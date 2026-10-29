@@ -47,3 +47,18 @@ one-liners. Read it BEFORE any file discovery. C3 refreshes it
 automatically (edit hooks + first tool call); if it is missing or looks
 stale, run `c3 map refresh`. Freshness state: `.c3/map.meta.json`.
 <!-- C3:END -->
+
+# Kinescript
+
+JSON scenes in, video out. Python 3.14 venv in `.venv` (`.venv/Scripts/kine`, `.venv/Scripts/python -m pytest`).
+
+- Engine: `kinescript/` — `timing.py` (cue references), `props.py` (keyframes, tweens, AST-checked expressions),
+  `scene.py` (loading, components, sequences), `render.py` (Skia, GPU via hidden glfw OpenGL context, CPU fallback),
+  `output.py` (parallel chunked ffmpeg encode + audio mix), `verify.py` (check/look/probe), `mcp.py`, `cli.py`.
+- Frames must stay a pure function of (scene, frame number); `tests/test_core.py::test_frame_is_pure_function_of_index`
+  guards it. Do not add state carried between frames.
+- Before calling any visual change done: `kine check`, then `kine look --boxes` and look at the image.
+- Launch video: `python marketing/build_promo.py <fps> <ms>` then `kine render marketing/promo.json -o docs/promo.mp4 -q high`.
+  Numbers quoted in it, the README and site/ are measurements; re-measure before changing them.
+- Brand: `brand/BRAND.md`. Theme defaults in `kinescript/components.py` THEME follow it.
+- Sample media is generated (`python examples/make_media.py`) and gitignored.
