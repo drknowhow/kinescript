@@ -39,7 +39,7 @@ An agent cannot watch a video, so Kinescript gives it things it can read:
 | Command | What the agent gets |
 |---|---|
 | `kine docs` | the full scene reference, short enough to keep in context |
-| `kine check scene.json` | JSON issues with time ranges: text off canvas or in the safe margin, overlapping text, contrast under 4.5:1 against what is actually behind it, tiny text, too little reading time, load and render errors |
+| `kine check scene.json` | JSON issues with layer ids and time ranges: unknown keys (with the intended name first), bad values, missing media and out-of-range trims, text off canvas or in the safe margin, overlapping text, contrast under 3:1 against what is actually behind it, tiny text, too little reading time. Every problem is listed at once. Common names from other tools (`color`, `fontSize`, `duration`, `position`) are read and reported as info notes. |
 | `kine look scene.json --boxes` | one PNG of many labelled frames, with every layer outlined and named |
 | `kine probe scene.json --at 3.2` | resolved in/out of every layer and each visible layer's screen box |
 | `kine still` / `kine render` | a frame, a range (`--from/--to`), a draft (`-q draft --scale 0.5`) or the final file |
