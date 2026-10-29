@@ -21,39 +21,52 @@ QUALITY = {  # crf, x264 preset
 }
 
 
-def _video_args(fmt: str, quality: str, fps: float) -> list[str]:
+def _video_args(fmt: str, quality: str, fps: float, threads: int = 0) -> list[str]:
     crf, preset = QUALITY.get(quality, QUALITY["standard"])
+    # Each worker runs its own encoder; left to auto-threading, eight of them oversubscribe the CPU.
+    thr = ["-threads", str(threads)] if threads else []
     if fmt == "mov":  # ProRes 4444 with alpha, for compositing in an NLE
-        return ["-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuva444p10le", "-vendor", "apl0"]
+        return ["-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuva444p10le", "-vendor", "apl0", *thr]
     if fmt == "webm":
         return ["-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-b:v", "0", "-crf", str(crf + 10),
-                "-row-mt", "1", "-deadline", "realtime" if quality == "draft" else "good", "-cpu-used", "4"]
+                "-row-mt", "1", "-deadline", "realtime" if quality == "draft" else "good", "-cpu-used", "4", *thr]
+    if fmt == "gif":  # intermediate for the palette pass; a near-lossless one keeps grain and doubles the GIF
+        return ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", *thr]
     return ["-c:v", "libx264", "-preset", preset, "-crf", str(crf), "-pix_fmt", "yuv420p",
-            "-g", str(int(fps * 2)), "-bf", "2"]
+            "-g", str(int(fps * 2)), "-bf", "2", *thr]
 
 
-def _encoder(path: str, w: int, h: int, fps: float, fmt: str, quality: str) -> subprocess.Popen:
+def _encoder(path: str, w: int, h: int, fps: float, fmt: str, quality: str, threads: int = 0):
     cmd = [media.FFMPEG, "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", f"{w}x{h}",
-           "-r", f"{fps}", "-i", "-", *_video_args(fmt, quality, fps), "-an", path]
-    return subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=media._NOWIN)
+           "-r", f"{fps}", "-i", "-", *_video_args(fmt, quality, fps, threads), "-an", path]
+    # stderr goes to a file: a pipe nobody reads until the end can fill and stall the encoder.
+    log = tempfile.TemporaryFile()
+    return subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=log, creationflags=media._NOWIN), log
 
 
 def _render_range(args) -> dict:
-    spec, base, start, end, path, fmt, quality, scale, transparent = args
+    spec, base, start, end, path, fmt, quality, scale, transparent, threads = args
     scene = Scene(spec, base)
     if transparent:
         scene.bg = None
-    r = Renderer(scene, scale=scale)
-    enc = _encoder(path, r.w, r.h, scene.fps, fmt, quality)
+    r = Renderer(scene, scale=scale, even=fmt in ("mp4", "webm", "gif"))
+    enc, log = _encoder(path, r.w, r.h, scene.fps, fmt, quality, threads)
     t0 = time.perf_counter()
     try:
         for n in range(start, end):
             enc.stdin.write(r.frame(n).data)  # type: ignore[union-attr]
+    except BrokenPipeError:
+        pass  # ffmpeg quit early; its own message is reported below
     finally:
         scene.close()
-        enc.stdin.close()  # type: ignore[union-attr]
-        err = enc.stderr.read().decode(errors="replace") if enc.stderr else ""
+        try:
+            enc.stdin.close()  # type: ignore[union-attr]
+        except OSError:
+            pass
         enc.wait()
+        log.seek(0)
+        err = log.read().decode(errors="replace")
+        log.close()
     if enc.returncode:
         raise RuntimeError(f"ffmpeg failed on frames {start}-{end}: {err.strip()[:400]}")
     return {"frames": end - start, "seconds": time.perf_counter() - t0}
@@ -133,16 +146,20 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
     t0 = time.perf_counter()
     if ext == ".png" or out.endswith(("/", "\\")):
         return _render_pngs(scene, out_p, f0, f1, scale, transparent)
-    fmt = {".mov": "mov", ".webm": "webm"}.get(ext, "mp4")
+    fmt = {".mov": "mov", ".webm": "webm", ".gif": "gif"}.get(ext, "mp4")
     transparent = transparent or fmt in ("mov", "webm") and spec.get("canvas", {}).get("bg") in (None, "transparent")
+    if fmt == "gif":  # render no larger than the GIF will be (long side GIF_SIDE), not full size then shrink
+        scale = min(scale, GIF_SIDE / max(scene.w, scene.h))
     n = f1 - f0
     cpu = os.cpu_count() or 4
     workers = workers or max(1, min(cpu - 1, 8, n // int(fps * 1.5) or 1))
+    threads = max(1, cpu // workers)
     tmp = Path(tempfile.mkdtemp(prefix="kine-"))
     try:
         seg_ext = ".mov" if fmt == "mov" else ".webm" if fmt == "webm" else ".mp4"
         bounds = [f0 + n * k // workers for k in range(workers + 1)]
-        jobs = [(spec, base, bounds[k], bounds[k + 1], str(tmp / f"seg{k:03d}{seg_ext}"), fmt, quality, scale, transparent)
+        jobs = [(spec, base, bounds[k], bounds[k + 1], str(tmp / f"seg{k:03d}{seg_ext}"), fmt, quality, scale,
+                 transparent, threads)
                 for k in range(workers) if bounds[k + 1] > bounds[k]]
         if len(jobs) == 1:
             stats = [_render_range(jobs[0])]
@@ -170,14 +187,20 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
         shutil.rmtree(tmp, ignore_errors=True)
         scene.close()
     wall = time.perf_counter() - t0
-    return {"out": str(out_p), "frames": n, "seconds": round(n / fps, 3), "wall": round(wall, 2),
-            "fps_rendered": round(n / wall, 1), "workers": len(jobs),
-            "size_mb": round(out_p.stat().st_size / 1e6, 2) if out_p.exists() else None}
+    w, h = max(2, round(scene.w * scale)), max(2, round(scene.h * scale))
+    if fmt in ("mp4", "webm", "gif"):
+        w, h = w - w % 2, h - h % 2
+    return {"out": str(out_p), "w": w, "h": h, "fps": min(fps, GIF_FPS) if fmt == "gif" else fps, "frames": n,
+            "seconds": round(n / fps, 3), "wall": round(wall, 2), "fps_rendered": round(n / wall, 1),
+            "workers": len(jobs), "size_mb": round(out_p.stat().st_size / 1e6, 2) if out_p.exists() else None}
+
+
+GIF_SIDE, GIF_FPS = 720, 15  # a 6 s portrait GIF at full width and 20 fps ran past 10 MB
 
 
 def _to_gif(src: str, out: str, fps: float):
-    gfps = min(fps, 20)
-    vf = f"fps={gfps},scale=iw*min(1\\,960/iw):-1:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=sierra2_4a"
+    gfps = min(fps, GIF_FPS)
+    vf = f"fps={gfps},split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=sierra2_4a"
     res = subprocess.run([media.FFMPEG, "-y", "-v", "error", "-i", src, "-vf", vf, out], capture_output=True, text=True,
                          creationflags=media._NOWIN)
     if res.returncode:
@@ -200,14 +223,21 @@ def _render_pngs(scene: Scene, out: Path, f0: int, f1: int, scale: float, transp
     return {"out": str(folder), "frames": f1 - f0, "wall": round(time.perf_counter() - t0, 2)}
 
 
-def still(src, at: float, out: str, scale: float = 1.0) -> str:
+def still(src, at, out: str, scale: float = 1.0) -> dict:
+    """One frame to PNG/JPG. `at` is seconds, negative seconds from the end, or "end" (the last frame)."""
     import skia
     scene = load(src)
+    if str(at).strip().lower() == "end":
+        n = scene.frames - 1
+    else:
+        t = float(at)
+        n = int(round((scene.duration + t if t < 0 else t) * scene.fps))
+    n = max(0, min(scene.frames - 1, n))
     r = Renderer(scene, scale=scale)
-    r.frame(min(scene.frames - 1, int(round(at * scene.fps))))
+    r.frame(n)
     r.snapshot().save(out, skia.kPNG if out.lower().endswith(".png") else skia.kJPEG)
     scene.close()
-    return out
+    return {"out": out, "frame": n, "at": round(n / scene.fps, 3), "w": r.w, "h": r.h}
 
 
 def dump_json(obj) -> str:

@@ -6,7 +6,7 @@ import json
 import re
 from pathlib import Path
 
-from . import components, media
+from . import components, media, schema
 from . import presets as P
 from .props import Ctx, Prop, compile_prop
 from .timing import Timeline
@@ -24,7 +24,18 @@ DEFAULTS = {"x": 0.0, "y": 0.0, "opacity": 1.0, "scale": 1.0, "scaleX": 1.0, "sc
 
 
 class SceneError(ValueError):
-    pass
+    """A scene that cannot be built. `issues` lists every problem found, each with its layer id."""
+
+    def __init__(self, message: str, issues: list[dict] | None = None, layer: str | None = None):
+        super().__init__(message)
+        self.issues = issues or [{"level": "error", "code": "load", "layer": layer, "message": message, "fix": ""}]
+
+    @classmethod
+    def from_issues(cls, issues: list[dict]) -> "SceneError":
+        errs = [i for i in issues if i["level"] == "error"]
+        lines = [(f"layer '{i['layer']}': " if i.get("layer") else "") + i["message"] for i in errs]
+        msg = lines[0] if len(lines) == 1 else f"{len(lines)} problems:\n  " + "\n  ".join(lines)
+        return cls(msg, issues)
 
 
 class Layer:
@@ -59,7 +70,10 @@ class Layer:
 
 
 class Scene:
-    def __init__(self, spec: dict, base_dir: str | Path = "."):
+    def __init__(self, spec: dict, base_dir: str | Path = ".", notes: list[dict] | None = None):
+        spec, report = schema.normalize(spec)
+        self.issues: list[dict] = list(notes or []) + report.issues
+        self._raise_errors()
         self.spec = spec
         self.base = Path(base_dir)
         cv = spec.get("canvas", {})
@@ -77,19 +91,80 @@ class Scene:
         raw_layers = _subst(copy.deepcopy(spec.get("layers", [])), theme)
         self.bg = _subst(self.bg, theme)
         user_comps = spec.get("components", {})
-        raw_layers = [components.expand(l, user_comps, theme, self) for l in raw_layers]
+        try:
+            raw_layers = [components.expand(l, user_comps, theme, self) for l in raw_layers]
+        except ValueError as e:
+            raise SceneError(str(e)) from e
         raw_layers = [x for l in raw_layers for x in (l if isinstance(l, list) else [l])]
+        self._raise_errors()
         self.timeline = Timeline(self.fps, self.markers)
         self.layers: list[Layer] = []
         self.by_id: dict[str, Layer] = {}
         self._build(raw_layers, None, self.layers)
+        self._check_media()
+        self._raise_errors()
         try:
             self.duration = self.timeline.solve(cv.get("duration"))
         except ValueError as e:
-            raise SceneError(str(e)) from e
+            lid = getattr(e, "layer", None)
+            raise SceneError((f"layer '{lid}': " if lid else "") + str(e), layer=lid) from e
         for layer in self.by_id.values():
             layer.t_in, layer.t_out = self.timeline.resolved[layer.id]
         self.frames = max(1, round(self.duration * self.fps))
+        self._check_values()
+        self._raise_errors()
+
+    def note(self, level: str, code: str, layer, message: str, fix: str = ""):
+        self.issues.append({"level": level, "code": code, "layer": layer, "message": message, "fix": fix})
+
+    def _raise_errors(self):
+        if any(i["level"] == "error" for i in self.issues):
+            raise SceneError.from_issues(self.issues)
+
+    def _check_media(self):
+        """Missing files fail here, before any frame is rendered, with the path that was tried."""
+        def missing(src: str, owner, what: str) -> bool:
+            p = Path(src)
+            if p.exists():
+                return False
+            near = sorted(x.name for x in p.parent.iterdir()) if p.parent.is_dir() else []
+            close = schema.suggest(p.name, near) if near else None
+            fix = (f"did you mean '{close}'? " if close else "") + (
+                f"files in {p.parent}: {', '.join(near[:12])}" if near else f"folder {p.parent} does not exist")
+            self.note("error", "media-missing", owner, f"{what} not found: {p}",
+                      fix + " (paths are relative to the scene file)")
+            return True
+
+        for layer in self.all_layers():
+            if layer.src:
+                missing(layer.src, layer.id, f"{layer.type} src")
+        for i, a in enumerate(self.audio):
+            if isinstance(a, dict) and a.get("src") and not missing(self.path(a["src"]), f"audio[{i}]", "audio src"):
+                _check_trim(self, f"audio[{i}]", a.get("trim") or [0, None], media.probe(self.path(a["src"]))["duration"])
+
+    def _check_values(self):
+        """Evaluate every property at the start, middle and end of its layer, so a bad value is reported
+        now, with its layer and field, instead of as a Python error halfway through a render."""
+        for layer in self.all_layers():
+            d = layer.dur
+            for name, prop in layer.props.items():
+                if name.startswith("u_"):
+                    continue
+                for t in (0.0, d / 2, max(0.0, d - 1e-3), d):  # d: the last keyframe value itself
+                    try:
+                        v = prop.at(t, d, layer.t_in + t, 0)
+                    except Exception as e:  # noqa: BLE001 - any failure inside a user expression
+                        self.note("error", "bad-expression", layer.id, f"{name} failed at t={t:.2f}s: {e}")
+                        break
+                    if name in schema.COLOR_KEYS:
+                        if isinstance(v, str):
+                            self.note("error", "bad-colour", layer.id, f"{name} '{v}' is not a colour",
+                                      "use #rrggbb, #rrggbbaa, rgb(...) or a CSS colour name")
+                            break
+                    elif name in schema.SCALAR and (isinstance(v, bool) or not isinstance(v, (int, float))):
+                        self.note("error", "bad-value", layer.id, f"{name} is {v!r} at t={t:.2f}s; expected a number",
+                                  "use a number, a percentage like '50%', or an expression starting with '='")
+                        break
 
     def path(self, src: str) -> str:
         p = Path(src)
@@ -114,18 +189,23 @@ class Scene:
             natural = None
             if ltype in ("video", "image") or (ltype == "captions" and raw.get("src")):
                 layer.src = self.path(raw["src"]) if raw.get("src") else None
-            if ltype == "video" and layer.src:
+            if ltype == "video" and layer.src and Path(layer.src).exists():
                 info = media.probe(layer.src)
                 trim = raw.get("trim") or [0, None]
+                _check_trim(self, lid, trim, info["duration"])
                 end = trim[1] if len(trim) > 1 and trim[1] is not None else info["duration"]
+                end = min(float(end), info["duration"]) if info["duration"] else end
                 natural = max(0.04, (end - trim[0]) / float(raw.get("speed", 1)))
-            if ltype == "captions":
+            if ltype == "captions" and (raw.get("cues") or (layer.src and Path(layer.src).exists())):
                 raw = layer.raw = dict(raw, cues=components.load_cues(raw, layer.src))
                 if raw["cues"] and "dur" not in raw and "until" not in raw:
                     natural = max(c[1] for c in raw["cues"])
-            self.timeline.add(lid, raw.get("at", 0), raw.get("dur"), raw.get("until"), natural,
-                              prev=prev, parent=parent.id if parent else None,
-                              default_end=parent.id if parent else None)
+            try:
+                self.timeline.add(lid, raw.get("at", 0), raw.get("dur"), raw.get("until"), natural,
+                                  prev=prev, parent=parent.id if parent else None,
+                                  default_end=parent.id if parent else None)
+            except ValueError as e:
+                raise SceneError(f"layer '{lid}': {e}", layer=lid) from e
             ctx = self.ctx
             if ltype == "group" and ("w" in raw or "h" in raw):
                 ctx = Ctx(_num(raw.get("w"), self.w), _num(raw.get("h"), self.h), self.fps)
@@ -143,7 +223,7 @@ class Scene:
                 layer.enter = P.parse(raw.get("enter"))
                 layer.exit = P.parse(raw.get("exit"))
             except (ValueError, SyntaxError) as e:
-                raise SceneError(f"layer '{lid}': {e}") from e
+                raise SceneError(f"layer '{lid}': {e}", layer=lid) from e
             out.append(layer)
             kids = raw.get("children") or raw.get("layers")
             if ltype == "group" and kids:
@@ -169,6 +249,25 @@ class Scene:
         for layer in self.all_layers():
             if layer.video:
                 layer.video.close()
+
+
+def _check_trim(scene: "Scene", owner, trim, length: float):
+    if not isinstance(trim, (list, tuple)) or not trim:
+        scene.note("error", "bad-trim", owner, f"trim must be [start, end] in source seconds, got {trim!r}")
+        return
+    a = float(trim[0])
+    b = trim[1] if len(trim) > 1 else None
+    if not length:
+        return
+    if a >= length:
+        scene.note("error", "bad-trim", owner, f"trim starts at {a:g}s but the source is only {length:.2f}s long",
+                   f"use a start below {length:.2f}")
+    elif b is not None and float(b) <= a:
+        scene.note("error", "bad-trim", owner, f"trim end {b} is not after its start {a:g}")
+    elif b is not None and float(b) > length + 0.05:
+        scene.note("warning", "trim-past-end", owner,
+                   f"trim ends at {float(b):g}s but the source is {length:.2f}s long, so it stops at {length:.2f}s",
+                   f"use [{a:g}, {length:.2f}] or leave out the end")
 
 
 def _num(v, ref):
@@ -214,12 +313,18 @@ def load(src) -> Scene:
         return Scene(src)
     s = str(src)
     if s.lstrip().startswith("{"):
-        return Scene(json.loads(s))
-    p = Path(s)
-    if not p.exists():
-        raise SceneError(f"scene file not found: {p}")
+        text, base, name = s, Path("."), "scene"
+    else:
+        p = Path(s)
+        if not p.exists():
+            raise SceneError(f"scene file not found: {p}")
+        text, base, name = p.read_text(encoding="utf-8-sig"), p.parent, p.name
     try:
-        spec = json.loads(p.read_text(encoding="utf-8"))
+        spec, fixed = schema.loads(text)
     except json.JSONDecodeError as e:
-        raise SceneError(f"{p.name}: invalid JSON at line {e.lineno} col {e.colno}: {e.msg}") from e
-    return Scene(spec, p.parent)
+        lines = text.splitlines()
+        line = lines[e.lineno - 1].strip()[:120] if 0 < e.lineno <= len(lines) else ""
+        raise SceneError(f"{name}: invalid JSON at line {e.lineno} col {e.colno}: {e.msg}. The line is: {line}") from e
+    notes = [{"level": "info", "code": "json", "layer": None, "message": f"the JSON had {', '.join(fixed)}; read anyway",
+              "fix": "write strict JSON"}] if fixed else []
+    return Scene(spec, base, notes)

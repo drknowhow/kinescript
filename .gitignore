@@ -10,3 +10,4 @@ out_*
 .claude/
 dist/
 build/
+scratch/

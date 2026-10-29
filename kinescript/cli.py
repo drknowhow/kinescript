@@ -42,7 +42,7 @@ def main(argv=None) -> int:
 
     s = sub.add_parser("still", help="render one frame to PNG/JPG")
     s.add_argument("scene")
-    s.add_argument("--at", type=float, required=True)
+    s.add_argument("--at", required=True, help='seconds; negative counts from the end; "end" is the last frame')
     s.add_argument("-o", "--out")
     s.add_argument("--scale", type=float, default=1.0)
 
@@ -59,7 +59,8 @@ def main(argv=None) -> int:
     ck.add_argument("scene")
     ck.add_argument("--step", type=float, default=0.25)
 
-    pr = sub.add_parser("probe", help="resolved timeline, and layer boxes at --at")
+    pr = sub.add_parser("probe", help="resolved timeline and layer boxes at --at; or, for a media file, "
+                                      "its duration, size, fps and audio")
     pr.add_argument("scene")
     pr.add_argument("--at", type=float)
 
@@ -119,8 +120,9 @@ def _run(a) -> int:
         return 0
     if a.cmd == "still":
         from .output import still
-        out = a.out or _default_out(a.scene, f"_{a.at:g}s.png")
-        _emit({"ok": True, "out": still(a.scene, a.at, out, a.scale)})
+        at = str(a.at)
+        out = a.out or _default_out(a.scene, f"_{at.lstrip('-')}{'s' if at != 'end' else ''}.png")
+        _emit(dict(ok=True, **still(a.scene, at, out, a.scale)))
         return 0
     if a.cmd == "look":
         from .verify import contact_sheet
@@ -134,6 +136,10 @@ def _run(a) -> int:
         return 0 if res["ok"] else 1
     if a.cmd == "probe":
         from .verify import probe
+        if Path(a.scene).suffix.lower() != ".json" and Path(a.scene).exists():
+            from . import media
+            _emit(dict(ok=True, src=a.scene, **media.probe(a.scene)))
+            return 0
         _emit(probe(a.scene, a.at))
         return 0
     if a.cmd == "watch":

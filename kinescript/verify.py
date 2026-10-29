@@ -12,7 +12,7 @@ import skia
 
 from . import color as C
 from .render import FONT_DIR, Renderer, _argb
-from .scene import Scene, load
+from .scene import Scene, SceneError, load
 
 
 def _times(scene: Scene, count: int, times=None) -> list[float]:
@@ -85,19 +85,20 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
     the layer, the time range it was seen in, and a suggested fix."""
     try:
         scene = load(src)
-    except (ValueError, FileNotFoundError, RuntimeError) as e:
-        return {"ok": False, "errors": 1, "warnings": 0,
-                "issues": [{"level": "error", "code": "load", "layer": None, "message": str(e)}]}
+    except SceneError as e:
+        return _result(e.issues)
+    except (ValueError, FileNotFoundError, RuntimeError, OSError) as e:
+        return _result([{"level": "error", "code": "load", "layer": None, "message": str(e), "fix": ""}])
     W, H = scene.w, scene.h
     r = Renderer(scene, track=True, scale=1.0)
     found: dict[tuple, dict] = {}
 
-    def add(level, code, lid, T, msg, fix=""):
+    def add(level, code, lid, T, msg, fix="", until=None):
         key = (code, lid)
         it = found.get(key)
         if it is None:
-            found[key] = {"level": level, "code": code, "layer": lid, "from": round(T, 2), "to": round(T, 2),
-                          "message": msg, "fix": fix}
+            found[key] = {"level": level, "code": code, "layer": lid, "from": round(T, 2),
+                          "to": round(T if until is None else until, 2), "message": msg, "fix": fix}
         else:
             it["to"] = round(T, 2)
 
@@ -108,9 +109,9 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
             r.draw(T)
         except (ValueError, RuntimeError, OSError) as e:
             scene.close()
-            return {"ok": False, "errors": 1, "warnings": 0, "duration": round(scene.duration, 3),
-                    "issues": [{"level": "error", "code": "render", "layer": None, "from": round(T, 2),
-                                "to": round(T, 2), "message": f"{type(e).__name__}: {e}"}]}
+            return _result(scene.issues + [{"level": "error", "code": "render", "layer": None, "from": round(T, 2),
+                                            "to": round(T, 2), "message": f"{type(e).__name__}: {e}", "fix": ""}],
+                           duration=scene.duration)
         texts = []
         for lid, b in r.boxes.items():
             if b["alpha"] < 0.3:
@@ -174,16 +175,29 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
             need = 0.4 + words / 3.3
             if words >= 3 and layer.dur < need:
                 add("warning", "read-time", layer.id, layer.t_in,
-                    f"{words} words on screen for {layer.dur:.2f}s; viewers need ~{need:.1f}s", "extend dur or cut words")
+                    f"{words} words on screen for {layer.dur:.2f}s; viewers need ~{need:.1f}s", "extend dur or cut words",
+                    until=layer.t_out)
         if layer.type == "captions":
             for s0, s1, txt in layer.raw.get("cues", []):
                 words = _words(txt)
                 if words and (s1 - s0) < 0.25 + words / 4.5:
                     add("warning", "read-time", layer.id, layer.t_in + s0,
-                        f"caption '{txt[:30]}' is {s1 - s0:.2f}s for {words} words", "split or lengthen the cue")
+                        f"caption '{txt[:30]}' is {s1 - s0:.2f}s for {words} words", "split or lengthen the cue",
+                        until=layer.t_in + s1)
                     break
     scene.close()
-    issues = sorted(found.values(), key=lambda i: ({"error": 0, "warning": 1, "info": 2}[i["level"]], i["from"]))
+    return _result(scene.issues + list(found.values()), duration=scene.duration)
+
+
+_RANK = {"error": 0, "warning": 1, "info": 2}
+
+
+def _result(issues: list[dict], duration: float | None = None) -> dict:
+    """Errors first, then warnings, then info notes. `ok` is true when there are no errors."""
+    issues = sorted(issues, key=lambda i: (_RANK[i["level"]], i.get("from", -1)))
     errors = sum(1 for i in issues if i["level"] == "error")
-    return {"ok": errors == 0, "errors": errors, "warnings": sum(1 for i in issues if i["level"] == "warning"),
-            "duration": round(scene.duration, 3), "issues": issues}
+    out = {"ok": errors == 0, "errors": errors, "warnings": sum(1 for i in issues if i["level"] == "warning"),
+           "issues": issues}
+    if duration is not None:
+        out["duration"] = round(duration, 3)
+    return out

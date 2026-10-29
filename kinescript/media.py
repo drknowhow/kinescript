@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import json
 import shutil
+import queue
 import subprocess
+import threading
 from functools import lru_cache
 from pathlib import Path
 
@@ -84,14 +86,40 @@ class VideoSource:
         self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                      bufsize=self.nbytes * 2, creationflags=_NOWIN)
         self.index = -1
+        # A reader thread keeps up to PREFETCH decoded frames waiting, so ffmpeg decodes the next
+        # frames while this process draws the current one instead of both taking turns.
+        self.queue = q = queue.Queue(maxsize=self.PREFETCH)
+        self.stopping = stop = threading.Event()
+        threading.Thread(target=self._pump, args=(self.proc, q, stop, self.nbytes), daemon=True).start()
+
+    PREFETCH = 6
+
+    @staticmethod
+    def _pump(proc, q, stop, nbytes):
+        try:
+            while not stop.is_set():
+                buf = proc.stdout.read(nbytes)
+                item = buf if len(buf) == nbytes else None
+                while not stop.is_set():
+                    try:
+                        q.put(item, timeout=0.1)
+                        break
+                    except queue.Full:
+                        continue
+                if item is None:
+                    return
+        except (OSError, ValueError):  # the pipe was closed by close()
+            return
 
     def _read(self) -> bool:
-        assert self.proc and self.proc.stdout
-        buf = self.proc.stdout.read(self.nbytes)
-        if len(buf) < self.nbytes:
+        buf = self.queue.get()
+        if buf is None:
+            self.queue.put(None)  # stay at end of stream for later calls
             return False
         arr = np.frombuffer(buf, np.uint8).reshape(self.h, self.w, 4)
-        self.frame = skia.Image.fromarray(arr, colorType=skia.kRGBA_8888_ColorType)
+        # No copy: the image wraps the bytes object, which self._buf keeps alive until the next frame.
+        self._buf = buf
+        self.frame = skia.Image.fromarray(arr, colorType=skia.kRGBA_8888_ColorType, copy=False)
         self.index += 1
         return True
 
@@ -111,6 +139,7 @@ class VideoSource:
 
     def close(self):
         if self.proc:
+            self.stopping.set()
             try:
                 self.proc.stdout.close()  # type: ignore[union-attr]
                 self.proc.kill()

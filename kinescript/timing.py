@@ -18,7 +18,13 @@ _BASE = re.compile(r"^\s*([A-Za-z_][\w-]*)(?:\.(in|out|mid))?")
 
 
 class TimingError(ValueError):
-    pass
+    def __init__(self, message: str, layer: str | None = None):
+        super().__init__(message)
+        self.layer = layer
+
+
+FORMS = ('a number of seconds (1.5), "45f" (frames), "0:02.5", "title.out+0.2" (0.2 s after layer title ends), '
+         '"title.in", "title.mid", "prev.out", or a marker name')
 
 
 def parse_clock(s: str, fps: float) -> float | None:
@@ -68,7 +74,7 @@ class Timeline:
     def add(self, lid: str, at, dur=None, until=None, natural: float | None = None,
             prev: str | None = None, parent: str | None = None, default_end: str | None = None):
         if lid in self.nodes:
-            raise TimingError(f"duplicate layer id '{lid}'")
+            raise TimingError(f"duplicate layer id '{lid}'; every id must be unique", lid)
         self.nodes[lid] = dict(at=at, dur=dur, until=until, natural=natural, prev=prev,
                                parent=parent, default_end=default_end)
         self.order.append(lid)
@@ -84,11 +90,11 @@ class Timeline:
             return base + clk
         name, edge, rest = split_ref(s)
         if name is None:
-            raise TimingError(f"layer '{owner}': cannot parse time {s!r}")
+            raise TimingError(f"cannot read the time {s!r}. Write {FORMS}", owner)
         if name == "prev":
             name = self.nodes[owner]["prev"] if owner in self.nodes else None
             if name is None:
-                raise TimingError(f"layer '{owner}': 'prev' used on the first layer")
+                raise TimingError("'prev' used on the first layer, which has no previous layer", owner)
         if name in self.markers and not edge:
             t = self.markers[name]
         elif name == "start":
@@ -99,19 +105,29 @@ class Timeline:
                 t = t_in
             else:
                 if t_out is None:
-                    raise TimingError(f"layer '{owner}' refers to '{name}.{edge}', but '{name}' has no "
-                                      f"end (give it dur or until)")
+                    raise TimingError(f"refers to '{name}.{edge}', but '{name}' runs to the scene end, so it has "
+                                      f"no end time. Give '{name}' a dur or until", owner)
                 t = t_out if edge == "out" else (t_in + t_out) / 2
         else:
-            known = ", ".join(list(self.nodes)[:12])
-            raise TimingError(f"layer '{owner}': unknown reference '{name}' in {s!r}. Known ids: {known}")
-        return t + offset(rest, self.fps)
+            from .schema import suggest
+            options = list(self.nodes) + list(self.markers)
+            close = suggest(name, options)
+            known = ", ".join(options[:16])
+            if " " in s.strip():
+                raise TimingError(f"cannot read the time {s!r}. Write {FORMS}", owner)
+            raise TimingError(f"unknown reference '{name}' in {s!r}." + (f" Did you mean '{close}'?" if close else "")
+                              + f" Layer ids and markers: {known}", owner)
+        try:
+            return t + offset(rest, self.fps)
+        except TimingError as e:
+            raise TimingError(f"{e} in {s!r}. Write {FORMS}", owner) from None
 
     def resolve(self, lid: str) -> tuple[float, float | None]:
         if lid in self.resolved:
             return self.resolved[lid]
         if lid in self._stack:
-            raise TimingError("timing cycle: " + " -> ".join(self._stack + [lid]))
+            raise TimingError("timing cycle: " + " -> ".join(self._stack + [lid])
+                              + ". A layer cannot start or end relative to itself", lid)
         self._stack.append(lid)
         n = self.nodes[lid]
         base = self.resolve(n["parent"])[0] if n["parent"] else 0.0
@@ -122,7 +138,7 @@ class Timeline:
             if isinstance(d, str):
                 clk = parse_clock(d, self.fps)
                 if clk is None:
-                    raise TimingError(f"layer '{lid}': bad dur {d!r}")
+                    raise TimingError(f"dur {d!r} is not a length of time; use seconds like 2.5, or \"45f\"", lid)
                 d = clk
             t_out: float | None = t_in + float(d)
         elif until is not None and until != "end":
@@ -134,7 +150,7 @@ class Timeline:
         else:
             t_out = None  # open: runs to the scene end
         if t_out is not None and t_out <= t_in:
-            raise TimingError(f"layer '{lid}' ends ({t_out:.3f}s) before it starts ({t_in:.3f}s)")
+            raise TimingError(f"ends at {t_out:.3f}s, which is not after its start at {t_in:.3f}s", lid)
         self._stack.pop()
         self.resolved[lid] = (t_in, t_out)
         return t_in, t_out

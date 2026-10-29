@@ -30,6 +30,7 @@ BLENDS = {"normal": skia.BlendMode.kSrcOver, "multiply": skia.BlendMode.kMultipl
           "darken": skia.BlendMode.kDarken, "softLight": skia.BlendMode.kSoftLight,
           "difference": skia.BlendMode.kDifference, "color": skia.BlendMode.kColor}
 SAMPLING = skia.SamplingOptions(skia.FilterMode.kLinear, skia.MipmapMode.kNone)
+CUBIC = skia.SamplingOptions(skia.CubicResampler.Mitchell())  # video frames arrive at source size and upscale here
 _FMT = re.compile(r"\{:([^{}]*)\}")
 _GL: dict = {}
 
@@ -136,11 +137,28 @@ def _argb(c, alpha: float = 1.0) -> int:
     return C.to_argb_int(c, alpha)
 
 
+def declare_uniforms(src: str, uniforms: dict) -> str:
+    """Add `uniform` lines for built-ins (iTime, iResolution, iProgress) and for entries of the layer's
+    "uniforms" that the source uses without declaring, so a shader needs only its main()."""
+    decl = []
+    wanted = {"iTime": "float", "iResolution": "float2", "iProgress": "float"}
+    for name, v in uniforms.items():
+        n = len(v) if isinstance(v, (list, tuple)) else 4 if C.is_color(v) else 1
+        wanted[name] = "float" if n == 1 else f"float{n}"
+    for name, typ in wanted.items():
+        if re.search(rf"\b{name}\b", src) and not re.search(rf"\buniform\s+\w+\s+{name}\b", src):
+            decl.append(f"uniform {typ} {name};")
+    return "\n".join(decl + [src]) if decl else src
+
+
 class Renderer:
-    def __init__(self, scene: Scene, track: bool = False, scale: float = 1.0, backend: str = "auto"):
+    def __init__(self, scene: Scene, track: bool = False, scale: float = 1.0, backend: str = "auto",
+                 even: bool = False):
         self.s = scene
         self.scale = scale
         self.w, self.h = max(2, round(scene.w * scale)), max(2, round(scene.h * scale))
+        if even:  # 4:2:0 video needs even sizes
+            self.w, self.h = self.w - self.w % 2, self.h - self.h % 2
         self.info = skia.ImageInfo.Make(self.w, self.h, skia.kRGBA_8888_ColorType, skia.kPremul_AlphaType)
         ctx = gpu_context() if backend in ("auto", "gpu") else None
         if backend == "gpu" and ctx is None:
@@ -150,10 +168,15 @@ class Renderer:
         if self.surface is None:
             self.surface = skia.Surface.MakeRaster(self.info)
         self.buf = np.empty((self.h, self.w, 4), np.uint8)
+        # Encoders take straight (unpremultiplied) RGBA; reading premultiplied pixels into a transparent
+        # .mov/.webm darkens every soft edge. Opaque frames are identical either way.
+        self.transparent = scene.bg in (None, "transparent", "none")
+        self.read_info = self.info.makeAlphaType(skia.kUnpremul_AlphaType) if self.transparent else self.info
         self.track = track
         self.boxes: dict[str, dict] = {}
         self._tf: dict = {}
         self._layouts: dict = {}
+        self._fonts: dict = {}
         self._paths: dict = {}
         self._shaders: dict = {}
         self.stop_at: str | None = None
@@ -176,9 +199,13 @@ class Renderer:
                 acc += self.buf
             np.floor_divide(acc, samples, out=acc)
             self.buf[...] = acc.astype(np.uint8)
+            if self.transparent:
+                a = self.buf[..., 3:4].astype(np.uint16)
+                rgb = np.where(a > 0, (self.buf[..., :3].astype(np.uint16) * 255 + a // 2) // np.maximum(a, 1), 0)
+                self.buf[..., :3] = np.minimum(rgb, 255).astype(np.uint8)
             return self.buf
         self.draw(T)
-        self.surface.readPixels(self.info, self.buf, self.w * 4)
+        self.surface.readPixels(self.read_info, self.buf, self.w * 4)
         return self.buf
 
     def snapshot(self) -> skia.Image:
@@ -560,7 +587,7 @@ class Renderer:
         cy0 = by + (bh - ch) / 2
         px, py = bx + fx * bw, by + fy * bh
         dst = skia.Rect.MakeXYWH(px + (cx0 - px) * zoom, py + (cy0 - py) * zoom, cw * zoom, ch * zoom)
-        c.drawImageRect(img, dst, SAMPLING, skia.Paint(AntiAlias=True))
+        c.drawImageRect(img, dst, CUBIC if L.type == "video" else SAMPLING, skia.Paint(AntiAlias=True))
         c.restore()
         sp = self._stroke_paint(L, g)
         if sp:
@@ -575,7 +602,11 @@ class Renderer:
             if zp is not None:
                 zmax = max(float(zp.at(L.dur * k / 8, L.dur)) for k in range(9))
             info = media.probe(L.src)
-            k = min(max(1.0, zmax) * self.scale, max(info["w"] / max(bw, 1), 1.0))
+            # Decode at no more than the source's own resolution: piping upscaled RGBA (8 MB a frame at
+            # 1080p) costs more than the decode, and the GPU upscales it at draw time anyway.
+            rw, rh = info["w"] / max(bw, 1), info["h"] / max(bh, 1)
+            native = (min if L.raw.get("fit", "cover") == "cover" else max)(rw, rh) if info["w"] else 1.0
+            k = min(max(1.0, zmax) * self.scale, native)
             L.video = media.VideoSource(L.src, round(bw * k), round(bh * k), self.s.fps, speed, L.raw.get("fit", "cover"))
         trim0 = float((L.raw.get("trim") or [0])[0])
         src_t = trim0 + t * speed
@@ -621,10 +652,14 @@ class Renderer:
             if name not in shaders.PRESETS:
                 raise ValueError(f"layer '{L.id}': unknown shader preset '{name}'. Known: {', '.join(shaders.PRESETS)}")
             src, defaults = shaders.PRESETS[name]
+        else:
+            src = declare_uniforms(src, L.raw.get("uniforms") or {})
         try:
             eff = skia.RuntimeEffect.MakeForShader(src)
         except RuntimeError as e:
-            raise ValueError(f"layer '{L.id}': SkSL error: {e}") from e
+            errs = [x.strip() for x in str(e).splitlines() if "error" in x.lower()] or [str(e).strip()]
+            more = f" (and {len(errs) - 1} more, often caused by the first)" if len(errs) > 1 else ""
+            raise ValueError(f"layer '{L.id}': SkSL error: {errs[0]}{more}") from e
         if eff is None:
             raise ValueError(f"layer '{L.id}': SkSL did not compile")
         self._shaders[L.id] = (eff, defaults)
@@ -674,10 +709,12 @@ class Renderer:
 
     def _font(self, L: Layer, g, size: float) -> skia.Font:
         fam = L.raw.get("font") or self.s.theme.get("font")
-        tf = self._typeface(fam, int(g("weight", 600)), bool(L.raw.get("italic")))
-        f = skia.Font(tf, size)
-        f.setSubpixel(True)
-        f.setEdging(skia.Font.Edging.kAntiAlias)
+        key = (fam, int(g("weight", 600)), bool(L.raw.get("italic")), size)
+        f = self._fonts.get(key)
+        if f is None:
+            f = self._fonts[key] = skia.Font(self._typeface(*key[:3]), size)
+            f.setSubpixel(True)
+            f.setEdging(skia.Font.Edging.kAntiAlias)
         return f
 
     def _text_layout(self, L: Layer, t, T, g, txt: str, size: float | None = None, max_w=None) -> Layout:
@@ -685,7 +722,8 @@ class Renderer:
         ls = float(g("letterSpacing", 0))
         mw = max_w if max_w is not None else g("maxWidth")
         lhm = float(g("lineHeight", 1.18))
-        key = (L.id, txt, size, ls, mw, lhm)
+        # Every input that changes the layout belongs in the key, or a frame depends on which frames came before.
+        key = (L.id, txt, size, ls, mw, lhm, int(g("weight", 600)))
         lay = self._layouts.get(key)
         if lay:
             return lay

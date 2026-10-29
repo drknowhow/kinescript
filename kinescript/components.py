@@ -35,7 +35,7 @@ def _lower_third(p, th):
     if sub:
         kids.append({"id": f"{p['id']}-sub", "type": "text", "text": sub, "x": 28, "y": 76, "anchor": "topleft",
                      "align": "left", "size": round(p.get("size", 54) * 0.55), "weight": 500,
-                     "fill": p.get("subColor", th["accent2"]), "at": 0.3,
+                     "fill": p.get("subColor", th["muted"]), "at": 0.3,
                      "enter": {"name": "left", "dur": 0.45, "dist": 20}, "exit": {"name": "fade", "dur": 0.3},
                      "box": box})
     return {"type": "group", "x": x, "y": y, "children": kids}
@@ -109,6 +109,14 @@ def _kinetic(p, th):
             "children": kids}
 
 
+# Parameters a builder reads only in some branches (so a single call may not touch them).
+PARAMS = {"lowerThird": ("title", "subtitle", "x", "y", "accent", "size", "plate", "color", "subColor"),
+          "titleCard": ("title", "subtitle", "kicker", "size", "accent", "color", "x", "y"),
+          "callout": ("x", "y", "r", "label", "side", "accent", "size", "boxColor"),
+          "focus": ("x", "y", "w", "h", "dim", "accent", "radius"),
+          "progress": ("color", "h", "y"),
+          "kinetic": ("words", "every", "size", "motion", "color", "x", "y")}
+
 BUILTIN = {"lowerThird": _lower_third, "titleCard": _title_card, "callout": _callout, "focus": _focus,
            "progress": _progress, "kinetic": _kinetic}
 COMPONENT_DOCS = {
@@ -120,6 +128,40 @@ COMPONENT_DOCS = {
     "kinetic": "words[], every(s), size, motion",
 }
 _PASS = ("id", "at", "dur", "until", "enter", "exit", "opacity", "scale", "rotate", "hidden")
+
+
+class Params(dict):
+    """Component parameters that remember which names the builder asked for, so a parameter
+    nobody reads (a typo such as "subtitel") is reported instead of silently dropped."""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.read: set[str] = set()
+
+    def get(self, k, default=None):
+        self.read.add(k)
+        return super().get(k, default)
+
+    def __getitem__(self, k):
+        self.read.add(k)
+        return super().__getitem__(k)
+
+    def __contains__(self, k):
+        self.read.add(k)
+        return super().__contains__(k)
+
+
+def _unused(name: str, raw: dict, known: set[str], scene):
+    from .schema import COMMENT, suggest
+    for k in raw:
+        if k in known or k in _PASS or k in COMMENT or k in ("use", "type", "x", "y") or str(k).startswith(("_", "//")):
+            continue
+        close = suggest(k, sorted(known - set(_PASS) - {"id"}))
+        msg = (f"component '{name}' has no parameter '{k}'." + (f" Did you mean '{close}'?" if close else "")
+               + f" Its parameters: {', '.join(sorted(known - {'id'})) or 'none'}")
+        if scene is None:
+            raise ValueError(msg)
+        scene.note("error", "unknown-param", raw.get("id"), msg, f"rename or remove '{k}'")
 
 
 def _fill_template(v, params):
@@ -147,18 +189,21 @@ def expand(raw, user: dict, theme: dict, scene=None):
     if not name:
         return raw
     _counter[0] += 1
-    params = dict(raw)
+    params = Params(raw)
     params.setdefault("id", f"{name}{_counter[0]}")
     if name in user:
         comp = user[name]
         merged = dict(comp.get("params", {}), **params)
         body = _fill_template(copy.deepcopy(comp.get("layers", [])), merged)
+        names = set(comp.get("params", {})) | set(re.findall(r"\{\{(\w+)\}\}", repr(comp.get("layers", []))))
+        _unused(name, raw, names, scene)
         for i, k in enumerate(body):
             k.setdefault("id", f"{params['id']}-{i}")
             k["id"] = f"{params['id']}-{k['id']}" if not str(k["id"]).startswith(params["id"]) else k["id"]
         out = {"type": "group", "x": raw.get("x", 0), "y": raw.get("y", 0), "children": body}
     elif name in BUILTIN:
         out = BUILTIN[name](params, theme)
+        _unused(name, raw, params.read | set(PARAMS.get(name, ())), scene)
     else:
         raise ValueError(f"unknown component '{name}'. Built-in: {', '.join(BUILTIN)}; scene: {', '.join(user) or 'none'}")
     for k in _PASS:

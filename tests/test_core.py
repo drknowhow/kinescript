@@ -44,7 +44,7 @@ def test_timing_cycle_is_reported():
 
 
 def test_unknown_reference_lists_known_ids():
-    with pytest.raises(k.SceneError, match="Known ids"):
+    with pytest.raises(k.SceneError, match="Layer ids and markers: a, b"):
         k.Scene(scene([{"id": "a", "type": "rect"}, {"id": "b", "type": "rect", "at": "nope.out"}]))
 
 
@@ -214,3 +214,13 @@ def test_score_shader_moves_in_whole_beats():
     a, b, c = _frame(spec, 3), _frame(spec, 6), _frame(spec, 18)
     assert np.array_equal(a, b)
     assert not np.array_equal(a, c)
+
+
+def test_animated_weight_frame_is_independent_of_history():
+    spec = scene([{"type": "text", "text": "Weight", "x": "50%", "y": "50%", "size": 60,
+                   "weight": [[0, 300], [1, 700, "linear"]]}], duration=1)
+    r = Renderer(k.Scene(spec), backend="cpu")
+    for n in range(0, 30):
+        r.frame(n)
+    after_history = r.frame(15).copy()
+    assert np.array_equal(after_history, _frame(spec, 15))

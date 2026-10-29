@@ -118,4 +118,26 @@ def get(name: str | None) -> Ease:
             return lambda t: min(1.0, math.floor(t * n) / n) if t < 1 else 1.0
     if name == "spring":
         return _spring()
-    raise ValueError(f"unknown ease '{name}'. Known: {', '.join(sorted(EASES))}, spring(k,d), bezier(a,b,c,d), steps(n)")
+    c = canonical(name)
+    if c:
+        return get(c)
+    from .schema import unknown
+    raise ValueError(unknown("ease", name, list(EASES) + ["spring"]) + ", spring(k,d), bezier(a,b,c,d), steps(n)")
+
+
+CSS = {"ease": "inOutSine", "easein": "inCubic", "easeout": "outCubic", "easeinout": "inOutCubic",
+       "linear": "linear", "cubicbezier": "bezier"}
+
+
+def canonical(name: str) -> str | None:
+    """'easeOutCubic', 'ease-out-cubic', 'EaseInOut', CSS 'ease-in' -> Kinescript names; None when nothing fits."""
+    s = re.sub(r"[-_ ]", "", str(name)).lower()
+    m = re.fullmatch(r"(\w+?)(\(.*\))", s)
+    if m and m.group(1) in ("cubicbezier", "bezier", "spring", "steps"):
+        return ("bezier" if "bezier" in m.group(1) else m.group(1)) + m.group(2)
+    if s in CSS:
+        return CSS[s]
+    if s.startswith("ease"):
+        s = s[4:]
+    low = {k.lower(): k for k in EASES}
+    return low.get(s)

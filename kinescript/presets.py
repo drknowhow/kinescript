@@ -5,6 +5,7 @@ renderer composes with the layer's own properties.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from . import ease as E
@@ -87,6 +88,30 @@ PRESETS = {
 DEFAULT_EASE = {"pop": "outBack", "spin": "outBack", "type": "linear", "draw": "inOutCubic", "snap": "outQuart"}
 
 
+# Names other tools use for the same motions. Keys are lower case without dashes.
+ALIASES = {"typewriter": "type", "typing": "type", "slide": "left", "scale": "pop", "grow": "pop", "bounce": "pop",
+           "appear": "snap", "cut": "snap", "dissolve": "fade", "opacity": "fade", "up": "rise", "riseup": "rise",
+           "down": "drop", "fall": "drop", "blurin": "blur", "focus": "blur", "rotate": "spin", "reveal": "wipe",
+           "write": "draw", "stroke": "draw", "letterspacing": "track", "tracking": "track"}
+
+
+def canonical(name: str) -> str | None:
+    """'fadeIn' -> 'fade', 'slideUp' -> 'slide-up', 'typewriter' -> 'type'; None when nothing fits."""
+    if name in PRESETS:
+        return name
+    s = re.sub(r"(?<=[a-z])(?=[A-Z])", "-", str(name).strip()).lower().replace("_", "-").replace(" ", "-")
+    for cand in (s, re.sub(r"-?(in|out)$", "", s)):
+        if cand in PRESETS:
+            return cand
+        sq = cand.replace("-", "")
+        if sq in ALIASES:
+            return ALIASES[sq]
+        for p in PRESETS:
+            if p.replace("-", "") == sq:
+                return p
+    return None
+
+
 @dataclass
 class Motion:
     names: list[str]
@@ -108,9 +133,12 @@ def parse(spec, default_dur: float = 0.5) -> Motion | None:
         return None
     if isinstance(spec, str):
         spec = {"name": spec}
-    names = [n.strip() for n in str(spec.get("name", "fade")).split("+") if n.strip()]
-    for n in names:
-        if n not in PRESETS:
-            raise ValueError(f"unknown motion '{n}'. Known: {', '.join(sorted(PRESETS))}")
+    names = []
+    for n in (n.strip() for n in str(spec.get("name", "fade")).split("+") if n.strip()):
+        c = canonical(n)
+        if c is None:
+            from .schema import unknown
+            raise ValueError(unknown("motion", n, PRESETS))
+        names.append(c)
     opts = {k: v for k, v in spec.items() if k not in ("name", "dur", "ease", "stagger")}
     return Motion(names, float(spec.get("dur", default_dur)), spec.get("ease", ""), float(spec.get("stagger", 0)), opts)
