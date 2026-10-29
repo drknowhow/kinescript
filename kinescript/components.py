@@ -120,12 +120,13 @@ PARAMS = {"lowerThird": ("title", "subtitle", "x", "y", "accent", "size", "plate
 BUILTIN = {"lowerThird": _lower_third, "titleCard": _title_card, "callout": _callout, "focus": _focus,
            "progress": _progress, "kinetic": _kinetic}
 COMPONENT_DOCS = {
-    "lowerThird": "title, subtitle, x, y, accent, size, plate (colour or false)",
-    "titleCard": "title, subtitle, kicker, size, accent",
-    "callout": "x, y, r, label, side(left|right), accent",
-    "focus": "x, y, w, h (region of footage to highlight), dim, accent",
-    "progress": "color, h, y",
-    "kinetic": "words[], every(s), size, motion",
+    "lowerThird": "title, subtitle, x [\"6%\"], y [\"78%\"] (top-left of its accent bar), accent, size [54], "
+                  "color, subColor, plate (box colour, or false for none)",
+    "titleCard": "title, subtitle, kicker (small line above), x, y [\"50%\"] (centre), size [128], accent, color",
+    "callout": "x, y (centre of the ring), r [60], label, side [right] (left|right), accent, size, boxColor",
+    "focus": "x, y, w, h (top-left and size of the region to highlight), dim [0.55], accent, radius",
+    "progress": "color, h [8], y [\"100%\"] (a bar along the bottom edge that fills over the whole scene)",
+    "kinetic": "words [list], every [0.6] (seconds per word), size [180], motion [pop], color, x, y [\"50%\"] (centre)",
 }
 _PASS = ("id", "at", "dur", "until", "enter", "exit", "opacity", "scale", "rotate", "hidden")
 

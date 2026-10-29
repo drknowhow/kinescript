@@ -200,7 +200,10 @@ GIF_SIDE, GIF_FPS = 720, 15  # a 6 s portrait GIF at full width and 20 fps ran p
 
 def _to_gif(src: str, out: str, fps: float):
     gfps = min(fps, GIF_FPS)
-    vf = f"fps={gfps},split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=sierra2_4a"
+    # 128 colours with ordered dither and changed-rectangle updates: about half the size of error
+    # diffusion on moving gradients (6.6 -> 3.5 MB on a 6 s portrait clip) with no visible loss.
+    vf = (f"fps={gfps},split[a][b];[a]palettegen=stats_mode=diff:max_colors=128[p];"
+          "[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle")
     res = subprocess.run([media.FFMPEG, "-y", "-v", "error", "-i", src, "-vf", vf, out], capture_output=True, text=True,
                          creationflags=media._NOWIN)
     if res.returncode:

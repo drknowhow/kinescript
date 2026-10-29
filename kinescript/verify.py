@@ -50,17 +50,39 @@ def contact_sheet(src, out: str, count: int = 12, cols: int | None = None, width
         c.drawImage(img, x, y + label_h)
         c.drawString(f"{T:6.2f}s  f{n}", x + 2, y + 18, font, skia.Paint(AntiAlias=True, Color=_argb("#f2f0e8")))
         if boxes:
-            for lid, b in r.boxes.items():
-                if b["alpha"] < 0.05:
-                    continue
-                l, t_, rr, bb = b["rect"]  # already in thumbnail pixels (the renderer is scaled)
-                p = skia.Paint(AntiAlias=True, Style=skia.Paint.kStroke_Style, StrokeWidth=1, Color=_argb("#b9f45d"))
-                c.drawRect(skia.Rect(x + l, y + label_h + t_, x + rr, y + label_h + bb), p)
-                c.drawString(lid, x + l + 2, y + label_h + t_ + 12, small,
-                             skia.Paint(AntiAlias=True, Color=_argb("#b9f45d")))
+            _draw_boxes(c, scene, r.boxes, x, y + label_h, tw, th, small)
     sheet.makeImageSnapshot().save(out, skia.kPNG)
     scene.close()
     return {"out": out, "times": [round(t, 3) for t in ts], "grid": [cols, rows], "backend": r.backend}
+
+
+def _draw_boxes(c, scene: Scene, boxes: dict, ox: float, oy: float, tw: float, th: float, font):
+    """Outline every visible layer; label only top-level layers, on a dark tab just outside the box,
+    so labels neither cover the text they name nor pile up for every child of a component."""
+    line = skia.Paint(AntiAlias=True, Style=skia.Paint.kStroke_Style, StrokeWidth=1, Color=_argb("#b9f45d"))
+    tab = skia.Paint(AntiAlias=True, Color=_argb("#0a0c10d8"))
+    ink = skia.Paint(AntiAlias=True, Color=_argb("#b9f45d"))
+    taken: list[skia.Rect] = []
+    c.save()
+    c.clipRect(skia.Rect.MakeXYWH(ox, oy, tw, th))
+    for lid, b in boxes.items():
+        if b["alpha"] < 0.05:
+            continue
+        l, t_, rr, bb = b["rect"]  # already in thumbnail pixels (the renderer is scaled)
+        c.drawRect(skia.Rect(ox + l, oy + t_, ox + rr, oy + bb), line)
+        layer = scene.by_id.get(lid)
+        if layer is not None and layer.parent is not None:
+            continue
+        w = font.measureText(lid) + 6
+        lx = min(max(ox, ox + l), ox + tw - w)
+        ly = oy + t_ - 14 if t_ - 14 >= 0 else oy + bb  # above the box, or below it at the top edge
+        rect = skia.Rect.MakeXYWH(lx, ly, w, 14)
+        if any(rect.intersect(o) for o in taken):
+            continue  # skip a label that would sit on another; the outline still shows
+        taken.append(rect)
+        c.drawRect(rect, tab)
+        c.drawString(lid, lx + 3, ly + 11, font, ink)
+    c.restore()
 
 
 def probe(src, at: float | None = None) -> dict:

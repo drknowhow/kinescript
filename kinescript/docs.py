@@ -23,7 +23,8 @@ RULES
   4. x and y say where the layer's anchor goes. They default to 0, the TOP-LEFT corner of the
      canvas. For the centre write "x": "50%", "y": "50%". The anchor defaults to "center".
   5. Layers draw in list order: later layers are on top. Put backgrounds first.
-  6. A layer without "dur" or "until" stays until the scene ends.
+  6. A layer without "dur" or "until" stays until the scene ends. Nothing fades out unless you
+     give it an "exit", e.g. "exit": "fade".
   7. Use only the keys listed here. `kine check` rejects unknown keys and names the right one.
   8. After writing a scene, run `kine check scene.json` and fix every error before rendering.
 
@@ -99,7 +100,7 @@ LAYER TYPES (defaults in brackets)
             smooth closed
   path      d (SVG path data, e.g. "M0 0 L100 0") or points; fill stroke strokeWidth
   arrow     x1 y1 x2 y2 bend [0] head [22] stroke strokeWidth
-  text      text, size [64], weight [600] (100..900), font ["Space Grotesk"; also "IBM Plex Mono",
+  text      text (centred on x, y: the anchor is center), size [64], weight [600] (100..900), font ["Space Grotesk"; also "IBM Plex Mono",
             any installed family, or a .ttf path], italic, fill [#f2f0e8], emph (colour of
             words written **like this**), align [center] (left|center|right), maxWidth (wraps
             lines), lineHeight [1.18], letterSpacing [0], stroke, strokeWidth,
@@ -110,7 +111,8 @@ LAYER TYPES (defaults in brackets)
             unitX unitY unitRotate unitScale unitOpacity (expressions per unit; i is its index)
   counter   value (animate it, e.g. {"from": 0, "to": 1250, "dur": 2}), format ["{:,.0f}"; also
             "${:,.2f}M" or "{:.0f}%"], and every text key
-  image     src (path relative to the scene file), w, h (give one and the other keeps the
+  image     src (every src, for image, video, captions and audio, is relative to the scene
+            file), w, h (give one and the other keeps the
             aspect), fit [cover] (cover|contain|stretch), zoom [1] (zooms inside the frame),
             focus [[0.5, 0.5]] (the point zoom moves toward), radius, stroke, strokeWidth
   video     src, trim [start, end] (seconds in the source file), speed [1], volume [1] (0 mutes),
@@ -119,12 +121,18 @@ LAYER TYPES (defaults in brackets)
             mode (karaoke|pop: highlight the current word), active (colour of that word), and
             the text keys. Defaults: x "50%", y "86%", size 46, weight 700, a dark box behind.
   shader    preset ({shaders}) with uniforms {"name": number or colour},
-            or sksl: your own SkSL "half4 main(float2 p) {...}". iTime, iResolution, iProgress
-            and your uniforms are declared for you. Fills the canvas unless you give w and h.
+            mesh and score are subtle; aurora and grid are strong, so use opacity 0.2-0.4.
+            Or sksl: your own SkSL "half4 main(float2 p) { ... return half4(r, g, b, a); }".
+            p is the pixel position (0..w, 0..h); p / iResolution is 0..1. The colour is
+            premultiplied: for a see-through colour return half4(rgb * a, a). iTime (seconds),
+            iResolution, iProgress (0..1) and your uniforms are declared for you.
+            Fills the canvas unless you give w and h.
   group     children [layers], w, h, clip (true cuts children off at w x h), radius, fill.
             Children are placed from the group's x, y and start at the group's "at".
   sequence  clips [{"src": "a.mp4", "trim": [0, 4]}, ...] and transition {"type": "fade",
-            "dur": 0.4} (fade|wipe|slide|zoom|blur|cut). Becomes back-to-back video layers.
+            "dur": 0.4} (fade|wipe|slide|zoom|blur|cut). Becomes back-to-back video layers named
+            <id>-1, <id>-2, ... Each transition overlaps the clips it joins, so 3 s + 3 s with a
+            0.5 s fade lasts 5.5 s.
 
 ANIMATING A VALUE (any number or colour key)
   constant     "x": 960
@@ -164,7 +172,8 @@ EASES  {eases}, spring, spring(stiffness, damping), bezier(x1, y1, x2, y2), step
 COMPONENTS  {"use": "<name>", "id": "...", "at": ..., "dur": ..., ...parameters}
   Built in (parameters):
 {components}
-  Components also accept enter, exit, opacity, scale, rotate, hidden.
+  x and y place the component as noted above. Components also accept enter, exit, opacity,
+  scale, rotate, hidden.
   Your own: "components": {"badge": {"params": {"label": "NEW"}, "layers": [
               {"type": "text", "text": "{{label}}", "size": 40}]}}
   then a layer {"use": "badge", "label": "BETA", "x": 200, "y": 100}.
@@ -178,11 +187,13 @@ RECIPES (layers to paste into "layers")
   Pill label:
     {"id": "pill", "type": "text", "text": "NEW", "x": "50%", "y": "50%", "size": 40,
      "fill": "#0a0c10", "box": {"fill": "#b9f45d", "pad": [10, 24], "radius": 999}}
-  Bar of a bar chart growing up from a baseline at y 900, with its value counting up above:
+  Bar of a bar chart growing up from a baseline at y 900, with its value riding on top. The
+  value's y uses the same tween as the bar's height (same dur, same default ease), so it stays
+  40 px above the bar:
     {"id": "bar1", "type": "rect", "x": 600, "y": 900, "anchor": "bottom", "w": 120,
      "h": {"from": 0, "to": 400, "dur": 0.8}, "fill": "#ff633f", "at": 0.5}
-    {"id": "bar1-value", "type": "counter", "x": 600, "y": 450, "size": 48, "at": 0.5,
-     "value": {"from": 0, "to": 80, "dur": 0.8}, "format": "{:.0f}"}
+    {"id": "bar1-value", "type": "counter", "x": 600, "y": {"from": 860, "to": 460, "dur": 0.8},
+     "size": 48, "at": 0.5, "value": {"from": 0, "to": 80, "dur": 0.8}, "format": "{:.0f}"}
   Slow zoom on a photo (Ken Burns):
     {"id": "photo", "type": "image", "src": "photo.jpg", "w": 1920, "h": 1080, "anchor": "topleft",
      "zoom": [[0, 1], ["end", 1.15, "linear"]], "focus": [0.6, 0.4]}
@@ -198,18 +209,22 @@ RECIPES (layers to paste into "layers")
 
 COMMANDS
   kine new scene.json             write a starter scene
-  kine check scene.json           JSON list of problems. error: must fix. warning: should fix
-                                  (off canvas, overlap, low contrast, short reading time).
+  kine check scene.json           JSON list of problems. error: must fix. warning: should fix:
+                                  text off the canvas or inside the outer 5% (safe-area),
+                                  overlapping text, contrast under 3:1, or text shown for less
+                                  than about 0.4 s + 0.3 s per word (read-time).
                                   info: a name it read for you, e.g. "'color' read as 'fill'".
-  kine look scene.json --boxes    one PNG of 12 frames; --boxes outlines each layer with its id;
-                                  -n 16 frames, --at 1 2.5 4 exact times, --width 480, --cols 4
-  kine still scene.json --at 2.5  one frame as PNG; --at -1 is 1 s before the end; --at end
+  kine look scene.json --boxes    one PNG of 12 evenly spaced frames; --boxes outlines layers and
+                                  labels the top-level ones; -n 16 frames, --at 1 2.5 4 exact
+                                  times (use it to see a transition), --width 480, --cols 4, -o
+  kine still scene.json --at 2.5  one frame as PNG (-o to name it); --at -1 is 1 s before the
+                                  end; --at end is the last frame
   kine probe scene.json --at 2    every layer's start and end, and screen boxes at 2 s
   kine probe clip.mp4             a media file's duration, w, h, fps and whether it has audio
   kine render scene.json -o out.mp4 -q draft|standard|high
                                   standard is the default, draft the fastest, high the best.
                                   Also .mov or .webm (with --transparent for no background),
-                                  .gif (720 px, 15 fps), or a folder/ for PNG frames.
+                                  .gif (longest side 720 px, 15 fps), or a folder/ for PNG frames.
                                   --scale 0.5 halves the size; --from 2 --to 4 renders a part.
   kine watch scene.json           re-makes the contact sheet on every save
   kine doctor                     checks ffmpeg, the GPU and fonts
