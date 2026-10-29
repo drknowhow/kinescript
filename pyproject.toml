@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kinescript"
+version = "0.1.0"
+description = "Motion graphics and video edits written as JSON, checked and rendered by agents."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["skia-python>=87", "numpy>=1.24", "glfw>=2.5"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+kine = "kinescript.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["kinescript*"]
+
+[tool.setuptools.package-data]
+kinescript = ["fonts/*.ttf", "fonts/*.txt"]

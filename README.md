@@ -1,0 +1,134 @@
+<p align="center"><img src="brand/logo-dark.png" width="460" alt="kinescript"></p>
+
+<p align="center"><b>Video you can diff.</b><br>Motion graphics and video edits written as JSON, checked by agents, rendered on the GPU.</p>
+
+<p align="center"><img src="docs/hero.gif" width="720" alt="The Kinescript launch video, rendered by Kinescript"></p>
+
+Kinescript turns a JSON scene into video. Every layer, keyframe and cut is a line of data, so a scene can be
+generated, reviewed in a pull request, and changed by a script or an agent. The renderer is a pure function of
+the frame number: any frame renders on its own, which makes previews instant and lets a render split across
+processes.
+
+The launch video in `docs/promo.mp4` is a Kinescript scene (`marketing/promo.json`). It is 34 seconds of 1080p
+and renders, with audio, in about 7 seconds on the development machine.
+
+## What it does
+
+- **Cue timing.** Start and end times can name other layers: `"at": "title.out+0.2"`. Lengthen one layer and
+  everything cued after it moves. Cycles and missing references are reported with the ids involved.
+- **Animate anything.** Numbers and colours take constants, keyframes (`[[0, 0], [0.6, 1, "outBack"]]`, with
+  negative times counted from the layer's end), a tween object, or an expression such as `"=540 + sin(t*3)*40"`.
+  Colours interpolate in OKLab.
+- **Text that moves per letter.** `"split": "chars"` with a staggered enter motion, typewriter reveal with a caret,
+  `**emphasis**` markup, per-unit expressions (`"unitY": "=sin(T*4 + i)*12"` for a wave).
+- **Footage.** Video layers with trim, speed, loop, cover/contain fit, punch-in `zoom` around a `focus` point, and
+  rounded picture-in-picture. A `sequence` turns a cut list into clips with fade, wipe, slide, zoom or blur
+  transitions. Clip audio and music beds are mixed automatically.
+- **Captions** from `.srt`/`.vtt` or inline cues, with karaoke and pop modes.
+- **Shaders.** SkSL layers with `mesh`, `aurora` and `grid` presets, or your own source.
+- **Finishing.** Per-layer blur, shadow, blend modes and colour adjustments; a scene grade with vignette and film
+  grain; optional motion blur.
+- **Components.** `lowerThird`, `titleCard`, `callout`, `focus` (dim everything but a region), `progress`,
+  `kinetic`, plus your own with `{{param}}` placeholders.
+- **Outputs.** H.264 `.mp4`, ProRes 4444 `.mov` and VP9 `.webm` with alpha for compositing, `.gif`, PNG sequences.
+
+## Built for agents
+
+An agent cannot watch a video, so Kinescript gives it things it can read:
+
+| Command | What the agent gets |
+|---|---|
+| `kine docs` | the full scene reference, short enough to keep in context |
+| `kine check scene.json` | JSON issues with time ranges: text off canvas or in the safe margin, overlapping text, contrast under 4.5:1 against what is actually behind it, tiny text, too little reading time, load and render errors |
+| `kine look scene.json --boxes` | one PNG of many labelled frames, with every layer outlined and named |
+| `kine probe scene.json --at 3.2` | resolved in/out of every layer and each visible layer's screen box |
+| `kine still` / `kine render` | a frame, a range (`--from/--to`), a draft (`-q draft --scale 0.5`) or the final file |
+
+The same tools are available over MCP (`kine mcp`), and `kine_look` / `kine_still` return images inline.
+
+```json
+{
+  "mcpServers": {
+    "kinescript": {"command": "kine", "args": ["mcp"]}
+  }
+}
+```
+
+## Install
+
+Requires Python 3.10+ and ffmpeg on `PATH`.
+
+```bash
+git clone <this repo> kinescript && cd kinescript
+python -m venv .venv && .venv/Scripts/activate      # or: source .venv/bin/activate
+pip install -e .
+kine doctor                                          # ffmpeg path, GPU availability, default font
+```
+
+Dependencies are `skia-python`, `numpy` and `glfw`. Inter (SIL Open Font License) ships with the package so default
+text looks the same on every machine.
+
+## Quick start
+
+```bash
+kine new scene.json
+kine check scene.json
+kine look scene.json --boxes
+kine render scene.json -o scene.mp4
+```
+
+```json
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "bg": "#0e0f13"},
+  "grade": {"vignette": 0.35, "grain": 0.04},
+  "layers": [
+    {"id": "dot", "type": "circle", "x": "50%", "y": "50%", "r": 26, "fill": "$accent", "dur": 1.1,
+     "enter": {"name": "pop", "dur": 0.4}, "exit": "fade"},
+    {"id": "title", "type": "text", "text": "Motion, **written.**", "x": "50%", "y": "46%", "size": 140,
+     "weight": 800, "split": "chars", "at": "dot.out-0.1", "dur": 3.2,
+     "enter": {"name": "rise+blur", "stagger": 0.03}, "exit": "fade"},
+    {"id": "sub", "type": "text", "text": "scenes as data", "x": "50%", "y": "62%", "size": 40,
+     "fill": "$muted", "at": "title.in+0.6", "until": "title.out", "enter": "rise"}
+  ]
+}
+```
+
+More in `examples/`: `hello.json` (title animation) and `edit.json` (a cut list with a punch-in, crossfade,
+lower third, callout, karaoke captions and a music bed). Run `python examples/make_media.py` first to generate the
+sample footage.
+
+## Performance
+
+Measured on the development machine (Intel Core Ultra 7 265, 20 threads, NVIDIA RTX 5060 Ti, Windows 11):
+
+| Workload | Result |
+|---|---|
+| Drawing one 1080p frame of the launch video (GPU) | median 5.1 ms, p95 6.7 ms |
+| Launch video, 34.4 s at 1080p30, `-q high`, with audio | 7.2 s wall, 144 frames/s |
+| `examples/edit.json`, 10.4 s with two decoded video clips | 4.8 s wall, 66 frames/s |
+
+Rendering uses Skia on the GPU through a hidden OpenGL context, one per worker process. Frames are split into
+chunks, encoded in parallel and joined without re-encoding.
+
+## Limits
+
+- Without a usable GPU, Kinescript falls back to Skia's CPU rasteriser. With the Windows `skia-python` wheel this is
+  very slow (about 0.9 s per 1080p frame for the launch video); use `--scale 0.5` for previews on such machines.
+  `KINE_BACKEND=cpu` forces this path.
+- 2D only. Audio is mixing (trim, gain, fades, speed), not editing or effects.
+- Video is decoded and resampled by ffmpeg to the scene frame rate. Jumping backwards or far ahead reopens the
+  decoder, which is slower than sequential playback.
+- Text layout is single-script left-to-right with greedy wrapping. No shaping for complex scripts or bidi.
+- Expressions are limited to arithmetic and the listed helpers; attribute access and other names are rejected.
+
+## Project layout
+
+```
+kinescript/   engine: timing, props, presets, render, output, verify (check/look/probe), mcp, cli
+examples/     scenes and the generator for sample media
+marketing/    the launch video, as a scene and its builder script
+brand/        logo files and the brand guide
+content/      launch post and social copy
+site/         landing page
+tests/        pytest suite
+```

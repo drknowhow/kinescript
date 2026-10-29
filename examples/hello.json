@@ -1,0 +1,17 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "bg": {"linear": [[0,0],[1,1]], "stops": ["#0e0f13", "#1b1d26"]}},
+  "grade": {"vignette": 0.45, "grain": 0.06},
+  "layers": [
+    {"id": "dot", "type": "circle", "x": "50%", "y": "50%", "r": 26, "fill": "$accent", "at": 0, "dur": 1.1,
+     "enter": {"name": "pop", "dur": 0.4}, "exit": {"name": "zoom", "dur": 0.3, "from": 0.2}},
+    {"id": "title", "type": "text", "text": "Motion, **written.**", "x": "50%", "y": "46%", "size": 140, "weight": 800,
+     "split": "chars", "at": "dot.out-0.1", "dur": 3.2,
+     "enter": {"name": "rise+blur", "dur": 0.6, "stagger": 0.03, "dist": 70}, "exit": {"name": "fade", "dur": 0.4}},
+    {"id": "rule", "type": "line", "points": [[-260,0],[260,0]], "x": "50%", "y": "58%", "stroke": "$accent",
+     "strokeWidth": 7, "at": "title.in+0.5", "until": "title.out", "enter": {"name": "draw", "dur": 0.8}, "exit": "fade"},
+    {"id": "sub", "type": "text", "text": "scenes as data  ·  checked by agents  ·  rendered in parallel", "x": "50%", "y": "65%",
+     "size": 38, "weight": 400, "fill": "$muted", "at": "rule.in+0.3", "until": "title.out", "enter": "rise", "exit": "fade"},
+    {"id": "orbit", "type": "circle", "r": 10, "fill": "$accent2", "x": "=960 + cos(t*2.2)*420", "y": "=540 + sin(t*2.2)*160",
+     "at": "title.in", "until": "title.out", "opacity": 0.85, "enter": "fade", "exit": "fade"}
+  ]
+}

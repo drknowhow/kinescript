@@ -1,0 +1,214 @@
+"""Encoding: frames piped to ffmpeg, split across worker processes, audio mixed at the end."""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import tempfile
+import time
+from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
+
+from . import media
+from .render import Renderer
+from .scene import Scene, load
+
+QUALITY = {  # crf, x264 preset
+    "draft": (30, "ultrafast"),
+    "standard": (20, "veryfast"),
+    "high": (16, "medium"),
+}
+
+
+def _video_args(fmt: str, quality: str, fps: float) -> list[str]:
+    crf, preset = QUALITY.get(quality, QUALITY["standard"])
+    if fmt == "mov":  # ProRes 4444 with alpha, for compositing in an NLE
+        return ["-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuva444p10le", "-vendor", "apl0"]
+    if fmt == "webm":
+        return ["-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-b:v", "0", "-crf", str(crf + 10),
+                "-row-mt", "1", "-deadline", "realtime" if quality == "draft" else "good", "-cpu-used", "4"]
+    return ["-c:v", "libx264", "-preset", preset, "-crf", str(crf), "-pix_fmt", "yuv420p",
+            "-g", str(int(fps * 2)), "-bf", "2"]
+
+
+def _encoder(path: str, w: int, h: int, fps: float, fmt: str, quality: str) -> subprocess.Popen:
+    cmd = [media.FFMPEG, "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", f"{w}x{h}",
+           "-r", f"{fps}", "-i", "-", *_video_args(fmt, quality, fps), "-an", path]
+    return subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=media._NOWIN)
+
+
+def _render_range(args) -> dict:
+    spec, base, start, end, path, fmt, quality, scale, transparent = args
+    scene = Scene(spec, base)
+    if transparent:
+        scene.bg = None
+    r = Renderer(scene, scale=scale)
+    enc = _encoder(path, r.w, r.h, scene.fps, fmt, quality)
+    t0 = time.perf_counter()
+    try:
+        for n in range(start, end):
+            enc.stdin.write(r.frame(n).data)  # type: ignore[union-attr]
+    finally:
+        scene.close()
+        enc.stdin.close()  # type: ignore[union-attr]
+        err = enc.stderr.read().decode(errors="replace") if enc.stderr else ""
+        enc.wait()
+    if enc.returncode:
+        raise RuntimeError(f"ffmpeg failed on frames {start}-{end}: {err.strip()[:400]}")
+    return {"frames": end - start, "seconds": time.perf_counter() - t0}
+
+
+def _audio_inputs(scene: Scene) -> list[dict]:
+    """Every audible source as {src, at, trim0, trim1, gain_db, fade_in, fade_out, speed}."""
+    out = []
+    for layer in scene.all_layers():
+        if layer.type != "video" or not layer.src:
+            continue
+        vol = layer.raw.get("volume", 1)
+        if not vol or not media.probe(layer.src)["audio"]:
+            continue
+        trim = layer.raw.get("trim") or [0, None]
+        speed = float(layer.raw.get("speed", 1))
+        fi = layer.enter.dur if layer.enter else 0
+        fo = layer.exit.dur if layer.exit else 0
+        out.append(dict(src=layer.src, at=layer.t_in, trim0=float(trim[0]), dur=layer.dur * speed, gain=float(vol),
+                        fade_in=fi, fade_out=fo, speed=speed))
+    for a in scene.audio:
+        src = scene.path(a["src"])
+        at = scene.timeline._time(a.get("at", 0), "audio", 0.0)
+        trim = a.get("trim") or [0, None]
+        total = media.probe(src)["duration"]
+        end = trim[1] if len(trim) > 1 and trim[1] is not None else total
+        dur = min(end - trim[0], scene.duration - at)
+        gain = 10 ** (float(a.get("gain", 0)) / 20) if "gain" in a else float(a.get("volume", 1))
+        out.append(dict(src=src, at=at, trim0=float(trim[0]), dur=max(0.01, dur), gain=gain,
+                        fade_in=float(a.get("fadeIn", 0)), fade_out=float(a.get("fadeOut", 0)), speed=1.0))
+    return out
+
+
+def _mux_audio(scene: Scene, video: str, out: str):
+    ins = _audio_inputs(scene)
+    if not ins:
+        shutil.move(video, out)
+        return
+    cmd = [media.FFMPEG, "-y", "-v", "error", "-i", video]
+    chains = []
+    for k, a in enumerate(ins):
+        cmd += ["-i", a["src"]]
+        f = [f"atrim=start={a['trim0']:.4f}:duration={a['dur']:.4f}", "asetpts=PTS-STARTPTS"]
+        if a["speed"] != 1:
+            f.append(f"atempo={max(0.5, min(2.0, a['speed'])):.4f}")
+        if a["fade_in"]:
+            f.append(f"afade=t=in:d={a['fade_in']:.3f}")
+        if a["fade_out"]:
+            f.append(f"afade=t=out:st={max(0, a['dur'] / a['speed'] - a['fade_out']):.3f}:d={a['fade_out']:.3f}")
+        f.append(f"volume={a['gain']:.4f}")
+        ms = int(round(a["at"] * 1000))
+        f.append(f"adelay={ms}|{ms}")
+        chains.append(f"[{k + 1}:a]{','.join(f)}[a{k}]")
+    mix = "".join(f"[a{k}]" for k in range(len(ins)))
+    graph = ";".join(chains) + f";{mix}amix=inputs={len(ins)}:normalize=0:dropout_transition=0,alimiter=limit=0.95,atrim=duration={scene.duration:.4f}[aout]"
+    cmd += ["-filter_complex", graph, "-map", "0:v", "-map", "[aout]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+            "-shortest", out]
+    res = subprocess.run(cmd, capture_output=True, text=True, creationflags=media._NOWIN)
+    if res.returncode:
+        raise RuntimeError(f"audio mix failed: {res.stderr.strip()[:400]}")
+    os.remove(video)
+
+
+def render(src, out: str, quality: str = "standard", workers: int | None = None, scale: float = 1.0,
+           start: float | None = None, end: float | None = None, transparent: bool = False) -> dict:
+    """Render a scene to a file. Format from the extension: .mp4, .mov (ProRes 4444 alpha), .webm (VP9 alpha),
+    .gif, or a directory / pattern ending in .png for a frame sequence."""
+    scene = load(src)
+    spec, base = scene.spec, str(scene.base)
+    fps = scene.fps
+    f0 = 0 if start is None else max(0, int(round(start * fps)))
+    f1 = scene.frames if end is None else min(scene.frames, int(round(end * fps)))
+    if f1 <= f0:
+        raise ValueError("nothing to render: end is before start")
+    out_p = Path(out)
+    ext = out_p.suffix.lower()
+    t0 = time.perf_counter()
+    if ext == ".png" or out.endswith(("/", "\\")):
+        return _render_pngs(scene, out_p, f0, f1, scale, transparent)
+    fmt = {".mov": "mov", ".webm": "webm"}.get(ext, "mp4")
+    transparent = transparent or fmt in ("mov", "webm") and spec.get("canvas", {}).get("bg") in (None, "transparent")
+    n = f1 - f0
+    cpu = os.cpu_count() or 4
+    workers = workers or max(1, min(cpu - 1, 8, n // int(fps * 1.5) or 1))
+    tmp = Path(tempfile.mkdtemp(prefix="kine-"))
+    try:
+        seg_ext = ".mov" if fmt == "mov" else ".webm" if fmt == "webm" else ".mp4"
+        bounds = [f0 + n * k // workers for k in range(workers + 1)]
+        jobs = [(spec, base, bounds[k], bounds[k + 1], str(tmp / f"seg{k:03d}{seg_ext}"), fmt, quality, scale, transparent)
+                for k in range(workers) if bounds[k + 1] > bounds[k]]
+        if len(jobs) == 1:
+            stats = [_render_range(jobs[0])]
+        else:
+            with ProcessPoolExecutor(max_workers=len(jobs)) as ex:
+                stats = list(ex.map(_render_range, jobs))
+        listing = tmp / "list.txt"
+        listing.write_text("".join(f"file '{j[4]}'\n" for j in jobs))
+        joined = str(tmp / f"joined{seg_ext}")
+        res = subprocess.run([media.FFMPEG, "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", str(listing),
+                              "-c", "copy", joined], capture_output=True, text=True, creationflags=media._NOWIN)
+        if res.returncode:
+            raise RuntimeError(f"concat failed: {res.stderr.strip()[:400]}")
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        if ext == ".gif":
+            _to_gif(joined, str(out_p), fps)
+        else:
+            sub = Scene(spec, base)
+            if start is not None or end is not None:
+                sub.audio = []
+            final = str(tmp / f"final{seg_ext}")
+            _mux_audio(sub, joined, final) if fmt == "mp4" else shutil.move(joined, final)
+            shutil.move(final, str(out_p))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+        scene.close()
+    wall = time.perf_counter() - t0
+    return {"out": str(out_p), "frames": n, "seconds": round(n / fps, 3), "wall": round(wall, 2),
+            "fps_rendered": round(n / wall, 1), "workers": len(jobs),
+            "size_mb": round(out_p.stat().st_size / 1e6, 2) if out_p.exists() else None}
+
+
+def _to_gif(src: str, out: str, fps: float):
+    gfps = min(fps, 20)
+    vf = f"fps={gfps},scale=iw*min(1\\,960/iw):-1:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=sierra2_4a"
+    res = subprocess.run([media.FFMPEG, "-y", "-v", "error", "-i", src, "-vf", vf, out], capture_output=True, text=True,
+                         creationflags=media._NOWIN)
+    if res.returncode:
+        raise RuntimeError(f"gif failed: {res.stderr.strip()[:400]}")
+
+
+def _render_pngs(scene: Scene, out: Path, f0: int, f1: int, scale: float, transparent: bool) -> dict:
+    import skia
+    if transparent:
+        scene.bg = None
+    folder = out if out.suffix.lower() != ".png" else out.parent
+    stem = "frame" if out.suffix.lower() != ".png" else out.stem
+    folder.mkdir(parents=True, exist_ok=True)
+    r = Renderer(scene, scale=scale)
+    t0 = time.perf_counter()
+    for n in range(f0, f1):
+        r.frame(n)
+        r.snapshot().save(str(folder / f"{stem}_{n:05d}.png"), skia.kPNG)
+    scene.close()
+    return {"out": str(folder), "frames": f1 - f0, "wall": round(time.perf_counter() - t0, 2)}
+
+
+def still(src, at: float, out: str, scale: float = 1.0) -> str:
+    import skia
+    scene = load(src)
+    r = Renderer(scene, scale=scale)
+    r.frame(min(scene.frames - 1, int(round(at * scene.fps))))
+    r.snapshot().save(out, skia.kPNG if out.lower().endswith(".png") else skia.kJPEG)
+    scene.close()
+    return out
+
+
+def dump_json(obj) -> str:
+    return json.dumps(obj, indent=2, ensure_ascii=False)

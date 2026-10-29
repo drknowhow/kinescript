@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kinescript: video you can diff</title>
+<meta name="description" content="Motion graphics and video edits written as JSON, checked by agents, rendered on the GPU.">
+<link rel="icon" href="../brand/mark.svg">
+<style>
+@font-face { font-family: Inter; font-weight: 400; src: url(../kinescript/fonts/Inter-Regular.ttf); }
+@font-face { font-family: Inter; font-weight: 500; src: url(../kinescript/fonts/Inter-Medium.ttf); }
+@font-face { font-family: Inter; font-weight: 700; src: url(../kinescript/fonts/Inter-Bold.ttf); }
+@font-face { font-family: Inter; font-weight: 800; src: url(../kinescript/fonts/Inter-ExtraBold.ttf); }
+:root {
+  --ink: #0e0f13; --paper: #f3efe6; --cue: #ff5a36; --signal: #3ddbd9; --graphite: #8b8f99; --panel: #16181f;
+  --line: #262934; --mono: "Cascadia Code", "JetBrains Mono", Consolas, ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+html { background: var(--ink); color: var(--paper); font: 400 18px/1.6 Inter, system-ui, sans-serif; }
+body { margin: 0; }
+a { color: inherit; }
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 28px; }
+header { display: flex; align-items: center; justify-content: space-between; padding: 28px 0; }
+header img { height: 34px; display: block; }
+header nav a { color: var(--graphite); text-decoration: none; margin-left: 28px; font-weight: 500; font-size: 16px; }
+header nav a:hover { color: var(--paper); }
+.hero { padding: 56px 0 40px; }
+h1 { font-size: clamp(44px, 7vw, 86px); line-height: 1.02; letter-spacing: -0.03em; font-weight: 800; margin: 0 0 22px; }
+h1 em { font-style: normal; color: var(--cue); }
+.lede { font-size: 22px; color: #c9c6bf; max-width: 640px; margin: 0 0 32px; }
+.cmd { display: inline-flex; gap: 14px; align-items: center; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px; padding: 12px 18px; font: 500 17px var(--mono); }
+.cmd span { color: var(--graphite); }
+.film { margin: 48px 0 0; border-radius: 16px; overflow: hidden; border: 1px solid var(--line); background: #000; }
+.film video { display: block; width: 100%; height: auto; }
+.caption { color: var(--graphite); font-size: 15px; margin-top: 12px; }
+section { padding: 88px 0 0; }
+h2 { font-size: clamp(30px, 4vw, 44px); letter-spacing: -0.02em; line-height: 1.1; margin: 0 0 14px; font-weight: 800; }
+.sub { color: var(--graphite); max-width: 620px; margin: 0 0 36px; }
+.three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 24px; }
+.card h3 { margin: 0 0 6px; font-size: 20px; }
+.card p { margin: 0 0 16px; color: #c9c6bf; font-size: 16px; }
+pre { margin: 0; background: #0b0c10; border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px;
+  font: 400 14.5px/1.6 var(--mono); overflow-x: auto; color: var(--paper); }
+.k { color: var(--graphite); } .v { color: var(--signal); } .c { color: var(--cue); }
+.del { color: #ff8f78; } .add { color: var(--signal); }
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center; }
+.numbers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.num b { display: block; font-size: 64px; font-weight: 800; letter-spacing: -0.03em; line-height: 1; color: var(--cue); }
+.num:nth-child(2) b { color: var(--signal); } .num:nth-child(3) b { color: var(--paper); }
+.num span { color: #c9c6bf; font-size: 16px; }
+.fine { color: var(--graphite); font-size: 14px; margin-top: 22px; }
+ul.plain { list-style: none; padding: 0; margin: 0; columns: 2; column-gap: 40px; }
+ul.plain li { padding: 10px 0; border-top: 1px solid var(--line); break-inside: avoid; font-size: 16px; }
+ul.plain b { color: var(--paper); }
+footer { padding: 96px 0 48px; color: var(--graphite); font-size: 15px; display: flex; justify-content: space-between; align-items: center; }
+footer img { height: 26px; }
+@media (max-width: 860px) {
+  .three, .split, .numbers { grid-template-columns: 1fr; }
+  ul.plain { columns: 1; }
+  header nav { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img src="../brand/logo-transparent.svg" alt="kinescript">
+    <nav><a href="#how">How it works</a><a href="#agents">For agents</a><a href="#speed">Speed</a></nav>
+  </header>
+
+  <div class="hero">
+    <h1>Video you can <em>diff.</em></h1>
+    <p class="lede">Motion graphics and video edits written as JSON, checked by agents, rendered on the GPU.</p>
+    <div class="cmd"><span>$</span> kine render scene.json</div>
+    <div class="film">
+      <video src="../docs/promo.mp4" poster="../docs/poster.png" controls playsinline preload="metadata"></video>
+    </div>
+    <p class="caption">This video is a Kinescript scene: <code>marketing/promo.json</code>. 34 seconds of 1080p, rendered with audio in about 7 seconds.</p>
+  </div>
+
+  <section id="how">
+    <h2>Write. Check. Render.</h2>
+    <p class="sub">A scene is one JSON file. The renderer is a function of that file and a frame number, so any frame renders on its own.</p>
+    <div class="three">
+      <div class="card">
+        <h3>Write it as data</h3>
+        <p>Layers, keyframes, cuts and captions. Every change is a line in a pull request.</p>
+<pre>{<span class="k">"type"</span>: <span class="v">"text"</span>,
+ <span class="k">"text"</span>: <span class="v">"Q3 results"</span>,
+ <span class="k">"split"</span>: <span class="v">"chars"</span>,
+ <span class="k">"enter"</span>: <span class="v">"rise+blur"</span>}</pre>
+      </div>
+      <div class="card">
+        <h3>Check before rendering</h3>
+        <p>Contrast against the real background, safe margins, overlap, reading time.</p>
+<pre><span class="k">$</span> kine check scene.json
+<span class="c">contrast</span> lt-title 2.2s
+  2.0:1, want 4.5:1
+  <span class="k">fix:</span> add a box</pre>
+      </div>
+      <div class="card">
+        <h3>Render in parallel</h3>
+        <p>Frames split across processes, drawn on the GPU, joined without re-encoding.</p>
+<pre><span class="k">$</span> kine render scene.json
+<span class="v">1020</span> frames  <span class="v">7.2</span> s
+<span class="v">144</span> frames/s, with audio</pre>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="split">
+      <div>
+        <h2>Time is a reference.</h2>
+        <p class="sub">Start a layer when another one ends. Lengthen the intro and the title and the call to action move with it. Cycles and missing ids are reported before anything renders.</p>
+      </div>
+<pre>  {<span class="k">"id"</span>: <span class="v">"intro"</span>, <span class="k">"type"</span>: <span class="v">"text"</span>,
+<span class="del">-  "dur": 2.5},</span>
+<span class="add">+  "dur": 4.5},</span>
+  {<span class="k">"id"</span>: <span class="v">"title"</span>, <span class="k">"at"</span>: <span class="c">"intro.out+0.2"</span>},
+  {<span class="k">"id"</span>: <span class="v">"cta"</span>,   <span class="k">"at"</span>: <span class="c">"title.out"</span>}</pre>
+    </div>
+  </section>
+
+  <section id="agents">
+    <h2>Made for agents.</h2>
+    <p class="sub">An agent cannot watch a video. Kinescript gives it things it can read, over the command line or MCP.</p>
+    <ul class="plain">
+      <li><b>kine docs</b> the whole scene reference, short enough to keep in context</li>
+      <li><b>kine check</b> issues as JSON, each with a time range and a fix</li>
+      <li><b>kine look</b> many frames in one labelled image, layers outlined by id</li>
+      <li><b>kine probe</b> where every layer is at a given time, in pixels</li>
+      <li><b>kine still</b> one frame, returned inline over MCP</li>
+      <li><b>kine render</b> drafts at half scale, ranges, or the final file</li>
+    </ul>
+<pre style="margin-top:28px">{ <span class="k">"mcpServers"</span>: { <span class="k">"kinescript"</span>: { <span class="k">"command"</span>: <span class="v">"kine"</span>, <span class="k">"args"</span>: [<span class="v">"mcp"</span>] } } }</pre>
+  </section>
+
+  <section id="speed">
+    <h2>Fast where it counts.</h2>
+    <p class="sub">Skia on the GPU, one hidden OpenGL context per worker, one ffmpeg pass to join.</p>
+    <div class="numbers">
+      <div class="num"><b>5.1 ms</b><span>median time to draw one 1080p frame of the launch video</span></div>
+      <div class="num"><b>144</b><span>frames per second, rendering the launch video with audio</span></div>
+      <div class="num"><b>3</b><span>Python dependencies: skia-python, numpy, glfw. Plus ffmpeg.</span></div>
+    </div>
+    <p class="fine">Measured on an Intel Core Ultra 7 265 with an NVIDIA RTX 5060 Ti, Windows 11. Without a GPU the CPU fallback is much slower; see the README.</p>
+  </section>
+
+  <section>
+    <h2>In the box.</h2>
+    <ul class="plain">
+      <li><b>Text</b> per-letter and per-word motion, typewriter with caret, emphasis markup, waves</li>
+      <li><b>Footage</b> trim, speed, loop, punch-in zoom around a focus point, picture-in-picture</li>
+      <li><b>Cut lists</b> fade, wipe, slide, zoom and blur transitions</li>
+      <li><b>Captions</b> SRT or inline, karaoke and pop modes</li>
+      <li><b>Shapes</b> rects, circles, polygons, SVG paths and arrows that draw on</li>
+      <li><b>Shaders</b> SkSL backgrounds with presets, or your own source</li>
+      <li><b>Finishing</b> grade, vignette, grain, blur, shadows, blend modes, motion blur</li>
+      <li><b>Output</b> MP4, ProRes 4444 and VP9 with alpha, GIF, PNG sequences</li>
+    </ul>
+  </section>
+
+  <footer>
+    <img src="../brand/mark.svg" alt="">
+    <span>Kinescript 0.1</span>
+  </footer>
+</div>
+</body>
+</html>
