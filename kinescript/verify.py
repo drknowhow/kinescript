@@ -56,6 +56,24 @@ def contact_sheet(src, out: str, count: int = 12, cols: int | None = None, width
     return {"out": out, "times": [round(t, 3) for t in ts], "grid": [cols, rows], "backend": r.backend}
 
 
+def _behind(boxes: dict, lid: str, a: list, w: int, h: int) -> str | None:
+    """The shape or media layer drawn before `lid` that covers most of its box, if any.
+    `boxes` is in draw order, so every entry before `lid` is underneath it. Layers that fill the
+    canvas are skipped: under a background the colour is wrong, not the placement."""
+    best, area = None, 0.0
+    for other, b in boxes.items():
+        if other == lid:
+            break
+        r = b["rect"]
+        if (b["type"] in ("text", "counter", "captions", "group") or b["alpha"] < 0.5
+                or (r[0] <= 0 and r[1] <= 0 and r[2] >= w and r[3] >= h)):
+            continue
+        ix, iy = min(a[2], r[2]) - max(a[0], r[0]), min(a[3], r[3]) - max(a[1], r[1])
+        if ix > 0 and iy > 0 and ix * iy > area:
+            best, area = other, ix * iy
+    return best
+
+
 def _draw_boxes(c, scene: Scene, boxes: dict, ox: float, oy: float, tw: float, th: float, font):
     """Outline every visible layer; label only top-level layers, on a dark tab just outside the box,
     so labels neither cover the text they name nor pile up for every child of a component."""
@@ -188,8 +206,11 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
         fg = C.luminance(tuple(b["fill"]))
         worst = min(C.contrast(fg, float(np.percentile(lum, 10))), C.contrast(fg, float(np.percentile(lum, 90))))
         if worst < 3.0:
-            add("warning", "contrast", layer.id, T, f"contrast against what is behind it is {worst:.1f}:1 (want 4.5:1)",
-                "add a box, a shadow, or change the colour")
+            under = _behind(r.boxes, layer.id, b["rect"], r.w, r.h)
+            add("warning", "contrast", layer.id, T, f"contrast against what is behind it is {worst:.1f}:1 (want 4.5:1)"
+                + (f"; it overlaps '{under}'" if under else ""),
+                f"move it clear of '{under}', or add a box or a shadow" if under
+                else "add a box, a shadow, or change the colour")
     # Reading time.
     for layer in scene.all_layers():
         if layer.type == "text":

@@ -187,13 +187,17 @@ RECIPES (layers to paste into "layers")
   Pill label:
     {"id": "pill", "type": "text", "text": "NEW", "x": "50%", "y": "50%", "size": 40,
      "fill": "#0a0c10", "box": {"fill": "#b9f45d", "pad": [10, 24], "radius": 999}}
-  Bar of a bar chart growing up from a baseline at y 900, with its value riding on top. The
-  value's y uses the same tween as the bar's height (same dur, same default ease), so it stays
-  40 px above the bar:
+  Bar of a bar chart growing up from a baseline at y 900, with its value riding on top and its
+  label under the baseline. The value's y uses the same tween as the bar's height (same dur,
+  same default ease), so it stays 40 px above the bar. The label is anchored at its top edge,
+  20 px below the baseline. Keep text off the bar: light text over the orange fails the
+  contrast check:
     {"id": "bar1", "type": "rect", "x": 600, "y": 900, "anchor": "bottom", "w": 120,
      "h": {"from": 0, "to": 400, "dur": 0.8}, "fill": "#ff633f", "at": 0.5}
     {"id": "bar1-value", "type": "counter", "x": 600, "y": {"from": 860, "to": 460, "dur": 0.8},
      "size": 48, "at": 0.5, "value": {"from": 0, "to": 80, "dur": 0.8}, "format": "{:.0f}"}
+    {"id": "bar1-label", "type": "text", "text": "Q1", "x": 600, "y": 920, "anchor": "top",
+     "size": 40, "at": 0.5}
   Slow zoom on a photo (Ken Burns):
     {"id": "photo", "type": "image", "src": "photo.jpg", "w": 1920, "h": 1080, "anchor": "topleft",
      "zoom": [[0, 1], ["end", 1.15, "linear"]], "focus": [0.6, 0.4]}

@@ -61,3 +61,35 @@ def test_every_recipe_loads_with_no_rewrites(tmp_path):
     s = k.load(str(f))
     assert not [i for i in s.issues if i["level"] != "warning"], s.issues
     s.close()
+
+
+def test_bar_chart_recipe_passes_check_as_a_three_bar_chart():
+    """Small models copy the bar recipe once per bar, often with bigger text; the copies must not
+    warn. At 64 px a centre-anchored label at y 920 reaches into the bar, so this guards the anchor."""
+    bar = [json.loads(o) for o in _objects(_section("RECIPES (layers to paste into \"layers\")"))
+           if json.loads(o).get("id", "").startswith("bar1")]
+    assert {L["id"] for L in bar} == {"bar1", "bar1-value", "bar1-label"}
+    layers = []
+    for n, dx in enumerate((-400, 0, 400), 1):
+        for L in json.loads(json.dumps(bar).replace("bar1", f"bar{n}")):
+            L["x"] += dx
+            if L["id"].endswith("-label"):
+                L["size"] = 64
+            layers.append(L)
+    r = check({"canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 3}, "layers": layers})
+    assert r["ok"] and not [i for i in r["issues"] if i["level"] != "info"], r["issues"]
+
+
+def test_contrast_warning_names_the_shape_behind_but_not_the_background():
+    def warn(layers):
+        r = check({"canvas": {"w": 1280, "h": 720, "fps": 30, "duration": 2}, "layers": layers})
+        return [i for i in r["issues"] if i["code"] == "contrast"]
+    text = {"id": "t", "type": "text", "text": "Hello", "x": 640, "y": 360, "size": 64, "fill": "#f2f0e8"}
+    on_shape = warn([{"id": "slab", "type": "rect", "x": 640, "y": 360, "w": 600, "h": 200, "fill": "#ff633f"}, text])
+    assert on_shape and "overlaps 'slab'" in on_shape[0]["message"] and "slab" in on_shape[0]["fix"]
+    on_bg = warn([{"id": "bg", "type": "rect", "x": 0, "y": 0, "anchor": "topleft", "w": "100%", "h": "100%",
+                   "fill": "#ff633f"}, text])
+    assert on_bg and "overlaps" not in on_bg[0]["message"]
+    default_fill = {k: v for k, v in text.items() if k != "fill"}  # the theme's paper colour
+    assert warn([{"id": "slab", "type": "rect", "x": 640, "y": 360, "w": 600, "h": 200, "fill": "#ff633f"},
+                 default_fill])

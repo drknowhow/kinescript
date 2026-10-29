@@ -10,6 +10,9 @@
 - Fixed: a text frame could depend on earlier frames when weight was animated.
 - Fixed: transparent .mov/.webm had dark fringes (premultiplied pixels sent as straight alpha).
 - Fixed: odd output sizes crashed MP4 encoding.
+- Fixed: the contrast check skipped text and counters that used the default colour.
+- A contrast warning names the shape behind the text and says to move the text clear of it.
+- The bar chart recipe adds a label under the baseline, anchored at its top edge.
 - Video decodes at source size on a prefetch thread (single worker on `edit.json`: 34 to 60 fps).
 - GIFs render at a 720 px long side, 15 fps, 128 colours: on examples/hello.json, 0.78 MB in 1.1 s against 1.22 MB in 2.4 s before.
 - `kine still --at end` and negative times; `kine probe clip.mp4`; render results include w and h.

@@ -349,7 +349,8 @@ class Renderer:
             info = {"rect": [round(r.left(), 1), round(r.top(), 1), round(r.right(), 1), round(r.bottom(), 1)],
                     "alpha": round(alpha * parent_alpha, 3), "type": L.type, "scale": round(math.sqrt(abs(m.getScaleX() * m.getScaleY())) or abs(m.getSkewX()), 4)}
             if L.type in ("text", "counter", "captions"):
-                fill = g("fill")
+                # The colour _draw_text uses, so checks see default-coloured text too.
+                fill = g("fill") if "fill" in L.props else C.parse(self.s.theme.get("paper", "#f2f0e8"))
                 info.update(size=float(g("size", 64)), fill=list(fill) if isinstance(fill, tuple) else None,
                             text=self._last_text if hasattr(self, "_last_text") else "")
             self.boxes[L.id] = info
