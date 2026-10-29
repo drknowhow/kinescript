@@ -11,7 +11,7 @@
 - Fixed: transparent .mov/.webm had dark fringes (premultiplied pixels sent as straight alpha).
 - Fixed: odd output sizes crashed MP4 encoding.
 - Video decodes at source size on a prefetch thread (single worker on `edit.json`: 34 to 60 fps).
-- GIFs render at a 720 px long side, 15 fps, 128 colours: about a fifth of the old size.
+- GIFs render at a 720 px long side, 15 fps, 128 colours: on examples/hello.json, 0.78 MB in 1.1 s against 1.22 MB in 2.4 s before.
 - `kine still --at end` and negative times; `kine probe clip.mp4`; render results include w and h.
 - `look --boxes` labels only top-level layers, outside their boxes.
 
