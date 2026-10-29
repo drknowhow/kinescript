@@ -30,9 +30,46 @@ BLENDS = {"normal": skia.BlendMode.kSrcOver, "multiply": skia.BlendMode.kMultipl
           "darken": skia.BlendMode.kDarken, "softLight": skia.BlendMode.kSoftLight,
           "difference": skia.BlendMode.kDifference, "color": skia.BlendMode.kColor}
 SAMPLING = skia.SamplingOptions(skia.FilterMode.kLinear, skia.MipmapMode.kNone)
-CUBIC = skia.SamplingOptions(skia.CubicResampler.Mitchell())  # video frames arrive at source size and upscale here
+# Video frames arrive at source size and upscale here. Catmull-Rom interpolates (a 1:1 draw is
+# exact); Mitchell, used before, blurred every native-size frame (mean error 14.8 vs 4.7 on a sharp clip).
+CUBIC = skia.SamplingOptions(skia.CubicResampler.CatmullRom())
 _FMT = re.compile(r"\{:([^{}]*)\}")
 _GL: dict = {}
+
+# A frame as I420 (BT.709, limited range), computed on the GPU so the readback and the pipe to the
+# encoder carry 12 bits a pixel instead of 32, and ffmpeg converts nothing. Each output RGBA pixel
+# holds the next four bytes of the I420 buffer (Y plane, then U, then V), so one readPixels of a
+# (w/4) x (1.5h) surface is the whole buffer. Chroma is the mean of each 2x2 block.
+I420_SKSL = """
+uniform shader src;
+uniform float W;
+uniform float H;
+float3 px(float2 q) { return src.eval(q).rgb; }
+float luma(float3 c) { return dot(c, float3(0.2126, 0.7152, 0.0722)); }
+float byte_at(float b) {
+    float wh = W * H;
+    if (b < wh) {
+        float y = floor(b / W);
+        return (16.0 + 219.0 * luma(px(float2(b - y * W + 0.5, y + 0.5)))) / 255.0;
+    }
+    float k = b - wh;
+    float q = wh * 0.25;
+    float plane = floor(k / q);
+    k -= plane * q;
+    float cw = W * 0.5;
+    float cy = floor(k / cw);
+    float2 o = float2((k - cy * cw) * 2.0, cy * 2.0);
+    float3 c = (px(o + float2(0.5, 0.5)) + px(o + float2(1.5, 0.5)) + px(o + float2(0.5, 1.5))
+                + px(o + float2(1.5, 1.5))) * 0.25;
+    float e = luma(c);
+    float d = plane < 0.5 ? (c.b - e) / 1.8556 : (c.r - e) / 1.5748;
+    return (128.0 + 224.0 * d) / 255.0;
+}
+half4 main(float2 p) {
+    float b = (floor(p.y) * (W * 0.25) + floor(p.x)) * 4.0;
+    return half4(byte_at(b), byte_at(b + 1.0), byte_at(b + 2.0), byte_at(b + 3.0));
+}
+"""
 
 
 def gpu_context():
@@ -228,6 +265,34 @@ class Renderer:
         self.draw(T)
         self.surface.readPixels(self.read_info, self.buf, self.w * 4)
         return self.buf
+
+    @property
+    def yuv(self) -> bool:
+        """Whether frame_i420 runs on the GPU: an opaque frame, no motion blur, width a multiple of 4."""
+        mb = self.s.motion_blur
+        return (self.backend == "gpu" and not self.transparent and self.w % 4 == 0 and self.h % 2 == 0
+                and not (mb and int(mb.get("samples", 0)) > 1))
+
+    def frame_i420(self, n: int) -> np.ndarray:
+        """Frame n as an I420 buffer (BT.709, limited range), reused between calls. Needs self.yuv."""
+        if not hasattr(self, "_i420"):
+            info = skia.ImageInfo.Make(self.w // 4, self.h * 3 // 2, skia.kRGBA_8888_ColorType, skia.kPremul_AlphaType)
+            surf = skia.Surface.MakeRenderTarget(self.surface.recordingContext(), skia.Budgeted.kNo, info)
+            self._i420 = (skia.RuntimeEffect.MakeForShader(I420_SKSL), info, surf,
+                          np.empty(self.w * self.h * 3 // 2, np.uint8))
+        eff, info, surf, buf = self._i420
+        self.draw(n / self.s.fps)
+        img = self.surface.makeImageSnapshot()
+        b = skia.RuntimeEffectBuilder(eff)
+        b.setChild("src", img.makeShader(skia.TileMode.kClamp, skia.TileMode.kClamp, skia.SamplingOptions()))
+        b.setUniform("W", float(self.w))
+        b.setUniform("H", float(self.h))
+        surf.getCanvas().drawPaint(skia.Paint(Shader=b.makeShader(), BlendMode=skia.BlendMode.kSrc))
+        # Drop the snapshot before the next draw: while it lives, drawing to the surface copies the
+        # whole texture first (copy-on-write), which cost ~80 ms a frame.
+        del img, b
+        surf.readPixels(info, buf, self.w)
+        return buf
 
     def snapshot(self) -> skia.Image:
         return self.surface.makeImageSnapshot()
@@ -629,7 +694,8 @@ class Renderer:
             rw, rh = info["w"] / max(bw, 1), info["h"] / max(bh, 1)
             native = (min if L.raw.get("fit", "cover") == "cover" else max)(rw, rh) if info["w"] else 1.0
             k = min(max(1.0, zmax) * self.scale, native)
-            L.video = media.VideoSource(L.src, round(bw * k), round(bh * k), self.s.fps, speed, L.raw.get("fit", "cover"))
+            L.video = media.VideoSource(L.src, round(bw * k), round(bh * k), self.s.fps, speed, L.raw.get("fit", "cover"),
+                                        ctx=gpu_context() if self.backend == "gpu" else None)
         trim0 = float((L.raw.get("trim") or [0])[0])
         src_t = trim0 + t * speed
         if L.raw.get("loop"):

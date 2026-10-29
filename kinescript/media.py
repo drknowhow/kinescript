@@ -39,7 +39,21 @@ def probe(src: str) -> dict:
         n, d = v["avg_frame_rate"].split("/")
         fps = float(n) / float(d or 1)
     return {"duration": dur, "w": int((v or {}).get("width", 0)), "h": int((v or {}).get("height", 0)),
-            "fps": fps, "audio": a, "image": bool(v) and fps == 0 and dur == 0}
+            "fps": fps, "audio": a, "image": bool(v) and fps == 0 and dur == 0,
+            "pix_fmt": (v or {}).get("pix_fmt", ""), "color_space": (v or {}).get("color_space", "")}
+
+
+def yuv_matrix(info: dict):
+    """Skia's YUV colour space for a probed clip: its tag, or, untagged, the rule players use
+    (BT.709 from 1280 wide or above 576 lines, else BT.601). All limited range."""
+    cs = info.get("color_space") or ""
+    if cs == "bt709":
+        return skia.kRec709_YUVColorSpace
+    if cs in ("smpte170m", "bt470bg", "fcc"):
+        return skia.kRec601_YUVColorSpace
+    if cs.startswith("bt2020"):
+        return skia.kBT2020_YUVColorSpace
+    return skia.kRec709_YUVColorSpace if info.get("w", 0) >= 1280 or info.get("h", 0) > 576 else skia.kRec601_YUVColorSpace
 
 
 @lru_cache(maxsize=64)
@@ -58,31 +72,48 @@ class VideoSource:
     layer box, so a sequential render reads each frame exactly once. Out-of-order access
     (contact sheets, probes) reopens the pipe at the requested time."""
 
-    def __init__(self, src: str, w: int, h: int, fps: float, speed: float = 1.0, fit: str = "cover"):
+    def __init__(self, src: str, w: int, h: int, fps: float, speed: float = 1.0, fit: str = "cover", ctx=None):
+        """ctx: a GPU context. With one, YUV clips without alpha arrive as yuv420p (1.5 bytes a pixel
+        instead of 4; ffmpeg converts nothing) and become RGB on the GPU at draw time."""
         self.src, self.w, self.h, self.fps, self.speed, self.fit = src, max(2, w), max(2, h), fps, speed, fit
         self.info = probe(src)
+        pf = self.info["pix_fmt"]
+        self.ctx = ctx if (ctx is not None and fit != "contain" and pf.startswith(("yuv", "nv", "p0"))
+                           and not pf.startswith("yuva")) else None
+        if self.ctx is not None:  # 4:2:0 planes need even sizes
+            self.w, self.h = max(2, self.w - self.w % 2), max(2, self.h - self.h % 2)
+            self.yuv_info = skia.YUVAInfo((self.w, self.h), skia.YUVAInfo.kY_U_V, skia.YUVAInfo.k420,
+                                          yuv_matrix(self.info))
         self.proc: subprocess.Popen | None = None
         self.t0 = 0.0
         self.index = -1
         self.frame: skia.Image | None = None
-        self.nbytes = self.w * self.h * 4
+        self.nbytes = self.w * self.h * 3 // 2 if self.ctx is not None else self.w * self.h * 4
 
     def _vf(self) -> str:
         w, h = self.w, self.h
+        if self.ctx is not None:  # cover or stretch, kept in YUV and limited range
+            fit = ":force_original_aspect_ratio=increase" if self.fit == "cover" else ""
+            crop = f",crop={w}:{h}" if self.fit == "cover" else ""
+            return f"setpts=(PTS-STARTPTS)/{self.speed},fps={self.fps},scale={w}:{h}{fit}:out_range=tv{crop},format=yuv420p"
+        # The same matrix the YUV path uses, so GPU and raster renders of a clip agree.
+        m = {skia.kRec709_YUVColorSpace: "bt709", skia.kRec601_YUVColorSpace: "bt601",
+             skia.kBT2020_YUVColorSpace: "bt2020"}[yuv_matrix(self.info)]
+        cm = f":in_color_matrix={m}" if self.info.get("pix_fmt", "").startswith(("yuv", "nv", "p0")) else ""
         if self.fit == "contain":
-            size = (f"scale={w}:{h}:force_original_aspect_ratio=decrease,format=rgba,"
+            size = (f"scale={w}:{h}{cm}:force_original_aspect_ratio=decrease,format=rgba,"
                     f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x00000000")
         elif self.fit == "stretch":
-            size = f"scale={w}:{h},format=rgba"
+            size = f"scale={w}:{h}{cm},format=rgba"
         else:
-            size = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},format=rgba"
+            size = f"scale={w}:{h}{cm}:force_original_aspect_ratio=increase,crop={w}:{h},format=rgba"
         return f"setpts=(PTS-STARTPTS)/{self.speed},fps={self.fps},{size}"
 
     def _open(self, t: float):
         self.close()
         self.t0 = max(0.0, t)
         cmd = [FFMPEG, "-v", "error", "-ss", f"{self.t0:.4f}", "-i", self.src, "-an", "-vf", self._vf(),
-               "-f", "rawvideo", "-pix_fmt", "rgba", "-"]
+               "-f", "rawvideo", "-pix_fmt", "yuv420p" if self.ctx is not None else "rgba", "-"]
         self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                      bufsize=self.nbytes * 2, creationflags=_NOWIN)
         self.index = -1
@@ -116,10 +147,19 @@ class VideoSource:
         if buf is None:
             self.queue.put(None)  # stay at end of stream for later calls
             return False
-        arr = np.frombuffer(buf, np.uint8).reshape(self.h, self.w, 4)
-        # No copy: the image wraps the bytes object, which self._buf keeps alive until the next frame.
+        # No copy: the image (or the planes) wrap the bytes object, which self._buf keeps alive.
         self._buf = buf
-        self.frame = skia.Image.fromarray(arr, colorType=skia.kRGBA_8888_ColorType, copy=False)
+        if self.ctx is not None:
+            w, h, b = self.w, self.h, np.frombuffer(buf, np.uint8)
+            planes = (b[:w * h].reshape(h, w), b[w * h:w * h * 5 // 4].reshape(h // 2, w // 2),
+                      b[w * h * 5 // 4:].reshape(h // 2, w // 2))
+            pms = [skia.Pixmap(skia.ImageInfo.Make(a.shape[1], a.shape[0], skia.kGray_8_ColorType,
+                                                   skia.kOpaque_AlphaType), a, a.shape[1]) for a in planes]
+            self.frame = skia.Image.MakeFromYUVAPixmaps(
+                self.ctx, skia.YUVAPixmaps.FromExternalPixmaps(self.yuv_info, pms + [skia.Pixmap()]))
+        else:
+            arr = np.frombuffer(buf, np.uint8).reshape(self.h, self.w, 4)
+            self.frame = skia.Image.fromarray(arr, colorType=skia.kRGBA_8888_ColorType, copy=False)
         self.index += 1
         return True
 

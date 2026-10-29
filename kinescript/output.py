@@ -32,13 +32,24 @@ def _video_args(fmt: str, quality: str, fps: float, threads: int = 0) -> list[st
                 "-row-mt", "1", "-deadline", "realtime" if quality == "draft" else "good", "-cpu-used", "4", *thr]
     if fmt == "gif":  # intermediate for the palette pass; a near-lossless one keeps grain and doubles the GIF
         return ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", *thr]
-    return ["-c:v", "libx264", "-preset", preset, "-crf", str(crf), "-pix_fmt", "yuv420p",
-            "-g", str(int(fps * 2)), "-bf", "2", *thr]
+    # x264's own GOP defaults (keyint 250, 3 B-frames, scene-cut keyframes): same PSNR as -g 2s -bf 2
+    # in 10-12% fewer bytes on the examples.
+    return ["-c:v", "libx264", "-preset", preset, "-crf", str(crf), "-pix_fmt", "yuv420p", *thr]
 
 
-def _encoder(path: str, w: int, h: int, fps: float, fmt: str, quality: str, threads: int = 0):
-    cmd = [media.FFMPEG, "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", f"{w}x{h}",
-           "-r", f"{fps}", "-i", "-", *_video_args(fmt, quality, fps, threads), "-an", path]
+# HD video is BT.709. Untagged files are read as 709 by browsers and players, but ffmpeg's default
+# RGB->YUV matrix is BT.601, which shifts saturated colours; so convert with 709 and say so.
+# The tags go on the frames (setparams): ffmpeg 8 drops -color_primaries / -color_trc output options
+# when the frames themselves say "unknown".
+TAG_709 = "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv"
+TO_709 = "scale=out_color_matrix=bt709:out_range=tv"
+
+
+def _encoder(path: str, w: int, h: int, fps: float, fmt: str, quality: str, threads: int = 0, yuv: bool = False):
+    """yuv: frames arrive as BT.709 I420 (Renderer.frame_i420) and pass to the encoder unconverted."""
+    pix, vf = ("yuv420p", TAG_709) if yuv else ("rgba", f"{TO_709},{TAG_709}")
+    cmd = [media.FFMPEG, "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", pix, "-s", f"{w}x{h}",
+           "-r", f"{fps}", "-i", "-", "-vf", vf, *_video_args(fmt, quality, fps, threads), "-an", path]
     # stderr goes to a file: a pipe nobody reads until the end can fill and stall the encoder.
     log = tempfile.TemporaryFile()
     return subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=log, creationflags=media._NOWIN), log
@@ -50,11 +61,13 @@ def _render_range(args) -> dict:
     if transparent:
         scene.bg = None
     r = Renderer(scene, scale=scale, even=fmt in ("mp4", "webm", "gif"))
-    enc, log = _encoder(path, r.w, r.h, scene.fps, fmt, quality, threads)
+    yuv = r.yuv and fmt in ("mp4", "gif")
+    enc, log = _encoder(path, r.w, r.h, scene.fps, fmt, quality, threads, yuv)
+    grab = r.frame_i420 if yuv else r.frame
     t0 = time.perf_counter()
     try:
         for n in range(start, end):
-            enc.stdin.write(r.frame(n).data)  # type: ignore[union-attr]
+            enc.stdin.write(grab(n).data)  # type: ignore[union-attr]
     except BrokenPipeError:
         pass  # ffmpeg quit early; its own message is reported below
     finally:
@@ -100,12 +113,25 @@ def _audio_inputs(scene: Scene) -> list[dict]:
     return out
 
 
-def _mux_audio(scene: Scene, video: str, out: str):
+def _copy(video_in: list[str], out: str):
+    """Write the video input (one segment, or the concat list of several) to out without re-encoding."""
+    if video_in[0] == "-i":
+        shutil.move(video_in[1], out)
+        return
+    res = subprocess.run([media.FFMPEG, "-y", "-v", "error", *video_in, "-c", "copy", out], capture_output=True,
+                         text=True, creationflags=media._NOWIN)
+    if res.returncode:
+        raise RuntimeError(f"concat failed: {res.stderr.strip()[:400]}")
+
+
+def _mux_audio(scene: Scene, video_in: list[str], out: str):
+    """Mix the scene's audio under the video in one pass; the video stream is copied, joining the
+    segments on the way when video_in is a concat list."""
     ins = _audio_inputs(scene)
     if not ins:
-        shutil.move(video, out)
+        _copy(video_in, out)
         return
-    cmd = [media.FFMPEG, "-y", "-v", "error", "-i", video]
+    cmd = [media.FFMPEG, "-y", "-v", "error", *video_in]
     chains = []
     for k, a in enumerate(ins):
         cmd += ["-i", a["src"]]
@@ -127,7 +153,6 @@ def _mux_audio(scene: Scene, video: str, out: str):
     res = subprocess.run(cmd, capture_output=True, text=True, creationflags=media._NOWIN)
     if res.returncode:
         raise RuntimeError(f"audio mix failed: {res.stderr.strip()[:400]}")
-    os.remove(video)
 
 
 def render(src, out: str, quality: str = "standard", workers: int | None = None, scale: float = 1.0,
@@ -152,7 +177,7 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
         scale = min(scale, GIF_SIDE / max(scene.w, scene.h))
     n = f1 - f0
     cpu = os.cpu_count() or 4
-    workers = workers or max(1, min(cpu - 1, 8, n // int(fps * 1.5) or 1))
+    workers = workers or _workers(scene, n, cpu, fmt)
     threads = max(1, cpu // workers)
     tmp = Path(tempfile.mkdtemp(prefix="kine-"))
     try:
@@ -166,22 +191,21 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
         else:
             with ProcessPoolExecutor(max_workers=len(jobs)) as ex:
                 stats = list(ex.map(_render_range, jobs))
-        listing = tmp / "list.txt"
-        listing.write_text("".join(f"file '{j[4]}'\n" for j in jobs))
-        joined = str(tmp / f"joined{seg_ext}")
-        res = subprocess.run([media.FFMPEG, "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", str(listing),
-                              "-c", "copy", joined], capture_output=True, text=True, creationflags=media._NOWIN)
-        if res.returncode:
-            raise RuntimeError(f"concat failed: {res.stderr.strip()[:400]}")
-        out_p.parent.mkdir(parents=True, exist_ok=True)
-        if ext == ".gif":
-            _to_gif(joined, str(out_p), fps)
+        if len(jobs) == 1:
+            video_in = ["-i", jobs[0][4]]
         else:
-            sub = Scene(spec, base)
-            if start is not None or end is not None:
-                sub.audio = []
-            final = str(tmp / f"final{seg_ext}")
-            _mux_audio(sub, joined, final) if fmt == "mp4" else shutil.move(joined, final)
+            listing = tmp / "list.txt"
+            listing.write_text("".join(f"file '{j[4]}'\n" for j in jobs))
+            video_in = ["-f", "concat", "-safe", "0", "-i", str(listing)]
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        final = str(tmp / f"final{seg_ext}")
+        if ext == ".gif":
+            _to_gif(video_in, str(out_p), fps)
+        elif fmt == "mp4" and start is None and end is None:
+            _mux_audio(scene, video_in, final)
+        else:
+            _copy(video_in, final)
+        if ext != ".gif":
             shutil.move(final, str(out_p))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -195,16 +219,33 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
             "workers": len(jobs), "size_mb": round(out_p.stat().st_size / 1e6, 2) if out_p.exists() else None}
 
 
+def _workers(scene: Scene, frames: int, cpu: int, fmt: str = "mp4") -> int:
+    """Render processes for a render. On the GPU every process opens its own GL context on the same
+    GPU and its own video decoders, so past a few they slow each other down. Measured on a 20-thread
+    CPU with one GPU (2026-10-29): 1038 vector frames were fastest with 4-6 workers (3.2 s against
+    4.8 s with one); 126 frames, and 312 frames with two video layers, were fastest with one. The
+    raster (CPU) backend is bound by the CPU and keeps one worker per 1.5 s of frames. VP9 and
+    ProRes encode slower than the GPU draws, so .webm/.mov take up to 4 workers, one per 60 frames
+    (1038-frame promo as .webm: 18.7 s with one worker, 10.9 s with four, 11.3 s with eight)."""
+    from .render import gpu_context
+    if fmt in ("webm", "mov"):
+        return max(1, min(4, frames // 60))
+    if gpu_context() is None:
+        return max(1, min(cpu - 1, 8, frames // int(scene.fps * 1.5) or 1))
+    video = any(L.type in ("video", "sequence") for L in scene.all_layers())
+    return max(1, min(4, frames // (500 if video else 250)))
+
+
 GIF_SIDE, GIF_FPS = 720, 15  # a 6 s portrait GIF at full width and 20 fps ran past 10 MB
 
 
-def _to_gif(src: str, out: str, fps: float):
+def _to_gif(video_in: list[str], out: str, fps: float):
     gfps = min(fps, GIF_FPS)
     # 128 colours with ordered dither and changed-rectangle updates: about half the size of error
     # diffusion on moving gradients (6.6 -> 3.5 MB on a 6 s portrait clip) with no visible loss.
-    vf = (f"fps={gfps},split[a][b];[a]palettegen=stats_mode=diff:max_colors=128[p];"
+    vf = (f"scale=in_color_matrix=bt709:in_range=tv,format=rgb24,fps={gfps},split[a][b];[a]palettegen=stats_mode=diff:max_colors=128[p];"
           "[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle")
-    res = subprocess.run([media.FFMPEG, "-y", "-v", "error", "-i", src, "-vf", vf, out], capture_output=True, text=True,
+    res = subprocess.run([media.FFMPEG, "-y", "-v", "error", *video_in, "-vf", vf, out], capture_output=True, text=True,
                          creationflags=media._NOWIN)
     if res.returncode:
         raise RuntimeError(f"gif failed: {res.stderr.strip()[:400]}")

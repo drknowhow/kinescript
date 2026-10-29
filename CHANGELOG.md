@@ -10,6 +10,17 @@
 - Fixed: a text frame could depend on earlier frames when weight was animated.
 - Fixed: transparent .mov/.webm had dark fringes (premultiplied pixels sent as straight alpha).
 - Fixed: odd output sizes crashed MP4 encoding.
+- Fixed: MP4 colours. Frames were converted with BT.601 and left untagged, which players read as
+  BT.709, so pure green played back as #00d700. Output is now BT.709 and tagged as such.
+- Fixed: untagged HD source clips were decoded as BT.601; they now follow the player rule
+  (BT.709 from 1280 wide or above 576 lines).
+- Fixed: video layers were softened by Mitchell resampling even at native size; now Catmull-Rom.
+- Frames reach the encoder as I420 converted on the GPU (3.1 MB a 1080p frame instead of 8.3 MB),
+  and clips decode as yuv420p and become RGB on the GPU.
+- One render process for short scenes and video scenes on the GPU, up to four for long ones;
+  the audio mix and the segment join are one pass; x264 keeps its own GOP defaults.
+  Against the previous commit: renders of the three examples are 29-38% faster, and files are
+  16-34% smaller except hello at -q high (+19% at equal PSNR).
 - Fixed: the contrast check skipped text and counters that used the default colour.
 - A contrast warning names the shape behind the text and says to move the text clear of it.
 - The bar chart recipe adds a label under the baseline, anchored at its top edge.
