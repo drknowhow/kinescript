@@ -8,3 +8,5 @@ out_*
 *.tmp
 .mcp.json
 .claude/
+dist/
+build/

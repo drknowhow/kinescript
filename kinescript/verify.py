@@ -11,7 +11,7 @@ import numpy as np
 import skia
 
 from . import color as C
-from .render import Renderer, _argb
+from .render import FONT_DIR, Renderer, _argb
 from .scene import Scene, load
 
 
@@ -37,8 +37,8 @@ def contact_sheet(src, out: str, count: int = 12, cols: int | None = None, width
     gap, label_h = 8, 26
     sheet = skia.Surface(cols * (tw + gap) + gap, rows * (th + label_h + gap) + gap)
     c = sheet.getCanvas()
-    c.clear(_argb("#16171c"))
-    mono = skia.Typeface("Consolas", skia.FontStyle.Normal())
+    c.clear(_argb("#0a0c10"))
+    mono = skia.Typeface.MakeFromFile(str(FONT_DIR / "IBMPlexMono-Medium.ttf"))
     font = skia.Font(mono, 15)
     small = skia.Font(mono, 11)
     for k, T in enumerate(ts):
@@ -48,16 +48,16 @@ def contact_sheet(src, out: str, count: int = 12, cols: int | None = None, width
         x = gap + (k % cols) * (tw + gap)
         y = gap + (k // cols) * (th + label_h + gap)
         c.drawImage(img, x, y + label_h)
-        c.drawString(f"{T:6.2f}s  f{n}", x + 2, y + 18, font, skia.Paint(AntiAlias=True, Color=_argb("#f3efe6")))
+        c.drawString(f"{T:6.2f}s  f{n}", x + 2, y + 18, font, skia.Paint(AntiAlias=True, Color=_argb("#f2f0e8")))
         if boxes:
             for lid, b in r.boxes.items():
                 if b["alpha"] < 0.05:
                     continue
                 l, t_, rr, bb = b["rect"]  # already in thumbnail pixels (the renderer is scaled)
-                p = skia.Paint(AntiAlias=True, Style=skia.Paint.kStroke_Style, StrokeWidth=1, Color=_argb("#3ddbd9"))
+                p = skia.Paint(AntiAlias=True, Style=skia.Paint.kStroke_Style, StrokeWidth=1, Color=_argb("#b9f45d"))
                 c.drawRect(skia.Rect(x + l, y + label_h + t_, x + rr, y + label_h + bb), p)
                 c.drawString(lid, x + l + 2, y + label_h + t_ + 12, small,
-                             skia.Paint(AntiAlias=True, Color=_argb("#3ddbd9")))
+                             skia.Paint(AntiAlias=True, Color=_argb("#b9f45d")))
     sheet.makeImageSnapshot().save(out, skia.kPNG)
     scene.close()
     return {"out": out, "times": [round(t, 3) for t in ts], "grid": [cols, rows], "backend": r.backend}

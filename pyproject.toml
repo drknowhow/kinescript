@@ -1,23 +1,39 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "kinescript"
-version = "0.1.0"
-description = "Motion graphics and video edits written as JSON, checked and rendered by agents."
+version = "1.0.0"
+description = "Motion graphics and video edits written as JSON, checked by agents, rendered on the GPU."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE", "kinescript/fonts/*-OFL.txt"]
+authors = [{ name = "Dr. Know How" }]
 requires-python = ">=3.10"
 dependencies = ["skia-python>=87", "numpy>=1.24", "glfw>=2.5"]
+keywords = ["video", "motion graphics", "animation", "skia", "ffmpeg", "mcp", "agents"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Environment :: GPU",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Multimedia :: Video :: Conversion",
+]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "build>=1.2"]
 
 [project.scripts]
 kine = "kinescript.cli:main"
 
-[tool.setuptools.packages.find]
-include = ["kinescript*"]
+[tool.setuptools]
+packages = ["kinescript", "kinescript.fonts"]  # fonts/ is a data-only package
 
 [tool.setuptools.package-data]
-kinescript = ["fonts/*.ttf", "fonts/*.txt"]
+"kinescript.fonts" = ["*.ttf", "*.txt"]

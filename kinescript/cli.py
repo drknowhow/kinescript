@@ -10,7 +10,7 @@ from pathlib import Path
 from . import __version__
 
 STARTER = {
-    "canvas": {"w": 1920, "h": 1080, "fps": 30, "bg": "#0e0f13"},
+    "canvas": {"w": 1920, "h": 1080, "fps": 30, "bg": "#0a0c10"},
     "grade": {"vignette": 0.3},
     "layers": [
         {"id": "bg", "type": "shader", "preset": "mesh", "opacity": 0.35},

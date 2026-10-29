@@ -47,8 +47,8 @@ The renderer is a function of the scene and the frame number. Nothing carries ov
 render splits into chunks that run in parallel and get joined at the end without re-encoding. Drawing happens on
 the GPU through Skia.
 
-On the development machine (RTX 5060 Ti, Core Ultra 7 265), a frame of the launch video takes a median 5.1 ms to
-draw, and the whole 34-second 1080p video renders with audio in about 7 seconds.
+On the development machine (RTX 5060 Ti, Core Ultra 7 265), a frame of the launch video takes a median 5.2 ms to
+draw, and the whole 35-second 1080p video renders with audio in about 6.4 seconds.
 
 ## What is in the box
 
@@ -68,7 +68,7 @@ left-to-right scripts without complex shaping. These are listed in the README wi
 ## Try it
 
 ```bash
-pip install -e .
+pip install kinescript
 kine new scene.json
 kine check scene.json && kine look scene.json && kine render scene.json
 ```

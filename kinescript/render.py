@@ -19,9 +19,12 @@ ANCHORS = {"center": (0.5, 0.5), "topleft": (0, 0), "top": (0.5, 0), "topright":
            "right": (1, 0.5), "bottomleft": (0, 1), "bottom": (0.5, 1), "bottomright": (1, 1)}
 FONT_FALLBACK = ["Segoe UI", "Helvetica Neue", "Arial", "DejaVu Sans"]
 FONT_DIR = Path(__file__).parent / "fonts"
-# Inter ships with the package (SIL OFL) so default text looks the same on every machine.
-BUNDLED = {"inter": {400: "Inter-Regular.ttf", 500: "Inter-Medium.ttf", 600: "Inter-SemiBold.ttf",
-                     700: "Inter-Bold.ttf", 800: "Inter-ExtraBold.ttf", 900: "Inter-Black.ttf"}}
+# Space Grotesk and IBM Plex Mono ship with the package (SIL OFL) so default text matches on every machine.
+_GROTESK = {400: "SpaceGrotesk-Regular.ttf", 500: "SpaceGrotesk-Medium.ttf", 600: "SpaceGrotesk-SemiBold.ttf",
+            700: "SpaceGrotesk-Bold.ttf"}
+_PLEX = {400: "IBMPlexMono-Regular.ttf", 500: "IBMPlexMono-Medium.ttf", 600: "IBMPlexMono-SemiBold.ttf",
+         700: "IBMPlexMono-Bold.ttf"}
+BUNDLED = {"space grotesk": _GROTESK, "sans": _GROTESK, "ibm plex mono": _PLEX, "mono": _PLEX}
 BLENDS = {"normal": skia.BlendMode.kSrcOver, "multiply": skia.BlendMode.kMultiply, "screen": skia.BlendMode.kScreen,
           "overlay": skia.BlendMode.kOverlay, "add": skia.BlendMode.kPlus, "lighten": skia.BlendMode.kLighten,
           "darken": skia.BlendMode.kDarken, "softLight": skia.BlendMode.kSoftLight,
@@ -406,7 +409,7 @@ class Renderer:
         """Fill then stroke. 'draw' (0..1) trims the stroke and fades the fill with it."""
         amt = max(0.0, min(1.0, float(g("draw")) * reveal))
         has_stroke = L.raw.get("stroke") is not None
-        fp = self._fill_paint(L, g, box, alpha=amt, default=None if has_stroke else "#f3efe6")
+        fp = self._fill_paint(L, g, box, alpha=amt, default=None if has_stroke else self.s.theme.get("paper", "#f2f0e8"))
         if fp is not None and amt > 0:
             c.drawPath(path, fp)
         sp = self._stroke_paint(L, g)
@@ -506,12 +509,12 @@ class Renderer:
 
     def _draw_line(self, c, L, t, T, g, box, reveal, mods):
         if L.raw.get("stroke") is None:
-            L.raw["stroke"] = "#f3efe6"
+            L.raw["stroke"] = self.s.theme.get("paper", "#f2f0e8")
         self._draw_path(c, L, t, T, g, box, reveal, mods)
 
     def _draw_arrow(self, c, L, t, T, g, box, reveal, mods):
         if L.raw.get("stroke") is None:
-            L.raw["stroke"] = "#f3efe6"
+            L.raw["stroke"] = self.s.theme.get("paper", "#f2f0e8")
         path = self._path(L, t, T, g)
         amt = float(g("draw")) * reveal
         sp = self._stroke_paint(L, g)
@@ -767,8 +770,8 @@ class Renderer:
             c.drawRRect(skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(*box), r, r),
                         skia.Paint(AntiAlias=True, Color=_argb(bs.get("fill", "#000000b0"))))
         ox, oy = bx + pad[1], by + pad[0]
-        fill = g("fill") if "fill" in L.props else C.parse("#f3efe6")
-        emph = g("emph") if "emph" in L.props else C.parse(self.s.theme.get("accent", "#ff5a36"))
+        fill = g("fill") if "fill" in L.props else C.parse(self.s.theme.get("paper", "#f2f0e8"))
+        emph = g("emph") if "emph" in L.props else C.parse(self.s.theme.get("accent", "#ff633f"))
         act = g("active") if "active" in L.props else emph
         fpaint = skia.Paint(AntiAlias=True)
         spaint = self._stroke_paint(L, g)

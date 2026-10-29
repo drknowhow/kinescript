@@ -11,8 +11,8 @@ KINESCRIPT SCENE REFERENCE
 A scene is JSON. Frame n depends only on the scene and n, so any frame renders alone.
 
 {
-  "canvas": {"w": 1920, "h": 1080, "fps": 30, "bg": "#0e0f13", "duration": "auto"},
-  "theme":  {"accent": "#ff5a36"},          // "$accent" anywhere = this value
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "bg": "#0a0c10", "duration": "auto"},
+  "theme":  {"accent": "#ff633f"},          // "$accent" anywhere = this value
   "markers": {"drop": 12.5},                 // named times: "at": "drop"
   "grade":  {"contrast": 1.05, "saturate": 1.1, "vignette": 0.35, "grain": 0.05},
   "motionBlur": {"samples": 6, "shutter": 0.5},

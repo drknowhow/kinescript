@@ -3,11 +3,11 @@
   "w": 1920,
   "h": 1080,
   "fps": 30,
-  "bg": "#0e0f13"
+  "bg": "#0a0c10"
  },
  "grade": {
-  "vignette": 0.4,
-  "grain": 0.035
+  "vignette": 0.3,
+  "grain": 0.03
  },
  "audio": [
   {
@@ -21,125 +21,80 @@
   {
    "id": "bg",
    "type": "shader",
-   "preset": "mesh",
-   "opacity": 0.12,
+   "preset": "score",
+   "opacity": 0.8,
    "uniforms": {
-    "c1": "#ff5a36",
-    "c2": "#3ddbd9",
-    "c3": "#0e0f13",
-    "c4": "#16181f",
-    "speed": 0.35
+    "base": "#0a0c10",
+    "line": "#242832",
+    "mark": "#9299a8"
    }
   },
   {
    "id": "s1",
    "type": "group",
    "at": 0,
-   "dur": 3.6,
+   "dur": 3.8,
    "exit": {
     "name": "fade",
-    "dur": 0.35
+    "dur": 0.22
    },
    "children": [
     {
-     "id": "logo-dot",
-     "type": "circle",
-     "x": 660.0,
-     "y": 500,
-     "r": 30.0,
-     "fill": "#ff5a36",
+     "id": "logo-bar",
+     "type": "path",
+     "d": "M636.1 440.0 L636.1 560.0",
+     "stroke": "#f2f0e8",
+     "strokeWidth": 16.875,
      "at": 0.0,
      "enter": {
-      "name": "pop",
+      "name": "draw",
+      "dur": 0.3,
+      "ease": "outQuart"
+     }
+    },
+    {
+     "id": "logo-arms",
+     "type": "path",
+     "d": "M728.0 440.0 C 697.0 440.0 697.0 500.0 666.1 500.0 C 697.0 500.0 697.0 560.0 728.0 560.0",
+     "stroke": "#f2f0e8",
+     "strokeWidth": 16.875,
+     "at": 0.22,
+     "enter": {
+      "name": "draw",
       "dur": 0.5
      }
     },
     {
-     "id": "logo-trail0",
-     "type": "line",
-     "points": [
-      [
-       0,
-       0
-      ],
-      [
-       -64.0,
-       0
-      ]
-     ],
-     "x": 614.0,
-     "y": 480.0,
-     "stroke": "#f3efe6",
-     "strokeWidth": 9.0,
-     "at": 0.3,
-     "enter": {
-      "name": "draw",
-      "dur": 0.45
-     }
-    },
-    {
-     "id": "logo-trail1",
-     "type": "line",
-     "points": [
-      [
-       0,
-       0
-      ],
-      [
-       -104.0,
-       0
-      ]
-     ],
-     "x": 614.0,
+     "id": "logo-cue",
+     "type": "circle",
+     "x": 666.09375,
      "y": 500.0,
-     "stroke": "#f3efe6",
-     "strokeWidth": 9.0,
-     "at": 0.36,
+     "r": 15.9375,
+     "fill": "#ff633f",
+     "at": 0.5,
      "enter": {
-      "name": "draw",
-      "dur": 0.45
-     }
-    },
-    {
-     "id": "logo-trail2",
-     "type": "line",
-     "points": [
-      [
-       0,
-       0
-      ],
-      [
-       -52.0,
-       0
-      ]
-     ],
-     "x": 614.0,
-     "y": 520.0,
-     "stroke": "#f3efe6",
-     "strokeWidth": 9.0,
-     "at": 0.42,
-     "enter": {
-      "name": "draw",
-      "dur": 0.45
+      "name": "pop",
+      "dur": 0.28,
+      "from": 0.2
      }
     },
     {
      "id": "logo-word",
      "type": "text",
      "text": "kinescript",
-     "x": 722.0,
-     "y": 504.0,
+     "x": 771.09375,
+     "y": 513.125,
      "anchor": "left",
      "align": "left",
      "size": 120,
-     "weight": 800,
+     "weight": 700,
+     "letterSpacing": -2.8125,
      "split": "chars",
-     "at": 0.4,
+     "at": 0.62,
      "enter": {
-      "name": "rise+blur",
-      "dur": 0.5,
-      "stagger": 0.03,
-      "dist": 40
+      "name": "snap",
+      "dur": 0.22,
+      "stagger": 0.028
      }
     },
     {
@@ -147,12 +102,16 @@
      "type": "text",
      "text": "Video you can **diff.**",
      "x": 960,
-     "y": 650,
-     "size": 48,
+     "y": 680,
+     "size": 46,
      "weight": 500,
-     "fill": "#8b8f99",
-     "at": 1.4,
-     "enter": "rise"
+     "fill": "#9299a8",
+     "emph": "#ff633f",
+     "at": 1.5,
+     "enter": {
+      "name": "fade",
+      "dur": 0.3
+     }
     }
    ]
   },
@@ -163,7 +122,7 @@
    "dur": 6.8,
    "exit": {
     "name": "fade",
-    "dur": 0.35
+    "dur": 0.22
    },
    "children": [
     {
@@ -175,10 +134,12 @@
      "anchor": "left",
      "align": "left",
      "size": 66,
-     "weight": 800,
+     "weight": 700,
      "enter": {
-      "name": "rise",
-      "dur": 0.5
+      "name": "left",
+      "dur": 0.32,
+      "dist": 28,
+      "ease": "outQuart"
      }
     },
     {
@@ -191,9 +152,12 @@
      "align": "left",
      "size": 34,
      "weight": 400,
-     "fill": "#8b8f99",
-     "at": 0.25,
-     "enter": "rise"
+     "fill": "#9299a8",
+     "at": 0.2,
+     "enter": {
+      "name": "fade",
+      "dur": 0.25
+     }
     },
     {
      "id": "code-label",
@@ -203,9 +167,9 @@
      "y": 330,
      "anchor": "left",
      "align": "left",
-     "font": "Cascadia Code",
+     "font": "IBM Plex Mono",
      "size": 26,
-     "fill": "#8b8f99",
+     "fill": "#9299a8",
      "at": 0.3,
      "enter": "fade"
     },
@@ -217,26 +181,29 @@
      "w": 780,
      "h": 440,
      "anchor": "topleft",
-     "radius": 18,
-     "fill": "#16181f",
-     "stroke": "#2a2d38",
+     "radius": 14,
+     "fill": "#12151b",
+     "stroke": "#242832",
      "strokeWidth": 2,
      "at": 0.3,
-     "enter": "fade"
+     "enter": {
+      "name": "wipe-down",
+      "dur": 0.3
+     }
     },
     {
      "id": "code",
      "type": "text",
-     "text": "{\n  \"type\": \"text\",\n  \"text\": **\"Hello, world\"**,\n  \"at\": **\"logo.out+0.2\"**,\n  \"enter\": **\"rise+blur\"**\n}",
+     "text": "{\n  \"type\": \"text\",\n  \"text\": **\"Hello, world\"**,\n  \"at\": **\"logo.out+0.2\"**,\n  \"enter\": **\"snap\"**\n}",
      "x": 200,
      "y": 400,
      "anchor": "topleft",
      "align": "left",
-     "font": "Cascadia Code",
+     "font": "IBM Plex Mono",
      "size": 34,
      "weight": 400,
      "lineHeight": 1.55,
-     "emph": "#3ddbd9",
+     "emph": "#b9f45d",
      "caret": true,
      "at": 0.6,
      "enter": {
@@ -251,13 +218,13 @@
      "y1": 580,
      "x2": 1060,
      "y2": 580,
-     "stroke": "#ff5a36",
+     "stroke": "#ff633f",
      "strokeWidth": 6,
      "head": 18,
      "at": 3.1,
      "enter": {
       "name": "draw",
-      "dur": 0.4
+      "dur": 0.3
      }
     },
     {
@@ -268,9 +235,9 @@
      "y": 330,
      "anchor": "left",
      "align": "left",
-     "font": "Cascadia Code",
+     "font": "IBM Plex Mono",
      "size": 26,
-     "fill": "#8b8f99",
+     "fill": "#9299a8",
      "at": 3.1,
      "enter": "fade"
     },
@@ -282,18 +249,34 @@
      "w": 660,
      "h": 440,
      "clip": true,
-     "radius": 18,
-     "fill": "#0b0c10",
+     "radius": 14,
+     "fill": "#0a0c10",
      "at": 3.1,
-     "enter": "fade",
+     "enter": {
+      "name": "snap",
+      "dur": 0.3
+     },
      "children": [
       {
        "id": "result-bg",
-       "type": "shader",
-       "preset": "aurora",
+       "type": "image",
+       "src": "../brand/art/transition.jpg",
+       "x": 330,
+       "y": 220,
        "w": 660,
        "h": 440,
-       "opacity": 0.55
+       "fit": "cover",
+       "opacity": 0.7,
+       "zoom": [
+        [
+         0,
+         1.0
+        ],
+        [
+         "end",
+         1.08
+        ]
+       ]
       },
       {
        "id": "result-text",
@@ -302,14 +285,21 @@
        "x": 330,
        "y": 220,
        "size": 72,
-       "weight": 800,
+       "weight": 700,
+       "box": {
+        "fill": "#0a0c10d0",
+        "pad": [
+         10,
+         22
+        ],
+        "radius": 10
+       },
        "split": "chars",
        "at": 0.4,
        "enter": {
-        "name": "rise+blur",
-        "dur": 0.55,
-        "stagger": 0.035,
-        "dist": 50
+        "name": "snap",
+        "dur": 0.22,
+        "stagger": 0.03
        }
       }
      ]
@@ -323,7 +313,7 @@
    "dur": 6.4,
    "exit": {
     "name": "fade",
-    "dur": 0.35
+    "dur": 0.22
    },
    "children": [
     {
@@ -335,10 +325,12 @@
      "anchor": "left",
      "align": "left",
      "size": 66,
-     "weight": 800,
+     "weight": 700,
      "enter": {
-      "name": "rise",
-      "dur": 0.5
+      "name": "left",
+      "dur": 0.32,
+      "dist": 28,
+      "ease": "outQuart"
      }
     },
     {
@@ -351,20 +343,25 @@
      "align": "left",
      "size": 34,
      "weight": 400,
-     "fill": "#8b8f99",
-     "at": 0.25,
-     "enter": "rise"
+     "fill": "#9299a8",
+     "at": 0.2,
+     "enter": {
+      "name": "fade",
+      "dur": 0.25
+     }
     },
     {
      "id": "ruler",
      "type": "path",
-     "d": "M260 380 H1700 M260 370 V390 M380 370 V390 M500 370 V390 M620 370 V390 M740 370 V390 M860 370 V390 M980 370 V390 M1100 370 V390 M1220 370 V390 M1340 370 V390 M1460 370 V390 M1580 370 V390 M1700 370 V390",
-     "stroke": "#3a3d48",
+     "d": "M260 380 H1700 M260 368 V390 M380 372 V390 M500 372 V390 M620 372 V390 M740 368 V390 M860 372 V390 M980 372 V390 M1100 372 V390 M1220 368 V390 M1340 372 V390 M1460 372 V390 M1580 372 V390 M1700 368 V390",
+     "stroke": "#242832",
      "strokeWidth": 2,
-     "at": 0.3,
+     "cap": "butt",
+     "at": 0.25,
      "enter": {
       "name": "draw",
-      "dur": 0.6
+      "dur": 0.4,
+      "ease": "outQuart"
      }
     },
     {
@@ -375,27 +372,28 @@
      "h": 76,
      "w": "=300 + 240*ease('inOutCubic', (t - 1.6) / 1.1)",
      "anchor": "left",
-     "radius": 12,
-     "fill": "#ff5a36",
+     "radius": 8,
+     "fill": "#ff633f",
      "at": 0.4,
      "enter": {
       "name": "wipe-right",
-      "dur": 0.4
+      "dur": 0.3,
+      "ease": "outQuart"
      }
     },
     {
      "id": "bar-a-label",
      "type": "text",
      "text": "intro",
+     "font": "IBM Plex Mono",
+     "size": 30,
+     "weight": 600,
      "x": 288,
      "y": 470,
      "anchor": "left",
      "align": "left",
-     "font": "Cascadia Code",
-     "size": 30,
-     "weight": 600,
-     "fill": "#0e0f13",
-     "at": 0.6,
+     "fill": "#0a0c10",
+     "at": 0.6000000000000001,
      "enter": "fade"
     },
     {
@@ -406,26 +404,27 @@
      "h": 76,
      "w": 520,
      "anchor": "left",
-     "radius": 12,
-     "fill": "#3ddbd9",
+     "radius": 8,
+     "fill": "#b9f45d",
      "at": 0.6,
      "enter": {
       "name": "wipe-right",
-      "dur": 0.4
+      "dur": 0.3,
+      "ease": "outQuart"
      }
     },
     {
      "id": "bar-b-label",
      "type": "text",
      "text": "title  \"at\": \"intro.out\"",
-     "x": "=612 + 240*ease('inOutCubic', (t - 1.6) / 1.1)",
+     "font": "IBM Plex Mono",
+     "size": 30,
+     "weight": 600,
+     "x": "=28 + 584 + 240*ease('inOutCubic', (t - 1.6) / 1.1)",
      "y": 580,
      "anchor": "left",
      "align": "left",
-     "font": "Cascadia Code",
-     "size": 30,
-     "weight": 600,
-     "fill": "#0e0f13",
+     "fill": "#0a0c10",
      "at": 0.8,
      "enter": "fade"
     },
@@ -437,26 +436,27 @@
      "h": 76,
      "w": 430,
      "anchor": "left",
-     "radius": 12,
-     "fill": "#f3efe6",
+     "radius": 8,
+     "fill": "#f2f0e8",
      "at": 0.8,
      "enter": {
       "name": "wipe-right",
-      "dur": 0.4
+      "dur": 0.3,
+      "ease": "outQuart"
      }
     },
     {
      "id": "bar-c-label",
      "type": "text",
      "text": "cta  \"at\": \"title.out\"",
-     "x": "=1156 + 240*ease('inOutCubic', (t - 1.6) / 1.1)",
+     "font": "IBM Plex Mono",
+     "size": 30,
+     "weight": 600,
+     "x": "=28 + 1128 + 240*ease('inOutCubic', (t - 1.6) / 1.1)",
      "y": 690,
      "anchor": "left",
      "align": "left",
-     "font": "Cascadia Code",
-     "size": 30,
-     "weight": 600,
-     "fill": "#0e0f13",
+     "fill": "#0a0c10",
      "at": 1.0,
      "enter": "fade"
     },
@@ -468,11 +468,14 @@
      "y": 860,
      "anchor": "left",
      "align": "left",
-     "font": "Cascadia Code",
+     "font": "IBM Plex Mono",
      "size": 32,
-     "fill": "#ff5a36",
+     "fill": "#ff633f",
      "at": 1.6,
-     "enter": "rise"
+     "enter": {
+      "name": "snap",
+      "dur": 0.3
+     }
     }
    ]
   },
@@ -483,7 +486,7 @@
    "dur": 7.0,
    "exit": {
     "name": "fade",
-    "dur": 0.35
+    "dur": 0.22
    },
    "children": [
     {
@@ -495,10 +498,12 @@
      "anchor": "left",
      "align": "left",
      "size": 66,
-     "weight": 800,
+     "weight": 700,
      "enter": {
-      "name": "rise",
-      "dur": 0.5
+      "name": "left",
+      "dur": 0.32,
+      "dist": 28,
+      "ease": "outQuart"
      }
     },
     {
@@ -511,40 +516,35 @@
      "align": "left",
      "size": 34,
      "weight": 400,
-     "fill": "#8b8f99",
-     "at": 0.25,
-     "enter": "rise"
+     "fill": "#9299a8",
+     "at": 0.2,
+     "enter": {
+      "name": "fade",
+      "dur": 0.25
+     }
     },
     {
      "id": "tile0",
-     "type": "rect",
+     "type": "image",
+     "src": "../brand/art/hero.jpg",
      "x": 260,
      "y": 340,
      "w": 330,
      "h": 186,
      "anchor": "topleft",
-     "radius": 10,
-     "fill": {
-      "linear": [
-       [
-        0,
-        0
-       ],
-       [
-        1,
-        1
-       ]
-      ],
-      "stops": [
-       "#ff5a36",
-       "#5a1f14"
-      ]
-     },
+     "fit": "cover",
+     "zoom": 1.6,
+     "focus": [
+      0.72,
+      0.3
+     ],
+     "radius": 8,
+     "stroke": "#242832",
+     "strokeWidth": 2,
      "at": 0.5,
      "enter": {
-      "name": "pop",
-      "dur": 0.35,
-      "from": 0.85
+      "name": "snap",
+      "dur": 0.3
      }
     },
     {
@@ -555,50 +555,42 @@
      "y": 362,
      "anchor": "left",
      "align": "left",
-     "font": "Cascadia Code",
+     "font": "IBM Plex Mono",
      "size": 24,
-     "fill": "#f3efe6",
+     "fill": "#f2f0e8",
      "at": 0.6,
      "box": {
-      "fill": "#0e0f13c0",
+      "fill": "#0a0c10d0",
       "pad": [
        4,
        8
       ],
-      "radius": 5
+      "radius": 4
      },
      "enter": "fade"
     },
     {
      "id": "tile1",
-     "type": "rect",
+     "type": "image",
+     "src": "../brand/art/transition.jpg",
      "x": 620,
      "y": 340,
      "w": 330,
      "h": 186,
      "anchor": "topleft",
-     "radius": 10,
-     "fill": {
-      "linear": [
-       [
-        0,
-        0
-       ],
-       [
-        1,
-        1
-       ]
-      ],
-      "stops": [
-       "#3ddbd9",
-       "#103a3a"
-      ]
-     },
-     "at": 0.5700000000000001,
+     "fit": "cover",
+     "zoom": 1.75,
+     "focus": [
+      0.62,
+      0.45
+     ],
+     "radius": 8,
+     "stroke": "#242832",
+     "strokeWidth": 2,
+     "at": 0.56,
      "enter": {
-      "name": "pop",
-      "dur": 0.35,
-      "from": 0.85
+      "name": "snap",
+      "dur": 0.3
      }
     },
     {
@@ -609,50 +601,42 @@
      "y": 362,
      "anchor": "left",
      "align": "left",
-     "font": "Cascadia Code",
+     "font": "IBM Plex Mono",
      "size": 24,
-     "fill": "#f3efe6",
-     "at": 0.6699999999999999,
+     "fill": "#f2f0e8",
+     "at": 0.6599999999999999,
      "box": {
-      "fill": "#0e0f13c0",
+      "fill": "#0a0c10d0",
       "pad": [
        4,
        8
       ],
-      "radius": 5
+      "radius": 4
      },
      "enter": "fade"
     },
     {
      "id": "tile2",
-     "type": "rect",
+     "type": "image",
+     "src": "../brand/art/og.jpg",
      "x": 980,
      "y": 340,
      "w": 330,
      "h": 186,
      "anchor": "topleft",
-     "radius": 10,
-     "fill": {
-      "linear": [
-       [
-        0,
-        0
-       ],
-       [
-        1,
-        1
-       ]
-      ],
-      "stops": [
-       "#2a2d38",
-       "#16181f"
-      ]
-     },
-     "at": 0.64,
+     "fit": "cover",
+     "zoom": 1.9000000000000001,
+     "focus": [
+      0.8,
+      0.45
+     ],
+     "radius": 8,
+     "stroke": "#242832",
+     "strokeWidth": 2,
+     "at": 0.62,
      "enter": {
-      "name": "pop",
-      "dur": 0.35,
-      "from": 0.85
+      "name": "snap",
+      "dur": 0.3
      }
     },
     {
@@ -663,50 +647,42 @@
      "y": 362,
      "anchor": "left",
      "align": "left",
-     "font": "Cascadia Code",
+     "font": "IBM Plex Mono",
      "size": 24,
-     "fill": "#f3efe6",
-     "at": 0.74,
+     "fill": "#f2f0e8",
+     "at": 0.72,
      "box": {
-      "fill": "#0e0f13c0",
+      "fill": "#0a0c10d0",
       "pad": [
        4,
        8
       ],
-      "radius": 5
+      "radius": 4
      },
      "enter": "fade"
     },
     {
      "id": "tile3",
-     "type": "rect",
+     "type": "image",
+     "src": "../brand/art/hero.jpg",
      "x": 1340,
      "y": 340,
      "w": 330,
      "h": 186,
      "anchor": "topleft",
-     "radius": 10,
-     "fill": {
-      "linear": [
-       [
-        0,
-        0
-       ],
-       [
-        1,
-        1
-       ]
-      ],
-      "stops": [
-       "#ffd60a",
-       "#4a3b05"
-      ]
-     },
-     "at": 0.71,
+     "fit": "cover",
+     "zoom": 1.6,
+     "focus": [
+      0.6,
+      0.75
+     ],
+     "radius": 8,
+     "stroke": "#242832",
+     "strokeWidth": 2,
+     "at": 0.6799999999999999,
      "enter": {
-      "name": "pop",
-      "dur": 0.35,
-      "from": 0.85
+      "name": "snap",
+      "dur": 0.3
      }
     },
     {
@@ -717,50 +693,42 @@
      "y": 362,
      "anchor": "left",
      "align": "left",
-     "font": "Cascadia Code",
+     "font": "IBM Plex Mono",
      "size": 24,
-     "fill": "#f3efe6",
-     "at": 0.81,
+     "fill": "#f2f0e8",
+     "at": 0.78,
      "box": {
-      "fill": "#0e0f13c0",
+      "fill": "#0a0c10d0",
       "pad": [
        4,
        8
       ],
-      "radius": 5
+      "radius": 4
      },
      "enter": "fade"
     },
     {
      "id": "tile4",
-     "type": "rect",
+     "type": "image",
+     "src": "../brand/art/transition.jpg",
      "x": 260,
      "y": 570,
      "w": 330,
      "h": 186,
      "anchor": "topleft",
-     "radius": 10,
-     "fill": {
-      "linear": [
-       [
-        0,
-        0
-       ],
-       [
-        1,
-        1
-       ]
-      ],
-      "stops": [
-       "#3ddbd9",
-       "#103a3a"
-      ]
-     },
-     "at": 0.78,
+     "fit": "cover",
+     "zoom": 1.75,
+     "focus": [
+      0.3,
+      0.2
+     ],
+     "radius": 8,
+     "stroke": "#242832",
+     "strokeWidth": 2,
+     "at": 0.74,
      "enter": {
-      "name": "pop",
-      "dur": 0.35,
-      "from": 0.85
+      "name": "snap",
+      "dur": 0.3
      }
     },
     {
@@ -771,50 +739,42 @@
      "y": 592,
      "anchor": "left",
      "align": "left",
-     "font": "Cascadia Code",
+     "font": "IBM Plex Mono",
      "size": 24,
-     "fill": "#f3efe6",
-     "at": 0.88,
+     "fill": "#f2f0e8",
+     "at": 0.84,
      "box": {
-      "fill": "#0e0f13c0",
+      "fill": "#0a0c10d0",
       "pad": [
        4,
        8
       ],
-      "radius": 5
+      "radius": 4
      },
      "enter": "fade"
     },
     {
      "id": "tile5",
-     "type": "rect",
+     "type": "image",
+     "src": "../brand/art/og.jpg",
      "x": 620,
      "y": 570,
      "w": 330,
      "h": 186,
      "anchor": "topleft",
-     "radius": 10,
-     "fill": {
-      "linear": [
-       [
-        0,
-        0
-       ],
-       [
-        1,
-        1
-       ]
-      ],
-      "stops": [
-       "#2a2d38",
-       "#16181f"
-      ]
-     },
-     "at": 0.8500000000000001,
+     "fit": "cover",
+     "zoom": 1.9000000000000001,
+     "focus": [
+      0.7,
+      0.6
+     ],
+     "radius": 8,
+     "stroke": "#242832",
+     "strokeWidth": 2,
+     "at": 0.8,
      "enter": {
-      "name": "pop",
-      "dur": 0.35,
-      "from": 0.85
+      "name": "snap",
+      "dur": 0.3
      }
     },
     {
@@ -825,50 +785,42 @@
      "y": 592,
      "anchor": "left",
      "align": "left",
-     "font": "Cascadia Code",
+     "font": "IBM Plex Mono",
      "size": 24,
-     "fill": "#f3efe6",
-     "at": 0.95,
+     "fill": "#f2f0e8",
+     "at": 0.8999999999999999,
      "box": {
-      "fill": "#0e0f13c0",
+      "fill": "#0a0c10d0",
       "pad": [
        4,
        8
       ],
-      "radius": 5
+      "radius": 4
      },
      "enter": "fade"
     },
     {
      "id": "tile6",
-     "type": "rect",
+     "type": "image",
+     "src": "../brand/art/hero.jpg",
      "x": 980,
      "y": 570,
      "w": 330,
      "h": 186,
      "anchor": "topleft",
-     "radius": 10,
-     "fill": {
-      "linear": [
-       [
-        0,
-        0
-       ],
-       [
-        1,
-        1
-       ]
-      ],
-      "stops": [
-       "#ffd60a",
-       "#4a3b05"
-      ]
-     },
-     "at": 0.92,
+     "fit": "cover",
+     "zoom": 1.6,
+     "focus": [
+      0.85,
+      0.55
+     ],
+     "radius": 8,
+     "stroke": "#242832",
+     "strokeWidth": 2,
+     "at": 0.86,
      "enter": {
-      "name": "pop",
-      "dur": 0.35,
-      "from": 0.85
+      "name": "snap",
+      "dur": 0.3
      }
     },
     {
@@ -879,50 +831,42 @@
      "y": 592,
      "anchor": "left",
      "align": "left",
-     "font": "Cascadia Code",
+     "font": "IBM Plex Mono",
      "size": 24,
-     "fill": "#f3efe6",
-     "at": 1.02,
+     "fill": "#f2f0e8",
+     "at": 0.96,
      "box": {
-      "fill": "#0e0f13c0",
+      "fill": "#0a0c10d0",
       "pad": [
        4,
        8
       ],
-      "radius": 5
+      "radius": 4
      },
      "enter": "fade"
     },
     {
      "id": "tile7",
-     "type": "rect",
+     "type": "image",
+     "src": "../brand/art/transition.jpg",
      "x": 1340,
      "y": 570,
      "w": 330,
      "h": 186,
      "anchor": "topleft",
-     "radius": 10,
-     "fill": {
-      "linear": [
-       [
-        0,
-        0
-       ],
-       [
-        1,
-        1
-       ]
-      ],
-      "stops": [
-       "#ff5a36",
-       "#5a1f14"
-      ]
-     },
-     "at": 0.99,
+     "fit": "cover",
+     "zoom": 1.75,
+     "focus": [
+      0.45,
+      0.8
+     ],
+     "radius": 8,
+     "stroke": "#242832",
+     "strokeWidth": 2,
+     "at": 0.9199999999999999,
      "enter": {
-      "name": "pop",
-      "dur": 0.35,
-      "from": 0.85
+      "name": "snap",
+      "dur": 0.3
      }
     },
     {
@@ -933,17 +877,17 @@
      "y": 592,
      "anchor": "left",
      "align": "left",
-     "font": "Cascadia Code",
+     "font": "IBM Plex Mono",
      "size": 24,
-     "fill": "#f3efe6",
-     "at": 1.09,
+     "fill": "#f2f0e8",
+     "at": 1.02,
      "box": {
-      "fill": "#0e0f13c0",
+      "fill": "#0a0c10d0",
       "pad": [
        4,
        8
       ],
-      "radius": 5
+      "radius": 4
      },
      "enter": "fade"
     },
@@ -955,13 +899,13 @@
      "w": 330,
      "h": 186,
      "anchor": "topleft",
-     "radius": 10,
-     "stroke": "#ff5a36",
+     "radius": 8,
+     "stroke": "#ff633f",
      "strokeWidth": 6,
      "at": 1.8,
      "enter": {
       "name": "draw",
-      "dur": 0.5
+      "dur": 0.4
      }
     },
     {
@@ -972,24 +916,27 @@
      "y": 830,
      "anchor": "right",
      "align": "right",
-     "font": "Cascadia Code",
+     "font": "IBM Plex Mono",
      "size": 28,
      "weight": 600,
-     "fill": "#0e0f13",
+     "fill": "#0a0c10",
      "box": {
-      "fill": "#ff5a36",
+      "fill": "#ff633f",
       "pad": [
        10,
        18
       ],
-      "radius": 8
+      "radius": 6
      },
      "at": 1.9,
      "dur": 2.6,
-     "enter": "pop",
+     "enter": {
+      "name": "snap",
+      "dur": 0.3
+     },
      "exit": {
       "name": "fade",
-      "dur": 0.2
+      "dur": 0.15
      }
     },
     {
@@ -1000,20 +947,23 @@
      "y": 830,
      "anchor": "right",
      "align": "right",
-     "font": "Cascadia Code",
+     "font": "IBM Plex Mono",
      "size": 28,
      "weight": 600,
-     "fill": "#0e0f13",
+     "fill": "#0a0c10",
      "box": {
-      "fill": "#3ddbd9",
+      "fill": "#b9f45d",
       "pad": [
        10,
        18
       ],
-      "radius": 8
+      "radius": 6
      },
      "at": "flag-chip.out",
-     "enter": "pop"
+     "enter": {
+      "name": "snap",
+      "dur": 0.3
+     }
     }
    ]
   },
@@ -1024,7 +974,7 @@
    "dur": 5.6,
    "exit": {
     "name": "fade",
-    "dur": 0.35
+    "dur": 0.22
    },
    "children": [
     {
@@ -1036,10 +986,12 @@
      "anchor": "left",
      "align": "left",
      "size": 66,
-     "weight": 800,
+     "weight": 700,
      "enter": {
-      "name": "rise",
-      "dur": 0.5
+      "name": "left",
+      "dur": 0.32,
+      "dist": 28,
+      "ease": "outQuart"
      }
     },
     {
@@ -1052,9 +1004,12 @@
      "align": "left",
      "size": 34,
      "weight": 400,
-     "fill": "#8b8f99",
-     "at": 0.25,
-     "enter": "rise"
+     "fill": "#9299a8",
+     "at": 0.2,
+     "enter": {
+      "name": "fade",
+      "dur": 0.25
+     }
     },
     {
      "id": "fps",
@@ -1065,9 +1020,9 @@
        0
       ],
       [
-       1.6,
-       137,
-       "outCubic"
+       1.4,
+       160,
+       "outQuart"
       ]
      ],
      "format": "{:.0f}",
@@ -1076,10 +1031,13 @@
      "anchor": "left",
      "align": "left",
      "size": 260,
-     "weight": 900,
-     "fill": "#ff5a36",
+     "weight": 700,
+     "fill": "#ff633f",
      "at": 0.3,
-     "enter": "fade"
+     "enter": {
+      "name": "snap",
+      "dur": 0.3
+     }
     },
     {
      "id": "fps-label",
@@ -1091,9 +1049,14 @@
      "align": "left",
      "size": 40,
      "weight": 500,
-     "fill": "#f3efe6",
+     "fill": "#f2f0e8",
      "at": 0.6,
-     "enter": "rise"
+     "enter": {
+      "name": "left",
+      "dur": 0.32,
+      "dist": 28,
+      "ease": "outQuart"
+     }
     },
     {
      "id": "ms",
@@ -1104,9 +1067,9 @@
        0
       ],
       [
-       1.4,
+       1.2,
        5,
-       "outCubic"
+       "outQuart"
       ]
      ],
      "format": "{:.0f} ms",
@@ -1115,10 +1078,13 @@
      "anchor": "left",
      "align": "left",
      "size": 120,
-     "weight": 800,
-     "fill": "#3ddbd9",
+     "weight": 700,
+     "fill": "#b9f45d",
      "at": 1.0,
-     "enter": "fade"
+     "enter": {
+      "name": "snap",
+      "dur": 0.3
+     }
     },
     {
      "id": "ms-label",
@@ -1130,9 +1096,14 @@
      "align": "left",
      "size": 40,
      "weight": 500,
-     "fill": "#f3efe6",
+     "fill": "#f2f0e8",
      "at": 1.2,
-     "enter": "rise"
+     "enter": {
+      "name": "left",
+      "dur": 0.32,
+      "dist": 28,
+      "ease": "outQuart"
+     }
     }
    ]
   },
@@ -1143,125 +1114,85 @@
    "dur": 5.0,
    "children": [
     {
-     "id": "end-dot",
-     "type": "circle",
-     "x": 660.0,
-     "y": 460,
-     "r": 30.0,
-     "fill": "#ff5a36",
+     "id": "end-bar",
+     "type": "path",
+     "d": "M636.1 380.0 L636.1 500.0",
+     "stroke": "#f2f0e8",
+     "strokeWidth": 16.875,
      "at": 0.1,
      "enter": {
-      "name": "pop",
+      "name": "draw",
+      "dur": 0.3,
+      "ease": "outQuart"
+     }
+    },
+    {
+     "id": "end-arms",
+     "type": "path",
+     "d": "M728.0 380.0 C 697.0 380.0 697.0 440.0 666.1 440.0 C 697.0 440.0 697.0 500.0 728.0 500.0",
+     "stroke": "#f2f0e8",
+     "strokeWidth": 16.875,
+     "at": 0.32,
+     "enter": {
+      "name": "draw",
       "dur": 0.5
      }
     },
     {
-     "id": "end-trail0",
-     "type": "line",
-     "points": [
-      [
-       0,
-       0
-      ],
-      [
-       -64.0,
-       0
-      ]
-     ],
-     "x": 614.0,
+     "id": "end-cue",
+     "type": "circle",
+     "x": 666.09375,
      "y": 440.0,
-     "stroke": "#f3efe6",
-     "strokeWidth": 9.0,
-     "at": 0.4,
+     "r": 15.9375,
+     "fill": "#ff633f",
+     "at": 0.6,
      "enter": {
-      "name": "draw",
-      "dur": 0.45
-     }
-    },
-    {
-     "id": "end-trail1",
-     "type": "line",
-     "points": [
-      [
-       0,
-       0
-      ],
-      [
-       -104.0,
-       0
-      ]
-     ],
-     "x": 614.0,
-     "y": 460.0,
-     "stroke": "#f3efe6",
-     "strokeWidth": 9.0,
-     "at": 0.46,
-     "enter": {
-      "name": "draw",
-      "dur": 0.45
-     }
-    },
-    {
-     "id": "end-trail2",
-     "type": "line",
-     "points": [
-      [
-       0,
-       0
-      ],
-      [
-       -52.0,
-       0
-      ]
-     ],
-     "x": 614.0,
-     "y": 480.0,
-     "stroke": "#f3efe6",
-     "strokeWidth": 9.0,
-     "at": 0.52,
-     "enter": {
-      "name": "draw",
-      "dur": 0.45
+      "name": "pop",
+      "dur": 0.28,
+      "from": 0.2
      }
     },
     {
      "id": "end-word",
      "type": "text",
      "text": "kinescript",
-     "x": 722.0,
-     "y": 464.0,
+     "x": 771.09375,
+     "y": 453.125,
      "anchor": "left",
      "align": "left",
      "size": 120,
-     "weight": 800,
+     "weight": 700,
+     "letterSpacing": -2.8125,
      "split": "chars",
-     "at": 0.5,
+     "at": 0.72,
      "enter": {
-      "name": "rise+blur",
-      "dur": 0.5,
-      "stagger": 0.03,
-      "dist": 40
+      "name": "snap",
+      "dur": 0.22,
+      "stagger": 0.028
      }
     },
     {
      "id": "cmd",
      "type": "text",
-     "text": "kine render scene.json",
+     "text": "pip install kinescript",
      "x": 960,
      "y": 640,
-     "font": "Cascadia Code",
+     "font": "IBM Plex Mono",
      "size": 40,
-     "fill": "#f3efe6",
+     "fill": "#f2f0e8",
      "box": {
-      "fill": "#16181f",
+      "fill": "#12151b",
       "pad": [
        16,
        28
       ],
-      "radius": 12
+      "radius": 10
      },
      "at": 1.0,
-     "enter": "rise"
+     "enter": {
+      "name": "snap",
+      "dur": 0.3
+     }
     },
     {
      "id": "verbs",
@@ -1271,7 +1202,7 @@
      "y": 760,
      "size": 34,
      "weight": 500,
-     "fill": "#8b8f99",
+     "fill": "#9299a8",
      "at": 1.4,
      "enter": "fade"
     }

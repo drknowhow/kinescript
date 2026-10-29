@@ -105,6 +105,13 @@ def _reply(id_, result=None, error=None):
 
 
 def serve():
+    try:
+        _serve()
+    except OSError:  # the client closed its end of the pipe (BrokenPipeError, or EINVAL on Windows)
+        sys.stdout = open(os.devnull, "w")  # so the interpreter's final flush stays quiet
+
+
+def _serve():
     for line in sys.stdin:
         line = line.strip()
         if not line:

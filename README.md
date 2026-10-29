@@ -9,8 +9,8 @@ generated, reviewed in a pull request, and changed by a script or an agent. The 
 the frame number: any frame renders on its own, which makes previews instant and lets a render split across
 processes.
 
-The launch video in `docs/promo.mp4` is a Kinescript scene (`marketing/promo.json`). It is 34 seconds of 1080p
-and renders, with audio, in about 7 seconds on the development machine.
+The launch video in `docs/promo.mp4` is a Kinescript scene (`marketing/promo.json`). It is 35 seconds of 1080p
+and renders, with audio, in about 6.4 seconds on the development machine.
 
 ## What it does
 
@@ -25,7 +25,7 @@ and renders, with audio, in about 7 seconds on the development machine.
   rounded picture-in-picture. A `sequence` turns a cut list into clips with fade, wipe, slide, zoom or blur
   transitions. Clip audio and music beds are mixed automatically.
 - **Captions** from `.srt`/`.vtt` or inline cues, with karaoke and pop modes.
-- **Shaders.** SkSL layers with `mesh`, `aurora` and `grid` presets, or your own source.
+- **Shaders.** SkSL layers with `mesh`, `aurora`, `grid` and `score` presets, or your own source.
 - **Finishing.** Per-layer blur, shadow, blend modes and colour adjustments; a scene grade with vignette and film
   grain; optional motion blur.
 - **Components.** `lowerThird`, `titleCard`, `callout`, `focus` (dim everything but a region), `progress`,
@@ -59,14 +59,14 @@ The same tools are available over MCP (`kine mcp`), and `kine_look` / `kine_stil
 Requires Python 3.10+ and ffmpeg on `PATH`.
 
 ```bash
-git clone <this repo> kinescript && cd kinescript
-python -m venv .venv && .venv/Scripts/activate      # or: source .venv/bin/activate
-pip install -e .
-kine doctor                                          # ffmpeg path, GPU availability, default font
+pip install kinescript
+kine doctor        # ffmpeg path, GPU availability, default font
 ```
 
-Dependencies are `skia-python`, `numpy` and `glfw`. Inter (SIL Open Font License) ships with the package so default
-text looks the same on every machine.
+From a checkout: `pip install -e .`
+
+Dependencies are `skia-python`, `numpy` and `glfw`. Space Grotesk and IBM Plex Mono (both SIL Open Font License)
+ship with the package, so default text looks the same on every machine.
 
 ## Quick start
 
@@ -79,14 +79,14 @@ kine render scene.json -o scene.mp4
 
 ```json
 {
-  "canvas": {"w": 1920, "h": 1080, "fps": 30, "bg": "#0e0f13"},
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "bg": "#0a0c10"},
   "grade": {"vignette": 0.35, "grain": 0.04},
   "layers": [
     {"id": "dot", "type": "circle", "x": "50%", "y": "50%", "r": 26, "fill": "$accent", "dur": 1.1,
      "enter": {"name": "pop", "dur": 0.4}, "exit": "fade"},
     {"id": "title", "type": "text", "text": "Motion, **written.**", "x": "50%", "y": "46%", "size": 140,
-     "weight": 800, "split": "chars", "at": "dot.out-0.1", "dur": 3.2,
-     "enter": {"name": "rise+blur", "stagger": 0.03}, "exit": "fade"},
+     "weight": 700, "split": "chars", "at": "dot.out-0.1", "dur": 3.2,
+     "enter": {"name": "snap", "stagger": 0.03}, "exit": "fade"},
     {"id": "sub", "type": "text", "text": "scenes as data", "x": "50%", "y": "62%", "size": 40,
      "fill": "$muted", "at": "title.in+0.6", "until": "title.out", "enter": "rise"}
   ]
@@ -103,9 +103,9 @@ Measured on the development machine (Intel Core Ultra 7 265, 20 threads, NVIDIA 
 
 | Workload | Result |
 |---|---|
-| Drawing one 1080p frame of the launch video (GPU) | median 5.1 ms, p95 6.7 ms |
-| Launch video, 34.4 s at 1080p30, `-q high`, with audio | 7.2 s wall, 144 frames/s |
-| `examples/edit.json`, 10.4 s with two decoded video clips | 4.8 s wall, 66 frames/s |
+| Drawing one 1080p frame of the launch video (GPU, including readback) | median 5.2 ms, p95 6.5 ms |
+| Launch video, 34.6 s at 1080p30, `-q high`, with audio | 6.4 s wall, about 160 frames/s (median of 5 runs) |
+| `examples/edit.json`, 10.4 s with two decoded video clips | 6.1 s wall, 51 frames/s |
 
 Rendering uses Skia on the GPU through a hidden OpenGL context, one per worker process. Frames are split into
 chunks, encoded in parallel and joined without re-encoding.
@@ -113,7 +113,7 @@ chunks, encoded in parallel and joined without re-encoding.
 ## Limits
 
 - Without a usable GPU, Kinescript falls back to Skia's CPU rasteriser. With the Windows `skia-python` wheel this is
-  very slow (about 0.9 s per 1080p frame for the launch video); use `--scale 0.5` for previews on such machines.
+  very slow (about 0.65 s per 1080p frame for the launch video); use `--scale 0.5` for previews on such machines.
   `KINE_BACKEND=cpu` forces this path.
 - 2D only. Audio is mixing (trim, gain, fades, speed), not editing or effects.
 - Video is decoded and resampled by ffmpeg to the scene frame rate. Jumping backwards or far ahead reopens the
@@ -127,8 +127,13 @@ chunks, encoded in parallel and joined without re-encoding.
 kinescript/   engine: timing, props, presets, render, output, verify (check/look/probe), mcp, cli
 examples/     scenes and the generator for sample media
 marketing/    the launch video, as a scene and its builder script
-brand/        logo files and the brand guide
+brand/        logo files, generated art and the brand guide
 content/      launch post and social copy
 site/         landing page
 tests/        pytest suite
 ```
+
+## License
+
+MIT, see `LICENSE`. The bundled fonts are under the SIL Open Font License 1.1; their notices are in
+`kinescript/fonts/`.

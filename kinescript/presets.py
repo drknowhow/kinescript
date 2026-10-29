@@ -66,6 +66,11 @@ def _reveal(p, o):
     return Mods(reveal=p)
 
 
+def _snap(p, o):
+    """Hard cut in: visible within the first fifth, settling from a slight overscale. No blur."""
+    return Mods(alpha=1.0 if p >= 0.2 else p / 0.2, scale=1 + (1 - p) * o.get("amount", 0.06))
+
+
 def _track(p, o):
     return Mods(alpha=p, track=(1 - p) * o.get("amount", 40))
 
@@ -77,9 +82,9 @@ PRESETS = {
     "pop": _pop, "zoom": _zoom, "blur": _blur, "spin": _spin, "track": _track,
     "wipe": _wipe("right"), "wipe-right": _wipe("right"), "wipe-left": _wipe("left"),
     "wipe-up": _wipe("up"), "wipe-down": _wipe("down"),
-    "type": _reveal, "draw": _reveal,
+    "type": _reveal, "draw": _reveal, "snap": _snap,
 }
-DEFAULT_EASE = {"pop": "outBack", "spin": "outBack", "type": "linear", "draw": "inOutCubic"}
+DEFAULT_EASE = {"pop": "outBack", "spin": "outBack", "type": "linear", "draw": "inOutCubic", "snap": "outQuart"}
 
 
 @dataclass

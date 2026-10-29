@@ -9,8 +9,11 @@ import re
 from pathlib import Path
 
 THEME = {
-    "ink": "#0e0f13", "paper": "#f3efe6", "accent": "#ff5a36", "accent2": "#3ddbd9",
-    "muted": "#8b8f99", "font": "Inter", "mono": "Cascadia Code",
+    # Brand palette ("Kinetic Score"), plus the short names components use.
+    "void": "#0a0c10", "sheet": "#f2f0e8", "track": "#242832", "cue": "#ff633f", "key": "#b9f45d",
+    "annotation": "#9299a8",
+    "ink": "#0a0c10", "paper": "#f2f0e8", "accent": "#ff633f", "accent2": "#b9f45d", "muted": "#9299a8",
+    "font": "Space Grotesk", "mono": "IBM Plex Mono",
 }
 
 
@@ -18,7 +21,7 @@ def _lower_third(p, th):
     title, sub = p.get("title", "Title"), p.get("subtitle", "")
     x, y = p.get("x", "6%"), p.get("y", "78%")
     accent = p.get("accent", th["accent"])
-    plate = p.get("plate", "#0e0f13d0")
+    plate = p.get("plate", "#0a0c10d0")
     box = {"fill": plate, "pad": [8, 16], "radius": 6} if plate else None
     kids = [
         {"id": f"{p['id']}-bar", "type": "rect", "x": 0, "y": 0, "w": 8, "h": 124 if sub else 72,

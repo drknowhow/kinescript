@@ -69,7 +69,7 @@ class Scene:
         self.ctx = Ctx(self.w, self.h, self.fps)
         theme = dict(components.THEME, **spec.get("theme", {}))
         self.theme = theme
-        self.bg = cv.get("bg", "#0b0d12")
+        self.bg = cv.get("bg", "#0a0c10")
         self.markers = spec.get("markers", {})
         self.grade = spec.get("grade") or {}
         self.motion_blur = spec.get("motionBlur") or {}

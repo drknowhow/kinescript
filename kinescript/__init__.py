@@ -2,5 +2,5 @@
 from .output import render, still
 from .scene import Scene, SceneError, load
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 __all__ = ["Scene", "SceneError", "load", "render", "still", "__version__"]

@@ -197,3 +197,20 @@ def test_arrow_draws_head_at_tip():
                    "head": 20}], bg="#000000", duration=1)
     f = _frame(spec, 10)
     assert f[90, 150, 0] > 200 and f[84, 290, 0] > 100  # shaft, and a head stroke just above the tip
+
+
+def test_snap_motion_cuts_in_without_blur():
+    from kinescript.presets import parse
+    m = parse({"name": "snap", "dur": 0.3})
+    start, early, end = m.mods(0.0), m.mods(0.25), m.mods(1.0)
+    assert start.alpha == 0 and start.scale > 1.0
+    assert early.alpha == 1.0  # fully visible after the first fifth of the move
+    assert end.alpha == 1.0 and end.scale == pytest.approx(1.0) and end.blur == 0
+
+
+def test_score_shader_moves_in_whole_beats():
+    # rate 2 beats/s at 30 fps: frames 3 and 6 share a beat, frame 18 is in the next one.
+    spec = scene([{"type": "shader", "preset": "score", "uniforms": {"rate": 2}}], duration=1)
+    a, b, c = _frame(spec, 3), _frame(spec, 6), _frame(spec, 18)
+    assert np.array_equal(a, b)
+    assert not np.array_equal(a, c)

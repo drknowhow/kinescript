@@ -1,0 +1,84 @@
+{
+ "canvas": {
+  "w": 1200,
+  "h": 630,
+  "fps": 30,
+  "bg": "#0a0c10",
+  "duration": 5
+ },
+ "layers": [
+  {
+   "id": "art",
+   "type": "image",
+   "src": "../brand/art/og.jpg",
+   "x": 600,
+   "y": 315,
+   "w": 1200,
+   "h": 630,
+   "fit": "cover"
+  },
+  {
+   "id": "logo-bar",
+   "type": "path",
+   "d": "M95.3 232.0 L95.3 308.0",
+   "stroke": "#f2f0e8",
+   "strokeWidth": 10.6875,
+   "at": 0
+  },
+  {
+   "id": "logo-arms",
+   "type": "path",
+   "d": "M153.5 232.0 C 133.9 232.0 133.9 270.0 114.3 270.0 C 133.9 270.0 133.9 308.0 153.5 308.0",
+   "stroke": "#f2f0e8",
+   "strokeWidth": 10.6875,
+   "at": 0
+  },
+  {
+   "id": "logo-cue",
+   "type": "circle",
+   "x": 114.34375,
+   "y": 270.0,
+   "r": 10.09375,
+   "fill": "#ff633f",
+   "at": 0
+  },
+  {
+   "id": "logo-word",
+   "type": "text",
+   "text": "kinescript",
+   "x": 180.84375,
+   "y": 278.3125,
+   "anchor": "left",
+   "align": "left",
+   "size": 76,
+   "weight": 700,
+   "letterSpacing": -1.78125,
+   "split": "chars",
+   "at": 0
+  },
+  {
+   "id": "tagline",
+   "type": "text",
+   "text": "Video you can **diff.**",
+   "x": 90,
+   "y": 380,
+   "anchor": "left",
+   "align": "left",
+   "size": 44,
+   "weight": 600,
+   "emph": "#ff633f"
+  },
+  {
+   "id": "sub",
+   "type": "text",
+   "text": "Motion graphics and edits as JSON.\nChecked by agents, rendered on the GPU.",
+   "x": 90,
+   "y": 470,
+   "anchor": "left",
+   "align": "left",
+   "size": 24,
+   "fill": "#9299a8",
+   "lineHeight": 1.4
+  }
+ ]
+}
