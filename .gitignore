@@ -6,3 +6,5 @@ __pycache__/
 examples/media/
 out_*
 *.tmp
+.mcp.json
+.claude/
