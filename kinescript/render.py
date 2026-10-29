@@ -148,7 +148,28 @@ def declare_uniforms(src: str, uniforms: dict) -> str:
     for name, typ in wanted.items():
         if re.search(rf"\b{name}\b", src) and not re.search(rf"\buniform\s+\w+\s+{name}\b", src):
             decl.append(f"uniform {typ} {name};")
-    return "\n".join(decl + [src]) if decl else src
+    return "\n".join(decl + [glsl_to_sksl(src)]) if decl else glsl_to_sksl(src)
+
+
+def glsl_to_sksl(src: str) -> str:
+    """Accept the two shapes models usually write instead of SkSL's `half4 main(float2 p)`:
+    Shadertoy's mainImage(out vec4 fragColor, in vec2 fragCoord), and GLSL's void main() with
+    gl_FragCoord / gl_FragColor (or a vec4 main() that returns the colour)."""
+    if re.search(r"\b(half4|float4|vec4)\s+main\s*\(\s*(float2|vec2)", src):
+        return src
+    if re.search(r"\bvoid\s+mainImage\s*\(", src):
+        return src + "\nhalf4 main(float2 p) { vec4 c = vec4(0); mainImage(c, p); return half4(c); }"
+    m = re.search(r"\b(void|vec4|half4|float4)\s+main\s*\(\s*(void)?\s*\)\s*\{", src)
+    if not m:
+        return src
+    depth, end = 1, m.end()
+    while end < len(src) and depth:
+        depth += {"{": 1, "}": -1}.get(src[end], 0)
+        end += 1
+    body = src[m.end():end - 1].replace("gl_FragCoord", "_kpos").replace("gl_FragColor", "_kcol")
+    if m.group(1) == "void":
+        body = "vec4 _kcol = vec4(0);" + body + "return half4(_kcol);"
+    return src[:m.start()] + "half4 main(float2 _kpos) {" + body + "}" + src[end:]
 
 
 class Renderer:
@@ -659,7 +680,8 @@ class Renderer:
         except RuntimeError as e:
             errs = [x.strip() for x in str(e).splitlines() if "error" in x.lower()] or [str(e).strip()]
             more = f" (and {len(errs) - 1} more, often caused by the first)" if len(errs) > 1 else ""
-            raise ValueError(f"layer '{L.id}': SkSL error: {errs[0]}{more}") from e
+            raise ValueError(f"layer '{L.id}': SkSL error: {errs[0]}{more}. A shader is "
+                             "half4 main(float2 p) { ... return half4(r, g, b, 1); } with p in pixels") from e
         if eff is None:
             raise ValueError(f"layer '{L.id}': SkSL did not compile")
         self._shaders[L.id] = (eff, defaults)

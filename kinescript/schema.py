@@ -125,6 +125,8 @@ WEIGHTS = {"thin": 100, "extralight": 200, "light": 300, "normal": 400, "regular
            "medium": 500, "semibold": 600, "demibold": 600, "bold": 700, "extrabold": 800, "heavy": 900,
            "black": 900}
 COLOR_KEYS = {"fill", "stroke", "emph", "active"}
+# Objects some tools nest animated values under; their keys belong on the layer itself.
+WRAPPERS = {"tween", "tweens", "keyframes", "animate", "animation", "animations", "props", "properties", "style"}
 # Props whose value must be one number (after % and expressions are resolved).
 SCALAR = {"x", "y", "w", "h", "r", "opacity", "scale", "scaleX", "scaleY", "rotate", "blur", "size", "weight",
           "strokeWidth", "draw", "drawStart", "zoom", "value", "radius", "dimOutside", "sides", "inner", "x1", "y1",
@@ -267,6 +269,9 @@ def _values(raw: dict, ltype: str, rep: Report, lid):
                     "or an expression starting with '='")
         elif k in SCALAR and isinstance(v, bool):
             rep.add("error", "bad-value", lid, f"{k} is {str(v).lower()}, which is not a number", "use a number")
+        elif k in ("fill", "stroke") and isinstance(v, str) and (g := css_gradient(v)) is not None:
+            raw[k] = g
+            rep.add("info", "renamed-value", lid, f"{k}: CSS gradient read as {g}", "write the gradient object")
         elif k in COLOR_KEYS and isinstance(v, str) and not v.startswith(("=", "$")) and not C.is_color(v):
             rep.add("error", "bad-colour", lid, f"{k} '{v}' is not a colour",
                     "use #rrggbb, #rrggbbaa, rgb(...), or a CSS colour name such as 'red'")
@@ -277,6 +282,42 @@ def _values(raw: dict, ltype: str, rep: Report, lid):
             if "stops" not in v:
                 rep.add("error", "bad-value", lid, f"{k}: a gradient needs 'stops'",
                         '{"linear": [[0, 0], [1, 1]], "stops": ["#ff633f", "#b9f45d"]}')
+
+
+_CSS_DIR = {"to right": ([0, 0.5], [1, 0.5]), "to left": ([1, 0.5], [0, 0.5]), "to bottom": ([0.5, 0], [0.5, 1]),
+            "to top": ([0.5, 1], [0.5, 0]), "to bottom right": ([0, 0], [1, 1]), "to top left": ([1, 1], [0, 0]),
+            "to top right": ([0, 1], [1, 0]), "to bottom left": ([1, 0], [0, 1])}
+
+
+def css_gradient(v: str) -> dict | None:
+    """'linear-gradient(90deg, #00f, #808)' or 'radial-gradient(#fff, #000)' -> a gradient object."""
+    import math
+    m = re.fullmatch(r"\s*(linear|radial)-gradient\((.*)\)\s*", v, re.S)
+    if not m:
+        return None
+    parts = [p.strip() for p in re.split(r",(?![^(]*\))", m.group(2)) if p.strip()]
+    pts = ([0.5, 0], [0.5, 1])  # CSS default: top to bottom
+    if parts and (parts[0] in _CSS_DIR or re.fullmatch(r"-?\d+(\.\d+)?deg", parts[0])):
+        d = parts.pop(0)
+        if d in _CSS_DIR:
+            pts = _CSS_DIR[d]
+        else:
+            a = math.radians(float(d[:-3]))
+            dx, dy = math.sin(a) / 2, -math.cos(a) / 2
+            pts = ([round(0.5 - dx, 3), round(0.5 - dy, 3)], [round(0.5 + dx, 3), round(0.5 + dy, 3)])
+    stops = []
+    for p in parts:
+        mm = re.fullmatch(r"(.+?)\s+(\d+(?:\.\d+)?)%", p)
+        col, pos = (mm.group(1), float(mm.group(2)) / 100) if mm else (p, None)
+        if not C.is_color(col):
+            return None
+        stops.append(col if pos is None else [pos, col])
+    if len(stops) < 2:
+        return None
+    if any(isinstance(x, list) for x in stops):
+        n = len(stops)
+        stops = [x if isinstance(x, list) else [i / (n - 1), x] for i, x in enumerate(stops)]
+    return {"radial": [0.5, 0.5, 0.7], "stops": stops} if m.group(1) == "radial" else {"linear": list(pts), "stops": stops}
 
 
 _NUMLIKE = re.compile(r"^\s*-?\d+(\.\d+)?\s*(%|vw|vh|vmin|px)?\s*([+-]\s*\d+(\.\d+)?\s*(px)?)?\s*$")
@@ -309,6 +350,24 @@ def _layer(raw, rep: Report, path: str, comps: dict):
         rep.add("error", "bad-layer", None, f"{path} must be an object, got {type(raw).__name__}")
         return
     lid = raw.get("id") or path
+    if "use" not in raw and isinstance(raw.get("type"), str):
+        from .components import BUILTIN
+        name = suggest(raw["type"], BUILTIN)
+        if name and name.lower() == raw["type"].strip().lower():
+            raw["use"] = name
+            del raw["type"]
+            rep.add("info", "renamed-key", lid, f"type '{name}' is a component; read as \"use\": \"{name}\"",
+                    f"write \"use\": \"{name}\"")
+    for wrap in [k for k in raw if k in WRAPPERS and isinstance(raw[k], dict)
+                 and not {"name", "type", "preset"} & set(raw[k])]:  # a motion object is not a wrapper
+        inner = raw.pop(wrap)
+        for k, v in inner.items():
+            if k in raw:
+                rep.add("error", "duplicate-key", lid, f"'{k}' is set both directly and inside '{wrap}'")
+            else:
+                raw[k] = v
+        rep.add("info", "renamed-key", lid, f"'{wrap}' unwrapped: its keys ({', '.join(inner)}) are layer keys",
+                "put animated values directly on the layer, e.g. \"opacity\": {\"from\": 0, \"to\": 1}")
     if "use" in raw:
         from .components import BUILTIN
         name = raw["use"]

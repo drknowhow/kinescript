@@ -196,3 +196,16 @@ def test_examples_and_promo_have_no_unknown_keys():
         bad = [i for i in sc.issues if i["level"] == "error" or i["code"] in ("renamed-key", "ignored-key")]
         sc.close()
         assert not bad, (path, bad)
+
+
+def test_shapes_models_write_instead_of_kinescript_are_read():
+    from kinescript.render import glsl_to_sksl
+    _, s = codes(scene([{"id": "p", "type": "progress"},
+                        {"id": "t", "type": "rect", "tween": {"opacity": {"from": 1, "to": 0}},
+                         "fill": "linear-gradient(to right, #00f, #808)"}]))
+    assert s is not None and s.by_id["p"].type == "rect"  # the progress component expanded
+    assert s.by_id["t"].raw["fill"] == {"linear": [[0, 0.5], [1, 0.5]], "stops": ["#00f", "#808"]}
+    assert "opacity" in s.by_id["t"].props
+    assert "half4 main(float2 _kpos)" in glsl_to_sksl("void main(){ gl_FragColor = vec4(gl_FragCoord.xy, 0, 1); }")
+    r = check(scene([{"type": "shader", "sksl": "void mainImage(out vec4 c, in vec2 f){ c = vec4(f / iResolution, 0, 1); }"}]))
+    assert r["ok"], r["issues"]
