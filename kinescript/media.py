@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import queue
 import subprocess
@@ -21,9 +22,23 @@ class MediaError(RuntimeError):
     pass
 
 
-@lru_cache(maxsize=128)
+def _version(src: str) -> tuple:
+    """(path, modification time, size): a cache key that changes when the file does, so the MCP server and
+    warm render workers read an edited file again."""
+    try:
+        st = os.stat(src)
+    except OSError:
+        return src, 0, -1
+    return src, st.st_mtime_ns, st.st_size
+
+
 def probe(src: str) -> dict:
-    """{'duration', 'w', 'h', 'fps', 'audio'} for a media file."""
+    """{'duration', 'w', 'h', 'fps', 'audio'} for a media file, probed once per file version."""
+    return _probe(*_version(src))
+
+
+@lru_cache(maxsize=128)
+def _probe(src: str, mtime: int, size: int) -> dict:
     if not Path(src).exists():
         raise MediaError(f"media not found: {src}")
     out = subprocess.run([FFPROBE, "-v", "error", "-show_streams", "-show_format", "-of", "json", src],
@@ -56,8 +71,13 @@ def yuv_matrix(info: dict):
     return skia.kRec709_YUVColorSpace if info.get("w", 0) >= 1280 or info.get("h", 0) > 576 else skia.kRec601_YUVColorSpace
 
 
-@lru_cache(maxsize=64)
 def image(src: str) -> skia.Image:
+    """The decoded image, once per file version."""
+    return _image(*_version(src))
+
+
+@lru_cache(maxsize=64)
+def _image(src: str, mtime: int, size: int) -> skia.Image:
     data = Path(src).read_bytes() if Path(src).exists() else None
     if data is None:
         raise MediaError(f"image not found: {src}")

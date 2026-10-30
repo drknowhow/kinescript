@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -173,7 +174,7 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
     """Render a scene to a file. Format from the extension: .mp4, .mov (ProRes 4444 alpha), .webm (VP9 alpha),
     .gif, or a directory / pattern ending in .png for a frame sequence."""
     scene = load(src)
-    spec, base = scene.spec, str(scene.base)
+    spec, base = scene.spec, str(scene.base.resolve())  # warm workers keep the directory they started in
     fps = scene.fps
     f0 = 0 if start is None else max(0, int(round(start * fps)))
     f1 = scene.frames if end is None else min(scene.frames, int(round(end * fps)))
@@ -205,10 +206,14 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
             audio = _start_audio(scene, str(tmp / "audio.m4a")) if mix else None
             stats = [_render_range(jobs[0])]
         else:
-            with ProcessPoolExecutor(max_workers=len(jobs)) as ex:
+            ex, failed = _pool(len(jobs)), True
+            try:
                 pending = ex.map(_render_range, jobs)  # submitted now; the audio mix starts behind them
                 audio = _start_audio(scene, str(tmp / "audio.m4a")) if mix else None
                 stats = list(pending)
+                failed = False
+            finally:
+                _rest(failed)
         if len(jobs) == 1:
             video_in = ["-i", jobs[0][4]]
         else:
@@ -240,6 +245,54 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
     return {"out": str(out_p), "w": w, "h": h, "fps": min(fps, GIF_FPS) if fmt == "gif" else fps, "frames": n,
             "seconds": round(n / fps, 3), "wall": round(wall, 2), "fps_rendered": round(n / wall, 1),
             "workers": len(jobs), "size_mb": round(out_p.stat().st_size / 1e6, 2) if out_p.exists() else None}
+
+
+# Render processes stay up for WARM seconds after a render, so the next one in the same process (the MCP
+# server, a script rendering several scenes) skips starting them: each imports Skia and opens a GL context.
+# Repeat renders of examples/model.json took 1.7 s instead of 2.45 s, the launch video 2.2 s instead of
+# 2.6 s (2026-10-30). What they cache is keyed on file versions (media, models) or on parameters (meshes,
+# eases, colours), so nothing they keep goes stale. 0 shuts them down at the end of each render.
+WARM = 120.0
+_POOL: dict = {"busy": 0, "gen": 0}
+_POOL_LOCK = threading.Lock()
+
+
+def _pool(n: int) -> ProcessPoolExecutor:
+    """The warm pool, new when it has fewer than n processes or KINE_BACKEND changed since it started."""
+    key = os.environ.get("KINE_BACKEND", "")
+    with _POOL_LOCK:
+        if "ex" in _POOL and (_POOL["key"] != key or _POOL["size"] < n):
+            _drop()
+        if "ex" not in _POOL:
+            _POOL.update(ex=ProcessPoolExecutor(max_workers=n), key=key, size=n)
+        _POOL["busy"] += 1
+        _POOL["gen"] += 1
+        return _POOL["ex"]
+
+
+def _rest(failed: bool):
+    """After a render: a failed pool shuts down now (its other jobs finish first), an idle one after WARM s."""
+    with _POOL_LOCK:
+        _POOL["busy"] -= 1
+        if failed or WARM <= 0:
+            _drop()
+            return
+        gen = _POOL["gen"]
+    t = threading.Timer(WARM, _idle, (gen,))
+    t.daemon = True
+    t.start()
+
+
+def _idle(gen: int):
+    with _POOL_LOCK:
+        if _POOL["gen"] == gen and not _POOL["busy"]:
+            _drop()
+
+
+def _drop():
+    ex = _POOL.pop("ex", None)
+    if ex is not None:
+        ex.shutdown(wait=True, cancel_futures=True)
 
 
 def _workers(scene: Scene, frames: int, cpu: int, fmt: str = "mp4") -> int:

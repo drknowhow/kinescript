@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 
 import numpy as np
@@ -353,7 +354,7 @@ def test_render_mp4_with_audio(clip, tmp_path):
                   {"type": "text", "text": "Title", "x": "50%", "y": "50%", "size": 30, "enter": "pop"}])
     res = k.render(spec, str(out), quality="draft")
     assert res["frames"] == 30
-    info = media.probe.__wrapped__(str(out))
+    info = media.probe(str(out))
     assert info["audio"] and info["duration"] == pytest.approx(1.0, abs=0.1)
 
 
@@ -388,6 +389,51 @@ def test_audio_mixes_while_frames_render_and_stops_when_they_fail(clip, tmp_path
     with pytest.raises(RuntimeError, match="frames failed"):
         k.render(spec, str(tmp_path / "o.mp4"), quality="draft", workers=1)
     assert started[0][0].poll() is not None  # stopped, not left running
+
+
+def test_repeat_renders_reuse_warm_workers_until_idle(tmp_path, monkeypatch):
+    import time
+    from kinescript import output
+    monkeypatch.setattr(output, "WARM", 0.5)
+    spec = scene([{"type": "rect", "w": 100, "h": 60, "x": "=t*200", "y": 90}], duration=1)
+    k.render(spec, str(tmp_path / "a.mp4"), quality="draft", workers=2)
+    first = set(output._POOL["ex"]._processes)
+    k.render(spec, str(tmp_path / "b.mp4"), quality="draft", workers=2)
+    assert first <= set(output._POOL["ex"]._processes)  # the same processes drew the second render
+    if os.environ.get("KINE_BACKEND") == "cpu":  # change the setting whichever backend this run uses
+        monkeypatch.delenv("KINE_BACKEND")
+    else:
+        monkeypatch.setenv("KINE_BACKEND", "cpu")
+    k.render(spec, str(tmp_path / "c.mp4"), quality="draft", workers=2)
+    assert not first & set(output._POOL["ex"]._processes)  # started again with the new backend setting
+    time.sleep(1.5)
+    assert "ex" not in output._POOL  # shut down once idle
+
+
+def test_failed_render_or_warm_zero_shuts_the_pool_down(tmp_path, monkeypatch):
+    from kinescript import output
+    output._pool(1)
+    output._rest(failed=True)
+    assert "ex" not in output._POOL and output._POOL["busy"] == 0
+    monkeypatch.setattr(output, "WARM", 0)  # what `kine render` sets: a one-shot process times its own shutdown
+    k.render(scene([{"type": "rect"}], duration=1), str(tmp_path / "o.mp4"), quality="draft", workers=2)
+    assert "ex" not in output._POOL
+
+
+def test_media_caches_read_a_replaced_file_again(tmp_path):
+    import skia
+    p = tmp_path / "img.png"
+
+    def write(w, colour):
+        s = skia.Surface(w, 8)
+        s.getCanvas().clear(colour)
+        s.makeImageSnapshot().save(str(p), skia.kPNG)
+
+    write(8, skia.ColorRED)
+    first = media.image(str(p))
+    assert media.image(str(p)) is first  # unchanged: decoded once
+    write(16, skia.ColorBLUE)
+    assert media.image(str(p)).width() == 16 and media.probe(str(p))["w"] == 16
 
 
 def test_captions_from_srt(tmp_path):

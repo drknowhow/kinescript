@@ -119,6 +119,7 @@ ffmpeg for several workloads, and times whole renders.
 
 Rendering uses Skia on the GPU through a hidden OpenGL context, one per worker process. Frames are split into
 chunks, encoded in parallel and joined without re-encoding, while another ffmpeg process mixes the audio.
+Within one process, such as the MCP server, the workers stay warm for two minutes between renders.
 
 ## Limits
 

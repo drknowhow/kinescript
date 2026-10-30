@@ -42,6 +42,12 @@
   the streams by copying them. The output is byte-identical. The launch video at `-q high` takes 3.44 s instead
   of 3.99 s, and `examples/edit.json` 2.09 s instead of 2.34 s (medians of 5 runs). A writer thread overlapping
   the pipe to ffmpeg was tried first and made renders 4-5% slower, because drawing holds the GIL.
+- Render workers stay warm for two minutes between renders in the same process (the MCP server, a script),
+  so the next render skips starting them. Rendering again in one process: `examples/model.json` 1.7 s instead
+  of 2.45 s, `examples/import.json` 1.08 s instead of 1.65 s, the launch video 2.2 s instead of 2.6 s.
+  `kine render` renders once and exits, so it shuts its workers down as before.
+- Fixed: images and probed media were cached by path alone, so the MCP server and `kine watch` kept showing a
+  file's old contents after it was replaced. The caches now key on the file's modification time and size.
 - `kine check` warns past 60,000 model triangles in one frame.
 - `z` used to be ignored with a note; it is now depth in px toward the viewer.
 - `kine check` warns when text faces away from the camera (mirrored) and when a layer crosses the camera plane.

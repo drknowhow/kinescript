@@ -114,7 +114,9 @@ def _run(a) -> int:
         _emit(info)
         return 0
     if a.cmd == "render":
+        from . import output
         from .output import render
+        output.WARM = 0  # one render, then the process exits: shut the workers down inside it, as timed
         out = a.out or _default_out(a.scene, ".mp4")
         _emit(dict(ok=True, **render(a.scene, out, a.quality, a.workers, a.scale, a.start, a.end, a.transparent)))
         return 0
