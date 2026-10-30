@@ -890,24 +890,21 @@ class Renderer:
     def _draw_model(self, c, L, t, T, g, box, reveal, mods):
         return render3d.draw(self, c, L, g, reveal)
 
-    def _model_surface(self, w: int, h: int):
-        """An offscreen for models at least w x h device pixels, and its supersampling factor: 4x MSAA
-        on the GPU (no measurable cost), else 2x supersampling, which `check` and `--boxes` skip."""
-        ss = 1 if self.backend == "gpu" or self.track else 2
-        have = self._msurf
-        if have is None or have.width() < w * ss or have.height() < h * ss:
-            size = (max(w * ss, have.width() if have else 0), max(h * ss, have.height() if have else 0))
-            info = skia.ImageInfo.Make(*size, skia.kRGBA_8888_ColorType, skia.kPremul_AlphaType)
+    def _model_surface(self):
+        """The offscreen models are drawn in at their place in the frame, and its supersampling factor:
+        4x MSAA on the GPU (no measurable cost), else 2x supersampling, which `check` and `--boxes` skip.
+        It is the size of the frame from the start. One that grew to fit the largest model so far made a
+        frame depend on the frames before it: on the GPU, edges moved by up to 49 levels."""
+        if self._msurf is None:
             ctx = self.surface.recordingContext()
-            have = skia.Surface.MakeRenderTarget(ctx, skia.Budgeted.kNo, info, 4) if ctx else None
-            if have is None and ctx:  # no MSAA here: supersample on the GPU instead
-                return self._supersampled(w, h)
-            self._msurf = have = have or skia.Surface.MakeRaster(info)
-        return have, ss
-
-    def _supersampled(self, w: int, h: int):
-        info = skia.ImageInfo.Make(w * 2, h * 2, skia.kRGBA_8888_ColorType, skia.kPremul_AlphaType)
-        return skia.Surface.MakeRenderTarget(self.surface.recordingContext(), skia.Budgeted.kNo, info), 2
+            ss = 1 if self.backend == "gpu" or self.track else 2
+            info = skia.ImageInfo.Make(self.w * ss, self.h * ss, skia.kRGBA_8888_ColorType, skia.kPremul_AlphaType)
+            surf = skia.Surface.MakeRenderTarget(ctx, skia.Budgeted.kNo, info, 4) if ctx else None
+            if surf is None and ctx:  # no MSAA here: supersample on the GPU instead
+                ss, info = 2, info.makeWH(self.w * 2, self.h * 2)
+                surf = skia.Surface.MakeRenderTarget(ctx, skia.Budgeted.kNo, info)
+            self._msurf = surf or skia.Surface.MakeRaster(info), ss
+        return self._msurf
 
     def _effect(self, L: Layer):
         hit = self._shaders.get(L.id)
