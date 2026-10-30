@@ -232,7 +232,13 @@ def _workers(scene: Scene, frames: int, cpu: int, fmt: str = "mp4") -> int:
         return max(1, min(4, frames // 60))
     if gpu_context() is None:
         return max(1, min(cpu - 1, 8, frames // int(scene.fps * 1.5) or 1))
-    video = any(L.type in ("video", "sequence") for L in scene.all_layers())
+    layers = list(scene.all_layers())
+    if any(L.type == "model" for L in layers):
+        # Model frames spend their time in numpy and in building Skia's vertex lists, not on the GPU,
+        # so they spread over processes: examples/model.json (180 frames, ~11k triangles drawn a
+        # frame) took 4.2 s with one worker, 2.3 s with six and 2.2 s with eight (2026-10-30).
+        return max(1, min(6, frames // 30))
+    video = any(L.type in ("video", "sequence") for L in layers)
     return max(1, min(4, frames // (500 if video else 250)))
 
 

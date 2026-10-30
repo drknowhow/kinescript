@@ -49,11 +49,16 @@ def camera(w: float, h: float, fov: float = DEFAULT_FOV, x: float = 0.0, y: floa
     """World to canvas. The default camera looks at the canvas centre from the distance at which
     `fov` (vertical, degrees) spans the canvas height, so z=0 maps to itself. x, y pan the camera
     (and the point it orbits); z moves it back; ry orbits it right, rx up (looking down), rz rolls it."""
+    orbit = rotate_z(-rz) @ rotate_x(-rx) @ rotate_y(-ry)
+    return lens(w, h, fov) @ translate(0, 0, -z) @ orbit @ translate(-w / 2 - x, -h / 2 - y)
+
+
+def lens(w: float, h: float, fov: float = DEFAULT_FOV) -> np.ndarray:
+    """The projection part of `camera`: camera space (origin at the canvas centre) to canvas."""
     focus = (h / 2) / math.tan(math.radians(min(max(fov, 1.0), 179.0)) / 2)
     persp = np.eye(4)
     persp[3, 2] = -1.0 / focus
-    orbit = rotate_z(-rz) @ rotate_x(-rx) @ rotate_y(-ry)
-    return translate(w / 2, h / 2) @ persp @ translate(0, 0, -z) @ orbit @ translate(-w / 2 - x, -h / 2 - y)
+    return translate(w / 2, h / 2) @ persp
 
 
 def to_skia(m: np.ndarray) -> skia.M44:

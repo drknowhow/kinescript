@@ -54,6 +54,7 @@ SCENE (top level)
   grade       whole-frame look: {"contrast": 1.05, "saturate": 1.1, "vignette": 0.35, "grain": 0.05}
   motionBlur  {"samples": 6, "shutter": 0.5}   (slower: renders 6 sub-frames per frame)
   camera      moves and turns the view in depth (see DEPTH AND CAMERA).
+  light       how model layers are lit (see 3D MODELS).
   audio       [{"src": "music.mp3", "at": 0, "gain": -8, "fadeIn": 1, "fadeOut": 2, "trim": [0, 30]}]
               gain is in dB (0 = unchanged, -6 = about half as loud). fadeOut ends where the audio
               ends: the scene end, unless trim makes the audio shorter.
@@ -129,6 +130,7 @@ LAYER TYPES (defaults in brackets)
             premultiplied: for a see-through colour return half4(rgb * a, a). iTime (seconds),
             iResolution, iProgress (0..1) and your uniforms are declared for you.
             Fills the canvas unless you give w and h.
+  model     a lit 3D solid: shape or parts (see 3D MODELS).
   group     children [layers], w, h, clip (true cuts children off at w x h), radius, fill.
             Children are placed from the group's x, y and start at the group's "at".
   sequence  clips [{"src": "a.mp4", "trim": [0, 4]}, ...] and transition {"type": "fade",
@@ -174,6 +176,35 @@ DEPTH AND CAMERA (3D)
       {"id": "note", "type": "text", "text": "fixed to the screen", "x": "50%", "y": "88%", "size": 40,
        "fixed": true}]}
 
+3D MODELS
+  A model layer is a lit solid in the space of DEPTH AND CAMERA, so z, rotateX, rotateY, rotate,
+  scale and the camera apply to it. x and y place its centre.
+  shape     cube (w [200], h and depth [= w]) | sphere (r [100]) | cylinder (r [80], h [200]) |
+            cone (r [90], h [200], tip up) | torus (r [110], tube [r x 0.35], facing you) |
+            plane (w, h; both sides show). Sizes are px and animate.
+  detail    low | medium (default) | high: how many triangles. A medium sphere has about 2,200.
+  fill      one colour [theme accent]   shine 0..1 [0.4]   metal 0..1 [0]   rim 0..1 [0.5] (edge
+            light)   bands [0] (2 or more: flat toon steps). These animate.
+  parts     [{"shape": "sphere", "r": 30, "x": 0, "y": -120, "z": 0, "rotateX": 0, "rotateY": 0,
+            "rotate": 0, "scale": 1, "fill": "#b9f45d", "shine": 0.9}, ...] placed from the
+            model's centre, in plain numbers (parts do not animate; the model does). A part takes
+            the model's material keys it does not set. A model may have shape, parts, or both.
+  explode   0..1: faces fly out along their normals.
+  draw      0..1, or "enter": "build": triangles appear from the bottom up.
+  light     top level, or on one model: studio (default) | soft | dramatic | flat (no shading),
+            or {"preset": "studio", "key": 0.85, "fill": 0.25, "ambient": 0.22, "rim": 0.35,
+            "from": "topleft", "color": "#fff4e6"}. from: topleft | top | topright | left | right |
+            front | bottomleft | bottom | bottomright. Lights move with the camera.
+  Triangles are sorted far to near within one model, so things that touch or pass through each
+  other go in one model as parts. Separate layers draw in list order. check warns past 60,000
+  triangles in a frame.
+  A ring around a ball that builds in, turns, and flies apart:
+    {"id": "emblem", "type": "model", "x": "50%", "y": "45%", "detail": "high",
+     "rotateX": [[0, 64], ["end", 18]], "rotateY": [[0, -30], ["end", 70]],
+     "enter": {"name": "build", "dur": 1.6}, "explode": [[3, 0], ["end", 1]],
+     "parts": [{"shape": "torus", "r": 250, "tube": 70, "fill": "#ff633f", "metal": 0.45, "shine": 0.7},
+               {"shape": "sphere", "r": 100, "fill": "#b9f45d", "shine": 0.9}]}
+
 ANIMATING A VALUE (any number or colour key)
   constant     "x": 960
   tween        "opacity": {"from": 0, "to": 1, "dur": 0.6, "delay": 0, "ease": "outCubic"}
@@ -203,7 +234,7 @@ ENTER AND EXIT
   layer starts, so the whole reveal takes dur + (units - 1) x stagger.
   motions: {motions}
   rise moves up into place, drop moves down, left moves left, right moves right. type is a
-  typewriter. draw draws a stroke or path on. wipe reveals left to right. snap is a hard cut in
+  typewriter. draw draws a stroke or path on, and builds a model (build is the same). wipe reveals left to right. snap is a hard cut in
   with a small settle. flip, flip-up, tumble and push move in depth (see DEPTH AND CAMERA).
   none is no motion.
 

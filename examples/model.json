@@ -1,0 +1,25 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 6, "bg": "#0a0c10"},
+  "camera": {"rotateY": [[0, -12], ["end", 10]], "z": [[0, 260], ["end", 0]], "rotateX": [[0, 4], ["end", -2]]},
+  "light": "studio",
+  "layers": [
+    {"id": "emblem", "type": "model", "detail": "high", "x": "50%", "y": "44%",
+     "rotateX": [[0, 64], ["end", 18]], "rotateY": [[0, -30], ["end", 70]],
+     "enter": {"name": "build", "dur": 1.6}, "explode": [[4.6, 0], ["end", 1]], "opacity": [[5.2, 1], ["end", 0]],
+     "parts": [
+       {"shape": "torus", "r": 250, "tube": 70, "fill": "$accent", "metal": 0.45, "shine": 0.7},
+       {"shape": "sphere", "r": 100, "fill": "$accent2", "shine": 0.9}
+     ]},
+    {"id": "cube", "type": "model", "shape": "cube", "w": 150, "x": "17%", "y": "28%", "z": -240,
+     "rotateX": -24, "rotateY": [[0, 10], ["end", 190]], "fill": "#e8e2d0", "shine": 0.2,
+     "enter": {"name": "pop", "dur": 0.7}},
+    {"id": "cone", "type": "model", "shape": "cone", "r": 80, "h": 170, "x": "83%", "y": "64%", "z": 140,
+     "rotateX": -18, "rotate": [[0, -8], ["end", 8]], "fill": "#4a7dff", "metal": 0.3, "at": 0.3,
+     "enter": {"name": "rise", "dur": 0.8}},
+    {"id": "pill", "type": "model", "shape": "cylinder", "r": 46, "h": 150, "x": "80%", "y": "22%", "z": -380,
+     "rotateX": [[0, 30], ["end", -30]], "rotate": 35, "fill": "$muted", "bands": 3, "at": 0.5,
+     "enter": {"name": "fade", "dur": 0.6}},
+    {"id": "label", "type": "text", "text": "One drawVertices call per model", "x": "50%", "y": "88%", "size": 52,
+     "weight": 600, "fixed": true, "at": 1.2, "enter": {"name": "rise", "dur": 0.6}}
+  ]
+}

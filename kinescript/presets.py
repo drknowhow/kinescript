@@ -116,7 +116,7 @@ DEFAULT_EASE = {"pop": "outBack", "spin": "outBack", "type": "linear", "draw": "
 ALIASES = {"typewriter": "type", "typing": "type", "slide": "left", "scale": "pop", "grow": "pop", "bounce": "pop",
            "appear": "snap", "cut": "snap", "dissolve": "fade", "opacity": "fade", "up": "rise", "riseup": "rise",
            "down": "drop", "fall": "drop", "blurin": "blur", "focus": "blur", "rotate": "spin", "reveal": "wipe",
-           "write": "draw", "stroke": "draw", "letterspacing": "track", "tracking": "track",
+           "write": "draw", "stroke": "draw", "build": "draw", "assemble": "draw", "letterspacing": "track", "tracking": "track",
            "flipy": "flip", "flipx": "flip-up", "rotatey": "flip", "rotatex": "flip-up", "dolly": "push",
            "fly": "push"}
 

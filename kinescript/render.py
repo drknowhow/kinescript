@@ -11,7 +11,7 @@ import numpy as np
 import skia
 
 from . import color as C
-from . import media, space, svgpath
+from . import media, render3d, space, svgpath
 from .presets import IDENT, Mods
 from .scene import Layer, Scene
 
@@ -241,6 +241,10 @@ class Renderer:
         self._stopped = False
         self._m3d: np.ndarray | None = None  # world-to-canvas matrix of the layer being drawn, in 3D scenes
         self.culled: set[str] = set()  # layers skipped this frame because they cross the camera plane
+        self._lens: np.ndarray | None = None  # camera space to canvas, for lighting models
+        self._models: dict = {}  # merged parts of each model layer
+        self._msurf = None  # offscreen that models draw into, antialiased, before compositing
+        self.tris = 0  # model triangles drawn this frame
         cm = color_matrix({k: v for k, v in scene.grade.items() if k not in ("vignette", "grain")})
         self.grade_filter = skia.ColorFilters.Matrix(cm) if cm else None
 
@@ -303,6 +307,7 @@ class Renderer:
         s = self.s
         self.boxes = {}
         self.culled = set()
+        self.tris = 0
         self.stop_at, self._stopped = stop_at, False
         c = self.surface.getCanvas()
         c.resetMatrix()
@@ -343,6 +348,7 @@ class Renderer:
         s, cam = self.s, self.s.camera
         fov = float(cam.get("fov", T, T, default=space.DEFAULT_FOV)) if cam else space.DEFAULT_FOV
         fixed = space.camera(s.w, s.h, fov)
+        self._lens = space.lens(s.w, s.h, fov)
         if cam is None:
             return fixed, fixed
         g = lambda k: float(cam.get(k, T, T))  # noqa: E731
@@ -462,12 +468,13 @@ class Renderer:
                 c.clipRect(skia.Rect(*clip), doAntiAlias=True)
         reveal = mods.reveal if not mods.wipe else 1.0
         draw = getattr(self, "_draw_" + L.type)
-        draw(c, L, t, T, g, box, reveal, mods)
-        if self.track and box is not None:
+        drawn = draw(c, L, t, T, g, box, reveal, mods)  # a model returns its projected bounds
+        if self.track and (box is not None or drawn):
             m = c.getTotalMatrix()
-            r = m.mapRect(skia.Rect.MakeXYWH(*box))
+            r = skia.Rect(*drawn) if drawn else m.mapRect(skia.Rect.MakeXYWH(*box))
+            sc = 1.0 if drawn else math.sqrt(abs(m.getScaleX() * m.getScaleY())) or abs(m.getSkewX())
             info = {"rect": [round(r.left(), 1), round(r.top(), 1), round(r.right(), 1), round(r.bottom(), 1)],
-                    "alpha": round(alpha * parent_alpha, 3), "type": L.type, "scale": round(math.sqrt(abs(m.getScaleX() * m.getScaleY())) or abs(m.getSkewX()), 4)}
+                    "alpha": round(alpha * parent_alpha, 3), "type": L.type, "scale": round(sc, 4)}
             if L.type in ("text", "counter", "captions"):
                 # The colour _draw_text uses, so checks see default-coloured text too.
                 fill = g("fill") if "fill" in L.props else C.parse(self.s.theme.get("paper", "#f2f0e8"))
@@ -502,8 +509,8 @@ class Renderer:
             lay = self._text_layout(L, t, T, g, self._text_of(L, t, T, g))
             pad = self._pad(L)
             w, h = lay.w + pad[1] * 2, lay.h + pad[0] * 2
-        elif ty == "captions":
-            return None
+        elif ty in ("captions", "model"):
+            return None  # a model's bounds come from its projected mesh (render3d.draw)
         elif ty in ("circle",):
             w = h = float(g("r", 50)) * 2
         elif ty in ("path", "line", "arrow", "polygon"):
@@ -788,6 +795,28 @@ class Renderer:
                 b.setUniform(name, [float(x) for x in v] if isinstance(v, (list, tuple)) else float(v))
         mtx = skia.Matrix.Translate(bx, by)
         c.drawRect(skia.Rect.MakeXYWH(*box), skia.Paint(Shader=b.makeShader(mtx)))
+
+    def _draw_model(self, c, L, t, T, g, box, reveal, mods):
+        return render3d.draw(self, c, L, g, reveal)
+
+    def _model_surface(self, w: int, h: int):
+        """An offscreen for models at least w x h device pixels, and its supersampling factor: 4x MSAA
+        on the GPU (no measurable cost), else 2x supersampling, which `check` and `--boxes` skip."""
+        ss = 1 if self.backend == "gpu" or self.track else 2
+        have = self._msurf
+        if have is None or have.width() < w * ss or have.height() < h * ss:
+            size = (max(w * ss, have.width() if have else 0), max(h * ss, have.height() if have else 0))
+            info = skia.ImageInfo.Make(*size, skia.kRGBA_8888_ColorType, skia.kPremul_AlphaType)
+            ctx = self.surface.recordingContext()
+            have = skia.Surface.MakeRenderTarget(ctx, skia.Budgeted.kNo, info, 4) if ctx else None
+            if have is None and ctx:  # no MSAA here: supersample on the GPU instead
+                return self._supersampled(w, h)
+            self._msurf = have = have or skia.Surface.MakeRaster(info)
+        return have, ss
+
+    def _supersampled(self, w: int, h: int):
+        info = skia.ImageInfo.Make(w * 2, h * 2, skia.kRGBA_8888_ColorType, skia.kPremul_AlphaType)
+        return skia.Surface.MakeRenderTarget(self.surface.recordingContext(), skia.Budgeted.kNo, info), 2
 
     def _effect(self, L: Layer):
         hit = self._shaders.get(L.id)

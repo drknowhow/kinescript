@@ -183,6 +183,70 @@ def test_mirrored_text_warns():
     assert any(i["code"] == "mirrored-text" and i["layer"] == "t" for i in check(spec)["issues"])
 
 
+def _model(layer, **canvas):
+    return scene([dict({"id": "m", "type": "model", "x": 160, "y": 90}, **layer)], **dict({"bg": "#000000"}, **canvas))
+
+
+def test_model_frame_is_pure_function_of_index():
+    spec = _model({"shape": "torus", "r": 50, "detail": "low", "rotateX": "=t*90", "rotateY": "=t*40",
+                   "enter": "build", "explode": [[1, 0], ["end", 0.6]],
+                   "parts": [{"shape": "sphere", "r": 20, "fill": "#b9f45d"}]}, duration=2)
+    spec["camera"] = {"rotateY": [[0, -10], ["end", 10]]}
+    r = Renderer(k.Scene(spec), backend="cpu")
+    sequential = [r.frame(n).copy() for n in range(0, 50)]
+    assert np.array_equal(sequential[5], _frame(spec, 5)) and np.array_equal(sequential[45], _frame(spec, 45))
+
+
+def _shades(frame):
+    """The most common colours of the non-background pixels, and the share of pixels they cover."""
+    px = frame[..., :3].reshape(-1, 3)
+    px = px[px.any(1)]
+    cols, counts = np.unique(px, axis=0, return_counts=True)
+    top = np.argsort(-counts)
+    return cols[top], counts[top] / counts.sum()
+
+
+def test_cube_seen_from_a_corner_shows_three_differently_lit_faces():
+    spec = _model({"shape": "cube", "w": 90, "detail": "low", "rotateX": -35, "rotateY": 45})
+    r = Renderer(k.Scene(spec), backend="cpu")
+    r.draw(0)
+    assert r.tris == 3 * 18  # low detail: 3 x 3 cells, 18 triangles a face
+    cols, share = _shades(r.frame(0))
+    assert share[:3].sum() > 0.85 and min(np.abs(cols[i].astype(int) - cols[j]).max()
+                                          for i, j in ((0, 1), (0, 2), (1, 2))) > 10
+    cols, share = _shades(_frame(_model({"shape": "cube", "w": 90, "rotateX": -35, "rotateY": 45, "light": "flat",
+                                         "fill": "#3366cc"}), 0))
+    assert tuple(cols[0]) == (0x33, 0x66, 0xcc) and share[0] > 0.85  # flat light: the fill, unshaded
+
+
+def test_model_parts_hide_each_other_by_depth_not_list_order():
+    spec = _model({"light": "flat", "parts": [{"shape": "sphere", "r": 30, "z": 80, "fill": "#ff0000"},
+                                              {"shape": "cube", "w": 100, "fill": "#0000ff"}]})
+    f = _frame(spec, 0)
+    assert tuple(f[90, 160, :3]) == (255, 0, 0)  # the sphere is in front, though listed first
+    assert tuple(f[90, 160 + 55, :3]) == (0, 0, 255)
+
+
+def test_model_build_reveals_triangles_and_explode_spreads_them():
+    full = _boxes(_model({"shape": "sphere", "r": 40, "detail": "low"}))
+    half = _boxes(_model({"shape": "sphere", "r": 40, "detail": "low", "draw": 0.5}))
+    burst = _boxes(_model({"shape": "sphere", "r": 40, "detail": "low", "explode": 0.5}))
+    assert 0.3 < half.tris / full.tris < 0.7
+    width = lambda r: r.boxes["m"]["rect"][2] - r.boxes["m"]["rect"][0]  # noqa: E731
+    assert 80 < width(full) < 100 and width(burst) > width(full) * 1.2
+
+
+def test_model_crossing_the_camera_drops_triangles_and_check_warns(monkeypatch):
+    spec = _model({"shape": "plane", "w": 200, "h": 900, "y": 140, "rotateX": 80}, duration=0.5)  # a floor
+    r = _boxes(spec)
+    assert "m" in r.culled and "m" in r.boxes  # its near end is dropped, its far end still draws
+    issues = check(spec)["issues"]
+    assert any(i["code"] == "behind-camera" and "triangles" in i["message"] for i in issues)
+    from kinescript import verify
+    monkeypatch.setattr(verify, "TRIANGLE_BUDGET", 50)
+    assert any(i["code"] == "triangle-budget" for i in check(_model({"shape": "sphere"}, duration=0.5))["issues"])
+
+
 def test_gpu_and_cpu_agree_roughly():
     spec = scene([{"type": "rect", "x": 160, "y": 90, "w": 100, "h": 60, "fill": "#3ddbd9", "radius": 8}])
     cpu = _frame(spec, 0, "cpu").astype(int)
