@@ -6,6 +6,9 @@
   as `kokoro-v0.1.0` publishes it from `plugins/kinescript-kokoro` (`.github/workflows/release-kokoro.yml`), after
   it has spoken a line on CI. With no voice backend installed, `kine voice` prints that command.
 - The project site's hero is a narrated tour, `marketing/hero.json`.
+- `kine docs` and the Kokoro plugin's README cover Kokoro's pronunciation fixes: `[word](/phonemes/)` says a word
+  with the IPA phonemes given, `[word](-1)` and `[word](+1)` change its stress, and `"speaker": "af_heart,af_bella"`
+  blends two voices.
 
 ## 1.2.0 (2026-10-30)
 

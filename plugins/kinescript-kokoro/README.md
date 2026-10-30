@@ -47,6 +47,27 @@ rest of the list in Kokoro's VOICES.md). `rate` is Kokoro's speed, 1 by default.
 Word times come with English voices only. Other languages are spoken, but their sounds have no words, so
 word cues and voice captions do not work with them.
 
+Two voices separated by a comma, `"speaker": "af_heart,af_bella"`, are averaged into one. Use voices of the
+same language: the first letter picks it.
+
+## Pronunciation
+
+Kokoro reads English through [misaki](https://github.com/hexgrad/misaki), which takes a Markdown link in the
+text to change how one word is said. It looks up names it doesn't know in espeak, and some come out wrong:
+"Kinescript" alone is said KYNE-script.
+
+```json
+{"id": "vo1", "role": "voice", "text": "Meet [Kinescript](/kˈɪnəskɹˌɪpt/). [[go]]Render it."}
+```
+
+- `[word](/phonemes/)` says the word with the IPA phonemes between the slashes, here KIN-uh-script. `ˈ` marks
+  primary stress and `ˌ` secondary; misaki's phoneme list names the symbols it accepts.
+- `[word](-1)` lowers the word's stress one step, `[word](-2)` removes it, and `[word](+1)` or `[word](+2)`
+  raises it.
+
+The words file, captions and word ids keep the word as written (`Kinescript.`, id `kinescript`), and `[[go]]`
+marks work around it. Keep each link to one word: misaki joins `[New York](...)` into a single timed word.
+
 ## Device
 
 It runs on the GPU when the installed PyTorch was built for it, and on the CPU otherwise (a GPU newer than the

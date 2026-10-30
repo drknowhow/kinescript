@@ -327,8 +327,11 @@ SOUND
   It writes voice/vo1.wav (or the sound's src) and its words file, so cues and captions work as above.
   [[name]] gives the next word that id: "at": "vo1:go" starts as it says Render, whatever the line
   says later. speaker is the backend's voice (Kokoro: af_heart, af_bella, am_adam, bf_emma, bm_george),
-  rate (0.5 to 2, default 1) how fast it speaks. kine check reports a sound with text that is not spoken
-  yet (voice-missing) and one whose text, speaker or rate changed since it was spoken (voice-stale).
+  rate (0.5 to 2, default 1) how fast it speaks. With Kokoro, a speaker of "af_heart,af_bella" blends
+  the two voices, [word](/phonemes/) in text says that word with the IPA phonemes you give (for a name it
+  says wrong), and [word](-1) or [word](+1) lowers or raises its stress; captions and word ids keep the
+  word. kine check reports a sound with text that is not spoken yet (voice-missing) and one whose text,
+  speaker or rate changed since it was spoken (voice-stale).
   You cannot hear the mix, so read it: kine check measures it and names each sound problem with its
   time range, and kine look --audio draws it under the frames, with each sound's loudness in the JSON.
   Sound is mixed into .mp4, .mov and .webm, and into --from/--to renders. -o mix.wav (or .m4a,
