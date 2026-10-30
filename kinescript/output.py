@@ -1,4 +1,4 @@
-"""Encoding: frames piped to ffmpeg, split across worker processes, audio mixed at the end."""
+"""Encoding: frames piped to ffmpeg, split across worker processes, audio mixed alongside them."""
 from __future__ import annotations
 
 import json
@@ -124,14 +124,13 @@ def _copy(video_in: list[str], out: str):
         raise RuntimeError(f"concat failed: {res.stderr.strip()[:400]}")
 
 
-def _mux_audio(scene: Scene, video_in: list[str], out: str):
-    """Mix the scene's audio under the video in one pass; the video stream is copied, joining the
-    segments on the way when video_in is a concat list."""
+def _start_audio(scene: Scene, out: str):
+    """Start mixing the scene's audio to an AAC file `out`, in its own ffmpeg process so it runs while the
+    frames render; it took 0.7 s of the launch video's 3.8 s when it ran after them. None if silent."""
     ins = _audio_inputs(scene)
     if not ins:
-        _copy(video_in, out)
-        return
-    cmd = [media.FFMPEG, "-y", "-v", "error", *video_in]
+        return None
+    cmd = [media.FFMPEG, "-y", "-v", "error"]
     chains = []
     for k, a in enumerate(ins):
         cmd += ["-i", a["src"]]
@@ -145,14 +144,28 @@ def _mux_audio(scene: Scene, video_in: list[str], out: str):
         f.append(f"volume={a['gain']:.4f}")
         ms = int(round(a["at"] * 1000))
         f.append(f"adelay={ms}|{ms}")
-        chains.append(f"[{k + 1}:a]{','.join(f)}[a{k}]")
+        chains.append(f"[{k}:a]{','.join(f)}[a{k}]")
     mix = "".join(f"[a{k}]" for k in range(len(ins)))
     graph = ";".join(chains) + f";{mix}amix=inputs={len(ins)}:normalize=0:dropout_transition=0,alimiter=limit=0.95,atrim=duration={scene.duration:.4f}[aout]"
-    cmd += ["-filter_complex", graph, "-map", "0:v", "-map", "[aout]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-            "-shortest", out]
-    res = subprocess.run(cmd, capture_output=True, text=True, creationflags=media._NOWIN)
+    cmd += ["-filter_complex", graph, "-map", "[aout]", "-c:a", "aac", "-b:a", "192k", out]
+    log = tempfile.TemporaryFile()  # as in _encoder: an unread stderr pipe can stall ffmpeg
+    return subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stderr=log, creationflags=media._NOWIN), log, out
+
+
+def _mux(video_in: list[str], audio, out: str):
+    """Put the mixed audio under the video, both copied; the segments are joined on the way when video_in
+    is a concat list."""
+    proc, log, path = audio
+    proc.wait()
+    log.seek(0)
+    err = log.read().decode(errors="replace")
+    log.close()
+    if proc.returncode:
+        raise RuntimeError(f"audio mix failed: {err.strip()[:400]}")
+    res = subprocess.run([media.FFMPEG, "-y", "-v", "error", *video_in, "-i", path, "-map", "0:v", "-map", "1:a",
+                          "-c", "copy", "-shortest", out], capture_output=True, text=True, creationflags=media._NOWIN)
     if res.returncode:
-        raise RuntimeError(f"audio mix failed: {res.stderr.strip()[:400]}")
+        raise RuntimeError(f"audio mux failed: {res.stderr.strip()[:400]}")
 
 
 def render(src, out: str, quality: str = "standard", workers: int | None = None, scale: float = 1.0,
@@ -180,6 +193,8 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
     workers = workers or _workers(scene, n, cpu, fmt)
     threads = max(1, cpu // workers)
     tmp = Path(tempfile.mkdtemp(prefix="kine-"))
+    audio = None
+    mix = fmt == "mp4" and start is None and end is None
     try:
         seg_ext = ".mov" if fmt == "mov" else ".webm" if fmt == "webm" else ".mp4"
         bounds = [f0 + n * k // workers for k in range(workers + 1)]
@@ -187,10 +202,13 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
                  transparent, threads)
                 for k in range(workers) if bounds[k + 1] > bounds[k]]
         if len(jobs) == 1:
+            audio = _start_audio(scene, str(tmp / "audio.m4a")) if mix else None
             stats = [_render_range(jobs[0])]
         else:
             with ProcessPoolExecutor(max_workers=len(jobs)) as ex:
-                stats = list(ex.map(_render_range, jobs))
+                pending = ex.map(_render_range, jobs)  # submitted now; the audio mix starts behind them
+                audio = _start_audio(scene, str(tmp / "audio.m4a")) if mix else None
+                stats = list(pending)
         if len(jobs) == 1:
             video_in = ["-i", jobs[0][4]]
         else:
@@ -201,13 +219,18 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
         final = str(tmp / f"final{seg_ext}")
         if ext == ".gif":
             _to_gif(video_in, str(out_p), fps)
-        elif fmt == "mp4" and start is None and end is None:
-            _mux_audio(scene, video_in, final)
+        elif audio:
+            _mux(video_in, audio, final)
         else:
             _copy(video_in, final)
         if ext != ".gif":
             shutil.move(final, str(out_p))
     finally:
+        if audio and audio[0].poll() is None:  # the frames failed while the mix was still running
+            audio[0].kill()
+            audio[0].wait()
+        if audio:
+            audio[1].close()
         shutil.rmtree(tmp, ignore_errors=True)
         scene.close()
     wall = time.perf_counter() - t0

@@ -38,6 +38,10 @@
   10.6 ms instead of 191 ms, 2.56 s instead of 13.92 s. Past 16 samples, or on the CPU, the numpy average uses
   16-bit sums.
 - Fixed: stills and PNG sequences with motion blur saved the last sub-frame instead of the blurred frame.
+- The audio mix runs in its own ffmpeg process while the frames render, and the end of a render only joins
+  the streams by copying them. The output is byte-identical. The launch video at `-q high` takes 3.44 s instead
+  of 3.99 s, and `examples/edit.json` 2.09 s instead of 2.34 s (medians of 5 runs). A writer thread overlapping
+  the pipe to ffmpeg was tried first and made renders 4-5% slower, because drawing holds the GIL.
 - `kine check` warns past 60,000 model triangles in one frame.
 - `z` used to be ignored with a note; it is now depth in px toward the viewer.
 - `kine check` warns when text faces away from the camera (mirrored) and when a layer crosses the camera plane.

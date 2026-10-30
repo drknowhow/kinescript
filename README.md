@@ -10,7 +10,7 @@ the frame number: any frame renders on its own, which makes previews instant and
 processes.
 
 The launch video in `docs/promo.mp4` is a Kinescript scene (`marketing/promo.json`). It is 35 seconds of 1080p
-and renders, with audio, in about 4 seconds on the development machine.
+and renders, with audio, in about 3.5 seconds on the development machine.
 
 ## What it does
 
@@ -111,14 +111,14 @@ Measured on the development machine (Intel Core Ultra 7 265, 20 threads, NVIDIA 
 | Workload | Result |
 |---|---|
 | Drawing one 1080p frame of the launch video on the GPU, converted to I420 and read back as a render does | median 2.7 ms, p95 3.3 ms (all 1038 frames) |
-| Launch video, 34.6 s at 1080p30, `-q high`, with audio | 4.0 s wall, about 260 frames/s (median of 5 runs) |
-| `examples/edit.json`, 10.4 s with two decoded video clips | 2.3 s wall, 135 frames/s (median of 5 runs) |
+| Launch video, 34.6 s at 1080p30, `-q high`, with audio | 3.5 s wall, about 300 frames/s (median of 5 runs) |
+| `examples/edit.json`, 10.4 s with two decoded video clips | 2.05 s wall, 152 frames/s (median of 5 runs) |
 
 `python bench/stages.py` splits the time per frame into drawing, conversion and readback, and writing to
 ffmpeg for several workloads, and times whole renders.
 
 Rendering uses Skia on the GPU through a hidden OpenGL context, one per worker process. Frames are split into
-chunks, encoded in parallel and joined without re-encoding.
+chunks, encoded in parallel and joined without re-encoding, while another ffmpeg process mixes the audio.
 
 ## Limits
 
