@@ -25,7 +25,7 @@ from . import color as C
 COMMENT = {"note", "notes", "comment", "comments", "description", "name"}
 
 TOP = {"canvas", "theme", "markers", "grade", "motionBlur", "audio", "components", "layers", "meta", "version",
-       "$schema"}
+       "$schema", "camera"}
 TOP_ALIAS = {"layer": "layers", "elements": "layers", "objects": "layers", "items": "layers", "scene": "layers",
              "children": "layers", "tracks": "layers", "motion_blur": "motionBlur", "colorGrade": "grade",
              "music": "audio", "sound": "audio", "marker": "markers"}
@@ -51,9 +51,14 @@ AUDIO = {"src", "at", "trim", "gain", "volume", "fadeIn", "fadeOut"}
 AUDIO_ALIAS = {"source": "src", "file": "src", "path": "src", "start": "at", "fade_in": "fadeIn",
                "fade_out": "fadeOut", "fadein": "fadeIn", "fadeout": "fadeOut"}
 MOTION_BLUR = {"samples", "shutter"}
+CAMERA = {"x", "y", "z", "rotateX", "rotateY", "rotate", "fov"}
+CAMERA_ALIAS = {"rotationX": "rotateX", "rotationY": "rotateY", "rotateZ": "rotate", "rotationZ": "rotate",
+                "rotation": "rotate", "roll": "rotate", "orbit": "rotateY", "tilt": "rotateX", "dolly": "z",
+                "fieldOfView": "fov"}
 
 COMMON = {"id", "type", "at", "dur", "until", "x", "y", "anchor", "opacity", "scale", "scaleX", "scaleY", "rotate",
-          "blur", "blend", "shadow", "fx", "enter", "exit", "hidden", "allowOffscreen"}
+          "blur", "blend", "shadow", "fx", "enter", "exit", "hidden", "allowOffscreen", "z", "rotateX", "rotateY",
+          "backface", "fixed"}
 SHAPE = {"fill", "stroke", "strokeWidth", "draw", "drawStart", "cap", "join"}
 TEXT = {"text", "size", "weight", "font", "italic", "fill", "emph", "align", "maxWidth", "lineHeight",
         "letterSpacing", "stroke", "strokeWidth", "box", "case", "textCase", "caret", "split",
@@ -73,7 +78,7 @@ TYPES: dict[str, set[str]] = {
     "video": MEDIA | {"trim", "speed", "volume", "loop"},
     "captions": TEXT | {"src", "cues", "mode", "active"},
     "shader": {"preset", "uniforms", "sksl", "w", "h"},
-    "group": {"children", "layers", "w", "h", "clip", "radius", "fill"},
+    "group": {"children", "layers", "w", "h", "clip", "radius", "fill", "sort"},
 }
 SEQUENCE = {"id", "type", "at", "clips", "transition", "fit", "volume", "w", "h", "x", "y", "anchor"}
 TYPE_ALIAS = {"rectangle": "rect", "square": "rect", "box": "rect", "shape": "rect", "txt": "text", "label": "text",
@@ -96,7 +101,9 @@ ALIAS = {"color": "fill", "colour": "fill", "fillColor": "fill", "backgroundColo
          "line_height": "lineHeight", "leading": "lineHeight", "max_width": "maxWidth", "wrap": "maxWidth",
          "animation": "enter", "animate": "enter", "entrance": "enter", "in": "enter", "intro": "enter",
          "out": "exit", "outro": "exit", "exitAnimation": "exit", "transform": None, "kids": "children",
-         "items": "children", "elements": "children", "visible": None, "z": None, "zIndex": None}
+         "items": "children", "elements": "children", "visible": None, "zIndex": None,
+         "rotationX": "rotateX", "rotationY": "rotateY", "rotateZ": "rotate", "rotationZ": "rotate",
+         "translateZ": "z", "backfaceVisibility": "backface"}
 TYPE_ALIASES = {
     "circle": {"radius": "r", "size": "r"}, "polygon": {"radius": "r", "points": "sides"},
     "line": {"color": "stroke", "colour": "stroke", "fill": "stroke", "width": "strokeWidth"},
@@ -116,6 +123,8 @@ ENUMS = {
     "mode": ("karaoke", "pop"),
     "blend": ("normal", "multiply", "screen", "overlay", "add", "lighten", "darken", "softLight", "difference",
               "color"),
+    "backface": ("visible", "hidden"),
+    "sort": ("order", "depth"),
 }
 ENUM_ALIAS = {"middle": "center", "centre": "center", "centered": "center", "mid": "center",
               "characters": "chars", "letters": "chars", "char": "chars", "word": "words", "line": "lines",
@@ -131,7 +140,7 @@ WRAPPERS = {"tween", "tweens", "keyframes", "animate", "animation", "animations"
 SCALAR = {"x", "y", "w", "h", "r", "opacity", "scale", "scaleX", "scaleY", "rotate", "blur", "size", "weight",
           "strokeWidth", "draw", "drawStart", "zoom", "value", "radius", "dimOutside", "sides", "inner", "x1", "y1",
           "x2", "y2", "bend", "head", "maxWidth", "lineHeight", "letterSpacing", "focusX", "focusY", "speed",
-          "volume", "unitX", "unitY", "unitRotate", "unitScale", "unitOpacity"}
+          "volume", "unitX", "unitY", "unitRotate", "unitScale", "unitOpacity", "z", "rotateX", "rotateY", "fov"}
 REQUIRED = {"text": ("text",), "image": ("src",), "video": ("src",), "path": ("d", "points"), "line": ("points",),
             "captions": ("cues", "src"), "shader": ("preset", "sksl")}
 
@@ -230,12 +239,13 @@ def _values(raw: dict, ltype: str, rep: Report, lid):
         if isinstance(v, str) and v.strip().lower() in ("center", "centre", "middle"):
             raw[k] = "50%"
             rep.add("info", "renamed-value", lid, f"{k} '{v}' read as '50%'", f"write \"{k}\": \"50%\"")
-    v = raw.get("rotate")
-    if isinstance(v, str) and (m := _DEG.match(v)):
-        num, unit = float(m.group(1)), m.group(2)
-        raw["rotate"] = num * {"rad": 57.29577951308232, "turn": 360.0}.get(unit, 1.0)
-        rep.add("info", "renamed-value", lid, f"rotate '{v}' read as {raw['rotate']:g} (degrees)",
-                "rotate takes a number of degrees")
+    for k in ("rotate", "rotateX", "rotateY"):
+        v = raw.get(k)
+        if isinstance(v, str) and (m := _DEG.match(v)):
+            num, unit = float(m.group(1)), m.group(2)
+            raw[k] = num * {"rad": 57.29577951308232, "turn": 360.0}.get(unit, 1.0)
+            rep.add("info", "renamed-value", lid, f"{k} '{v}' read as {raw[k]:g} (degrees)",
+                    f"{k} takes a number of degrees")
     v = raw.get("opacity")
     if isinstance(v, (int, float)) and not isinstance(v, bool) and 1 < v <= 100:
         raw["opacity"] = v / 100
@@ -246,7 +256,7 @@ def _values(raw: dict, ltype: str, rep: Report, lid):
         if w:
             raw["weight"] = w
             rep.add("info", "renamed-value", lid, f"weight '{v}' read as {w}", "weight takes 100..900")
-    for k in ("italic", "hidden", "clip", "loop", "smooth", "closed", "allowOffscreen"):
+    for k in ("italic", "hidden", "clip", "loop", "smooth", "closed", "allowOffscreen", "fixed"):
         if isinstance(raw.get(k), str) and raw[k].lower() in ("true", "false", "yes", "no"):
             raw[k] = raw[k].lower() in ("true", "yes")
     if isinstance(raw.get("italic"), str) and raw["italic"].lower() in ("italic", "oblique", "normal"):
@@ -491,6 +501,18 @@ def normalize(spec) -> tuple[dict, Report]:
         _keys(spec["grade"], GRADE, {"saturation": "saturate"}, rep, None, "grade: ")
     if isinstance(spec.get("motionBlur"), dict):
         _keys(spec["motionBlur"], MOTION_BLUR, {}, rep, None, "motionBlur: ")
+    cam = spec.get("camera")
+    if isinstance(cam, dict):
+        _keys(cam, CAMERA, CAMERA_ALIAS, rep, "camera", "camera: ")
+        _values(cam, "camera", rep, "camera")
+        fov = cam.get("fov")
+        if isinstance(fov, (int, float)) and not isinstance(fov, bool) and not 5 <= fov <= 150:
+            rep.add("error", "bad-value", "camera", f"fov is {fov:g}; it must be between 5 and 150 degrees",
+                    "40 is the default; lower flattens perspective, higher exaggerates it")
+    elif cam is not None:
+        rep.add("error", "bad-value", "camera", f"camera must be an object like {{\"z\": -200, \"rotateY\": 10}}, "
+                f"got {type(cam).__name__}")
+        spec.pop("camera")
     audio = spec.get("audio")
     if isinstance(audio, dict):
         audio = spec["audio"] = [audio]

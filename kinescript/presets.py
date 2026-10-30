@@ -22,11 +22,14 @@ class Mods:
     reveal: float = 1.0      # typewriter / draw-on / wipe amount
     wipe: str = ""           # direction when a wipe is active
     track: float = 0.0       # extra letter spacing (px)
+    rx: float = 0.0          # added to rotateX, rotateY (degrees) and z (px)
+    ry: float = 0.0
+    dz: float = 0.0
 
     def combine(self, o: "Mods") -> "Mods":
         return Mods(self.alpha * o.alpha, self.dx + o.dx, self.dy + o.dy, self.scale * o.scale,
                     self.rotate + o.rotate, self.blur + o.blur, min(self.reveal, o.reveal),
-                    o.wipe or self.wipe, self.track + o.track)
+                    o.wipe or self.wipe, self.track + o.track, self.rx + o.rx, self.ry + o.ry, self.dz + o.dz)
 
 
 IDENT = Mods()
@@ -76,6 +79,23 @@ def _track(p, o):
     return Mods(alpha=p, track=(1 - p) * o.get("amount", 40))
 
 
+def _flip(p, o):
+    return Mods(alpha=min(1.0, p * 4), ry=(1 - p) * o.get("deg", 90))
+
+
+def _flip_up(p, o):
+    return Mods(alpha=min(1.0, p * 4), rx=(1 - p) * o.get("deg", 90))
+
+
+def _tumble(p, o):
+    return Mods(alpha=min(1.0, p * 2), rx=(1 - p) * -70, ry=(1 - p) * o.get("deg", 160),
+                dz=(1 - p) * -o.get("dist", 400))
+
+
+def _push(p, o):
+    return Mods(alpha=p, dz=(1 - p) * -o.get("dist", 600))
+
+
 PRESETS = {
     "none": lambda p, o: IDENT, "fade": _fade,
     "rise": _move(0, 1), "drop": _move(0, -1), "left": _move(1, 0), "right": _move(-1, 0),
@@ -84,15 +104,21 @@ PRESETS = {
     "wipe": _wipe("right"), "wipe-right": _wipe("right"), "wipe-left": _wipe("left"),
     "wipe-up": _wipe("up"), "wipe-down": _wipe("down"),
     "type": _reveal, "draw": _reveal, "snap": _snap,
+    "flip": _flip, "flip-up": _flip_up, "tumble": _tumble, "push": _push,
 }
-DEFAULT_EASE = {"pop": "outBack", "spin": "outBack", "type": "linear", "draw": "inOutCubic", "snap": "outQuart"}
+# Motions that turn or move a layer in depth; a scene using one gets a camera.
+DEPTH = {"flip", "flip-up", "tumble", "push"}
+DEFAULT_EASE = {"pop": "outBack", "spin": "outBack", "type": "linear", "draw": "inOutCubic", "snap": "outQuart",
+                "flip": "outBack", "flip-up": "outBack"}
 
 
 # Names other tools use for the same motions. Keys are lower case without dashes.
 ALIASES = {"typewriter": "type", "typing": "type", "slide": "left", "scale": "pop", "grow": "pop", "bounce": "pop",
            "appear": "snap", "cut": "snap", "dissolve": "fade", "opacity": "fade", "up": "rise", "riseup": "rise",
            "down": "drop", "fall": "drop", "blurin": "blur", "focus": "blur", "rotate": "spin", "reveal": "wipe",
-           "write": "draw", "stroke": "draw", "letterspacing": "track", "tracking": "track"}
+           "write": "draw", "stroke": "draw", "letterspacing": "track", "tracking": "track",
+           "flipy": "flip", "flipx": "flip-up", "rotatey": "flip", "rotatex": "flip-up", "dolly": "push",
+           "fly": "push"}
 
 
 def canonical(name: str) -> str | None:

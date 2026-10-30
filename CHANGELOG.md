@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Depth: every layer takes `z`, `rotateX`, `rotateY` and `backface`; a top-level `camera` pans, dollies,
+  orbits and rolls with perspective, and `fixed` layers ignore its moves; a group with `"sort": "depth"` draws
+  its children far to near. New motions `flip`, `flip-up`, `tumble` and `push`, also per letter with `split`.
+  Built on Skia's 4x4 matrices, so no new dependency, and scenes that use no depth draw exactly as before.
+  `examples/3d.json` (180 frames at 1080p) renders in 0.93 s on the GPU.
+- `z` used to be ignored with a note; it is now depth in px toward the viewer.
+- `kine check` warns when text faces away from the camera (mirrored) and when a layer crosses the camera plane.
 - `kine check` validates every key against the schema, names the intended key first, and lists
   every problem at once with its layer and field. Synonyms from other tools, CSS gradients,
   Shadertoy and GLSL shaders, comments and trailing commas in JSON are read and noted.

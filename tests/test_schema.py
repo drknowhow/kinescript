@@ -39,6 +39,17 @@ def test_aliases_are_read_and_noted():
     assert s.by_id["t"].enter.names == ["fade"]
 
 
+def test_depth_keys_are_read_and_the_camera_is_checked():
+    spec, rep = schema.normalize(scene([{"id": "a", "type": "rect", "z": -100, "rotationX": 20, "rotateY": "0.5turn"}]))
+    a = spec["layers"][0]
+    assert (a["z"], a["rotateX"], a["rotateY"]) == (-100, 20, 180)
+    assert not [i for i in rep.issues if i["level"] == "error"]
+    spec, rep = schema.normalize(dict(scene([{"type": "rect"}]), camera={"orbit": 10, "zom": 2, "fov": 200}))
+    assert spec["camera"]["rotateY"] == 10
+    errs = [i["message"] for i in rep.issues if i["level"] == "error"]
+    assert len(errs) == 2 and "zom" in errs[0] and "fov is 200" in errs[1]
+
+
 def test_line_colour_means_stroke():
     _, s = codes(scene([{"id": "l", "type": "line", "points": [[0, 0], [10, 10]], "color": "#f00"}]))
     assert s.by_id["l"].raw["stroke"] == "#f00"
@@ -160,7 +171,8 @@ def test_schema_lists_cover_every_key_the_renderer_reads(monkeypatch):
         READ[self.type].add(name)
         return orig(self, name, *a, **kw)
     monkeypatch.setattr(S.Layer, "get", get)
-    scenes = [ROOT / "examples" / "hello.json", ROOT / "examples" / "edit.json", ROOT / "marketing" / "promo.json"]
+    scenes = [ROOT / "examples" / "hello.json", ROOT / "examples" / "edit.json", ROOT / "examples" / "3d.json",
+              ROOT / "marketing" / "promo.json"]
     for path in scenes:
         sc = S.load(str(path))
         for layer in sc.all_layers():
@@ -175,7 +187,8 @@ def test_schema_lists_cover_every_key_the_renderer_reads(monkeypatch):
             head, _, sub = key.partition(".")
             if head.startswith("u_") or head in schema.COMMENT:
                 continue
-            ok = (head in schema.COMMON | schema.TYPES[typ]) and (not sub or sub in NESTED.get(head, {sub}))
+            allowed = schema.CAMERA if typ == "camera" else schema.COMMON | schema.TYPES[typ]
+            ok = head in allowed and (not sub or sub in NESTED.get(head, {sub}))
             if not ok:
                 missing.append(f"{typ}.{key}")
     assert not missing, (f"the renderer reads {sorted(missing)} but kinescript/schema.py does not list them; "
@@ -191,7 +204,8 @@ def test_component_param_lists_cover_every_param_a_builder_reads():
 
 
 def test_examples_and_promo_have_no_unknown_keys():
-    for path in ("examples/hello.json", "examples/edit.json", "marketing/promo.json", "marketing/og.json"):
+    for path in ("examples/hello.json", "examples/edit.json", "examples/3d.json", "marketing/promo.json",
+                 "marketing/og.json"):
         sc = k.load(str(ROOT / path))  # loading runs every schema check; a full `check` renders and is slow on CPU
         bad = [i for i in sc.issues if i["level"] == "error" or i["code"] in ("renamed-key", "ignored-key")]
         sc.close()

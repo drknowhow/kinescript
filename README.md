@@ -25,6 +25,8 @@ and renders, with audio, in about 6.4 seconds on the development machine.
   rounded picture-in-picture. A `sequence` turns a cut list into clips with fade, wipe, slide, zoom or blur
   transitions. Clip audio and music beds are mixed automatically.
 - **Captions** from `.srt`/`.vtt` or inline cues, with karaoke and pop modes.
+- **Depth.** Any layer takes `z`, `rotateX` and `rotateY`; a scene `camera` pans, dollies and orbits with real
+  perspective; `flip`, `flip-up`, `tumble` and `push` motions; two-sided cards with `"backface": "hidden"`.
 - **Shaders.** SkSL layers with `mesh`, `aurora`, `grid` and `score` presets, or your own source.
 - **Finishing.** Per-layer blur, shadow, blend modes and colour adjustments; a scene grade with vignette and film
   grain; optional motion blur.

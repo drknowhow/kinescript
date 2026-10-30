@@ -110,6 +110,79 @@ def test_frame_is_pure_function_of_index():
     assert np.array_equal(sequential[17], alone)
 
 
+def _boxes(spec, T=0.0):
+    r = Renderer(k.Scene(spec), track=True, backend="cpu")
+    r.draw(T)
+    return r
+
+
+def test_depth_frame_is_pure_function_of_index():
+    spec = scene([
+        {"id": "t", "type": "text", "text": "Flip", "x": "50%", "y": "40%", "size": 40, "split": "chars",
+         "enter": {"name": "flip", "stagger": 0.05}},
+        {"id": "card", "type": "rect", "x": "50%", "y": "70%", "w": 120, "h": 40, "rotateY": "=t*120",
+         "z": "=sin(t*3)*40"},
+    ], duration=2)
+    spec["camera"] = {"z": [[0, 60], ["end", -30]], "rotateY": [[0, -10], ["end", 10]]}
+    r = Renderer(k.Scene(spec), backend="cpu")
+    sequential = [r.frame(n).copy() for n in range(0, 30)]
+    assert np.array_equal(sequential[17], _frame(spec, 17))
+
+
+def test_default_camera_leaves_flat_layers_unchanged():
+    flat = scene([{"type": "rect", "x": 160, "y": 90, "w": 100, "h": 60, "fill": "#3ddbd9", "radius": 8, "rotate": 12},
+                  {"type": "text", "text": "Same", "x": "50%", "y": "30%", "size": 30, "shadow": {"blur": 8}}])
+    assert np.array_equal(_frame(flat, 0), _frame(dict(flat, camera={}), 0))
+
+
+def test_rotate_y_turns_the_right_edge_away_and_backface_hides_it():
+    r = _boxes(scene([{"id": "a", "type": "rect", "x": 160, "y": 90, "w": 100, "h": 60, "rotateY": 60}]))
+    left, top, right, bottom = r.boxes["a"]["rect"]
+    assert 45 < right - left < 58  # cos 60 halves the width; perspective widens the near half
+    assert bottom - top > 65 and (left + right) / 2 < 159  # the near (left) edge is taller
+    r = _boxes(scene([{"id": "a", "type": "rect", "x": 160, "y": 90, "w": 100, "h": 60, "rotateY": 180,
+                       "backface": "hidden"},
+                      {"id": "b", "type": "rect", "x": 160, "y": 90, "w": 100, "h": 60, "rotateY": 180}]))
+    assert "a" not in r.boxes and r.boxes["b"]["mirrored"]
+
+
+def test_group_sort_depth_draws_far_to_near():
+    kids = [{"id": "near", "type": "rect", "x": 0, "y": 0, "w": 80, "h": 80, "z": 50, "fill": "#0000ff"},
+            {"id": "far", "type": "rect", "x": 0, "y": 0, "w": 80, "h": 80, "z": -50, "fill": "#ff0000"}]
+    listed = scene([{"type": "group", "x": 160, "y": 90, "children": kids}], bg="#000000")
+    by_depth = scene([{"type": "group", "x": 160, "y": 90, "sort": "depth", "children": kids}], bg="#000000")
+    assert tuple(_frame(listed, 0)[90, 160, :3]) == (255, 0, 0)
+    assert tuple(_frame(by_depth, 0)[90, 160, :3]) == (0, 0, 255)
+
+
+def test_camera_pan_moves_layers_but_not_fixed_ones():
+    spec = scene([{"id": "a", "type": "rect", "x": 160, "y": 90, "w": 40, "h": 40},
+                  {"id": "b", "type": "rect", "x": 160, "y": 90, "w": 40, "h": 40, "fixed": True}])
+    spec["camera"] = {"x": 50}
+    r = _boxes(spec)
+    assert r.boxes["a"]["rect"][0] == pytest.approx(90, abs=0.5)
+    assert r.boxes["b"]["rect"][0] == pytest.approx(140, abs=0.5)
+
+
+def test_camera_orbit_and_dolly_bring_layers_closer():
+    for cam in ({"rotateY": 30}, {"z": -100}):
+        spec = dict(scene([{"id": "r", "type": "rect", "x": 240, "y": 90, "w": 40, "h": 40}]), camera=cam)
+        left, top, right, bottom = _boxes(spec).boxes["r"]["rect"]
+        assert bottom - top > 44, cam
+
+
+def test_layer_behind_camera_is_skipped_and_check_warns():
+    spec = scene([{"id": "a", "type": "rect", "x": 160, "y": 90, "w": 40, "h": 40, "z": 400}])
+    r = _boxes(spec)
+    assert "a" in r.culled and "a" not in r.boxes
+    assert any(i["code"] == "behind-camera" and i["layer"] == "a" for i in check(spec)["issues"])
+
+
+def test_mirrored_text_warns():
+    spec = scene([{"id": "t", "type": "text", "text": "Hi", "x": "50%", "y": "50%", "size": 40, "rotateY": 180}])
+    assert any(i["code"] == "mirrored-text" and i["layer"] == "t" for i in check(spec)["issues"])
+
+
 def test_gpu_and_cpu_agree_roughly():
     spec = scene([{"type": "rect", "x": 160, "y": 90, "w": 100, "h": 60, "fill": "#3ddbd9", "radius": 8}])
     cpu = _frame(spec, 0, "cpu").astype(int)

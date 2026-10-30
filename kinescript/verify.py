@@ -152,6 +152,9 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
             return _result(scene.issues + [{"level": "error", "code": "render", "layer": None, "from": round(T, 2),
                                             "to": round(T, 2), "message": f"{type(e).__name__}: {e}", "fix": ""}],
                            duration=scene.duration)
+        for lid in r.culled:
+            add("warning", "behind-camera", lid, T, "layer crosses the camera plane, so it is not drawn",
+                "lower its z, or move the camera back (a higher camera z)")
         texts = []
         for lid, b in r.boxes.items():
             if b["alpha"] < 0.3:
@@ -161,6 +164,9 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
             allow = layer is not None and layer.raw.get("allowOffscreen")
             if b["type"] in ("text", "counter", "captions"):
                 texts.append((lid, b))
+                if b.get("mirrored"):
+                    add("warning", "mirrored-text", lid, T, "text faces away from the camera, so it reads mirrored",
+                        "keep rotateX and rotateY within ±90°, or set \"backface\": \"hidden\" and add a back side")
                 if (l < -1 or t < -1 or rr > W + 1 or bb > H + 1) and not allow:
                     add("error", "text-offscreen", lid, T, f"text box {b['rect']} leaves the {W}x{H} canvas",
                         "move it inward, lower size, or set maxWidth")

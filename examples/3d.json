@@ -1,0 +1,26 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 6, "bg": {"linear": [[0,0],[1,1]], "stops": ["#0e0f13", "#1b1d26"]}},
+  "camera": {"z": [[0, 320], ["end", -140, "inOutCubic"]], "rotateY": [[0, -16], ["end", 12, "inOutCubic"]],
+             "rotateX": [[0, 6], ["end", -4, "inOutCubic"]]},
+  "layers": [
+    {"id": "wall", "type": "rect", "x": "50%", "y": "50%", "z": -700, "w": 1800, "h": 980, "radius": 48,
+     "fill": "#151922", "stroke": "#262c3a", "strokeWidth": 3},
+    {"id": "orb-far", "type": "circle", "x": "24%", "y": "30%", "z": -420, "r": 120, "fill": "$accent2", "opacity": 0.85},
+    {"id": "title", "type": "text", "text": "Depth, **written.**", "x": "50%", "y": "38%", "size": 130, "weight": 800,
+     "split": "chars", "at": 0.2, "enter": {"name": "flip", "dur": 0.8, "stagger": 0.04}},
+    {"id": "card", "type": "group", "x": "50%", "y": "64%", "at": 1.2, "enter": "push",
+     "rotateY": [[1.4, 0], [2.4, 180], [3.6, 180], [4.6, 360]],
+     "children": [
+       {"id": "front", "type": "group", "anchor": "center", "w": 560, "h": 150, "radius": 28, "fill": "#f2f0e8",
+        "backface": "hidden",
+        "children": [{"id": "front-text", "type": "text", "text": "front", "size": 64, "fill": "#0a0c10"}]},
+       {"id": "back", "type": "group", "anchor": "center", "w": 560, "h": 150, "radius": 28, "fill": "$accent",
+        "rotateY": 180, "backface": "hidden",
+        "children": [{"id": "back-text", "type": "text", "text": "and back", "size": 64, "fill": "#0a0c10"}]}
+     ]},
+    {"id": "orb-near", "type": "circle", "x": "80%", "y": "74%", "z": 260, "r": 70, "fill": "$accent", "at": 0.6,
+     "enter": {"name": "push", "dur": 0.9}},
+    {"id": "label", "type": "text", "text": "the label is fixed; the camera moves everything else", "x": "50%",
+     "y": "90%", "size": 34, "weight": 400, "fill": "$muted", "fixed": true, "at": 1.0, "enter": "fade"}
+  ]
+}
