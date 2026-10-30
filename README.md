@@ -89,13 +89,17 @@ An agent cannot watch a video, so Kinescript gives it things it can read:
 | `kine docs` | the full scene reference, short enough to keep in context |
 | `kine check scene.json` | every problem at once as JSON, each with its layer, time range and a fix |
 | `kine look scene.json --boxes` | one PNG of many labelled frames, with every layer outlined and the top-level ones named |
+| `kine look scene.json --audio` | the same frames with the sound under them: a lane per role and the mix, the duck and issues, plus each sound's measured loudness |
 | `kine probe scene.json --at 3.2` | resolved in/out of every layer and each visible layer's screen box |
 | `kine still` / `kine render` | a frame, a range (`--from/--to`), a draft (`-q draft --scale 0.5`) or the final file |
 | `kine watch scene.json` | the contact sheet, made again every time the file is saved |
 
 `kine check` reports unknown keys and bad values, missing media and out-of-range trims, text off the canvas or
 in the safe margin, overlapping text, contrast under 3:1 against what is actually behind the text, tiny text and
-too little reading time. An unknown key names the intended key first. Common names from other tools (`color`,
+too little reading time. When the scene has sound it mixes and measures it, without drawing a frame, while the
+frames are checked, and reports a voice cut off by the scene end, two voices at once, music less than 10 LU under a
+voice, an effect whose first sound comes late, a silent sound, and a mix off its loudness target or at its peak
+ceiling. An unknown key names the intended key first. Common names from other tools (`color`,
 `fontSize`, `duration`, `position`) are read and reported as info notes. It exits with status 1 while there are
 errors.
 

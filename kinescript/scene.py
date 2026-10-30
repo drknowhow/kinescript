@@ -74,8 +74,9 @@ class Layer:
 class Sound:
     """An audio entry, or a layer's sound, placed on the timeline like a layer."""
 
-    def __init__(self, sid: str, raw: dict, src: str | None, layer: str | None = None):
+    def __init__(self, sid: str, raw: dict, src: str | None, layer: str | None = None, natural: float | None = None):
         self.id, self.raw, self.src, self.layer = sid, raw, src, layer
+        self.natural = natural  # seconds of trimmed file; None when it loops or can't be read
         self.role = raw.get("role")
         self.t_in = self.t_out = 0.0
 
@@ -212,8 +213,9 @@ class Scene:
         for i, (a, layer) in enumerate(entries):
             sid = str(a.get("id") or (f"{layer}-sound" if layer else f"audio{i + 1}"))
             src = self.path(a["src"]) if a.get("src") else None
+            natural = _natural(a, src)
             try:
-                self.timeline.add(sid, a.get("at", 0), a.get("dur"), a.get("until"), _natural(a, src),
+                self.timeline.add(sid, a.get("at", 0), a.get("dur"), a.get("until"), natural,
                                   prev=None if layer else prev, counts=a.get("role") == "voice")
             except ValueError as e:
                 raise SceneError(f"audio '{sid}': {e}", layer=sid) from e
@@ -222,7 +224,7 @@ class Scene:
             g = a.get("gain")
             if g is not None and (isinstance(g, bool) or not isinstance(g, (int, float))):
                 self._check_gain(layer or sid, g)
-            out.append(Sound(sid, a, src, layer))
+            out.append(Sound(sid, a, src, layer, natural))
         return out
 
     def _check_gain(self, owner: str, g):

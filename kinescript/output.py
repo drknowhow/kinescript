@@ -103,7 +103,7 @@ def _audio_inputs(scene: Scene) -> list[dict]:
         fo = layer.exit.dur if layer.exit else 0
         out.append(dict(src=layer.src, at=layer.t_in, trim0=float(trim[0]), dur=layer.dur * speed, gain=float(vol),
                         fade_in=fi, fade_out=fo, speed=speed, loop=None, pan=0.0, role=None, curve=None,
-                        onset=False))
+                        onset=False, id=layer.id))
     for s in scene.audio:
         a = s.raw
         trim = a.get("trim") or [0, None]
@@ -118,7 +118,7 @@ def _audio_inputs(scene: Scene) -> list[dict]:
         out.append(dict(src=s.src, at=s.t_in, trim0=float(trim[0]), dur=max(0.01, min(s.t_out, scene.duration) - s.t_in),
                         gain=gain, fade_in=float(a.get("fadeIn", 0)), fade_out=float(a.get("fadeOut", 0)), speed=1.0,
                         loop=loop, pan=float(a.get("pan", 0)), role=s.role, curve=curve,
-                        onset=s.role == "sfx" and not a.get("trim") and not loop))
+                        onset=s.role == "sfx" and not a.get("trim") and not loop, id=s.id))
     return out
 
 
@@ -156,10 +156,19 @@ _CURVE_IN = ["-f", "f32le", "-ar", str(A.RATE), "-ac", "1", "-i"]
 _CURVE = "aresample=48000,aformat=channel_layouts=stereo"
 
 
-def _graph(ins: list[dict], managed: bool, curves: dict[int, str], duck: str | None, tail: str) -> tuple[list[str], str]:
+def _pad(duration: float) -> str:
+    """Silence after the mix up to `duration`. Counted in samples: with an endless apad, the atrim after it judged
+    the end by timestamps, and when ffmpeg 8 started the inputs in an unlucky order those were wrong and the mix
+    never ended, filling the disk."""
+    return f"asetpts=N/SR/TB,apad=whole_dur={duration:.4f}"
+
+
+def _graph(ins: list[dict], managed: bool, curves: dict[int, str], duck: str | None, tail: str,
+           pad: str) -> tuple[list[str], str]:
     """ffmpeg inputs and the filter graph that mixes `ins` into [aout]. curves: sound index -> its gain curve file;
     duck: the curve file the sounds marked "duck" are multiplied by after they are mixed; tail: filters after the
-    mix. managed: every sound is converted to 48 kHz stereo first, so curves and buses line up."""
+    mix; pad: what makes the ducked bus last the whole scene. managed: every sound is converted to 48 kHz stereo
+    first, so curves and buses line up."""
     args = [x for a in ins for x in ("-i", a["src"])]
     n = len(ins)
     chains = []
@@ -193,14 +202,12 @@ def _graph(ins: list[dict], managed: bool, curves: dict[int, str], duck: str | N
         if a["pan"]:
             f.append(_pan(a["pan"]))
         ms = int(round(a["at"] * 1000))
-        f.append(f"adelay={ms}|{ms}")
-        if managed:  # adelay leaves its leading silence without timestamps, and the atrims after the mix need them
-            f.append("asetpts=N/SR/TB")
+        f.extend([f"adelay={ms}|{ms}", "asetpts=N/SR/TB"])  # adelay's leading silence has no timestamps
         chains.append(head + ("," if head.endswith("amultiply") else "") + ",".join(f) + f"[a{k}]")
     ducked = [f"[a{k}]" for k, a in enumerate(ins) if duck and a.get("duck")]
     mix = [f"[a{k}]" for k, a in enumerate(ins) if f"[a{k}]" not in ducked]
     if ducked:
-        chains.append(f"{''.join(ducked)}amix=inputs={len(ducked)}:normalize=0:dropout_transition=0,apad[bus]")
+        chains.append(f"{''.join(ducked)}amix=inputs={len(ducked)}:normalize=0:dropout_transition=0,{pad}[bus]")
         curve(duck, "dk")
         chains.append("[bus][dk]amultiply[ducked]")
         mix.append("[ducked]")
@@ -230,7 +237,8 @@ def _start_audio(scene: Scene, out: str, start: float = 0.0, end: float | None =
             A.gain_curve(a["curve"], a["dur"], a["at"], scene.fps).astype("<f4").tofile(curves[k])
     # Padded to the full length: the mux keeps the shorter stream, so a mix that ends early would cut the video.
     cut = _cut(start, end, scene.duration) or f"atrim=duration={scene.duration:.4f}"
-    args, graph = _graph(ins, False, curves, None, f"alimiter=limit=0.95,apad,{cut}")
+    pad = _pad(scene.duration)
+    args, graph = _graph(ins, False, curves, None, f"alimiter=limit=0.95,{pad},{cut}", pad)
     script = out + ".graph"
     Path(script).write_text(graph, encoding="utf-8")
     cmd = [media.FFMPEG, "-y", "-v", "error", *args, *media.filter_script(script), "-map", "[aout]",
@@ -238,35 +246,52 @@ def _start_audio(scene: Scene, out: str, start: float = 0.0, end: float | None =
     return subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stderr=log, creationflags=media._NOWIN), log, out
 
 
-def _managed(scene: Scene, ins: list[dict], out: str, start: float, end: float | None, job: "_Mix"):
-    """Level each sound for its role, duck, mix to a float master, measure it, then correct its loudness, limit
-    its peaks and encode."""
-    cfg = A.settings(scene.spec)
-    duck_cfg, tmp = cfg["duck"], Path(out).parent
-    voices, curves = [], {}
-    spans = [(a["src"], a["trim0"], a["trim0"] + (a["loop"] or a["dur"] * a["speed"])) if a["role"] else None
-             for a in ins]
-    todo = list(dict.fromkeys(s for s in spans if s))  # each file and span measured once, a few at a time
-    with ThreadPoolExecutor(min(4, len(todo))) as ex:
+def measure(ins: list[dict]) -> list[dict]:
+    """audio.analyze for the part of each source a sound plays, each file and span once, a few at a time."""
+    spans = [(a["src"], a["trim0"], a["trim0"] + (a["loop"] or a["dur"] * a["speed"])) for a in ins]
+    todo = list(dict.fromkeys(spans))
+    with ThreadPoolExecutor(max(1, min(4, len(todo)))) as ex:
         infos = dict(zip(todo, ex.map(lambda s: A.analyze(*s), todo)))
-    for k, a in enumerate(ins):
+    return [infos[s] for s in spans]
+
+
+def plan(scene: Scene, ins: list[dict]) -> dict:
+    """The managed mix worked out before ffmpeg runs, changing `ins` in place: each sound with a role set to its
+    level (gain), an effect moved past its leading silence (trim0, and shift in seconds) and the sounds under the
+    duck marked. Returns the settings, each source's measurements and the duck curve (None without ducking)."""
+    cfg = A.settings(scene.spec)
+    duck_cfg, voices = cfg["duck"], []
+    infos = measure(ins)
+    for a, info in zip(ins, infos):
+        a["shift"] = 0.0
         if a["role"]:
-            info = infos[spans[k]]
             if a["onset"] and info["lead"] > 0.005:  # the effect's first sound lands on its cue
                 a["trim0"] += info["lead"]
+                a["shift"] = info["lead"]
             a["gain"] *= 10 ** (A.level(a["role"], info, cfg["levels"]) / 20)
             if duck_cfg and a["role"] in duck_cfg["by"]:
                 voices.append((a["at"], a["at"] + a["dur"] / a["speed"], info["rms"], 20 * math.log10(max(a["gain"], 1e-6))))
         a["duck"] = bool(duck_cfg) and a["role"] in duck_cfg["under"]
+    duck = A.duck_curve(voices, scene.duration, duck_cfg) if voices and any(a["duck"] for a in ins) else None
+    return {"cfg": cfg, "info": infos, "duck": duck, "ins": ins}
+
+
+def _managed(scene: Scene, ins: list[dict], out: str, start: float, end: float | None, job: "_Mix") -> dict:
+    """Level each sound for its role, duck, mix to a float master, measure it, then correct its loudness, limit
+    its peaks and encode. Returns the plan, with the master's measurements and its correction in dB."""
+    p = plan(scene, ins)
+    cfg, tmp, curves = p["cfg"], Path(out).parent, {}
+    for k, a in enumerate(ins):
         if a["curve"] is not None:
             curves[k] = str(tmp / f"gain{k}.f32")
             A.gain_curve(a["curve"], a["dur"], a["at"], scene.fps).astype("<f4").tofile(curves[k])
     duck = None
-    if voices and any(a["duck"] for a in ins):
+    if p["duck"] is not None:
         duck = str(tmp / "duck.f32")
-        A.duck_curve(voices, scene.duration, duck_cfg).astype("<f4").tofile(duck)
+        p["duck"].astype("<f4").tofile(duck)
     master, script = str(tmp / "master.wav"), tmp / "master.graph"
-    args, graph = _graph(ins, True, curves, duck, f"apad,atrim=duration={scene.duration:.4f}")
+    pad = _pad(scene.duration)
+    args, graph = _graph(ins, True, curves, duck, f"{pad},atrim=duration={scene.duration:.4f}", pad)
     script.write_text(graph, encoding="utf-8")
     job.run([media.FFMPEG, "-y", "-v", "error", *args, *media.filter_script(str(script)), "-map", "[aout]",
              "-c:a", "pcm_f32le", master])
@@ -274,10 +299,12 @@ def _managed(scene: Scene, ins: list[dict], out: str, start: float, end: float |
                                    "-f", "null", "-"]))
     # alimiter limits sample peaks; half a dB under the ceiling leaves room for peaks between samples.
     limit = max(0.0625, 10 ** ((cfg["peak"] - 0.5) / 20))
-    af = f"volume={A.correction(measured, cfg['loudness']):.2f}dB,alimiter=limit={limit:.4f}:level=0:latency=1"
+    p["master"], p["correction"] = measured, A.correction(measured, cfg["loudness"])
+    af = f"volume={p['correction']:.2f}dB,alimiter=limit={limit:.4f}:level=0:latency=1"
     cut = _cut(start, end, scene.duration)
     job.run([media.FFMPEG, "-y", "-v", "error", "-i", master, "-af", af + ("," + cut if cut else ""),
              *_codec(Path(out).suffix.lower()), out])
+    return p
 
 
 class _Mix:
@@ -285,7 +312,7 @@ class _Mix:
     kill like the Popen of the one-process mix, so render() waits for it and stops it the same way."""
 
     def __init__(self, steps, log):
-        self.returncode = None
+        self.returncode = self.result = None
         self._log, self._proc, self._stop = log, None, threading.Event()
         self._lock = threading.Lock()
         self._thread = threading.Thread(target=self._run, args=(steps,), daemon=True)
@@ -293,7 +320,7 @@ class _Mix:
 
     def _run(self, steps):
         try:
-            steps(self)
+            self.result = steps(self)
             code = 0
         except Exception as e:  # noqa: BLE001 - any failure is reported like a failed ffmpeg, never as success
             self._log.write((str(e) if isinstance(e, RuntimeError) else f"{type(e).__name__}: {e}").encode())

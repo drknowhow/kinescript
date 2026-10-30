@@ -54,9 +54,11 @@ def main(argv=None) -> int:
     lk.add_argument("--width", type=int, default=480, help="width of each thumbnail")
     lk.add_argument("--at", type=float, nargs="*", help="explicit times instead of even spacing")
     lk.add_argument("--boxes", action="store_true", help="outline every layer with its id")
+    lk.add_argument("--audio", action="store_true", help="draw the sound under the frames (a lane per role and the "
+                    "mix, with levels, the duck and issues) and print its measurements")
     lk.add_argument("-o", "--out")
 
-    ck = sub.add_parser("check", help="lint layout, timing, contrast and reading time; prints JSON")
+    ck = sub.add_parser("check", help="lint layout, timing, contrast, reading time and sound; prints JSON")
     ck.add_argument("scene")
     ck.add_argument("--step", type=float, default=0.25)
 
@@ -130,7 +132,7 @@ def _run(a) -> int:
     if a.cmd == "look":
         from .verify import contact_sheet
         out = a.out or _default_out(a.scene, "_sheet.png")
-        _emit(dict(ok=True, **contact_sheet(a.scene, out, a.count, a.cols, a.width, a.at, a.boxes)))
+        _emit(dict(ok=True, **contact_sheet(a.scene, out, a.count, a.cols, a.width, a.at, a.boxes, a.audio)))
         return 0
     if a.cmd == "check":
         from .verify import check

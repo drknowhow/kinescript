@@ -455,6 +455,25 @@ def _rms(pcm, t0, t1):
     return float(np.sqrt(np.mean(pcm[int(t0 * 8000):int(t1 * 8000)] ** 2)))
 
 
+def test_every_mix_pads_by_samples_so_it_always_ends(tone, tmp_path, monkeypatch):
+    # An endless apad was cut by timestamps; ffmpeg 8 sometimes got those wrong and the mix never ended.
+    import re
+    from kinescript import output
+    graphs, real = [], output._graph
+
+    def record(*a):
+        graphs.append(real(*a))
+        return graphs[-1]
+
+    monkeypatch.setattr(output, "_graph", record)
+    for role in (None, "music"):
+        spec = scene([{"type": "rect"}], duration=1)
+        spec["audio"] = [dict({"src": tone, "at": 0.5}, **({"role": role} if role else {}))]
+        k.render(spec, str(tmp_path / "o.wav"))
+    pads = [m for _, g in graphs for m in re.findall(r"apad[^,;\[]*", g)]
+    assert len(graphs) == 2 and pads and all(m == "apad=whole_dur=1.0000" for m in pads)
+
+
 def test_layers_cue_from_audio_and_only_voice_extends_auto_duration(tone):
     for role, duration in (("voice", 1.5), ("music", 1.0)):
         spec = scene([{"id": "a", "type": "rect", "dur": 1}, {"id": "b", "type": "rect", "at": "vo.out"}])
@@ -628,6 +647,61 @@ def test_a_changing_gain_must_give_decibels(tone):
     spec = dict(scene([{"type": "rect"}]), audio=[{"src": tone, "gain": [[0, "loud"], [1, 0]]}])
     with pytest.raises(k.SceneError, match="is not a number of dB"):
         k.Scene(spec)
+
+
+def _heard(spec):
+    """check's sound issues by code."""
+    return {i["code"]: i for i in check(spec)["issues"] if i["code"].startswith(("audio", "voice", "sfx"))}
+
+
+def test_check_hears_cut_overlapping_buried_late_and_silent_sounds(mix_media, tmp_path):
+    silent = tmp_path / "silent.wav"
+    subprocess.run([media.FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono", "-t", "1",
+                    str(silent)], check=True)
+    spec = scene([{"type": "rect"}], duration=2.2)
+    spec["audio"] = [{"id": "bed", "role": "music", "src": mix_media["bed"], "loop": True, "until": "end"},
+                     {"id": "vo1", "role": "voice", "src": mix_media["voice"], "at": 0.2},
+                     {"id": "vo2", "role": "voice", "src": mix_media["voice"], "at": 1.0},
+                     {"id": "hit", "role": "sfx", "src": mix_media["hit"], "at": 1.6, "trim": [0, 0.5]},
+                     {"id": "hush", "role": "ambience", "src": str(silent)}]
+    spec["mix"] = {"duck": False}
+    got = _heard(spec)
+    assert (got["audio-cut"]["layer"], got["audio-cut"]["from"], got["audio-cut"]["to"]) == ("vo2", 2.2, 2.5)
+    assert (got["voice-overlap"]["layer"], got["voice-overlap"]["from"], got["voice-overlap"]["to"]) == ("vo1+vo2", 1.0, 1.7)
+    assert got["voice-masked"]["fix"] == "remove \"duck\": false from mix"
+    assert (got["sfx-late"]["layer"], got["sfx-late"]["from"]) == ("hit", 1.6)
+    assert got["sfx-late"]["to"] == pytest.approx(1.9, abs=0.02)
+    assert got["audio-silent"]["layer"] == "hush"
+    spec["audio"], spec["canvas"]["duration"] = spec["audio"][:2], 3
+    del spec["mix"]
+    assert _heard(spec) == {}  # levelled and ducked: nothing to report
+
+
+def test_check_reports_a_mix_without_roles_that_is_quiet_or_at_its_limiter(tone):
+    spec = scene([{"type": "rect"}], duration=1)
+    spec["audio"] = [{"src": tone, "gain": -30}]
+    assert _heard(spec)["audio-loudness"]["level"] == "info"
+    spec["audio"] = [{"src": tone, "gain": 24}]
+    assert _heard(spec)["audio-peak"]["level"] == "warning"
+
+
+def test_look_draws_the_sound_and_returns_its_measurements(mix_media, tmp_path):
+    import skia
+    from kinescript.verify import contact_sheet
+    spec = scene([{"type": "rect"}], duration=4)
+    spec["audio"] = [{"role": "music", "src": mix_media["bed"], "loop": True, "until": "end"},
+                     {"role": "voice", "src": mix_media["voice"], "at": 1}]
+    plain = contact_sheet(spec, str(tmp_path / "a.png"), count=4, width=160)
+    heard = contact_sheet(spec, str(tmp_path / "b.png"), count=4, width=160, audio=True)
+    assert "audio" not in plain
+    a = heard["audio"]
+    assert a["mix"]["lufs"] == pytest.approx(-16, abs=1) and a["mix"]["true_peak"] <= -1.5
+    assert [s["lufs_out"] for s in a["sounds"]] == [pytest.approx(-16, abs=0.5), pytest.approx(-18, abs=0.5)]
+    assert a["duck"]["depth"] == 14 and a["duck"]["spans"][0][0] == pytest.approx(0.94, abs=0.03)
+    # three lanes (voice, music, the mix) of 44 px under a 22 px time axis, and an 8 px margin
+    assert skia.Image.open(str(tmp_path / "b.png")).height() - skia.Image.open(str(tmp_path / "a.png")).height() == 162
+    silent = contact_sheet(scene([{"type": "rect"}], duration=1), str(tmp_path / "c.png"), count=1, audio=True)
+    assert silent["audio"] is None
 
 
 def test_repeat_renders_reuse_warm_workers_until_idle(tmp_path, monkeypatch):

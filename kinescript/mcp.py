@@ -20,14 +20,18 @@ TOOLS = [
     {"name": "kine_docs", "description": "Kinescript scene reference: layer types, properties, timing, motions, "
      "components, eases. Read once before writing a scene.", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "kine_check", "description": "Lint a scene: load errors, text off canvas or in the safe margin, overlapping "
-     "text, low contrast, tiny text, too little reading time. Returns issues with time ranges and fixes.",
+     "text, low contrast, tiny text, too little reading time, and sound (a voice cut off or under the music, voices "
+     "overlapping, an effect late on its cue, silence, loudness and peaks). Returns issues with time ranges and fixes.",
      "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"}}, "required": ["scene"]}},
     {"name": "kine_look", "description": "Contact sheet: `count` frames in one labelled image. boxes=true outlines each "
-     "layer with its id. Use it to review motion and layout without watching video.",
+     "layer with its id. audio=true draws the sound under the frames on the same time axis (a lane per role and the "
+     "mix, with levels, the duck and issues in red) and returns its measurements. Use it to review motion, layout "
+     "and sound without watching video.",
      "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"},
                                                       "count": {"type": "integer", "default": 12},
                                                       "times": {"type": "array", "items": {"type": "number"}},
                                                       "boxes": {"type": "boolean", "default": False},
+                                                      "audio": {"type": "boolean", "default": False},
                                                       "width": {"type": "integer", "default": 400}}, "required": ["scene"]}},
     {"name": "kine_still", "description": "One full-size frame at time `at` (seconds), returned as an image.",
      "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"}, "at": {"type": "number"},
@@ -77,7 +81,7 @@ def call(name: str, args: dict) -> list[dict]:
         from .verify import contact_sheet
         out = str(Path(tempfile.gettempdir()) / f"kine_look_{os.getpid()}.png")
         info = contact_sheet(_scene(args), out, int(args.get("count", 12)), None, int(args.get("width", 400)),
-                             args.get("times"), bool(args.get("boxes")))
+                             args.get("times"), bool(args.get("boxes")), bool(args.get("audio")))
         return [_image(out), _text(info)]
     if name == "kine_still":
         from .output import still
