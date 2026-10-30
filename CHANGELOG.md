@@ -1,7 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.1.1 (2026-10-30)
 
+- A project site with demos, each video beside the scene file it was rendered from:
+  https://drknowhow.github.io/kinescript/. The README, which PyPI shows as the project description, covers 3D,
+  the MCP tools and every example, and its links work from PyPI.
 - Fixed: a model frame could differ depending on which frames the same worker had drawn before it; on the GPU,
   edges moved by up to 49 levels. Models now draw into an offscreen the size of the frame from the start.
 - 3D models draw faster, with the same pixels: work on a mesh that no frame changes is done once, only the
