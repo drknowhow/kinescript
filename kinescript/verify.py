@@ -249,7 +249,7 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
                 add("warning", "read-time", layer.id, layer.t_in,
                     f"{words} words on screen for {layer.dur:.2f}s; viewers need ~{need:.1f}s", "extend dur or cut words",
                     until=layer.t_out)
-        if layer.type == "captions":
+        if layer.type == "captions" and not layer.raw.get("voice"):  # a voice's captions keep the pace it speaks at
             for s0, s1, txt, *_ in layer.raw.get("cues", []):
                 words = _words(txt)
                 if words and (s1 - s0) < 0.25 + words / 4.5:

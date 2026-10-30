@@ -145,8 +145,8 @@ class Timeline:
                               + (f" Audio ids: {', '.join(list(self.words)[:16])}" if self.words else ""), owner)
         if w["ids"] is None:
             raise TimingError(f"refers to the word '{word}' of '{sid}', but '{sid}' has no word times. Add {w['file']} "
-                              "(a speech-to-text tool that times words, such as Whisper, writes one) or give "
-                              f"'{sid}' a \"words\" list", owner)
+                              "(kine voice writes it for a sound with text; for a recording, a speech-to-text tool "
+                              f"that times words, such as Whisper, writes one) or give '{sid}' a \"words\" list", owner)
         if word not in w["ids"]:
             close = suggest(word, w["ids"])
             raise TimingError(f"'{sid}' has no word '{word}'." + (f" Did you mean '{close}'?" if close else "")

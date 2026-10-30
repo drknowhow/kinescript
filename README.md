@@ -46,6 +46,11 @@ rendered from.
   -16, ambience -30, effects peaking at -6 dBFS. Music and ambience dip 14 dB while a voice speaks, an effect's
   leading silence is skipped so it lands on its cue, and the whole mix ends at -16 LUFS with peaks under
   -1.5 dBTP. Gain takes keyframes and expressions like any property; a top-level `mix` changes the targets.
+- **Voice-over from text.** Write what a voice says (`"text": "Check it. [[go]]Render it."`) and `kine voice`
+  speaks it through a plugin ([Kokoro](https://github.com/drknowhow/kinescript/tree/main/plugins/kinescript-kokoro)
+  is the first), writing the file and the time of each word, so cues and captions follow the voice. `[[go]]`
+  names the next word for a cue. Only a line whose text, speaker or rate changed is spoken again; rendering never
+  calls a speech engine.
 - **Captions** from `.srt`/`.vtt`, inline cues or a voice's word times, with karaoke and pop modes.
 - **Shaders.** SkSL layers with `mesh`, `aurora`, `grid` and `score` presets, or your own source.
 - **Finishing.** Per-layer blur, shadow, blend modes and colour adjustments; a scene grade with vignette and film
@@ -94,6 +99,7 @@ An agent cannot watch a video, so Kinescript gives it things it can read:
 | `kine probe scene.json --at 3.2` | resolved in/out of every layer and each visible layer's screen box |
 | `kine still` / `kine render` | a frame, a range (`--from/--to`), a draft (`-q draft --scale 0.5`) or the final file |
 | `kine watch scene.json` | the contact sheet, made again every time the file is saved |
+| `kine voice scene.json` | each sound with text spoken into its file, with its word times, skipping what has not changed |
 
 `kine check` reports unknown keys and bad values, missing media and out-of-range trims, text off the canvas or
 in the safe margin, overlapping text, contrast under 3:1 against what is actually behind the text, tiny text and
@@ -105,7 +111,7 @@ ceiling. An unknown key names the intended key first. Common names from other to
 errors.
 
 The same tools are available over MCP (`kine mcp`) as `kine_docs`, `kine_check`, `kine_look`, `kine_still`,
-`kine_probe` and `kine_render`. They take a scene as a file path or as the JSON object itself, and `kine_look`
+`kine_probe`, `kine_render` and `kine_voice`. They take a scene as a file path or as the JSON object itself, and `kine_look`
 and `kine_still` return images inline.
 
 ```json
@@ -174,9 +180,11 @@ More scenes in [`examples/`](https://github.com/drknowhow/kinescript/tree/main/e
   ground shadow, 6 s.
 - [`voiceover.json`](https://github.com/drknowhow/kinescript/blob/main/examples/voiceover.json): titles cued from
   the words of a voice-over, karaoke captions of it, and a music bed that dips under it, 5.4 s.
+- [`narrated.json`](https://github.com/drknowhow/kinescript/blob/main/examples/narrated.json): the same idea
+  with a voice written as text, a marked word and a click on it. Run `kine voice examples/narrated.json` first.
 
-`edit.json`, `import.json` and `voiceover.json` read sample media: run `python examples/make_media.py` first to
-generate it.
+`edit.json`, `import.json`, `voiceover.json` and `narrated.json` read sample media: run
+`python examples/make_media.py` first to generate it.
 
 ## Performance
 
@@ -219,6 +227,7 @@ kinescript/   engine: timing, props, scene, components, render (Skia), space, re
               mesh and models (3D), output (encoding and the audio mix),
               verify (check, look, probe), schema, docs, mcp, cli
 examples/     example scenes and the generator for sample media
+plugins/      kinescript-kokoro, the Kokoro voice for kine voice (installed on its own)
 marketing/    the launch video as a scene and its builder; build_site.py renders the site
 site/         the project site: demo scenes next to the videos rendered from them
 brand/        logo files, generated art and the brand guide
