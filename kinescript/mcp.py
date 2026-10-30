@@ -41,6 +41,13 @@ TOOLS = [
      "layer's screen box, alpha and text at that time.",
      "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"}, "at": {"type": "number"}},
                      "required": ["scene"]}},
+    {"name": "kine_voice", "description": "Speak each sound's `text` into its file (voice/<id>.wav unless it has a "
+     "src) and write its word times, so layers can cue from words (\"vo1:render\") and captions can follow it. Only "
+     "sounds whose text, speaker or rate changed are spoken again, unless force. Run it before check and render.",
+     "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"},
+                                                      "only": {"type": "array", "items": {"type": "string"}},
+                                                      "force": {"type": "boolean", "default": False},
+                                                      "backend": {"type": "string"}}, "required": ["scene"]}},
     {"name": "kine_render", "description": "Render to a file (.mp4, .mov ProRes 4444 alpha, .webm VP9 alpha, .gif, or a "
      ".png sequence; .wav/.m4a/.mp3/.flac for the sound alone). quality draft|standard|high; scale <1 for previews; "
      "from/to (s) for a range.",
@@ -88,6 +95,10 @@ def call(name: str, args: dict) -> list[dict]:
         out = str(Path(tempfile.gettempdir()) / f"kine_still_{os.getpid()}.png")
         still(_scene(args), float(args["at"]), out, float(args.get("scale", 0.5)))
         return [_image(out)]
+    if name == "kine_voice":
+        from .voice import generate
+        return [_text(generate(args["scene"], args.get("only"), bool(args.get("force")), args.get("backend"),
+                               args.get("base") or os.getcwd()))]
     if name == "kine_render":
         from .output import render
         sc = args["scene"]
@@ -134,7 +145,8 @@ def _serve():
                          "capabilities": {"tools": {}},
                          "serverInfo": {"name": "kinescript", "version": __version__},
                          "instructions": "Kinescript renders motion graphics and video edits from JSON scenes. "
-                                         "Call kine_docs first, then write a scene, kine_check it, kine_look at it, "
+                                         "Call kine_docs first, then write a scene (kine_voice it if a sound has "
+                                         "text), kine_check it, kine_look at it, "
                                          "and kine_render it."})
         elif method == "tools/list":
             _reply(id_, {"tools": TOOLS})

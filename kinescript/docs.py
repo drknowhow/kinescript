@@ -288,7 +288,8 @@ SOUND
   src (relative to the scene file), id, role (voice|music|sfx|ambience), at, dur, until,
   trim [start, end] (seconds in the file), gain (dB: 0 = unchanged, -6 = about half as loud) or
   volume (1 = unchanged), fadeIn, fadeOut (seconds), loop (true repeats the trimmed file until the
-  sound ends), pan (-1 left .. 1 right). A sound lasts as long as its trimmed file; fadeOut ends
+  sound ends), pan (-1 left .. 1 right), text, speaker and rate (a voice spoken from text, see
+  below). A sound lasts as long as its trimmed file; fadeOut ends
   where it ends, which is the scene end at the latest.
   A sound is a cue like a layer: "at": "vo1.out+0.3" starts something 0.3 s after the voice ends,
   and a sound can start at "title.in". "prev" is the sound listed before. A voice makes
@@ -321,6 +322,13 @@ SOUND
   as it finishes the word, and "vo1:render_2.in+0.1" works like any cue. Captions of the voice, each
   word lit as it is said:
     {"id": "cc", "type": "captions", "voice": "vo1", "mode": "karaoke"}
+  A voice from text: write what it says and kine voice speaks it (see COMMANDS):
+    {"id": "vo1", "role": "voice", "text": "Write a scene. Check it. [[go]]Render it.", "speaker": "af_heart"}
+  It writes voice/vo1.wav (or the sound's src) and its words file, so cues and captions work as above.
+  [[name]] gives the next word that id: "at": "vo1:go" starts as it says Render, whatever the line
+  says later. speaker is the backend's voice (Kokoro: af_heart, af_bella, am_adam, bf_emma, bm_george),
+  rate (0.5 to 2, default 1) how fast it speaks. kine check reports a sound with text that is not spoken
+  yet (voice-missing) and one whose text, speaker or rate changed since it was spoken (voice-stale).
   You cannot hear the mix, so read it: kine check measures it and names each sound problem with its
   time range, and kine look --audio draws it under the frames, with each sound's loudness in the JSON.
   Sound is mixed into .mp4, .mov and .webm, and into --from/--to renders. -o mix.wav (or .m4a,
@@ -387,12 +395,17 @@ COMMANDS
                                   .gif (longest side 720 px, 15 fps), or a folder/ for PNG frames.
                                   .wav, .m4a, .mp3 or .flac: the sound alone.
                                   --scale 0.5 halves the size; --from 2 --to 4 renders a part.
+  kine voice scene.json           speaks each sound's text into its file and times its words; a sound
+                                  is spoken again only when its text, speaker or rate changed
+                                  (--force: all of them, --only vo1: one). Needs a voice backend:
+                                  pip install kinescript-kokoro, or KINE_VOICE_CMD set to a command
+                                  that reads JSON requests on stdin. Rendering never speaks.
   kine watch scene.json           re-makes the contact sheet on every save
   kine doctor                     checks ffmpeg, the GPU and fonts
   kine mcp                        the same tools for MCP clients
 
 WORKFLOW FOR AGENTS
-  1. Write the scene.   2. kine check: fix every error, read the warnings, run it again.
+  1. Write the scene (if a sound has text, kine voice).   2. kine check: fix every error, read the warnings, run it again.
   3. kine look --boxes, and look at the image (with sound, kine look --audio).
   4. kine render -q draft, then the final render.
 """

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from . import components, media, models, schema
 from . import presets as P
+from . import voice as V
 from . import words as W
 from .props import Ctx, Prop, compile_prop
 from .timing import Timeline, parse_clock
@@ -168,6 +169,8 @@ class Scene:
                               "export it again as glTF 2.0 (.glb) or .obj")
         for s in self.audio:
             owner = s.layer or s.id
+            if s.raw.get("text") and s.src and not Path(s.src).exists():
+                continue  # not spoken yet: reported by _read_words
             if not s.src or missing(s.src, owner, "sound src" if s.layer else "audio src"):
                 continue
             try:
@@ -217,11 +220,22 @@ class Scene:
                 t1 = float(trim[1]) if len(trim) > 1 and trim[1] is not None else None
             except (TypeError, ValueError):
                 t0, t1 = 0.0, None  # reported by _check_media
-            near = W.default_path(self.path(a["src"])) if a.get("src") else None
+            src = a.get("src") or (V.default_src(sid) if a.get("text") else None)
             out[sid] = {"words": None, "trim0": t0, "trim1": t1,
-                        "file": Path(a["src"]).with_suffix(".words.json").as_posix() if a.get("src") else "a words file"}
+                        "file": Path(src).with_suffix(".words.json").as_posix() if src else "a words file"}
+            if src is None:
+                continue
+            path, near = V.paths(sid, a, self.base)
+            if a.get("text") and not path.exists():
+                self.note("error", "voice-missing", sid, f"'{sid}' has text but is not spoken yet: {src} does not exist",
+                          "run kine voice on this scene; it writes the file and its word times")
+                continue
+            rec = V.made(near) if a.get("text") else None
+            if rec and rec.get("hash") != V.fingerprint(a):
+                self.note("warning", "voice-stale", sid, f"the text, speaker or rate of '{sid}' changed after {src} "
+                          "was spoken, so it says the old text", "run kine voice on this scene to speak it again")
             given = a.get("words")
-            if given is None and not (near and near.exists()):
+            if given is None and not near.exists():
                 continue
             try:
                 out[sid]["words"] = W.read(near if given is None else self.path(given) if isinstance(given, str)
@@ -241,8 +255,8 @@ class Scene:
                              + (f" Audio ids: {', '.join(list(self.words)[:16])}" if self.words else ""), layer=lid)
         if w["words"] is None:
             raise SceneError(f"layer '{lid}': '{v}' has no word times for the captions to follow. Add {w['file']} "
-                             "(a speech-to-text tool that times words, such as Whisper, writes one), or give the "
-                             "captions cues", layer=lid)
+                             "(kine voice writes it for a sound with text; for a recording, a speech-to-text tool that "
+                             "times words, such as Whisper, writes one), or give the captions cues", layer=lid)
         return dict(raw, cues=W.cues(w["words"], w["trim0"], w["trim1"]), at=raw.get("at", v))
 
     def _build_audio(self) -> list[Sound]:
@@ -255,7 +269,7 @@ class Scene:
         out, prev = [], None
         for i, (a, layer) in enumerate(entries):
             sid = str(a.get("id") or (f"{layer}-sound" if layer else f"audio{i + 1}"))
-            src = self.path(a["src"]) if a.get("src") else None
+            src = self.path(a.get("src") or V.default_src(sid)) if a.get("src") or a.get("text") else None
             natural = _natural(a, src)
             try:
                 self.timeline.add(sid, a.get("at", 0), a.get("dur"), a.get("until"), natural,

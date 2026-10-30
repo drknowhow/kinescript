@@ -48,12 +48,13 @@ TWEEN = {"from", "to", "dur", "delay", "ease", "keys"}
 TWEEN_ALIAS = {"duration": "dur", "easing": "ease", "start": "from", "end": "to", "begin": "from"}
 GRADIENT = {"linear", "radial", "stops"}
 AUDIO = {"src", "at", "trim", "gain", "volume", "fadeIn", "fadeOut", "id", "role", "dur", "until", "loop", "pan",
-         "words"}
+         "words", "text", "speaker", "rate"}
 AUDIO_ALIAS = {"source": "src", "file": "src", "path": "src", "start": "at", "fade_in": "fadeIn",
                "fade_out": "fadeOut", "fadein": "fadeIn", "fadeout": "fadeOut", "duration": "dur", "length": "dur",
-               "end": "until", "type": "role", "kind": "role", "balance": "pan", "repeat": "loop"}
-# A layer's "sound": cued from the layer, so it has no id, until, loop or words of its own.
-SOUND = AUDIO - {"id", "until", "loop", "words"}
+               "end": "until", "type": "role", "kind": "role", "balance": "pan", "repeat": "loop",
+               "script": "text", "say": "text", "tts": "text", "narrator": "speaker", "pace": "rate"}
+# A layer's "sound": cued from the layer, so it has no id, until, loop, words or text of its own.
+SOUND = AUDIO - {"id", "until", "loop", "words", "text", "speaker", "rate"}
 MIX = {"loudness", "peak", "levels", "duck"}
 MIX_ALIAS = {"lufs": "loudness", "target": "loudness", "ceiling": "peak", "truePeak": "peak", "ducking": "duck",
              "level": "levels"}
@@ -592,8 +593,14 @@ def _audio_values(a: dict, rep: Report, lid, where: str):
     p = a.get("pan")
     if p is not None and (isinstance(p, bool) or not isinstance(p, (int, float)) or not -1 <= p <= 1):
         rep.add("error", "bad-value", lid, f"{where}pan is {p!r}; it must be a number from -1 (left) to 1 (right)")
-    if not a.get("src"):
-        rep.add("error", "missing-key", lid, f"{where}an audio entry needs 'src'", "\"src\": \"music.mp3\"")
+    t, r = a.get("text"), a.get("rate")
+    if t is not None and not (isinstance(t, str) and t.strip()):
+        rep.add("error", "bad-value", lid, f"{where}text is {t!r}; it is the words to speak, as a string")
+    if r is not None and (isinstance(r, bool) or not isinstance(r, (int, float)) or not 0.5 <= r <= 2):
+        rep.add("error", "bad-value", lid, f"{where}rate is {r!r}; it is how fast the text is spoken, from 0.5 to 2")
+    if not a.get("src") and not a.get("text"):
+        rep.add("error", "missing-key", lid, f"{where}an audio entry needs 'src' (or 'text' to speak)",
+                "\"src\": \"music.mp3\"")
 
 
 def _mix(m, rep: Report):

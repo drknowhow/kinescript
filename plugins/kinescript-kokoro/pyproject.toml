@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kinescript-kokoro"
+version = "0.1.0"
+description = "Kokoro voices for kine voice: speaks a scene's text and times each word"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10,<3.13"
+dependencies = ["kokoro>=0.9.4", "misaki[en]>=0.9.4"]
+
+[project.entry-points."kinescript.voice"]
+kokoro = "kinescript_kokoro:synth"
+
+[tool.setuptools]
+packages = ["kinescript_kokoro"]

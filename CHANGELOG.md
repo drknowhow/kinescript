@@ -38,6 +38,17 @@
   voice starts, and karaoke and pop light each word as it is said instead of guessing from its length.
 - `kine look --audio` marks each word a voice says in its lane.
 - `examples/voiceover.json`, with a stand-in voice and its words file from `examples/make_media.py`.
+- Voice-over from text. A sound's `text` (with `speaker` and `rate`) is what a voice says, and `kine voice
+  scene.json` (MCP `kine_voice`) speaks it into its `src`, `voice/<id>.wav` unless it names one, and writes its
+  words file. `[[go]]` in the text gives the next word the id `go`, so `"at": "vo1:go"` stays on that word when
+  the line is rewritten. A sound is spoken again only when its text, speaker or rate changed (`--force` speaks
+  all, `--only vo1` one). `kine check` reports a sound with text that is not spoken yet (`voice-missing`, an
+  error) and one whose text changed since (`voice-stale`). Rendering never speaks.
+- Voice backends are plugins in the `kinescript.voice` entry-point group, or a command named by `KINE_VOICE_CMD`
+  for a backend in another Python, which reads the requests as JSON on stdin; scene text never goes through a
+  shell. `plugins/kinescript-kokoro` is the first backend: Kokoro voices, with the time of each word for English.
+- Captions that follow a voice no longer get `read-time` warnings; they keep the pace the voice speaks at.
+- `examples/narrated.json`: a voice written as text, a marked word and a click on it.
 - Fixed: a scene whose sounds all ended before it did rendered a video cut short at the end of the last sound. The
   mix is now padded to the scene length. Scenes whose sound already reached the end render the same audio, bit for
   bit.

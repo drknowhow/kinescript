@@ -67,6 +67,13 @@ def main(argv=None) -> int:
     pr.add_argument("scene")
     pr.add_argument("--at", type=float)
 
+    v = sub.add_parser("voice", help="speak each sound's text into its file and time its words (only the ones "
+                                     "whose text changed, unless --force)")
+    v.add_argument("scene")
+    v.add_argument("--only", nargs="+", metavar="ID", help="speak just these sounds")
+    v.add_argument("--force", action="store_true", help="speak them again even if their text did not change")
+    v.add_argument("--backend", help="which installed voice backend to use, when there are several")
+
     sub.add_parser("docs", help="print the scene reference")
     nw = sub.add_parser("new", help="write a starter scene")
     nw.add_argument("path", nargs="?", default="scene.json")
@@ -133,6 +140,10 @@ def _run(a) -> int:
         from .verify import contact_sheet
         out = a.out or _default_out(a.scene, "_sheet.png")
         _emit(dict(ok=True, **contact_sheet(a.scene, out, a.count, a.cols, a.width, a.at, a.boxes, a.audio)))
+        return 0
+    if a.cmd == "voice":
+        from .voice import generate
+        _emit(generate(a.scene, a.only, a.force, a.backend))
         return 0
     if a.cmd == "check":
         from .verify import check

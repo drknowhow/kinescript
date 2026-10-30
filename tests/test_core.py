@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -793,6 +794,101 @@ def test_captions_follow_a_voice_and_light_each_word_as_it_is_said(mix_media, tm
     spec["audio"].append({"id": "bed", "src": mix_media["bed"]})
     with pytest.raises(k.SceneError, match="'bed' has no word times for the captions"):
         k.Scene(spec)
+
+
+def _fake_speak(req):
+    """A voice backend for tests: a 0.3 s tone per word, and those times."""
+    said = req["text"].split()
+    subprocess.run([media.FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i",
+                    f"sine=frequency=300:sample_rate=24000:duration={0.3 * len(said) + 0.2}", req["out"]], check=True)
+    return {"words": [{"word": w, "start": round(0.3 * k, 3), "end": round(0.3 * k + 0.25, 3)}
+                      for k, w in enumerate(said)], "speaker": req["speaker"] or "fake_one", "version": "1"}
+
+
+@pytest.fixture
+def fake_voice(monkeypatch):
+    from kinescript import voice
+    calls = []
+
+    class Entry:
+        name = "fake"
+
+        def load(self):
+            return lambda req: calls.append(req["text"]) or _fake_speak(req)
+    monkeypatch.delenv("KINE_VOICE_CMD", raising=False)
+    monkeypatch.setattr(voice, "backends", lambda: {"fake": Entry()})
+    return calls
+
+
+def test_kine_voice_speaks_text_once_and_names_marked_words(fake_voice, tmp_path):
+    from kinescript.voice import generate
+    f = tmp_path / "s.json"
+    spec = scene([{"id": "go", "type": "rect", "at": "vo1:go", "dur": 0.2},
+                  {"id": "cc", "type": "captions", "voice": "vo1"}], duration="auto")
+    spec["audio"] = [{"id": "vo1", "role": "voice", "text": "Write a scene. [[go]]Check it."}]
+    f.write_text(json.dumps(spec))
+    with pytest.raises(k.SceneError, match="'vo1' has text but is not spoken yet"):
+        k.load(str(f))
+    assert generate(str(f))["voices"] == [{"id": "vo1", "src": "voice/vo1.wav", "status": "made", "words": 5,
+                                           "seconds": 1.45, "took": pytest.approx(0, abs=5)}]
+    kept = json.loads((tmp_path / "voice" / "vo1.words.json").read_text())
+    assert kept["words"][3] == {"word": "Check", "start": 0.9, "end": 1.15, "id": "go"}
+    assert kept["made"]["backend"] == "fake" and kept["made"]["speaker"] == "fake_one"
+    s = k.load(str(f))
+    assert s.by_id["go"].t_in == pytest.approx(0.9) and s.by_id["cc"].raw["cues"][1][2] == "Check it."
+    assert generate(str(f))["voices"][0]["status"] == "fresh" and fake_voice == ["Write a scene. Check it."]
+    spec["audio"][0]["text"] = "Write a scene. [[go]]Check it twice."
+    f.write_text(json.dumps(spec))
+    assert [i["code"] for i in k.load(str(f)).issues] == ["voice-stale"]
+    assert generate(str(f))["voices"][0]["status"] == "made" and len(fake_voice) == 2
+    assert generate(str(f), force=True)["voices"][0]["status"] == "made" and len(fake_voice) == 3
+    with pytest.raises(ValueError, match="no sound with text has id vo2; sounds with text: vo1"):
+        generate(str(f), only=["vo2"])
+
+
+def test_kine_voice_runs_a_command_for_a_backend_in_another_python(tmp_path, monkeypatch):
+    from kinescript import voice
+    tool = tmp_path / "speak.py"
+    tool.write_text("import json, sys\nsys.path.insert(0, %r)\nfrom test_core import _fake_speak\n"
+                    "print(json.dumps([_fake_speak(r) for r in json.load(sys.stdin)]))\n" % str(Path(__file__).parent))
+    monkeypatch.setenv("KINE_VOICE_CMD", json.dumps([sys.executable, str(tool)]))
+    monkeypatch.setattr(voice, "backends", lambda: {})
+    spec = scene([{"type": "rect"}], duration="auto")
+    spec["audio"] = [{"id": "a", "text": "One; two"}, {"id": "b", "text": "three \"quoted\" & $(nothing)"}]
+    got = voice.generate(spec, base=tmp_path)["voices"]
+    assert [(v["id"], v["status"], v["words"]) for v in got] == [("a", "made", 2), ("b", "made", 4)]
+    # the text went to the command as JSON on stdin, untouched by any shell
+    assert json.loads((tmp_path / "voice" / "b.words.json").read_text())["words"][3]["word"] == "$(nothing)"
+    monkeypatch.delenv("KINE_VOICE_CMD")
+    spec["audio"][0]["text"] = "changed"
+    with pytest.raises(ValueError, match="no voice backend is installed"):
+        voice.generate(spec, base=tmp_path)
+
+
+def test_marks_find_their_word_when_the_voice_reads_it_differently():
+    from kinescript.voice import place_marks, split_marks
+    text, marks = split_marks("In 2026 [[ship]]we ship. [[end]]Done")
+    assert (text, marks) == ("In 2026 we ship. Done", {2: "ship", 4: "end"})
+    said = [{"word": w, "start": k, "end": k + 0.5} for k, w in enumerate(["In", "twenty", "twenty-six", "we", "ship.",
+                                                                            "Done"])]
+    assert [w.get("id") for w in place_marks(text, marks, said)] == [None, None, None, "ship", None, "end"]
+    with pytest.raises(ValueError, match=r"\[\[a\]\] is used twice"):
+        split_marks("[[a]]x [[a]]y")
+
+
+def test_kokoro_tokens_become_the_words_of_the_text(monkeypatch):
+    from types import SimpleNamespace as T
+    monkeypatch.syspath_prepend(str(Path(__file__).parents[1] / "plugins" / "kinescript-kokoro"))
+    from kinescript_kokoro import words_from_tokens
+    # As Kokoro 0.9.4 times "Write a scene. Check it, in 2026!" (punctuation is a token of its own)
+    toks = [("Write", " ", 0.3, 0.5125), ("a", " ", 0.5125, 0.6125), ("scene", "", 0.6125, 1.15), (".", " ", 1.15, 1.2875),
+            ("Check", " ", 1.2875, 1.55), ("it", "", 1.55, 1.65), (",", " ", 1.65, 1.6875), ("—", " ", None, None),
+            ("in", " ", None, None), ("2026", "", 2.35, 3.55), ("!", "", 3.55, 3.65)]
+    words = words_from_tokens([T(text=a, whitespace=b, start_ts=c, end_ts=d) for a, b, c, d in toks], offset=10)
+    assert [w["word"] for w in words] == ["Write", "a", "scene.", "Check", "it,", "in", "2026!"]
+    assert words[2] == {"word": "scene.", "start": 10.6125, "end": 11.15}  # not stretched over the pause after it
+    assert words[5] == {"word": "in", "start": 11.65, "end": 11.65}  # untimed: the end of the word before
+    assert words[6]["end"] == 13.55
 
 
 def test_repeat_renders_reuse_warm_workers_until_idle(tmp_path, monkeypatch):
