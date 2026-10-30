@@ -109,7 +109,7 @@ def _run(a) -> int:
         from .render import gpu_context, Renderer
         from .scene import Scene
         info = {"version": __version__, "ffmpeg": media.FFMPEG, "gpu": gpu_context() is not None}
-        r = Renderer(Scene({"canvas": {"w": 64, "h": 64}}))
+        r = Renderer(Scene({"canvas": {"w": 64, "h": 64}, "layers": [{"type": "text", "text": "kine"}]}))
         info["font"] = r._typeface(r.s.theme["font"], 600, False).getFamilyName()
         _emit(info)
         return 0

@@ -1,12 +1,18 @@
 name: release
 
 # Push a tag like v1.0.0 to build the package and publish it to PyPI.
-# Publishing uses PyPI trusted publishing: the PyPI project (or a pending publisher) must list
-# this repository, workflow file "release.yml" and environment "pypi". No token is stored here.
+# Run the workflow by hand (Actions > release > Run workflow) to publish the same build to TestPyPI instead.
+# Publishing uses trusted publishing (OIDC). No API token is stored here. Each index needs a publisher
+# (a pending one before the first upload) that lists this repository, workflow file "release.yml" and the
+# environment: "pypi" on pypi.org, "testpypi" on test.pypi.org.
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -17,10 +23,38 @@ jobs:
         with:
           python-version: "3.13"
       - name: Check the tag matches the package version
+        if: github.event_name == 'push'
         run: |
           v=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
           test "v$v" = "${GITHUB_REF_NAME}" || { echo "tag ${GITHUB_REF_NAME} != version $v"; exit 1; }
-      - run: pip install build twine && python -m build && twine check dist/*
+      - run: pip install build twine && python -m build && twine check --strict dist/*
+      - name: System packages
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg libgl1 libegl1 libfontconfig1
+      - name: Smoke test the wheel (a version cannot be re-uploaded, so prove it works first)
+        env:
+          KINE_BACKEND: cpu
+        run: |
+          python - <<'EOF'
+          import glob, pathlib, zipfile
+          names = zipfile.ZipFile(glob.glob("dist/*.whl")[0]).namelist()
+          stray = [n for n in names if not n.startswith(("kinescript/", "kinescript-"))]
+          fonts = {p.name for p in pathlib.Path("kinescript/fonts").glob("*.ttf")}
+          packed = {n.rsplit("/", 1)[1] for n in names if n.endswith(".ttf")}
+          assert not stray, f"stray files in the wheel: {stray}"
+          assert fonts and fonts == packed, f"fonts missing from the wheel: {fonts - packed}"
+          EOF
+          whl=$(ls "$GITHUB_WORKSPACE"/dist/*.whl)
+          python -m venv "$RUNNER_TEMP/smoke"
+          "$RUNNER_TEMP/smoke/bin/pip" install --quiet "$whl"
+          cd "$RUNNER_TEMP"   # leave the checkout so the installed package is the one that runs
+          "$RUNNER_TEMP/smoke/bin/python" -c "import importlib.metadata as m, kinescript; assert kinescript.__version__ == m.version('kinescript'), (kinescript.__version__, m.version('kinescript')); print(kinescript.__version__)"
+          kine="$RUNNER_TEMP/smoke/bin/kine"
+          "$kine" --version
+          "$kine" doctor
+          "$kine" new scene.json
+          "$kine" check scene.json --step 1
+          "$kine" still scene.json --at 0.5 --scale 0.25 -o scene.png
+          test -s scene.png
       - uses: actions/upload-artifact@v4
         with:
           name: dist
@@ -28,8 +62,11 @@ jobs:
 
   publish:
     needs: build
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    environment: pypi
+    environment:
+      name: pypi
+      url: https://pypi.org/project/kinescript/
     permissions:
       id-token: write
     steps:
@@ -38,3 +75,22 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish-testpypi:
+    needs: build
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/kinescript/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
