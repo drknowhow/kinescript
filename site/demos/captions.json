@@ -1,0 +1,22 @@
+{
+  "canvas": {"w": 1080, "h": 1920, "fps": 30, "duration": 7, "bg": "#0a0c10"},
+  "grade": {"vignette": 0.3},
+  "layers": [
+    {"id": "bg", "type": "shader", "preset": "score", "opacity": 0.55},
+    {"id": "file", "type": "text", "text": "captions.json  1080 x 1920", "font": "IBM Plex Mono", "x": "50%", "y": "9%",
+     "size": 44, "weight": 500, "fill": "$muted", "at": 0.1, "enter": "fade"},
+    {"id": "words", "use": "kinetic", "words": ["Captions", "that", "land", "on", "the"], "every": 0.45, "size": 180,
+     "y": "36%", "at": 0.3},
+    {"id": "wave", "type": "text", "text": "beat.", "x": "50%", "y": "36%", "size": 230, "weight": 800,
+     "fill": "$accent2", "split": "chars", "unitY": "=sin(T*5 + i*0.7)*16", "at": "words.out",
+     "enter": {"name": "rise", "dur": 0.4, "stagger": 0.04}},
+    {"id": "line", "type": "line", "points": [[-300, 0], [300, 0]], "x": "50%", "y": "47%", "stroke": "$muted",
+     "strokeWidth": 8, "at": "wave.in+0.3", "enter": {"name": "draw", "dur": 0.5}},
+    {"id": "cmd", "type": "text", "text": "\"mode\": \"karaoke\"", "font": "IBM Plex Mono", "x": "50%", "y": "54%",
+     "size": 48, "weight": 500, "at": "line.in+0.3", "enter": {"name": "type", "dur": 0.8}, "caret": true},
+    {"id": "cap", "type": "captions", "mode": "karaoke", "y": "70%", "size": 62, "maxWidth": 960, "at": 0.3,
+     "cues": [[0, 2.5, "Each word is timed in JSON"], [2.5, 4.6, "and lights up as it is said"],
+              [4.6, 6.7, "so a caption fix is one line"]]},
+    {"use": "progress", "id": "bar", "h": 10, "color": "$muted"}
+  ]
+}
