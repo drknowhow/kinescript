@@ -20,6 +20,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg libgl1 libegl1 libfontconfig1
       - name: Install
         run: pip install -e ".[dev]"
+      - name: Sample media (gitignored; examples and promo need it)
+        run: python examples/make_media.py
       - name: Test (CPU backend; runners have no GPU)
         env:
           KINE_BACKEND: cpu
