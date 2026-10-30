@@ -2,8 +2,13 @@
 
     python examples/make_media.py        # once: footage and the rocket model the examples read
     python marketing/build_site.py       # everything
-    python marketing/build_site.py dolly hero  # only these videos and posters ("look" is the contact sheet)
+    python marketing/build_site.py dolly hero  # only these videos and posters ("look" is the contact sheets)
+    python marketing/build_site.py sound       # only make the voice demo's bed and click again
     python marketing/build_site.py --page      # only rewrite the page fragments, no rendering
+
+The voice demo's voice (site/demos/voice/) is spoken by `kine voice` and committed, so building the site does not
+need a speech engine unless that line changes; then install plugins/kinescript-kokoro or set KINE_VOICE_CMD.
+Its music bed and click (site/demos/sound/) are synthesised here and committed too.
 
 Every video on the page is a scene rendered by `kine render -q high` at a fraction of its canvas size
 (the demos at half scale: 960x540, or 540x960 for the vertical one; the launch video at 1280x720). ffmpeg then
@@ -44,10 +49,12 @@ DEMO = {
     "title3d": ("examples/title3d.json", 3.2, 0.5),
     "import": ("examples/import.json", 3.0, 0.5),
     "captions": ("site/demos/captions.json", 4.0, 0.5),
+    "voice": ("site/demos/voice.json", 6.0, 0.5),
     "edit": ("site/demos/edit.json", 2.0, 0.5),
 }
 HERO = ("marketing/promo.json", 9.9, 2 / 3)
 LOOK = "card-flip"          # the contact sheet shown in the agent section
+LISTEN = "voice"            # the contact sheet with the sound under it, in the sound section
 CHECK = "site/demos/problems.json"
 PROBE = ("card-flip", 1.5)
 CUES = "site/demos/cues.json"
@@ -79,6 +86,67 @@ def look_sheet() -> None:
         png = Path(tmp) / "look.png"
         run(*KINE, "look", DEMO[LOOK][0], "--boxes", "-n", "8", "--cols", "4", "--width", "480", "-o", str(png))
         run("ffmpeg", "-y", "-v", "error", "-i", str(png), "-q:v", "3", str(MEDIA / "look.jpg"))
+        png = Path(tmp) / "listen.png"
+        run(*KINE, "look", DEMO[LISTEN][0], "--audio", "-n", "8", "--cols", "4", "--width", "480", "-o", str(png))
+        run("ffmpeg", "-y", "-v", "error", "-i", str(png), "-q:v", "3", str(MEDIA / "listen.jpg"))
+
+
+def _wav(path: Path, audio, rate: int = 48000) -> None:
+    import wave
+    import numpy as np
+    a = np.asarray(audio, dtype=np.float64)
+    a = a.reshape(len(a), -1)
+    with wave.open(str(path), "wb") as f:
+        f.setnchannels(a.shape[1])
+        f.setsampwidth(2)
+        f.setframerate(rate)
+        f.writeframes((np.clip(a, -1, 1) * 32767).astype("<i2").tobytes())
+
+
+def sound_assets() -> None:
+    """The voice demo's music bed (four chords and a plucked arpeggio at 100 bpm that loops without a seam) and
+    its click (a short tick after 20 ms of silence, which the mix skips so the tick lands on its cue)."""
+    import numpy as np
+    out = DEMOS / "sound"
+    out.mkdir(exist_ok=True)
+    rate, beat = 48000, 0.6
+    chords = [[45, 52, 55, 60], [41, 48, 52, 57], [48, 55, 60, 64], [43, 50, 55, 59]]  # Am7 Fmaj7 C G (MIDI)
+    length = len(chords) * 4 * beat
+    t = np.arange(int(length * rate)) / rate
+
+    def hz(note):  # a whole number of cycles over the loop, so its end meets its start
+        return round(440 * 2 ** ((note - 69) / 12) * length) / length
+
+    def env(start, attack, decay, hold):
+        u = (t - start) % length
+        return np.where(u < hold, np.minimum(u / attack, 1) * np.exp(-u * decay), 0)
+
+    left, right = np.zeros_like(t), np.zeros_like(t)
+    for k, chord in enumerate(chords):
+        e = env(k * 4 * beat, 0.5, 0.25, 4 * beat + 0.8)
+        for n, note in enumerate(chord):
+            f = hz(note)
+            tone = e * (np.sin(2 * np.pi * f * t) + 0.2 * np.sin(4 * np.pi * f * t)) / len(chord)
+            left += tone * (0.6 + 0.1 * n)
+            right += tone * (0.9 - 0.1 * n)
+        for s, note in enumerate([chord[1], chord[2], chord[3] + 12, chord[2], chord[3], chord[2] + 12, chord[3], chord[1] + 12]):
+            f = hz(note + 12)
+            e = env(k * 4 * beat + s * beat / 2, 0.005, 5.0, 1.2)
+            pluck = 0.35 * e * (np.sin(2 * np.pi * f * t) + 0.25 * np.sin(4 * np.pi * f * t))
+            left += pluck * (0.8 if s % 2 else 0.5)
+            right += pluck * (0.5 if s % 2 else 0.8)
+    bed = np.stack([left, right], 1)
+    bed *= 0.5 / np.abs(bed).max()
+    with tempfile.TemporaryDirectory() as tmp:
+        _wav(Path(tmp) / "bed.wav", bed, rate)
+        run("ffmpeg", "-y", "-v", "error", "-i", str(Path(tmp) / "bed.wav"), "-c:a", "aac", "-b:a", "128k",
+            str(out / "bed.m4a"))
+    u = np.arange(int(0.25 * rate)) / rate - 0.02
+    noise = np.random.default_rng(7).standard_normal(len(u))
+    tick = np.where(u >= 0, np.sin(2 * np.pi * 2200 * u) * np.exp(-u * 90) + 0.6 * np.sin(2 * np.pi * 640 * u)
+                    * np.exp(-u * 45) + 0.25 * noise * np.exp(-u * 400), 0)
+    _wav(out / "click.wav", 0.8 * tick / np.abs(tick).max(), rate)
+    print(f"wrote {out.relative_to(ROOT)}: bed.m4a ({length:g} s loop), click.wav")
 
 
 # ---- page fragments -------------------------------------------------------------------------------------
@@ -128,7 +196,8 @@ def diff_block(before: str, after: str) -> str:
 
 
 def score_block(summary: dict, caption: str, axis: float | None = None) -> str:
-    """Top-level layers as bars on one time axis, with a dot where each of their children starts.
+    """Top-level layers as bars on one time axis, with a dot where each of their children starts, then the scene's
+    own sounds (not those of layers), with a dot where each word of a voice is said.
     `axis` (seconds) puts several scores on the same scale; by default the axis is the scene's length."""
     end = summary["canvas"]["duration"]
     dur = axis or end
@@ -154,6 +223,16 @@ def score_block(summary: dict, caption: str, axis: float | None = None) -> str:
                        for t in sorted(cues.get(l["id"], ())) if t > a + 1e-3)
         rows.append(f'<li><span class="sid">{html.escape(l["id"])}</span><span class="track">'
                     f'<span class="bar" data-in="{a:g}" data-out="{b:g}" title="{html.escape(l["id"])}: {a:g} s to {b:g} s" '
+                    f'style="left:{a / dur * 100:.2f}%;width:{span / dur * 100:.2f}%">{dots}</span></span></li>')
+    for s in summary.get("audio", []):
+        if s["layer"]:
+            continue
+        a, b = s["in"], min(s["out"], end)
+        span = max(b - a, 1e-6)
+        dots = "".join(f'<i style="left:{(t - a) / span * 100:.2f}%"></i>' for _, t, _ in s.get("words", ()) if t > a + 1e-3)
+        rows.append(f'<li class="snd"><span class="sid">{html.escape(s["id"])}</span><span class="track">'
+                    f'<span class="bar" data-in="{a:g}" data-out="{b:g}" title="{html.escape(s["id"])} '
+                    f'({s["role"] or "sound"}): {a:g} s to {b:g} s" '
                     f'style="left:{a / dur * 100:.2f}%;width:{span / dur * 100:.2f}%">{dots}</span></span></li>')
     return (f'<ol class="score" data-dur="{dur:g}" style="--dur:{dur:g}" aria-label="{html.escape(caption)}, '
             f'{end:g} s">' + "".join(rows) + '<li class="ruler" aria-hidden="true"><span class="sid"></span>'
@@ -226,7 +305,12 @@ def write_page() -> None:
 def main(argv: list[str]) -> None:
     names = [a for a in argv if not a.startswith("-")]
     if "--page" not in argv:
+        if not (DEMOS / "sound" / "bed.m4a").exists() or "sound" in names:
+            sound_assets()
+        run(*KINE, "voice", DEMO["voice"][0])  # speaks only if the line changed since its file was made
         for name in names or [*DEMO, "hero", "look"]:
+            if name == "sound":
+                continue
             if name == "hero":
                 scene, at, scale = HERO
                 render(scene, MEDIA / "hero.mp4", scale, at)

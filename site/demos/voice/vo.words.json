@@ -1,0 +1,147 @@
+{
+ "words": [
+  {
+   "word": "This",
+   "start": 0.275,
+   "end": 0.475
+  },
+  {
+   "word": "voice",
+   "start": 0.475,
+   "end": 0.775
+  },
+  {
+   "word": "began",
+   "start": 0.775,
+   "end": 1.25
+  },
+  {
+   "word": "as",
+   "start": 1.25,
+   "end": 1.3625
+  },
+  {
+   "word": "a",
+   "start": 1.3625,
+   "end": 1.45
+  },
+  {
+   "word": "line",
+   "start": 1.45,
+   "end": 1.7125
+  },
+  {
+   "word": "of",
+   "start": 1.7125,
+   "end": 1.8
+  },
+  {
+   "word": "text.",
+   "start": 1.8,
+   "end": 2.575
+  },
+  {
+   "word": "Each",
+   "start": 2.7125,
+   "end": 3.0
+  },
+  {
+   "word": "word",
+   "start": 3.0,
+   "end": 3.2125
+  },
+  {
+   "word": "it",
+   "start": 3.2125,
+   "end": 3.325
+  },
+  {
+   "word": "says",
+   "start": 3.325,
+   "end": 3.625
+  },
+  {
+   "word": "is",
+   "start": 3.625,
+   "end": 3.7375
+  },
+  {
+   "word": "a",
+   "start": 3.7375,
+   "end": 3.8375
+  },
+  {
+   "word": "cue,",
+   "start": 3.8375,
+   "end": 4.35
+  },
+  {
+   "word": "so",
+   "start": 4.475,
+   "end": 4.6375
+  },
+  {
+   "word": "the",
+   "start": 4.6375,
+   "end": 4.725
+  },
+  {
+   "word": "picture",
+   "start": 4.725,
+   "end": 5.125
+  },
+  {
+   "word": "follows",
+   "start": 5.125,
+   "end": 5.5625,
+   "id": "pic"
+  },
+  {
+   "word": "it,",
+   "start": 5.5625,
+   "end": 5.9
+  },
+  {
+   "word": "and",
+   "start": 5.975,
+   "end": 6.0875
+  },
+  {
+   "word": "the",
+   "start": 6.0875,
+   "end": 6.175
+  },
+  {
+   "word": "music",
+   "start": 6.175,
+   "end": 6.5875
+  },
+  {
+   "word": "dips",
+   "start": 6.5875,
+   "end": 6.925,
+   "id": "duck"
+  },
+  {
+   "word": "while",
+   "start": 6.925,
+   "end": 7.1125
+  },
+  {
+   "word": "it",
+   "start": 7.1125,
+   "end": 7.2
+  },
+  {
+   "word": "speaks.",
+   "start": 7.2,
+   "end": 7.9
+  }
+ ],
+ "made": {
+  "hash": "34ce04ee895a5ee5",
+  "backend": "kinescript_kokoro",
+  "version": "kokoro 0.9.4, kinescript-kokoro 0.1.0",
+  "speaker": "af_heart"
+ }
+}

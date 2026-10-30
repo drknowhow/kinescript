@@ -1,15 +1,15 @@
 <p align="center"><img src="https://raw.githubusercontent.com/drknowhow/kinescript/main/brand/logo-dark.png" width="460" alt="kinescript"></p>
 
-<p align="center"><b>Video you can diff.</b><br>Motion graphics and video edits written as JSON, checked by agents, rendered on the GPU.</p>
+<p align="center"><b>Video you can diff.</b><br>Motion graphics, video edits and voice-over written as JSON, checked by agents, rendered on the GPU.</p>
 
 <p align="center"><a href="https://drknowhow.github.io/kinescript/">Documentation</a> · <a href="https://github.com/drknowhow/kinescript">Source</a> · <a href="https://github.com/drknowhow/kinescript/blob/main/CHANGELOG.md">Changelog</a> · <a href="https://github.com/drknowhow/kinescript/blob/main/docs/promo.mp4">Launch video</a></p>
 
 <p align="center"><img src="https://raw.githubusercontent.com/drknowhow/kinescript/main/docs/hero.gif" width="720" alt="The Kinescript launch video, rendered by Kinescript"></p>
 
-Kinescript turns a JSON scene into video. Every layer, keyframe and cut is a line of data, so a scene can be
-generated, reviewed in a pull request, and changed by a script or an agent. The renderer is a pure function of
-the frame number: any frame renders on its own, which makes previews instant and lets a render split across
-processes.
+Kinescript turns a JSON scene into video. Every layer, keyframe, cut and sound is a line of data, so a scene can
+be generated, reviewed in a pull request, and changed by a script or an agent. A voice-over can start as a line of
+text. The renderer is a pure function of the frame number: any frame renders on its own, which makes previews
+instant and lets a render split across processes.
 
 ```bash
 pip install kinescript
@@ -20,7 +20,7 @@ It needs Python 3.10 or newer and ffmpeg on your `PATH` ([details](https://githu
 
 The [launch video](https://github.com/drknowhow/kinescript/blob/main/docs/promo.mp4) is a Kinescript scene,
 [`marketing/promo.json`](https://github.com/drknowhow/kinescript/blob/main/marketing/promo.json). It is 35
-seconds of 1080p and renders, with audio, in about 3.5 seconds on the development machine. The
+seconds of 1080p and renders, with audio, in about 3.3 seconds on the development machine. The
 [project site](https://drknowhow.github.io/kinescript/) shows more demos, each next to the scene file it was
 rendered from.
 
@@ -37,20 +37,9 @@ rendered from.
 - **Footage.** Video layers with trim, speed, loop, cover/contain fit, punch-in `zoom` around a `focus` point, and
   rounded picture-in-picture. A `sequence` turns a cut list into clips with fade, wipe, slide, zoom or blur
   transitions. Clip audio and music beds are mixed automatically.
-- **Sound on the timeline.** Voice-over, music and effects are cues like layers: `"at": "vo1.out+0.3"` starts a
-  layer after the voice, `"at": "vo1:render"` as the voice says "render" (from a words file, such as Whisper's
-  JSON, next to it), a layer's `"sound": "pop.wav"` plays when it appears and moves when it moves, and a voice
-  stretches an `auto` duration to finish. Sounds loop and pan, are mixed into MP4, MOV, WebM and `--from/--to`
-  renders, and `-o mix.wav` renders the sound alone.
-- **A mix without listening.** Give a sound a `role` and it is set to that role's level: voice -18 LUFS, music
-  -16, ambience -30, effects peaking at -6 dBFS. Music and ambience dip 14 dB while a voice speaks, an effect's
-  leading silence is skipped so it lands on its cue, and the whole mix ends at -16 LUFS with peaks under
-  -1.5 dBTP. Gain takes keyframes and expressions like any property; a top-level `mix` changes the targets.
-- **Voice-over from text.** Write what a voice says (`"text": "Check it. [[go]]Render it."`) and `kine voice`
-  speaks it through a plugin ([Kokoro](https://github.com/drknowhow/kinescript/tree/main/plugins/kinescript-kokoro)
-  is the first), writing the file and the time of each word, so cues and captions follow the voice. `[[go]]`
-  names the next word for a cue. Only a line whose text, speaker or rate changed is spoken again; rendering never
-  calls a speech engine.
+- **Sound on the same timeline.** Voice-over, music and effects are cues like layers, a voice's words are cues
+  too, a voice can be spoken from text, and sounds with a role are levelled and ducked for you
+  ([Sound](https://github.com/drknowhow/kinescript#sound)).
 - **Captions** from `.srt`/`.vtt`, inline cues or a voice's word times, with karaoke and pop modes.
 - **Shaders.** SkSL layers with `mesh`, `aurora`, `grid` and `score` presets, or your own source.
 - **Finishing.** Per-layer blur, shadow, blend modes and colour adjustments; a scene grade with vignette and film
@@ -85,6 +74,54 @@ A 3D title that builds in and turns to face the camera:
  "rotateY": [[0, -40], [2.4, 0, "outCubic"]], "rotateX": [[0, 18], [2.4, 0, "outCubic"]],
  "shine": 0.6, "enter": {"name": "build", "dur": 1.2}}
 ```
+
+## Sound
+
+Sounds are a top-level `audio` list, timed like layers and mixed by ffmpeg while the frames render.
+
+- **Cues both ways.** `"at": "vo1.out+0.3"` starts a layer 0.3 s after the voice ends, and a sound can start at
+  `"title.in"`. A layer's `"sound": "pop.wav"` plays when it appears and moves when it moves. A voice stretches an
+  `auto` duration so it is never cut off.
+- **Words are cues.** A words file next to a voice (`vo1.words.json`, or Whisper's JSON as it is) times each
+  word: `"at": "vo1:render"` starts a layer as the voice says "render", and `{"type": "captions", "voice": "vo1"}`
+  captions it, lighting each word as it is said.
+- **Voice-over from text.** Write what a voice says in `text` and `kine voice` speaks it through a plugin, writing
+  the file and its word times. [Kokoro](https://github.com/drknowhow/kinescript/tree/main/plugins/kinescript-kokoro)
+  is the first. `[[go]]` in the text names the next word, so a cue to `vo1:go` survives a rewrite of the line.
+  Only a line whose text, speaker or rate changed is spoken again, and rendering never calls a speech engine.
+- **A mix without listening.** Give a sound a `role` and it is set to that role's level: voice -18 LUFS, music
+  -16, ambience -30, effects peaking at -6 dBFS. Music and ambience dip 14 dB while a voice speaks, an effect's
+  leading silence is skipped so it lands on its cue, and the whole mix ends at -16 LUFS with peaks under
+  -1.5 dBTP. A top-level `mix` changes the targets. Sounds without a role are mixed as given.
+- **Checked and drawn.** `kine check` mixes and measures the sound and reports a voice cut off or masked by the
+  music, an effect that lands late, silence, and a mix off its targets. `kine look --audio` draws the sound under
+  the frames on the same time axis.
+- **Everywhere.** Gain takes keyframes and expressions like any property; sounds loop and pan; the mix goes into
+  MP4, MOV, WebM and `--from/--to` renders, and `-o mix.wav` renders the sound alone.
+
+A narrated beat with a click on a marked word, over music that ducks under the voice:
+
+```json
+"audio": [
+  {"id": "vo", "role": "voice", "at": 0.6, "text": "Each word it says is a [[hit]]cue."},
+  {"id": "bed", "role": "music", "src": "bed.m4a", "loop": true, "until": "end", "fadeOut": 1.5}
+],
+"layers": [
+  {"id": "cue", "type": "text", "text": "Cue", "size": 200, "at": "vo:hit", "sound": "click.wav", "enter": "pop"},
+  {"id": "cc", "type": "captions", "voice": "vo", "mode": "karaoke"}
+]
+```
+
+`kine voice scene.json` speaks it once. The
+[voice demo](https://drknowhow.github.io/kinescript/#sound) on the project site plays the result with sound, next
+to its scene file. The Kokoro plugin needs Python 3.10 to 3.12:
+
+```bash
+pip install "kinescript-kokoro @ git+https://github.com/drknowhow/kinescript#subdirectory=plugins/kinescript-kokoro"
+```
+
+On a newer Python, install it into another one and point `KINE_VOICE_CMD` at it
+([details](https://github.com/drknowhow/kinescript/tree/main/plugins/kinescript-kokoro)).
 
 ## Built for agents
 
@@ -193,9 +230,9 @@ Measured on the development machine (Intel Core Ultra 7 265, 20 threads, NVIDIA 
 
 | Workload | Result |
 |---|---|
-| Drawing one 1080p frame of the launch video on the GPU, converted to I420 and read back as a render does | median 2.7 ms, p95 3.3 ms (all 1038 frames) |
-| Launch video, 34.6 s at 1080p30, `-q high`, with audio | 3.5 s wall, about 300 frames/s (median of 5 runs) |
-| `examples/edit.json`, 10.4 s with two decoded video clips | 2.05 s wall, 152 frames/s (median of 5 runs) |
+| Drawing one 1080p frame of the launch video on the GPU, converted to I420 and read back as a render does | median 2.8 ms, p95 3.8 ms (all 1038 frames) |
+| Launch video, 34.6 s at 1080p30, `-q high`, with audio | 3.3 s wall, about 320 frames/s (median of 5 runs) |
+| `examples/edit.json`, 10.4 s with two decoded video clips | 2.25 s wall, 139 frames/s (median of 5 runs) |
 
 [`python bench/stages.py`](https://github.com/drknowhow/kinescript/blob/main/bench/stages.py) splits the time
 per frame into drawing, conversion and readback, and writing to ffmpeg for several workloads, and times whole
@@ -215,6 +252,8 @@ Within one process, such as the MCP server, the workers stay warm for two minute
   objects as `parts` of one model). Draco- and meshopt-compressed model files are not read.
 - Audio is mixing and levelling (trim, gain over time, fades, speed, loop, pan, role levels, ducking, a loudness
   target), with no effects such as EQ, compression of single sounds or reverb.
+- Kinescript does not speak by itself: `kine voice` needs a plugin or a command. The Kokoro plugin times words
+  for English voices only and needs Python 3.10 to 3.12.
 - Video is decoded and resampled by ffmpeg to the scene frame rate. Jumping backwards or far ahead reopens the
   decoder, which is slower than sequential playback.
 - Text layout is single-script left-to-right with greedy wrapping. No shaping for complex scripts or bidi.

@@ -1,0 +1,30 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": "auto", "bg": "$void"},
+  "audio": [
+    {"id": "vo", "role": "voice", "at": 0.6, "speaker": "af_heart",
+     "text": "This voice began as a line of text. Each word it says is a cue, so the picture [[pic]]follows it, and the music [[duck]]dips while it speaks."},
+    {"id": "bed", "role": "music", "src": "sound/bed.m4a", "loop": true, "until": "end", "fadeIn": 1, "fadeOut": 1.5}
+  ],
+  "components": {
+    "beat": {"params": {"word": "", "cue": ""}, "layers": [
+      {"type": "text", "text": "{{word}}", "x": "50%", "y": "42%", "size": 220, "weight": 800,
+       "enter": {"name": "pop", "dur": 0.35}, "exit": "fade"},
+      {"type": "text", "text": "at {{cue}}", "font": "IBM Plex Mono", "x": "50%", "y": "60%", "size": 44,
+       "fill": "$muted", "at": 0.1, "enter": "rise", "exit": "fade"}
+    ]}
+  },
+  "layers": [
+    {"use": "beat", "id": "b0", "word": "Voice", "cue": "vo:voice", "at": "vo:voice", "until": "vo:text-0.1",
+     "sound": "sound/click.wav"},
+    {"use": "beat", "id": "b1", "word": "Text", "cue": "vo:text", "at": "vo:text", "until": "vo:cue-0.1",
+     "sound": "sound/click.wav"},
+    {"use": "beat", "id": "b2", "word": "Cue", "cue": "vo:cue", "at": "vo:cue", "until": "vo:pic-0.1",
+     "sound": "sound/click.wav"},
+    {"use": "beat", "id": "b3", "word": "Picture", "cue": "vo:pic", "at": "vo:pic", "until": "vo:duck-0.1",
+     "sound": "sound/click.wav"},
+    {"use": "beat", "id": "b4", "word": "Mix", "cue": "vo:duck", "at": "vo:duck", "until": "vo.out+1.2",
+     "sound": "sound/click.wav"},
+    {"id": "cc", "type": "captions", "voice": "vo", "mode": "karaoke", "active": "$key"},
+    {"use": "progress", "id": "progress", "color": "$key", "h": 6}
+  ]
+}

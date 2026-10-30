@@ -104,7 +104,7 @@ class Scene:
         self._sounding: list[Layer] = []
         raw_layers = _subst(copy.deepcopy(spec.get("layers", [])), theme)
         self.bg = _subst(self.bg, theme)
-        user_comps = spec.get("components", {})
+        self._components = user_comps = _subst(copy.deepcopy(spec.get("components", {})), theme)
         try:
             raw_layers = [components.expand(l, user_comps, theme, self) for l in raw_layers]
         except ValueError as e:
@@ -373,7 +373,7 @@ class Scene:
             out.append(layer)
             kids = raw.get("children") or raw.get("layers")
             if ltype == "group" and kids:
-                kids = [components.expand(k, self.spec.get("components", {}), self.theme, self) for k in kids]
+                kids = [components.expand(k, self._components, self.theme, self) for k in kids]
                 kids = [x for k in kids for x in (k if isinstance(k, list) else [k])]
                 self._build(kids, layer, layer.children)
             prev = lid
@@ -399,7 +399,8 @@ class Scene:
     def summary(self) -> dict:
         audio = []
         for s in self.audio:
-            audio.append({"id": s.id, "role": s.role, "src": s.raw.get("src"), "in": round(s.t_in, 3),
+            src = s.raw.get("src") or (V.default_src(s.id) if s.raw.get("text") else None)
+            audio.append({"id": s.id, "role": s.role, "src": src, "in": round(s.t_in, 3),
                           "out": round(s.t_out, 3), "layer": s.layer})
             if said := self.said(s.id):  # the ids a cue can name, and when each is said
                 audio[-1]["words"] = [[wid, round(a, 3), round(b, 3)] for wid, _, a, b in said]

@@ -397,9 +397,10 @@ COMMANDS
                                   --scale 0.5 halves the size; --from 2 --to 4 renders a part.
   kine voice scene.json           speaks each sound's text into its file and times its words; a sound
                                   is spoken again only when its text, speaker or rate changed
-                                  (--force: all of them, --only vo1: one). Needs a voice backend:
-                                  pip install kinescript-kokoro, or KINE_VOICE_CMD set to a command
-                                  that reads JSON requests on stdin. Rendering never speaks.
+                                  (--force: all of them, --only vo1: one). Needs a voice backend,
+                                  the Kokoro plugin (with none installed, kine voice prints the pip
+                                  command), or KINE_VOICE_CMD set to a command that reads JSON
+                                  requests on stdin. Rendering never speaks.
   kine watch scene.json           re-makes the contact sheet on every save
   kine doctor                     checks ffmpeg, the GPU and fonts
   kine mcp                        the same tools for MCP clients

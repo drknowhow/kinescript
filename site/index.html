@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kinescript: video you can diff</title>
-<meta name="description" content="Motion graphics and video edits written as JSON, checked by agents, rendered on the GPU.">
+<meta name="description" content="Motion graphics, video edits and voice-over written as JSON, checked by agents, rendered on the GPU.">
 <meta name="theme-color" content="#0a0c10">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Kinescript: video you can diff">
-<meta property="og:description" content="Motion graphics and video edits written as JSON, checked by agents, rendered on the GPU.">
+<meta property="og:description" content="Motion graphics, video edits and voice-over written as JSON, checked by agents, rendered on the GPU.">
 <meta property="og:url" content="https://drknowhow.github.io/kinescript/">
 <meta property="og:image" content="https://raw.githubusercontent.com/drknowhow/kinescript/main/docs/og.png">
 <meta name="twitter:card" content="summary_large_image">
@@ -23,7 +23,7 @@
   <header class="top">
     <a href="./" aria-label="Kinescript home"><img src="assets/logo-transparent.svg" alt="kinescript" width="834" height="200"></a>
     <nav aria-label="Sections">
-      <a href="#demos">Demos</a><a class="opt" href="#depth">3D</a><a class="opt" href="#agents">Agents</a><a href="#install">Install</a><a href="https://github.com/drknowhow/kinescript">GitHub</a>
+      <a href="#demos">Demos</a><a class="opt" href="#sound">Sound</a><a class="opt" href="#depth">3D</a><a class="opt" href="#agents">Agents</a><a href="#install">Install</a><a href="https://github.com/drknowhow/kinescript">GitHub</a>
     </nav>
   </header>
 
@@ -32,7 +32,7 @@
     <div class="hero-text">
       <h1 id="hero-title">Video you can diff<span class="dot">.</span></h1>
       <div class="hero-side">
-        <p class="lede">Kinescript turns a JSON scene into video. Every layer, keyframe and cut is a line of data, so a scene can be generated, reviewed in a pull request and changed by an agent, then checked and rendered from the command line.</p>
+        <p class="lede">Kinescript turns a JSON scene into video. Every layer, keyframe, cut and sound is a line of data, so a scene can be generated, reviewed in a pull request and changed by an agent, then checked and rendered from the command line. A voice-over can start as a line of text.</p>
         <div class="install">
           <code class="cmd">pip install kinescript</code>
           <span class="needs">Python 3.10+ and ffmpeg</span>
@@ -44,8 +44,8 @@
     <figure class="player" data-name="launch video">
       <div class="screen"><video src="media/hero.mp4" poster="media/hero.jpg" width="1280" height="720" autoplay muted loop playsinline controls preload="metadata" aria-label="The Kinescript launch video, 35 seconds"></video></div>
       <div class="deck"><button type="button" data-play>Pause</button><button type="button" data-sound aria-pressed="false">Sound on</button><span class="tc">0.0 s</span></div>
-      <!--build:score:hero--><ol class="score" data-dur="34.6" style="--dur:34.6" aria-label="Timeline of marketing/promo.json, 34.6 s"><li><span class="sid">bg</span><span class="track"><span class="bar" data-in="0" data-out="34.6" title="bg: 0 s to 34.6 s" style="left:0.00%;width:100.00%"></span></span></li><li><span class="sid">s1</span><span class="track"><span class="bar" data-in="0" data-out="3.8" title="s1: 0 s to 3.8 s" style="left:0.00%;width:10.98%"><i style="left:5.79%"></i><i style="left:13.16%"></i><i style="left:16.32%"></i><i style="left:39.47%"></i></span></span></li><li><span class="sid">s2</span><span class="track"><span class="bar" data-in="3.8" data-out="10.6" title="s2: 3.8 s to 10.6 s" style="left:10.98%;width:19.65%"><i style="left:2.94%"></i><i style="left:4.41%"></i><i style="left:8.82%"></i><i style="left:45.59%"></i><i style="left:51.47%"></i></span></span></li><li><span class="sid">s3</span><span class="track"><span class="bar" data-in="10.6" data-out="17" title="s3: 10.6 s to 17 s" style="left:30.64%;width:18.50%"><i style="left:3.13%"></i><i style="left:3.91%"></i><i style="left:6.25%"></i><i style="left:9.37%"></i><i style="left:12.50%"></i><i style="left:15.62%"></i><i style="left:25.00%"></i></span></span></li><li><span class="sid">s4</span><span class="track"><span class="bar" data-in="17" data-out="24" title="s4: 17 s to 24 s" style="left:49.13%;width:20.23%"><i style="left:2.86%"></i><i style="left:7.14%"></i><i style="left:8.00%"></i><i style="left:8.57%"></i><i style="left:8.86%"></i><i style="left:9.43%"></i><i style="left:9.71%"></i><i style="left:10.29%"></i><i style="left:10.57%"></i><i style="left:11.14%"></i><i style="left:11.43%"></i><i style="left:12.00%"></i><i style="left:12.29%"></i><i style="left:12.86%"></i><i style="left:13.14%"></i><i style="left:13.71%"></i><i style="left:14.57%"></i><i style="left:25.71%"></i><i style="left:27.14%"></i><i style="left:64.29%"></i></span></span></li><li><span class="sid">s5</span><span class="track"><span class="bar" data-in="24" data-out="29.6" title="s5: 24 s to 29.6 s" style="left:69.36%;width:16.18%"><i style="left:3.57%"></i><i style="left:5.36%"></i><i style="left:10.71%"></i><i style="left:17.86%"></i><i style="left:21.43%"></i></span></span></li><li><span class="sid">s6</span><span class="track"><span class="bar" data-in="29.6" data-out="34.6" title="s6: 29.6 s to 34.6 s" style="left:85.55%;width:14.45%"><i style="left:2.00%"></i><i style="left:6.40%"></i><i style="left:12.00%"></i><i style="left:14.40%"></i><i style="left:20.00%"></i><i style="left:28.00%"></i></span></span></li><li class="ruler" aria-hidden="true"><span class="sid"></span><span class="track"><span class="t0">0 s</span><span class="t1" style="left:100.00%">34.6 s</span></span></li></ol><!--/build-->
-      <figcaption>This video is one scene file, <a href="https://github.com/drknowhow/kinescript/blob/main/marketing/promo.json"><code>marketing/promo.json</code></a>. At 1080p it renders with audio in about 3.5 seconds on the development machine; this copy is 1280x720. The bars under it are the scene's top-level layers as <code>kine probe</code> reports them, with a dot where each child layer starts.</figcaption>
+      <!--build:score:hero--><ol class="score" data-dur="34.6" style="--dur:34.6" aria-label="Timeline of marketing/promo.json, 34.6 s"><li><span class="sid">bg</span><span class="track"><span class="bar" data-in="0" data-out="34.6" title="bg: 0 s to 34.6 s" style="left:0.00%;width:100.00%"></span></span></li><li><span class="sid">s1</span><span class="track"><span class="bar" data-in="0" data-out="3.8" title="s1: 0 s to 3.8 s" style="left:0.00%;width:10.98%"><i style="left:5.79%"></i><i style="left:13.16%"></i><i style="left:16.32%"></i><i style="left:39.47%"></i></span></span></li><li><span class="sid">s2</span><span class="track"><span class="bar" data-in="3.8" data-out="10.6" title="s2: 3.8 s to 10.6 s" style="left:10.98%;width:19.65%"><i style="left:2.94%"></i><i style="left:4.41%"></i><i style="left:8.82%"></i><i style="left:45.59%"></i><i style="left:51.47%"></i></span></span></li><li><span class="sid">s3</span><span class="track"><span class="bar" data-in="10.6" data-out="17" title="s3: 10.6 s to 17 s" style="left:30.64%;width:18.50%"><i style="left:3.13%"></i><i style="left:3.91%"></i><i style="left:6.25%"></i><i style="left:9.37%"></i><i style="left:12.50%"></i><i style="left:15.62%"></i><i style="left:25.00%"></i></span></span></li><li><span class="sid">s4</span><span class="track"><span class="bar" data-in="17" data-out="24" title="s4: 17 s to 24 s" style="left:49.13%;width:20.23%"><i style="left:2.86%"></i><i style="left:7.14%"></i><i style="left:8.00%"></i><i style="left:8.57%"></i><i style="left:8.86%"></i><i style="left:9.43%"></i><i style="left:9.71%"></i><i style="left:10.29%"></i><i style="left:10.57%"></i><i style="left:11.14%"></i><i style="left:11.43%"></i><i style="left:12.00%"></i><i style="left:12.29%"></i><i style="left:12.86%"></i><i style="left:13.14%"></i><i style="left:13.71%"></i><i style="left:14.57%"></i><i style="left:25.71%"></i><i style="left:27.14%"></i><i style="left:64.29%"></i></span></span></li><li><span class="sid">s5</span><span class="track"><span class="bar" data-in="24" data-out="29.6" title="s5: 24 s to 29.6 s" style="left:69.36%;width:16.18%"><i style="left:3.57%"></i><i style="left:5.36%"></i><i style="left:10.71%"></i><i style="left:17.86%"></i><i style="left:21.43%"></i></span></span></li><li><span class="sid">s6</span><span class="track"><span class="bar" data-in="29.6" data-out="34.6" title="s6: 29.6 s to 34.6 s" style="left:85.55%;width:14.45%"><i style="left:2.00%"></i><i style="left:6.40%"></i><i style="left:12.00%"></i><i style="left:14.40%"></i><i style="left:20.00%"></i><i style="left:28.00%"></i></span></span></li><li class="snd"><span class="sid">audio1</span><span class="track"><span class="bar" data-in="0" data-out="34.6" title="audio1 (sound): 0 s to 34.6 s" style="left:0.00%;width:100.00%"></span></span></li><li class="ruler" aria-hidden="true"><span class="sid"></span><span class="track"><span class="t0">0 s</span><span class="t1" style="left:100.00%">34.6 s</span></span></li></ol><!--/build-->
+      <figcaption>This video is one scene file, <a href="https://github.com/drknowhow/kinescript/blob/main/marketing/promo.json"><code>marketing/promo.json</code></a>. At 1080p it renders with audio in about 3.3 seconds on the development machine; this copy is 1280x720. The bars under it are the scene's top-level layers and its sound as <code>kine probe</code> reports them, with a dot where each child layer starts.</figcaption>
     </figure>
   </section>
 
@@ -64,7 +64,7 @@
 
   <section id="demos" aria-labelledby="demos-title">
     <h2 id="demos-title">The file beside the video.</h2>
-    <p class="sub">Each demo is a scene file and the video Kinescript rendered from it with <code>kine render -q high</code>, here at half size. The bars under a video are its layers; click them to jump.</p>
+    <p class="sub">Each demo is a scene file and the video Kinescript rendered from it with <code>kine render -q high</code>, here at half size. The bars under a video are its layers, and its sounds in orange; click them to jump.</p>
 
     <article class="demo tall" id="captions">
       <div class="demo-head">
@@ -93,7 +93,7 @@
         <figure class="player" data-name="video edit">
           <div class="screen"><video src="demos/edit.mp4" poster="demos/edit.jpg" width="960" height="540" autoplay muted loop playsinline controls preload="metadata" aria-label="Video edit demo, 12 seconds, no sound"></video></div>
           <div class="deck"><button type="button" data-play>Pause</button><span class="tc">0.0 s</span></div>
-          <!--build:score:edit--><ol class="score" data-dur="11.6" style="--dur:11.6" aria-label="Timeline of edit.json, 11.6 s"><li><span class="sid">cut-1</span><span class="track"><span class="bar" data-in="0" data-out="3.8" title="cut-1: 0 s to 3.8 s" style="left:0.00%;width:32.76%"></span></span></li><li><span class="sid">cut-2</span><span class="track"><span class="bar" data-in="3.3" data-out="7.3" title="cut-2: 3.3 s to 7.3 s" style="left:28.45%;width:34.48%"></span></span></li><li><span class="sid">cut-3</span><span class="track"><span class="bar" data-in="6.8" data-out="11.6" title="cut-3: 6.8 s to 11.6 s" style="left:58.62%;width:41.38%"></span></span></li><li><span class="sid">lt</span><span class="track"><span class="bar" data-in="0.4" data-out="3" title="lt: 0.4 s to 3 s" style="left:3.45%;width:22.41%"><i style="left:4.62%"></i><i style="left:11.54%"></i></span></span></li><li><span class="sid">co</span><span class="track"><span class="bar" data-in="1.2" data-out="3.1" title="co: 1.2 s to 3.1 s" style="left:10.34%;width:16.38%"><i style="left:13.16%"></i><i style="left:26.32%"></i></span></span></li><li><span class="sid">pip</span><span class="track"><span class="bar" data-in="7.3" data-out="11.6" title="pip: 7.3 s to 11.6 s" style="left:62.93%;width:37.07%"></span></span></li><li><span class="sid">cap</span><span class="track"><span class="bar" data-in="3.3" data-out="11.1" title="cap: 3.3 s to 11.1 s" style="left:28.45%;width:67.24%"></span></span></li><li><span class="sid">bar</span><span class="track"><span class="bar" data-in="0" data-out="11.6" title="bar: 0 s to 11.6 s" style="left:0.00%;width:100.00%"></span></span></li><li class="ruler" aria-hidden="true"><span class="sid"></span><span class="track"><span class="t0">0 s</span><span class="t1" style="left:100.00%">11.6 s</span></span></li></ol><!--/build-->
+          <!--build:score:edit--><ol class="score" data-dur="11.6" style="--dur:11.6" aria-label="Timeline of edit.json, 11.6 s"><li><span class="sid">cut</span><span class="track"><span class="bar" data-in="0" data-out="11.6" title="cut: 0 s to 11.6 s" style="left:0.00%;width:100.00%"><i style="left:28.45%"></i><i style="left:58.62%"></i></span></span></li><li><span class="sid">lt</span><span class="track"><span class="bar" data-in="0.4" data-out="3" title="lt: 0.4 s to 3 s" style="left:3.45%;width:22.41%"><i style="left:4.62%"></i><i style="left:11.54%"></i></span></span></li><li><span class="sid">co</span><span class="track"><span class="bar" data-in="1.2" data-out="3.1" title="co: 1.2 s to 3.1 s" style="left:10.34%;width:16.38%"><i style="left:13.16%"></i><i style="left:26.32%"></i></span></span></li><li><span class="sid">pip</span><span class="track"><span class="bar" data-in="7.3" data-out="11.6" title="pip: 7.3 s to 11.6 s" style="left:62.93%;width:37.07%"></span></span></li><li><span class="sid">cap</span><span class="track"><span class="bar" data-in="3.3" data-out="11.1" title="cap: 3.3 s to 11.1 s" style="left:28.45%;width:67.24%"></span></span></li><li><span class="sid">bar</span><span class="track"><span class="bar" data-in="0" data-out="11.6" title="bar: 0 s to 11.6 s" style="left:0.00%;width:100.00%"></span></span></li><li class="ruler" aria-hidden="true"><span class="sid"></span><span class="track"><span class="t0">0 s</span><span class="t1" style="left:100.00%">11.6 s</span></span></li></ol><!--/build-->
         </figure>
         <div class="pane">
           <div class="pane-head"><a href="demos/edit.json">edit.json</a><span>1920 x 1080, 11.6 s</span></div>
@@ -101,6 +101,62 @@
         </div>
       </div>
     </article>
+  </section>
+
+  <section id="sound" aria-labelledby="sound-title">
+    <h2 id="sound-title">A voice from a line of text.</h2>
+    <p class="sub">Write what the voice says in the scene. <code>kine voice</code> speaks it with a plugin (Kokoro is the first) and writes the time of every word, so <code>"at": "vo:text"</code> starts a layer on that word and captions follow the voice. Give sounds a role and the mix is levelled for you. Rendering never calls the speech engine.</p>
+
+    <article class="demo" id="voice">
+      <div class="demo-head">
+        <h3>Narration that cues the picture</h3>
+        <p>A Kokoro voice spoken from the scene's <code>text</code>. Five of its words each start a layer, and each layer's <code>sound</code> plays a click as it appears. The captions are lit from the word times, and the music dips 14 dB while the voice speaks. <code>[[pic]]</code> in the text names the word after it, so <code>vo:pic</code> stays on that word if the line is rewritten. Turn the sound on.</p>
+      </div>
+      <div class="demo-grid">
+        <figure class="player" data-name="voice demo">
+          <div class="screen"><video src="demos/voice.mp4" poster="demos/voice.jpg" width="960" height="540" autoplay muted loop playsinline controls preload="metadata" aria-label="Voice-over demo, 10 seconds, with sound"></video></div>
+          <div class="deck"><button type="button" data-play>Pause</button><button type="button" data-sound aria-pressed="false">Sound on</button><span class="tc">0.0 s</span></div>
+          <!--build:score:voice--><ol class="score" data-dur="9.95" style="--dur:9.95" aria-label="Timeline of voice.json, 9.95 s"><li><span class="sid">b0</span><span class="track"><span class="bar" data-in="1.075" data-out="2.3" title="b0: 1.075 s to 2.3 s" style="left:10.80%;width:12.31%"><i style="left:8.16%"></i></span></span></li><li><span class="sid">b1</span><span class="track"><span class="bar" data-in="2.4" data-out="4.338" title="b1: 2.4 s to 4.338 s" style="left:24.12%;width:19.48%"><i style="left:5.16%"></i></span></span></li><li><span class="sid">b2</span><span class="track"><span class="bar" data-in="4.438" data-out="5.625" title="b2: 4.438 s to 5.625 s" style="left:44.60%;width:11.93%"><i style="left:8.34%"></i></span></span></li><li><span class="sid">b3</span><span class="track"><span class="bar" data-in="5.725" data-out="7.088" title="b3: 5.725 s to 7.088 s" style="left:57.54%;width:13.70%"><i style="left:7.34%"></i></span></span></li><li><span class="sid">b4</span><span class="track"><span class="bar" data-in="7.188" data-out="9.95" title="b4: 7.188 s to 9.95 s" style="left:72.24%;width:27.76%"><i style="left:3.58%"></i></span></span></li><li><span class="sid">cc</span><span class="track"><span class="bar" data-in="0.6" data-out="9" title="cc: 0.6 s to 9 s" style="left:6.03%;width:84.42%"></span></span></li><li><span class="sid">progress</span><span class="track"><span class="bar" data-in="0" data-out="9.95" title="progress: 0 s to 9.95 s" style="left:0.00%;width:100.00%"></span></span></li><li class="snd"><span class="sid">vo</span><span class="track"><span class="bar" data-in="0.6" data-out="8.75" title="vo (voice): 0.6 s to 8.75 s" style="left:6.03%;width:81.91%"><i style="left:3.37%"></i><i style="left:5.83%"></i><i style="left:9.51%"></i><i style="left:15.34%"></i><i style="left:16.71%"></i><i style="left:17.79%"></i><i style="left:21.01%"></i><i style="left:22.09%"></i><i style="left:33.28%"></i><i style="left:36.81%"></i><i style="left:39.41%"></i><i style="left:40.80%"></i><i style="left:44.48%"></i><i style="left:45.85%"></i><i style="left:47.09%"></i><i style="left:54.91%"></i><i style="left:56.90%"></i><i style="left:57.98%"></i><i style="left:62.88%"></i><i style="left:68.25%"></i><i style="left:73.31%"></i><i style="left:74.70%"></i><i style="left:75.77%"></i><i style="left:80.83%"></i><i style="left:84.97%"></i><i style="left:87.26%"></i><i style="left:88.34%"></i></span></span></li><li class="snd"><span class="sid">bed</span><span class="track"><span class="bar" data-in="0" data-out="9.95" title="bed (music): 0 s to 9.95 s" style="left:0.00%;width:100.00%"></span></span></li><li class="ruler" aria-hidden="true"><span class="sid"></span><span class="track"><span class="t0">0 s</span><span class="t1" style="left:100.00%">9.95 s</span></span></li></ol><!--/build-->
+        </figure>
+        <div class="pane">
+          <div class="pane-head"><a href="demos/voice.json">voice.json</a><span>1920 x 1080, 9.95 s</span></div>
+          <pre class="code"><code><!--build:json:voice--><span class="ln">{</span><span class="ln">  <span class="k">&quot;canvas&quot;</span>: {<span class="k">&quot;w&quot;</span>: <span class="n">1920</span>, <span class="k">&quot;h&quot;</span>: <span class="n">1080</span>, <span class="k">&quot;fps&quot;</span>: <span class="n">30</span>, <span class="k">&quot;duration&quot;</span>: <span class="s">&quot;auto&quot;</span>, <span class="k">&quot;bg&quot;</span>: <span class="s">&quot;$void&quot;</span>},</span><span class="ln">  <span class="k">&quot;audio&quot;</span>: [</span><span class="ln">    {<span class="k">&quot;id&quot;</span>: <span class="s">&quot;vo&quot;</span>, <span class="k">&quot;role&quot;</span>: <span class="s">&quot;voice&quot;</span>, <span class="k">&quot;at&quot;</span>: <span class="n">0.6</span>, <span class="k">&quot;speaker&quot;</span>: <span class="s">&quot;af_heart&quot;</span>,</span><span class="ln">     <span class="k">&quot;text&quot;</span>: <span class="s">&quot;This voice began as a line of text. Each word it says is a cue, so the picture [[pic]]follows it, and the music [[duck]]dips while it speaks.&quot;</span>},</span><span class="ln">    {<span class="k">&quot;id&quot;</span>: <span class="s">&quot;bed&quot;</span>, <span class="k">&quot;role&quot;</span>: <span class="s">&quot;music&quot;</span>, <span class="k">&quot;src&quot;</span>: <span class="s">&quot;sound/bed.m4a&quot;</span>, <span class="k">&quot;loop&quot;</span>: <span class="n">true</span>, <span class="k">&quot;until&quot;</span>: <span class="c">&quot;end&quot;</span>, <span class="k">&quot;fadeIn&quot;</span>: <span class="n">1</span>, <span class="k">&quot;fadeOut&quot;</span>: <span class="n">1.5</span>}</span><span class="ln">  ],</span><span class="ln">  <span class="k">&quot;components&quot;</span>: {</span><span class="ln">    <span class="k">&quot;beat&quot;</span>: {<span class="k">&quot;params&quot;</span>: {<span class="k">&quot;word&quot;</span>: <span class="s">&quot;&quot;</span>, <span class="k">&quot;cue&quot;</span>: <span class="s">&quot;&quot;</span>}, <span class="k">&quot;layers&quot;</span>: [</span><span class="ln">      {<span class="k">&quot;type&quot;</span>: <span class="s">&quot;text&quot;</span>, <span class="k">&quot;text&quot;</span>: <span class="s">&quot;{{word}}&quot;</span>, <span class="k">&quot;x&quot;</span>: <span class="s">&quot;50%&quot;</span>, <span class="k">&quot;y&quot;</span>: <span class="s">&quot;42%&quot;</span>, <span class="k">&quot;size&quot;</span>: <span class="n">220</span>, <span class="k">&quot;weight&quot;</span>: <span class="n">800</span>,</span><span class="ln">       <span class="k">&quot;enter&quot;</span>: {<span class="k">&quot;name&quot;</span>: <span class="s">&quot;pop&quot;</span>, <span class="k">&quot;dur&quot;</span>: <span class="n">0.35</span>}, <span class="k">&quot;exit&quot;</span>: <span class="s">&quot;fade&quot;</span>},</span><span class="ln">      {<span class="k">&quot;type&quot;</span>: <span class="s">&quot;text&quot;</span>, <span class="k">&quot;text&quot;</span>: <span class="s">&quot;at {{cue}}&quot;</span>, <span class="k">&quot;font&quot;</span>: <span class="s">&quot;IBM Plex Mono&quot;</span>, <span class="k">&quot;x&quot;</span>: <span class="s">&quot;50%&quot;</span>, <span class="k">&quot;y&quot;</span>: <span class="s">&quot;60%&quot;</span>, <span class="k">&quot;size&quot;</span>: <span class="n">44</span>,</span><span class="ln">       <span class="k">&quot;fill&quot;</span>: <span class="s">&quot;$muted&quot;</span>, <span class="k">&quot;at&quot;</span>: <span class="n">0.1</span>, <span class="k">&quot;enter&quot;</span>: <span class="s">&quot;rise&quot;</span>, <span class="k">&quot;exit&quot;</span>: <span class="s">&quot;fade&quot;</span>}</span><span class="ln">    ]}</span><span class="ln">  },</span><span class="ln">  <span class="k">&quot;layers&quot;</span>: [</span><span class="ln">    {<span class="k">&quot;use&quot;</span>: <span class="s">&quot;beat&quot;</span>, <span class="k">&quot;id&quot;</span>: <span class="s">&quot;b0&quot;</span>, <span class="k">&quot;word&quot;</span>: <span class="s">&quot;Voice&quot;</span>, <span class="k">&quot;cue&quot;</span>: <span class="s">&quot;vo:voice&quot;</span>, <span class="k">&quot;at&quot;</span>: <span class="c">&quot;vo:voice&quot;</span>, <span class="k">&quot;until&quot;</span>: <span class="c">&quot;vo:text-0.1&quot;</span>,</span><span class="ln">     <span class="k">&quot;sound&quot;</span>: <span class="s">&quot;sound/click.wav&quot;</span>},</span><span class="ln">    {<span class="k">&quot;use&quot;</span>: <span class="s">&quot;beat&quot;</span>, <span class="k">&quot;id&quot;</span>: <span class="s">&quot;b1&quot;</span>, <span class="k">&quot;word&quot;</span>: <span class="s">&quot;Text&quot;</span>, <span class="k">&quot;cue&quot;</span>: <span class="s">&quot;vo:text&quot;</span>, <span class="k">&quot;at&quot;</span>: <span class="c">&quot;vo:text&quot;</span>, <span class="k">&quot;until&quot;</span>: <span class="c">&quot;vo:cue-0.1&quot;</span>,</span><span class="ln">     <span class="k">&quot;sound&quot;</span>: <span class="s">&quot;sound/click.wav&quot;</span>},</span><span class="ln">    {<span class="k">&quot;use&quot;</span>: <span class="s">&quot;beat&quot;</span>, <span class="k">&quot;id&quot;</span>: <span class="s">&quot;b2&quot;</span>, <span class="k">&quot;word&quot;</span>: <span class="s">&quot;Cue&quot;</span>, <span class="k">&quot;cue&quot;</span>: <span class="s">&quot;vo:cue&quot;</span>, <span class="k">&quot;at&quot;</span>: <span class="c">&quot;vo:cue&quot;</span>, <span class="k">&quot;until&quot;</span>: <span class="c">&quot;vo:pic-0.1&quot;</span>,</span><span class="ln">     <span class="k">&quot;sound&quot;</span>: <span class="s">&quot;sound/click.wav&quot;</span>},</span><span class="ln">    {<span class="k">&quot;use&quot;</span>: <span class="s">&quot;beat&quot;</span>, <span class="k">&quot;id&quot;</span>: <span class="s">&quot;b3&quot;</span>, <span class="k">&quot;word&quot;</span>: <span class="s">&quot;Picture&quot;</span>, <span class="k">&quot;cue&quot;</span>: <span class="s">&quot;vo:pic&quot;</span>, <span class="k">&quot;at&quot;</span>: <span class="c">&quot;vo:pic&quot;</span>, <span class="k">&quot;until&quot;</span>: <span class="c">&quot;vo:duck-0.1&quot;</span>,</span><span class="ln">     <span class="k">&quot;sound&quot;</span>: <span class="s">&quot;sound/click.wav&quot;</span>},</span><span class="ln">    {<span class="k">&quot;use&quot;</span>: <span class="s">&quot;beat&quot;</span>, <span class="k">&quot;id&quot;</span>: <span class="s">&quot;b4&quot;</span>, <span class="k">&quot;word&quot;</span>: <span class="s">&quot;Mix&quot;</span>, <span class="k">&quot;cue&quot;</span>: <span class="s">&quot;vo:duck&quot;</span>, <span class="k">&quot;at&quot;</span>: <span class="c">&quot;vo:duck&quot;</span>, <span class="k">&quot;until&quot;</span>: <span class="c">&quot;vo.out+1.2&quot;</span>,</span><span class="ln">     <span class="k">&quot;sound&quot;</span>: <span class="s">&quot;sound/click.wav&quot;</span>},</span><span class="ln">    {<span class="k">&quot;id&quot;</span>: <span class="s">&quot;cc&quot;</span>, <span class="k">&quot;type&quot;</span>: <span class="s">&quot;captions&quot;</span>, <span class="k">&quot;voice&quot;</span>: <span class="s">&quot;vo&quot;</span>, <span class="k">&quot;mode&quot;</span>: <span class="s">&quot;karaoke&quot;</span>, <span class="k">&quot;active&quot;</span>: <span class="s">&quot;$key&quot;</span>},</span><span class="ln">    {<span class="k">&quot;use&quot;</span>: <span class="s">&quot;progress&quot;</span>, <span class="k">&quot;id&quot;</span>: <span class="s">&quot;progress&quot;</span>, <span class="k">&quot;color&quot;</span>: <span class="s">&quot;$key&quot;</span>, <span class="k">&quot;h&quot;</span>: <span class="n">6</span>}</span><span class="ln">  ]</span><span class="ln">}</span><!--/build--></code></pre>
+        </div>
+      </div>
+    </article>
+
+    <div class="cols">
+      <div>
+        <div class="pane">
+          <div class="pane-head"><span>terminal</span></div>
+          <pre class="code out"><code>kine voice voice.json   # speak the text, time the words
+kine check voice.json   # also mixes and measures it
+kine look voice.json --audio
+kine render voice.json -o voice.mp4</code></pre>
+        </div>
+        <p class="note"><code>kine voice</code> speaks a line again only when its text, speaker or rate changed, and <code>kine check</code> says when one is missing or out of date. The Kokoro plugin installs from <a href="https://github.com/drknowhow/kinescript/tree/main/plugins/kinescript-kokoro"><code>plugins/kinescript-kokoro</code></a>; any other engine can be a plugin or a command.</p>
+      </div>
+      <div>
+        <ul class="tools-list" style="grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);">
+          <li><b>voice</b>-18 LUFS, and the music and ambience dip 14 dB under it</li>
+          <li><b>music</b>-16 LUFS, looped to the end of the scene</li>
+          <li><b>sfx</b>peaks at -6 dBFS; leading silence skipped, so it lands on its cue</li>
+          <li><b>mix</b>brought to -16 LUFS, peaks under -1.5 dBTP, in MP4, MOV and WebM</li>
+        </ul>
+        <p class="note">Roles and targets are defaults; a top-level <code>mix</code> changes them. A layer's <code>sound</code> moves when the layer moves. Scenes whose sounds have no role are mixed as given.</p>
+      </div>
+    </div>
+
+    <div class="tool">
+      <div class="tool-head">
+        <h3><code>kine look voice.json <span class="nb">--audio</span></code></h3>
+        <p>An agent cannot hear the mix, so it reads it. Under the frames, on the same time axis: a lane for each role and one for the mix, each word the voice says, where the music dips, each click on its cue, and any problem in red. The JSON that comes with it gives each sound's loudness before and after the mix.</p>
+      </div>
+      <figure class="sheet">
+        <a href="media/listen.jpg"><img src="media/listen.jpg" width="1960" height="822" loading="lazy" alt="A contact sheet of eight frames from the voice demo with the sound drawn under them: a voice lane with each spoken word marked, a music lane that dips while the voice speaks, an effects lane with five clicks, and the mix."></a>
+        <figcaption>The actual output for the voice demo above. The mix measures -16.0 LUFS with a true peak of -1.9 dBTP. Open the image for full size.</figcaption>
+      </figure>
+    </div>
   </section>
 
   <section id="depth" aria-labelledby="depth-title">
@@ -223,7 +279,7 @@
     <div class="tool">
       <div class="tool-head">
         <h3><code>kine check problems.json</code></h3>
-        <p>Every problem at once, errors first, each with its layer, time range and a fix. Contrast is measured against the pixels actually behind the text. The command exits with status 1 while there are errors.</p>
+        <p>Every problem at once, errors first, each with its layer, time range and a fix. Contrast is measured against the pixels actually behind the text. When the scene has sound it mixes and measures it too, and reports a voice cut off or masked by the music, an effect that lands late, and a mix off its loudness target. The command exits with status 1 while there are errors.</p>
       </div>
       <div class="cols check-grid">
         <div class="pane">
@@ -340,9 +396,10 @@
           <li><b>kine_still</b>one frame, as an image</li>
           <li><b>kine_probe</b>timeline and layer boxes</li>
           <li><b>kine_render</b>a draft, a range or the final file</li>
+          <li><b>kine_voice</b>speaks a scene's text and times its words</li>
         </ul>
       </div>
-      <p class="note"><code>kine docs</code> prints the whole scene reference, about 330 lines: rules, a complete scene, every layer type with its defaults, and recipes. It is written to fit in a model's context.</p>
+      <p class="note"><code>kine docs</code> prints the whole scene reference, about 400 lines: rules, a complete scene, every layer type with its defaults, and recipes. It is written to fit in a model's context.</p>
     </div>
   </section>
 
@@ -350,8 +407,8 @@
     <h2 id="speed-title">Fast on a GPU.</h2>
     <p class="sub">Skia draws on the GPU through a hidden OpenGL context, one per worker. Frames are split into chunks, encoded in parallel and joined without re-encoding, while another ffmpeg process mixes the audio.</p>
     <ul class="speed">
-      <li><b>2.7 ms</b>median to draw one 1080p frame of the launch video and read it back</li>
-      <li><b>300</b>frames per second, rendering the launch video at 1080p with audio</li>
+      <li><b>2.8 ms</b>median to draw one 1080p frame of the launch video and read it back</li>
+      <li><b>320</b>frames per second, rendering the launch video at 1080p with audio</li>
       <li><b>3</b>Python dependencies: skia-python, numpy and glfw, plus ffmpeg</li>
     </ul>
     <p class="note">Measured on an Intel Core Ultra 7 265 with an NVIDIA RTX 5060 Ti, Windows 11, on 2026-10-30. Without a GPU, Kinescript falls back to Skia's CPU rasteriser, which is much slower; the <a href="https://github.com/drknowhow/kinescript#limits">README</a> has the numbers.</p>
@@ -383,7 +440,7 @@ kine render scene.json -o scene.mp4</code></pre>
   </main>
 
   <footer>
-    <span class="brand"><img src="assets/mark.svg" alt="" width="200" height="200">Kinescript 1.1.1, MIT licence</span>
+    <span class="brand"><img src="assets/mark.svg" alt="" width="200" height="200">Kinescript 1.2.0, MIT licence</span>
     <nav aria-label="Project links">
       <a href="https://github.com/drknowhow/kinescript">Source</a>
       <a href="https://pypi.org/project/kinescript/">PyPI</a>
