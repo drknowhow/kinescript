@@ -130,7 +130,7 @@ LAYER TYPES (defaults in brackets)
             premultiplied: for a see-through colour return half4(rgb * a, a). iTime (seconds),
             iResolution, iProgress (0..1) and your uniforms are declared for you.
             Fills the canvas unless you give w and h.
-  model     a lit 3D solid: shape or parts (see 3D MODELS).
+  model     a lit 3D solid, 3D text or an extruded SVG path: shape or parts (see 3D MODELS).
   group     children [layers], w, h, clip (true cuts children off at w x h), radius, fill.
             Children are placed from the group's x, y and start at the group's "at".
   sequence  clips [{"src": "a.mp4", "trim": [0, 4]}, ...] and transition {"type": "fade",
@@ -181,7 +181,14 @@ DEPTH AND CAMERA (3D)
   scale and the camera apply to it. x and y place its centre.
   shape     cube (w [200], h and depth [= w]) | sphere (r [100]) | cylinder (r [80], h [200]) |
             cone (r [90], h [200], tip up) | torus (r [110], tube [r x 0.35], facing you) |
-            plane (w, h; both sides show). Sizes are px and animate.
+            plane (w, h; both sides show) | text | path. Sizes are px and animate.
+  text      shape "text" pushes letters out in depth: text ("\n" breaks lines), size [120],
+            weight [600], font, italic, letterSpacing, lineHeight, depth [size x 0.2], bevel [0]
+            (px of 45-degree edge). Centred on x, y. Each new text, size, depth or bevel value
+            rebuilds the solid, so grow it with scale.
+  path      shape "path": d (SVG path data, filled nonzero), w and/or h (fits inside them, keeping
+            its shape), depth [a fifth of its larger side], bevel [0], strokeWidth (in d's units:
+            extrudes the stroke, with round ends, for line icons).
   detail    low | medium (default) | high: how many triangles. A medium sphere has about 2,200.
   fill      one colour [theme accent]   shine 0..1 [0.4]   metal 0..1 [0]   rim 0..1 [0.5] (edge
             light)   bands [0] (2 or more: flat toon steps). These animate.
@@ -196,14 +203,20 @@ DEPTH AND CAMERA (3D)
             "from": "topleft", "color": "#fff4e6"}. from: topleft | top | topright | left | right |
             front | bottomleft | bottom | bottomright. Lights move with the camera.
   Triangles are sorted far to near within one model, so things that touch or pass through each
-  other go in one model as parts. Separate layers draw in list order. check warns past 60,000
-  triangles in a frame.
+  other go in one model as parts. Where two surfaces cut through each other the seam is stepped,
+  so let parts touch rather than cross. Separate layers draw in list order. check warns past
+  60,000 triangles in a frame.
   A ring around a ball that builds in, turns, and flies apart:
     {"id": "emblem", "type": "model", "x": "50%", "y": "45%", "detail": "high",
      "rotateX": [[0, 64], ["end", 18]], "rotateY": [[0, -30], ["end", 70]],
      "enter": {"name": "build", "dur": 1.6}, "explode": [[3, 0], ["end", 1]],
      "parts": [{"shape": "torus", "r": 250, "tube": 70, "fill": "#ff633f", "metal": 0.45, "shine": 0.7},
                {"shape": "sphere", "r": 100, "fill": "#b9f45d", "shine": 0.9}]}
+  A 3D title that builds in, turns, and settles:
+    {"id": "title3d", "type": "model", "shape": "text", "text": "LAUNCH", "x": "50%", "y": "50%",
+     "size": 240, "weight": 800, "depth": 70, "bevel": 5, "shine": 0.6,
+     "rotateY": [[0, -40], [2.4, 0, "outCubic"]], "rotateX": [[0, 18], [2.4, 0, "outCubic"]],
+     "enter": {"name": "build", "dur": 1.2}}
 
 ANIMATING A VALUE (any number or colour key)
   constant     "x": 960

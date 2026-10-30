@@ -305,9 +305,8 @@ def _num(v, ref):
 
 
 def _infer_type(raw: dict) -> str:
-    for key, t in (("text", "text"), ("cues", "captions"), ("d", "path"), ("points", "path"),
-                   ("children", "group"), ("layers", "group"), ("shape", "model"), ("parts", "model"),
-                   ("r", "circle")):
+    for key, t in (("shape", "model"), ("parts", "model"), ("text", "text"), ("cues", "captions"), ("d", "path"),
+                   ("points", "path"), ("children", "group"), ("layers", "group"), ("r", "circle")):
         if key in raw:
             return t
     if "src" in raw:

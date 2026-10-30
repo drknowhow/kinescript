@@ -66,6 +66,20 @@ def test_model_keys_parts_and_light_are_checked():
     assert [m for m in errs if "parts[1]: x" in m and "do not animate" in m]
 
 
+def test_text_and_path_models_need_their_outline_and_keep_the_2d_types():
+    spec, rep = schema.normalize(scene([
+        {"id": "a", "shape": "text", "text": "Hi", "d": 30, "fontSize": 90},  # no type: a shape makes it a model
+        {"id": "b", "type": "model", "shape": "svg", "w": 200},
+        {"id": "c", "type": "model", "parts": [{"shape": "string", "extrude": 20}]},
+        {"id": "d", "type": "text", "text": "flat"}, {"id": "e", "type": "path", "d": "M0 0 L10 10"}]))
+    a, b, c, d, e = spec["layers"]
+    assert (S._infer_type(a), a["depth"], a["size"]) == ("model", 30, 90) and "d" not in a
+    assert b["shape"] == "path" and c["parts"][0]["shape"] == "text" and c["parts"][0]["depth"] == 20
+    assert (d["type"], e["type"]) == ("text", "path")
+    errs = sorted(i["message"] for i in rep.issues if i["level"] == "error")
+    assert len(errs) == 2 and "path model needs 'd'" in errs[0] and "parts[0]: a text model needs 'text'" in errs[1]
+
+
 def test_line_colour_means_stroke():
     _, s = codes(scene([{"id": "l", "type": "line", "points": [[0, 0], [10, 10]], "color": "#f00"}]))
     assert s.by_id["l"].raw["stroke"] == "#f00"
@@ -188,7 +202,7 @@ def test_schema_lists_cover_every_key_the_renderer_reads(monkeypatch):
         return orig(self, name, *a, **kw)
     monkeypatch.setattr(S.Layer, "get", get)
     scenes = [ROOT / "examples" / "hello.json", ROOT / "examples" / "edit.json", ROOT / "examples" / "3d.json",
-              ROOT / "examples" / "model.json", ROOT / "marketing" / "promo.json"]
+              ROOT / "examples" / "model.json", ROOT / "examples" / "title3d.json", ROOT / "marketing" / "promo.json"]
     for path in scenes:
         sc = S.load(str(path))
         for layer in sc.all_layers():
@@ -221,7 +235,7 @@ def test_component_param_lists_cover_every_param_a_builder_reads():
 
 def test_examples_and_promo_have_no_unknown_keys():
     for path in ("examples/hello.json", "examples/edit.json", "examples/3d.json", "examples/model.json",
-                 "marketing/promo.json",
+                 "examples/title3d.json", "marketing/promo.json",
                  "marketing/og.json"):
         sc = k.load(str(ROOT / path))  # loading runs every schema check; a full `check` renders and is slow on CPU
         bad = [i for i in sc.issues if i["level"] == "error" or i["code"] in ("renamed-key", "ignored-key")]
