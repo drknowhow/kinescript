@@ -6,7 +6,7 @@ import json
 import re
 from pathlib import Path
 
-from . import components, media, schema
+from . import components, media, models, schema
 from . import presets as P
 from .props import Ctx, Prop, compile_prop
 from .timing import Timeline
@@ -144,8 +144,12 @@ class Scene:
             return True
 
         for layer in self.all_layers():
-            if layer.src:
-                missing(layer.src, layer.id, f"{layer.type} src")
+            if layer.src and not missing(layer.src, layer.id, f"{layer.type} src") and layer.type == "model":
+                try:
+                    models.load(layer.src)
+                except ValueError as e:
+                    self.note("error", "bad-model", layer.id, f"model src {e}",
+                              "export it again as glTF 2.0 (.glb) or .obj")
         for i, a in enumerate(self.audio):
             if isinstance(a, dict) and a.get("src") and not missing(self.path(a["src"]), f"audio[{i}]", "audio src"):
                 _check_trim(self, f"audio[{i}]", a.get("trim") or [0, None], media.probe(self.path(a["src"]))["duration"])
@@ -195,7 +199,7 @@ class Scene:
             layer = Layer(lid, ltype, raw, parent, len(self.by_id))
             self.by_id[lid] = layer
             natural = None
-            if ltype in ("video", "image") or (ltype == "captions" and raw.get("src")):
+            if ltype in ("video", "image", "model") or (ltype == "captions" and raw.get("src")):
                 layer.src = self.path(raw["src"]) if raw.get("src") else None
             if ltype == "video" and layer.src and Path(layer.src).exists():
                 info = media.probe(layer.src)
@@ -305,13 +309,14 @@ def _num(v, ref):
 
 
 def _infer_type(raw: dict) -> str:
-    for key, t in (("text", "text"), ("cues", "captions"), ("d", "path"), ("points", "path"),
-                   ("children", "group"), ("layers", "group"), ("shape", "model"), ("parts", "model"),
-                   ("r", "circle")):
+    for key, t in (("shape", "model"), ("parts", "model"), ("text", "text"), ("cues", "captions"), ("d", "path"),
+                   ("points", "path"), ("children", "group"), ("layers", "group"), ("r", "circle")):
         if key in raw:
             return t
     if "src" in raw:
-        return "video" if Path(str(raw["src"])).suffix.lower() in (".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v") else "image"
+        ext = Path(str(raw["src"])).suffix.lower()
+        return ("video" if ext in (".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v") else
+                "model" if ext in models.EXTENSIONS else "image")
     return "rect"
 
 

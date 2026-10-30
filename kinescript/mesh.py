@@ -2,14 +2,17 @@
 so sizes animate for free. Coordinates follow space.py: x right, y down, z toward the viewer."""
 from __future__ import annotations
 
+import math
 from functools import lru_cache
 from typing import NamedTuple
 
 import numpy as np
+import skia
 
 from . import space
 
 SHAPES = ("cube", "sphere", "cylinder", "cone", "torus", "plane")
+EXTRUDED = ("text", "path")
 DETAIL = {"low": 0.5, "medium": 1.0, "high": 2.0}
 
 
@@ -130,7 +133,7 @@ def placed(m: Mesh, scale3, matrix: np.ndarray | None = None) -> Mesh:
     if matrix is not None:
         P = P @ matrix[:3, :3].T + matrix[:3, 3]
         N = N @ np.linalg.inv(matrix[:3, :3])
-    return Mesh(P, N / np.linalg.norm(N, axis=1, keepdims=True), m.T, m.M)
+    return m._replace(P=P, N=N / np.linalg.norm(N, axis=1, keepdims=True))
 
 
 def part_matrix(p: dict) -> np.ndarray:
@@ -149,3 +152,239 @@ def merge(meshes: list[Mesh], materials: list[int]) -> Mesh:
 def build_order(m: Mesh) -> np.ndarray:
     """Triangle indices bottom to top, the order `draw` and the build motion reveal them in."""
     return np.argsort(-m.P[m.T, 1].mean(1), kind="stable")
+
+
+# ---- extruded outlines (text and SVG paths) -----------------------------------------------------------
+
+def _flatten(verb, p: np.ndarray, seg: float, w: float) -> np.ndarray:
+    """Points along one path segment, after its start point. Curves are cut into pieces about `seg` long,
+    lines into pieces up to 3 * seg, so walls stay short enough for the painter's sort."""
+    if verb == skia.Path.kLine_Verb:
+        n = max(1, math.ceil(float(np.hypot(*(p[1] - p[0]))) / (3 * seg)))
+    else:
+        n = max(1, min(64, math.ceil(float(np.hypot(*np.diff(p, axis=0).T).sum()) / seg)))
+    t = np.linspace(0, 1, n + 1)[1:, None]
+    s = 1 - t
+    if verb == skia.Path.kLine_Verb:
+        return p[0] + t * (p[1] - p[0])
+    if verb == skia.Path.kQuad_Verb:
+        return s * s * p[0] + 2 * s * t * p[1] + t * t * p[2]
+    if verb == skia.Path.kConic_Verb:
+        return (s * s * p[0] + 2 * w * s * t * p[1] + t * t * p[2]) / (s * s + 2 * w * s * t + t * t)
+    return s ** 3 * p[0] + 3 * s * s * t * p[1] + 3 * s * t * t * p[2] + t ** 3 * p[3]
+
+
+def _area(q: np.ndarray) -> float:
+    """Signed area; positive when the outline runs clockwise on screen (y down)."""
+    return 0.5 * float((q[:, 0] * np.roll(q[:, 1], -1) - np.roll(q[:, 0], -1) * q[:, 1]).sum())
+
+
+def _ring(pts) -> np.ndarray | None:
+    q = np.asarray(pts, float)
+    q = q[np.any(np.abs(q - np.roll(q, 1, 0)) > 1e-6, axis=1)]  # drop repeated points, the closing one too
+    return q if len(q) >= 3 and abs(_area(q)) > 1e-6 else None
+
+
+def contours(path: skia.Path, seg: float) -> list[np.ndarray]:
+    """The closed outlines of `path` as (n, 2) arrays, with overlaps removed."""
+    try:
+        path = skia.Simplify(path)
+    except Exception:  # Simplify gives up on some degenerate paths; use the path as given
+        pass
+    out, cur = [], []
+    it = skia.Path.Iter(path, True)
+    while True:
+        verb, pts = it.next()
+        if verb in (skia.Path.kMove_Verb, skia.Path.kClose_Verb, skia.Path.kDone_Verb):
+            q = _ring(cur) if len(cur) > 2 else None
+            if q is not None:
+                out.append(q)
+            cur = [(pts[0].fX, pts[0].fY)] if verb == skia.Path.kMove_Verb else []
+            if verb == skia.Path.kDone_Verb:
+                return out
+            continue
+        cur.extend(_flatten(verb, np.array([(q.fX, q.fY) for q in pts]), seg, it.conicWeight()))
+
+
+def _contains(q: np.ndarray, p) -> bool:
+    """Whether point p is inside the closed outline q (even-odd)."""
+    x, y = q[:, 0], q[:, 1]
+    x2, y2 = np.roll(x, -1), np.roll(y, -1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        hit = ((y > p[1]) != (y2 > p[1])) & (p[0] < x + (p[1] - y) * (x2 - x) / (y2 - y))
+    return bool(hit.sum() % 2)
+
+
+def _in_tri(p: np.ndarray, a, b, c) -> np.ndarray:
+    """Which points p (k, 2) lie inside or on triangle abc, either winding."""
+    d1 = (b[0] - a[0]) * (p[:, 1] - a[1]) - (b[1] - a[1]) * (p[:, 0] - a[0])
+    d2 = (c[0] - b[0]) * (p[:, 1] - b[1]) - (c[1] - b[1]) * (p[:, 0] - b[0])
+    d3 = (a[0] - c[0]) * (p[:, 1] - c[1]) - (a[1] - c[1]) * (p[:, 0] - c[0])
+    return ~(((d1 < 0) | (d2 < 0) | (d3 < 0)) & ((d1 > 0) | (d2 > 0) | (d3 > 0)))
+
+
+def _bridge(Q: np.ndarray, ring: np.ndarray, hole: np.ndarray) -> np.ndarray:
+    """Join `hole` into `ring` (index arrays into Q) with a cut from the hole's rightmost point to a ring point
+    it can see (Eberly, "Triangulation by ear clipping"). The ring runs clockwise on screen, the hole the other way."""
+    m = hole[np.argmax(Q[hole, 0])]
+    mx, my = Q[m]
+    a, b = Q[ring], Q[np.roll(ring, -1)]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        x = a[:, 0] + (my - a[:, 1]) * (b[:, 0] - a[:, 0]) / (b[:, 1] - a[:, 1])
+    ok = ((a[:, 1] > my) != (b[:, 1] > my)) & (x >= mx)
+    if not ok.any():
+        return ring
+    e = np.flatnonzero(ok)[np.argmin(x[ok])]
+    k = e if a[e, 0] > b[e, 0] else (e + 1) % len(ring)  # the end of the hit edge further along the ray
+    prv, nxt = Q[np.roll(ring, 1)], Q[np.roll(ring, -1)]
+    reflex = (a[:, 0] - prv[:, 0]) * (nxt[:, 1] - prv[:, 1]) - (a[:, 1] - prv[:, 1]) * (nxt[:, 0] - prv[:, 0]) < 0
+    block = reflex & _in_tri(a, (mx, my), (x[e], my), Q[ring[k]])
+    block[k] = False
+    if block.any():  # a reflex corner hides that point: cut to the corner closest in angle to the ray instead
+        cand = np.flatnonzero(block)
+        d = a[cand] - (mx, my)
+        dist = np.hypot(d[:, 0], d[:, 1])
+        k = cand[np.lexsort((dist, np.abs(d[:, 1]) / np.maximum(dist, 1e-12)))[0]]
+    j = int(np.flatnonzero(hole == m)[0])
+    return np.concatenate([ring[:k + 1], hole[j:], hole[:j], [m, ring[k]], ring[k + 1:]])
+
+
+def _earclip(Q: np.ndarray) -> np.ndarray:
+    """Triangles filling the simple polygon Q (n, 2), which runs clockwise on screen. (m, 3) indices into Q."""
+    n = len(Q)
+    prv, nxt = np.roll(np.arange(n), 1), np.roll(np.arange(n), -1)
+    alive = np.ones(n, bool)
+    tiny = 1e-9 * float(np.ptp(Q, axis=0).max()) ** 2
+
+    def cross(a, b, c):
+        return (Q[b, 0] - Q[a, 0]) * (Q[c, 1] - Q[a, 1]) - (Q[b, 1] - Q[a, 1]) * (Q[c, 0] - Q[a, 0])
+
+    def blocked(a, b, c):
+        p = Q[alive]
+        same = (p == Q[a]).all(1) | (p == Q[b]).all(1) | (p == Q[c]).all(1)  # the corners, and bridge copies
+        return bool((_in_tri(p, Q[a], Q[b], Q[c]) & ~same).any())
+
+    out, i, left, miss = [], 0, n, 0
+    while left > 3:
+        a, c = prv[i], nxt[i]
+        if cross(a, i, c) > tiny and not blocked(a, i, c):
+            out.append((a, i, c))
+        elif miss < left:
+            i, miss = c, miss + 1
+            continue
+        else:  # no clean ear in a whole lap (degenerate outline): drop a flat corner, else the most convex one
+            ids = np.flatnonzero(alive)
+            cr = cross(prv[ids], ids, nxt[ids])
+            flat = np.abs(cr) <= tiny
+            i = int(ids[np.argmax(flat)] if flat.any() else ids[np.argmax(cr)])
+            a, c = prv[i], nxt[i]
+            if not flat.any():
+                out.append((a, i, c))
+        alive[i] = False
+        nxt[a], prv[c] = c, a
+        i, left, miss = c, left - 1, 0
+    i = int(np.flatnonzero(alive)[0])
+    out.append((prv[i], i, nxt[i]))
+    return np.array(out, np.int32).reshape(-1, 3)
+
+
+def shape2d(rings: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Outlines as one point array Q, wound for extrusion (outer outlines clockwise on screen, holes the other
+    way), the index where each outline starts, and the triangles (into Q) that fill them."""
+    lo, hi = [q.min(0) for q in rings], [q.max(0) for q in rings]
+    within = [[j for j in range(len(rings)) if j != i and (lo[j] <= q[0]).all() and (q[0] <= hi[j]).all()
+               and _contains(rings[j], q[0])] for i, q in enumerate(rings)]
+    rings = [q if (len(w) % 2 == 0) == (_area(q) > 0) else q[::-1] for q, w in zip(rings, within)]
+    starts = np.cumsum([0] + [len(q) for q in rings[:-1]]).astype(np.int64)
+    Q = np.concatenate(rings) if rings else np.zeros((0, 2))
+    tris = []
+    for i, w in enumerate(within):
+        if len(w) % 2:
+            continue
+        ring = np.arange(starts[i], starts[i] + len(rings[i]))
+        holes = [np.arange(starts[h], starts[h] + len(rings[h])) for h, wh in enumerate(within)
+                 if len(wh) == len(w) + 1 and i in wh]
+        for h in sorted(holes, key=lambda h: -Q[h, 0].max()):
+            ring = _bridge(Q, ring, h)
+        tris.append(ring[_earclip(Q[ring])])
+    return Q, starts, (np.concatenate(tris) if tris else np.zeros((0, 3), np.int64))
+
+
+def _refine(P: np.ndarray, T: np.ndarray, most: float, outline: bool = False, extra: tuple = ()) -> tuple:
+    """Split edges longer than `most` at their midpoints until none is left, so a surface is made of small
+    triangles the painter's sort can order against nearby walls and parts. Returns P, T and the per-vertex
+    arrays in `extra` grown to match (a new vertex takes the mean of its edge's ends, or the first end's
+    integer). `outline=False` never splits edges on the outline, so a cap still meets its walls."""
+    extra = list(extra)
+    for _ in range(12):
+        e = np.sort(T[:, [[0, 1], [1, 2], [2, 0]]].reshape(-1, 2), axis=1)  # edges ab, bc, ca of each triangle
+        edges, inv, count = np.unique(e, axis=0, return_inverse=True, return_counts=True)
+        cut = ((count == 2) | outline) & (np.linalg.norm(P[edges[:, 0]] - P[edges[:, 1]], axis=1) > most)
+        if not cut.any():
+            break
+        mid = np.full(len(edges), -1)
+        mid[cut] = len(P) + np.arange(cut.sum())
+        a, b = edges[cut, 0], edges[cut, 1]
+        P = np.concatenate([P, (P[a] + P[b]) / 2])
+        extra = [np.concatenate([x, x[a] if x.dtype.kind in "iu" else (x[a] + x[b]) / 2]) for x in extra]
+        M = mid[inv.ravel()].reshape(-1, 3)
+        n = (M >= 0).sum(1)
+        # Turn each triangle so one cut is on ab, or two cuts are on ab and bc; winding is unchanged.
+        r = np.where(n == 1, np.argmax(M >= 0, 1), np.where(n == 2, (np.argmin(M >= 0, 1) + 1) % 3, 0))
+        turn = (np.arange(3)[None] + r[:, None]) % 3
+        (a, b, c), (ab, bc, ca) = np.take_along_axis(T, turn, 1).T, np.take_along_axis(M, turn, 1).T
+        tri = lambda *v, k: np.stack(v, 1)[n == k]  # noqa: E731
+        T = np.concatenate([tri(a, b, c, k=0), tri(a, ab, c, k=1), tri(ab, b, c, k=1),
+                            tri(ab, b, bc, k=2), tri(a, ab, bc, k=2), tri(a, bc, c, k=2),
+                            tri(a, ab, ca, k=3), tri(ab, b, bc, k=3), tri(ca, bc, c, k=3), tri(ab, bc, ca, k=3)])
+    return (P, T, *extra)
+
+
+def extrude(Q: np.ndarray, starts: np.ndarray, caps: np.ndarray, depth: float, bevel: float, rows: int,
+            edge: float) -> Mesh:
+    """A solid from shape2d's outlines, spanning z = -depth/2..depth/2. The walls are cut into `rows` bands
+    and shade smoothly where outline pieces meet at under about 45 degrees; `bevel` chamfers the edges at
+    45 degrees; no cap edge inside the outline is longer than `edge`."""
+    n = len(Q)
+    size = np.diff(np.append(starts, n))
+    first, count = np.repeat(starts, size), np.repeat(size, size)
+    idx = np.arange(n)
+    nxt, prv = first + (idx - first + 1) % count, first + (idx - first - 1) % count
+    d = Q[nxt] - Q
+    en = np.stack([d[:, 1], -d[:, 0]], 1)
+    en /= np.linalg.norm(en, axis=1, keepdims=True)  # outward normal of the edge from point i to the next
+    ep = en[prv]
+    dot = (en * ep).sum(1)
+    vn = en + ep
+    vn /= np.maximum(np.linalg.norm(vn, axis=1, keepdims=True), 1e-12)
+    smooth = (dot > 0.7)[:, None]
+    n0, n1 = np.where(smooth, vn, en), np.where(smooth[nxt], vn[nxt], en)  # normal at each end of each edge
+    b = max(0.0, min(bevel, depth * 0.45))
+    zf = depth / 2 - b
+    pieces = []
+
+    def band(rings, z, nz):
+        """A strip of quads along every edge, through one ring of points per height in z."""
+        P = np.empty((n, 2, len(z), 3))
+        N = np.empty_like(P)
+        for j, r in enumerate(rings):
+            P[:, 0, j, :2], P[:, 1, j, :2] = r, r[nxt]
+        P[..., 2] = z
+        N[:, 0, :, :2], N[:, 1, :, :2] = n0[:, None], n1[:, None]
+        N[..., 2] = nz
+        T = _grid(1, len(z) - 1)[None] + (np.arange(n) * 2 * len(z))[:, None, None]
+        pieces.append((P.reshape(-1, 3), N.reshape(-1, 3), T.reshape(-1, 3)))
+
+    band([Q] * (rows + 1), np.linspace(zf, -zf, rows + 1), 0.0)
+    face = Q
+    if b > 0:
+        face = Q - b * (en + ep) / np.maximum(1 + dot, 0.5)[:, None]  # outline moved in along its mitred normals
+        for s in (1.0, -1.0):
+            band([face, Q], np.array([s * depth / 2, s * zf]), s)
+    face, caps = _refine(face, caps, edge)
+    for s in (1.0, -1.0):
+        P = np.concatenate([face, np.full((len(face), 1), s * depth / 2)], 1)
+        pieces.append((P, np.tile([0.0, 0.0, s], (len(face), 1)), caps))
+    base = np.cumsum([0] + [len(p[0]) for p in pieces[:-1]])
+    return _orient(np.concatenate([p[0] for p in pieces]), np.concatenate([p[1] for p in pieces]),
+                   np.concatenate([p[2] + o for p, o in zip(pieces, base)]).astype(np.int64))

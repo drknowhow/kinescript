@@ -243,6 +243,8 @@ class Renderer:
         self.culled: set[str] = set()  # layers skipped this frame because they cross the camera plane
         self._lens: np.ndarray | None = None  # camera space to canvas, for lighting models
         self._models: dict = {}  # merged parts of each model layer
+        self._solids: dict = {}  # outlines and extruded meshes of text and path models
+        self._outer = None  # the 3D matrix of the layer being drawn's parent (models put their floor in it)
         self._msurf = None  # offscreen that models draw into, antialiased, before compositing
         self.tris = 0  # model triangles drawn this frame
         cm = color_matrix({k: v for k, v in scene.grade.items() if k not in ("vignette", "grain")})
@@ -426,7 +428,7 @@ class Renderer:
                 facing = space.facing(xy)
                 if not facing and L.raw.get("backface") == "hidden":
                     return
-            self._m3d = m
+            self._m3d, self._outer = m, outer
         c.save()
         c.translate(x, y)
         if tilt is not None:

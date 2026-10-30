@@ -53,10 +53,14 @@ def test_depth_examples_in_docs_pass_check_with_no_rewrites():
         assert r["ok"] and not r["issues"], r["issues"]
 
 
-def test_model_example_in_docs_passes_check_with_no_rewrites():
-    emblem = next(json.loads(o) for o in _objects(_section("3D MODELS")) if '"emblem"' in o)
-    r = check({"canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 4}, "layers": [emblem]})
-    assert r["ok"] and not r["issues"], r["issues"]
+def test_model_examples_in_docs_pass_check_with_no_rewrites():
+    models = [json.loads(o) for o in _objects(_section("3D MODELS"))]
+    assert {m["id"] for m in models} == {"emblem", "title3d", "product"}
+    for m in models:
+        if m.get("src"):  # the sample model examples/make_media.py writes
+            m["src"] = str(ROOT / "examples" / "media" / m["src"]).replace("\\", "/")
+        r = check({"canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 4}, "layers": [m]})
+        assert r["ok"] and not r["issues"], (m["id"], r["issues"])
 
 
 def test_every_recipe_loads_with_no_rewrites(tmp_path):

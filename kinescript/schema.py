@@ -59,11 +59,17 @@ LIGHT = {"preset", "key", "fill", "ambient", "rim", "from", "color"}
 LIGHT_ALIAS = {"colour": "color", "direction": "from", "dir": "from", "position": "from", "intensity": "key",
                "ambience": "ambient", "name": "preset"}
 MATERIAL = {"fill", "shine", "metal", "rim", "bands"}
-PART = MATERIAL | {"shape", "w", "h", "depth", "r", "tube", "x", "y", "z", "rotateX", "rotateY", "rotate", "scale"}
-MODEL_ALIAS = {"radius": "r", "d": "depth", "thickness": "tube", "geometry": "shape", "primitive": "shape",
+PART = MATERIAL | {"shape", "w", "h", "depth", "r", "tube", "x", "y", "z", "rotateX", "rotateY", "rotate", "scale",
+                   "text", "size", "font", "weight", "italic", "letterSpacing", "lineHeight", "d", "strokeWidth",
+                   "bevel"}
+MODEL_ALIAS = {"radius": "r", "thickness": "tube", "geometry": "shape", "primitive": "shape", "extrude": "depth",
+               "extrusion": "depth", "chamfer": "bevel",
                "mesh": "shape", "gloss": "shine", "glossiness": "shine", "shininess": "shine",
                "specular": "shine", "metallic": "metal", "metalness": "metal", "toon": "bands", "steps": "bands",
-               "quality": "detail", "lighting": "light", "children": "parts", "meshes": "parts"}
+               "quality": "detail", "lighting": "light", "children": "parts", "meshes": "parts", "model": "src",
+               "floor": "ground", "groundShadow": "ground", "contactShadow": "ground"}
+GROUND = {"y", "opacity", "blur"}
+GROUND_ALIAS = {"alpha": "opacity", "strength": "opacity", "softness": "blur", "radius": "blur", "level": "y"}
 
 COMMON = {"id", "type", "at", "dur", "until", "x", "y", "anchor", "opacity", "scale", "scaleX", "scaleY", "rotate",
           "blur", "blend", "shadow", "fx", "enter", "exit", "hidden", "allowOffscreen", "z", "rotateX", "rotateY",
@@ -89,7 +95,7 @@ TYPES: dict[str, set[str]] = {
     "shader": {"preset", "uniforms", "sksl", "w", "h"},
     "group": {"children", "layers", "w", "h", "clip", "radius", "fill", "sort"},
     "model": PART - {"x", "y", "z", "rotateX", "rotateY", "rotate", "scale"} | {"detail", "parts", "explode",
-                                                                              "draw", "light"},
+                                                                              "draw", "light", "src", "ground"},
 }
 SEQUENCE = {"id", "type", "at", "clips", "transition", "fit", "volume", "w", "h", "x", "y", "anchor"}
 TYPE_ALIAS = {"rectangle": "rect", "square": "rect", "box": "rect", "shape": "rect", "txt": "text", "label": "text",
@@ -138,7 +144,7 @@ ENUMS = {
               "color"),
     "backface": ("visible", "hidden"),
     "sort": ("order", "depth"),
-    "shape": ("cube", "sphere", "cylinder", "cone", "torus", "plane"),
+    "shape": ("cube", "sphere", "cylinder", "cone", "torus", "plane", "text", "path"),
     "detail": ("low", "medium", "high"),
 }
 ENUM_ALIAS = {"middle": "center", "centre": "center", "centered": "center", "mid": "center",
@@ -147,7 +153,8 @@ ENUM_ALIAS = {"middle": "center", "centre": "center", "centered": "center", "mid
               "plus": "add", "additive": "add", "soft-light": "softLight", "softlight": "softLight",
               "box": "cube", "cuboid": "cube", "ball": "sphere", "globe": "sphere", "donut": "torus",
               "doughnut": "torus", "ring": "torus", "tube": "cylinder", "can": "cylinder", "pipe": "cylinder",
-              "card": "plane", "quad": "plane", "med": "medium", "hi": "high", "lo": "low"}
+              "card": "plane", "quad": "plane", "svg": "path", "string": "text", "med": "medium", "hi": "high",
+              "lo": "low"}
 WEIGHTS = {"thin": 100, "extralight": 200, "light": 300, "normal": 400, "regular": 400, "book": 400,
            "medium": 500, "semibold": 600, "demibold": 600, "bold": 700, "extrabold": 800, "heavy": 900,
            "black": 900}
@@ -159,9 +166,9 @@ SCALAR = {"x", "y", "w", "h", "r", "opacity", "scale", "scaleX", "scaleY", "rota
           "strokeWidth", "draw", "drawStart", "zoom", "value", "radius", "dimOutside", "sides", "inner", "x1", "y1",
           "x2", "y2", "bend", "head", "maxWidth", "lineHeight", "letterSpacing", "focusX", "focusY", "speed",
           "volume", "unitX", "unitY", "unitRotate", "unitScale", "unitOpacity", "z", "rotateX", "rotateY", "fov",
-          "depth", "tube", "shine", "metal", "rim", "bands", "explode"}
+          "depth", "tube", "shine", "metal", "rim", "bands", "explode", "bevel"}
 REQUIRED = {"text": ("text",), "image": ("src",), "video": ("src",), "path": ("d", "points"), "line": ("points",),
-            "captions": ("cues", "src"), "shader": ("preset", "sksl"), "model": ("shape", "parts")}
+            "captions": ("cues", "src"), "shader": ("preset", "sksl"), "model": ("shape", "parts", "src")}
 
 
 class Report:
@@ -411,7 +418,7 @@ def _layer(raw, rep: Report, path: str, comps: dict):
             _motion(raw, key, rep, lid)
         return  # parameters are checked when the component expands (components.Params)
     t = raw.get("type")
-    if isinstance(t, str) and t.strip().lower() in ENUMS["shape"] and "shape" not in raw:
+    if isinstance(t, str) and t.strip().lower() in ENUMS["shape"] and t not in TYPES and "shape" not in raw:
         raw["type"], raw["shape"] = "model", t.strip().lower()
         rep.add("info", "renamed-value", lid, f"type '{t}' read as a model with shape '{raw['shape']}'",
                 f"write \"type\": \"model\", \"shape\": \"{raw['shape']}\"")
@@ -445,6 +452,11 @@ def _layer(raw, rep: Report, path: str, comps: dict):
         del raw[key]
         rep.add("info", "renamed-key", lid, f"'{key}' read as x and y", "write \"x\" and \"y\"")
     _keys(raw, COMMON | TYPES[t], lalias, rep, lid, "")
+    shape = raw.get("shape")
+    if t == "model" and isinstance(shape, str) and shape.lower().endswith((".glb", ".gltf", ".obj")):
+        raw["src"] = raw.pop("shape")
+        rep.add("info", "renamed-key", lid, f"shape '{shape}' read as src (a model file)",
+                f"write \"src\": \"{shape}\"")
     for need in [REQUIRED.get(t)]:
         if need and not any(raw.get(k) not in (None, "", []) for k in need):
             rep.add("error", "missing-key", lid, f"a {t} layer needs " + " or ".join(f"'{k}'" for k in need),
@@ -501,8 +513,35 @@ def _light(obj: dict, rep: Report, lid):
         rep.add("error", "bad-value", lid, f"light must be a preset ({', '.join(LIGHTS)}) or an object, got {v!r}")
 
 
+def _outline(obj: dict, rep: Report, lid, where: str = ""):
+    """Text and path shapes need their outline; a number in `d` is a depth (d is the path data here)."""
+    d = obj.get("d")
+    if isinstance(d, (int, float)) and not isinstance(d, bool) and "depth" not in obj:
+        obj["depth"] = obj.pop("d")
+        rep.add("info", "renamed-key", lid, f"{where}'d' read as 'depth'", "write 'depth'")
+    shape = obj.get("shape")
+    if shape == "text" and not str(obj.get("text", "")).strip():
+        rep.add("error", "missing-key", lid, f"{where}a text model needs 'text'",
+                'add "text": "..."')
+    if shape == "path" and not isinstance(obj.get("d"), str):
+        rep.add("error", "missing-key", lid, f"{where}a path model needs 'd', SVG path data",
+                'add "d": "M0 0 L100 0 L50 80 Z"')
+
+
 def _model(raw: dict, rep: Report, lid):
     _light(raw, rep, lid)
+    _outline(raw, rep, lid)
+    if raw.get("src") and raw.get("shape"):
+        rep.add("warning", "ignored-key", lid, f"shape '{raw['shape']}' is ignored: the model comes from src",
+                "drop shape, or make the shape its own part")
+    gr = raw.get("ground")
+    if isinstance(gr, dict):
+        _keys(gr, GROUND, GROUND_ALIAS, rep, lid, "ground: ")
+        for k, v in gr.items():
+            if k in GROUND and (isinstance(v, bool) or not isinstance(v, (int, float))):
+                rep.add("error", "bad-value", lid, f"ground {k} is {v!r}; it takes a number")
+    elif gr is not None and not isinstance(gr, bool):
+        rep.add("error", "bad-value", lid, f"ground is {gr!r}; it takes true or an object like {{\"opacity\": 0.5}}")
     if isinstance(raw.get("fill"), dict):
         rep.add("error", "bad-value", lid, "a model's fill is one colour; gradients do not apply to models",
                 "use a colour, and give parts their own fill for more than one")
@@ -517,6 +556,7 @@ def _model(raw: dict, rep: Report, lid):
             continue
         _keys(p, PART, dict(ALIAS, **MODEL_ALIAS), rep, lid, where)
         _values(p, "model", rep, lid)
+        _outline(p, rep, lid, where)
         for k, v in p.items():  # what _values lets through for layers but a part cannot animate or resolve
             if k in SCALAR and (isinstance(v, (list, dict)) or (isinstance(v, str) and (v.startswith("=") or _lengthish(v)))):
                 rep.add("error", "bad-value", lid, f"{where}{k} is {v!r}; parts take plain numbers (they do not animate)",
