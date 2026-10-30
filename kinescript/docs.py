@@ -87,7 +87,9 @@ KEYS EVERY LAYER HAS
                 difference | color
   shadow        {"x": 0, "y": 6, "blur": 16, "color": "#00000099"}   (those are the defaults)
   fx            {"brightness": 0, "contrast": 1, "saturate": 1, "hue": 0, "exposure": 0,
-                 "temperature": 0, "tint": 0, "gray": 0, "invert": 0}
+                 "temperature": 0, "tint": 0, "gray": 0, "invert": 0}. brightness adds to every
+                channel (-1..1), so below 0 dark footage turns black; exposure is in stops and
+                multiplies (-1 halves the light), which is the way to darken footage.
   enter, exit   a motion (see ENTER AND EXIT)
   hidden        true skips the layer
   allowOffscreen  true stops check warning when the layer leaves the canvas
@@ -105,8 +107,9 @@ LAYER TYPES (defaults in brackets)
   arrow     x1 y1 x2 y2 bend [0] head [22] stroke strokeWidth
   text      text (centred on x, y: the anchor is center), size [64], weight [600] (100..900), font ["Space Grotesk"; also "IBM Plex Mono",
             any installed family, or a .ttf path], italic, fill [#f2f0e8], emph (colour of
-            words written **like this**), align [center] (left|center|right), maxWidth (wraps
-            lines), lineHeight [1.18], letterSpacing [0], stroke, strokeWidth,
+            text written **like this**, also inside a word: g**P**u colours the P),
+            align [center] (left|center|right), maxWidth (wraps lines), lineHeight [1.18],
+            letterSpacing [0], stroke, strokeWidth,
             box {"fill": "#000000b0", "pad": [12, 20], "radius": 10} (a background behind the
             text; pad is [vertical, horizontal]), case (upper|lower),
             split (chars|words|lines: animate each unit, see ENTER AND EXIT),
@@ -135,9 +138,11 @@ LAYER TYPES (defaults in brackets)
   group     children [layers], w, h, clip (true cuts children off at w x h), radius, fill.
             Children are placed from the group's x, y and start at the group's "at".
   sequence  clips [{"src": "a.mp4", "trim": [0, 4]}, ...] and transition {"type": "fade",
-            "dur": 0.4} (fade|wipe|slide|zoom|blur|cut). Becomes back-to-back video layers named
-            <id>-1, <id>-2, ... Each transition overlaps the clips it joins, so 3 s + 3 s with a
-            0.5 s fade lasts 5.5 s.
+            "dur": 0.4} (fade|wipe|slide|zoom|blur|cut). Becomes a group of back-to-back video layers
+            named <id>-1, <id>-2, ... that ends with its last clip, so "<id>.out" is a cue. Each
+            transition overlaps the clips it joins, so 3 s + 3 s with a 0.5 s fade lasts 5.5 s.
+            fit, volume, w, h, x, y and anchor go to every clip; opacity, blur, fx, enter and the
+            other layer keys apply to the whole cut.
 
 DEPTH AND CAMERA (3D)
   Any layer can move and turn in depth. x is right, y is down and z is toward the viewer, in px,
