@@ -455,6 +455,25 @@ def _rms(pcm, t0, t1):
     return float(np.sqrt(np.mean(pcm[int(t0 * 8000):int(t1 * 8000)] ** 2)))
 
 
+def test_every_mix_pads_by_samples_so_it_always_ends(tone, tmp_path, monkeypatch):
+    # An endless apad was cut by timestamps; ffmpeg 8 sometimes got those wrong and the mix never ended.
+    import re
+    from kinescript import output
+    graphs, real = [], output._graph
+
+    def record(*a):
+        graphs.append(real(*a))
+        return graphs[-1]
+
+    monkeypatch.setattr(output, "_graph", record)
+    for role in (None, "music"):
+        spec = scene([{"type": "rect"}], duration=1)
+        spec["audio"] = [dict({"src": tone, "at": 0.5}, **({"role": role} if role else {}))]
+        k.render(spec, str(tmp_path / "o.wav"))
+    pads = [m for _, g in graphs for m in re.findall(r"apad[^,;\[]*", g)]
+    assert len(graphs) == 2 and pads and all(m == "apad=whole_dur=1.0000" for m in pads)
+
+
 def test_layers_cue_from_audio_and_only_voice_extends_auto_duration(tone):
     for role, duration in (("voice", 1.5), ("music", 1.0)):
         spec = scene([{"id": "a", "type": "rect", "dur": 1}, {"id": "b", "type": "rect", "at": "vo.out"}])

@@ -156,10 +156,19 @@ _CURVE_IN = ["-f", "f32le", "-ar", str(A.RATE), "-ac", "1", "-i"]
 _CURVE = "aresample=48000,aformat=channel_layouts=stereo"
 
 
-def _graph(ins: list[dict], managed: bool, curves: dict[int, str], duck: str | None, tail: str) -> tuple[list[str], str]:
+def _pad(duration: float) -> str:
+    """Silence after the mix up to `duration`. Counted in samples: with an endless apad, the atrim after it judged
+    the end by timestamps, and when ffmpeg 8 started the inputs in an unlucky order those were wrong and the mix
+    never ended, filling the disk."""
+    return f"asetpts=N/SR/TB,apad=whole_dur={duration:.4f}"
+
+
+def _graph(ins: list[dict], managed: bool, curves: dict[int, str], duck: str | None, tail: str,
+           pad: str) -> tuple[list[str], str]:
     """ffmpeg inputs and the filter graph that mixes `ins` into [aout]. curves: sound index -> its gain curve file;
     duck: the curve file the sounds marked "duck" are multiplied by after they are mixed; tail: filters after the
-    mix. managed: every sound is converted to 48 kHz stereo first, so curves and buses line up."""
+    mix; pad: what makes the ducked bus last the whole scene. managed: every sound is converted to 48 kHz stereo
+    first, so curves and buses line up."""
     args = [x for a in ins for x in ("-i", a["src"])]
     n = len(ins)
     chains = []
@@ -193,14 +202,12 @@ def _graph(ins: list[dict], managed: bool, curves: dict[int, str], duck: str | N
         if a["pan"]:
             f.append(_pan(a["pan"]))
         ms = int(round(a["at"] * 1000))
-        f.append(f"adelay={ms}|{ms}")
-        if managed:  # adelay leaves its leading silence without timestamps, and the atrims after the mix need them
-            f.append("asetpts=N/SR/TB")
+        f.extend([f"adelay={ms}|{ms}", "asetpts=N/SR/TB"])  # adelay's leading silence has no timestamps
         chains.append(head + ("," if head.endswith("amultiply") else "") + ",".join(f) + f"[a{k}]")
     ducked = [f"[a{k}]" for k, a in enumerate(ins) if duck and a.get("duck")]
     mix = [f"[a{k}]" for k, a in enumerate(ins) if f"[a{k}]" not in ducked]
     if ducked:
-        chains.append(f"{''.join(ducked)}amix=inputs={len(ducked)}:normalize=0:dropout_transition=0,apad[bus]")
+        chains.append(f"{''.join(ducked)}amix=inputs={len(ducked)}:normalize=0:dropout_transition=0,{pad}[bus]")
         curve(duck, "dk")
         chains.append("[bus][dk]amultiply[ducked]")
         mix.append("[ducked]")
@@ -230,7 +237,8 @@ def _start_audio(scene: Scene, out: str, start: float = 0.0, end: float | None =
             A.gain_curve(a["curve"], a["dur"], a["at"], scene.fps).astype("<f4").tofile(curves[k])
     # Padded to the full length: the mux keeps the shorter stream, so a mix that ends early would cut the video.
     cut = _cut(start, end, scene.duration) or f"atrim=duration={scene.duration:.4f}"
-    args, graph = _graph(ins, False, curves, None, f"alimiter=limit=0.95,apad,{cut}")
+    pad = _pad(scene.duration)
+    args, graph = _graph(ins, False, curves, None, f"alimiter=limit=0.95,{pad},{cut}", pad)
     script = out + ".graph"
     Path(script).write_text(graph, encoding="utf-8")
     cmd = [media.FFMPEG, "-y", "-v", "error", *args, *media.filter_script(script), "-map", "[aout]",
@@ -266,7 +274,8 @@ def _managed(scene: Scene, ins: list[dict], out: str, start: float, end: float |
         duck = str(tmp / "duck.f32")
         A.duck_curve(voices, scene.duration, duck_cfg).astype("<f4").tofile(duck)
     master, script = str(tmp / "master.wav"), tmp / "master.graph"
-    args, graph = _graph(ins, True, curves, duck, f"apad,atrim=duration={scene.duration:.4f}")
+    pad = _pad(scene.duration)
+    args, graph = _graph(ins, True, curves, duck, f"{pad},atrim=duration={scene.duration:.4f}", pad)
     script.write_text(graph, encoding="utf-8")
     job.run([media.FFMPEG, "-y", "-v", "error", *args, *media.filter_script(str(script)), "-map", "[aout]",
              "-c:a", "pcm_f32le", master])
