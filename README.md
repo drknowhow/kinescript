@@ -106,7 +106,9 @@ and `kine_still` return images inline.
 ## Install
 
 Requires Python 3.10+ and ffmpeg on `PATH` (for example `winget install Gyan.FFmpeg`, `brew install ffmpeg` or
-`sudo apt install ffmpeg`).
+`sudo apt install ffmpeg`). On Linux, `skia-python` also loads the system's EGL, GL and fontconfig libraries, even
+with `KINE_BACKEND=cpu`. A bare container or server needs `sudo apt install libegl1 libgl1 libfontconfig1`, or
+importing Kinescript fails with `libEGL.so.1: cannot open shared object file`.
 
 ```bash
 pip install kinescript

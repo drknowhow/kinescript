@@ -13,6 +13,17 @@
   of 1.7 (one frame draws in a median 10 ms instead of 14.8) and `examples/import.json` in 0.84 s instead of
   1.1 (9 ms instead of 12.9).
 
+Fixes from the first outside test, a promo reel built from `kine docs` alone (`examples/gpu-doom`, #11):
+
+- A sequence is a group that ends with its last clip, so its own id is a cue: `"until": "cut.out"` instead of naming
+  the last clip. `opacity`, `blur`, `fx`, `enter` and the other layer keys on a sequence apply to the whole cut, and
+  `kine check` accepts them. Clip times are unchanged. A group can also end relative to one of its children.
+- `**emphasis**` can start and stop inside a word: `g**P**u` colours only the P. Punctuation written outside the
+  stars, as in `**word**,`, is no longer coloured.
+- On Linux, importing Kinescript without the system EGL and GL libraries now names the packages to install, and the
+  README lists them.
+- `kine docs` says that `fx.brightness` adds to each channel and `exposure` is the key that darkens footage.
+
 ## 1.1.0 (2026-10-30)
 
 First release on PyPI: `pip install kinescript`.
