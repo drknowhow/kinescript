@@ -310,19 +310,23 @@ def shape2d(rings: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray, np.ndarray
     return Q, starts, (np.concatenate(tris) if tris else np.zeros((0, 3), np.int64))
 
 
-def _refine(P: np.ndarray, T: np.ndarray, most: float) -> tuple[np.ndarray, np.ndarray]:
-    """Split inner edges longer than `most` at their midpoints until none is left, so a cap is made of small
-    triangles the painter's sort can order against nearby walls and parts. Outline edges are never split,
-    so caps still meet the walls without cracks."""
+def _refine(P: np.ndarray, T: np.ndarray, most: float, outline: bool = False, extra: tuple = ()) -> tuple:
+    """Split edges longer than `most` at their midpoints until none is left, so a surface is made of small
+    triangles the painter's sort can order against nearby walls and parts. Returns P, T and the per-vertex
+    arrays in `extra` grown to match (a new vertex takes the mean of its edge's ends, or the first end's
+    integer). `outline=False` never splits edges on the outline, so a cap still meets its walls."""
+    extra = list(extra)
     for _ in range(12):
         e = np.sort(T[:, [[0, 1], [1, 2], [2, 0]]].reshape(-1, 2), axis=1)  # edges ab, bc, ca of each triangle
         edges, inv, count = np.unique(e, axis=0, return_inverse=True, return_counts=True)
-        cut = (count == 2) & (np.linalg.norm(P[edges[:, 0]] - P[edges[:, 1]], axis=1) > most)
+        cut = ((count == 2) | outline) & (np.linalg.norm(P[edges[:, 0]] - P[edges[:, 1]], axis=1) > most)
         if not cut.any():
             break
         mid = np.full(len(edges), -1)
         mid[cut] = len(P) + np.arange(cut.sum())
-        P = np.concatenate([P, (P[edges[cut, 0]] + P[edges[cut, 1]]) / 2])
+        a, b = edges[cut, 0], edges[cut, 1]
+        P = np.concatenate([P, (P[a] + P[b]) / 2])
+        extra = [np.concatenate([x, x[a] if x.dtype.kind in "iu" else (x[a] + x[b]) / 2]) for x in extra]
         M = mid[inv.ravel()].reshape(-1, 3)
         n = (M >= 0).sum(1)
         # Turn each triangle so one cut is on ab, or two cuts are on ab and bc; winding is unchanged.
@@ -333,7 +337,7 @@ def _refine(P: np.ndarray, T: np.ndarray, most: float) -> tuple[np.ndarray, np.n
         T = np.concatenate([tri(a, b, c, k=0), tri(a, ab, c, k=1), tri(ab, b, c, k=1),
                             tri(ab, b, bc, k=2), tri(a, ab, bc, k=2), tri(a, bc, c, k=2),
                             tri(a, ab, ca, k=3), tri(ab, b, bc, k=3), tri(ca, bc, c, k=3), tri(ab, bc, ca, k=3)])
-    return P, T
+    return (P, T, *extra)
 
 
 def extrude(Q: np.ndarray, starts: np.ndarray, caps: np.ndarray, depth: float, bevel: float, rows: int,

@@ -19,6 +19,15 @@
   (o, a, 8) stay open, curved sides shade smoothly, and both work as `parts`. Outlines are cached per text and
   font. `examples/title3d.json` (the brand mark and wordmark, 150 frames at 1080p, up to 5,718 triangles drawn
   a frame) renders in 1.34 s on the GPU with 5 workers and 2.87 s on the CPU.
+- Model files: `src` on a model layer reads `.glb` and `.gltf` (glTF 2.0) and `.obj` with its `.mtl`, in numpy:
+  node transforms, base colours (a texture gives its mean colour), metallic and roughness as `metal` and
+  `shine`, flat or smoothing-group normals when a file has none. A layer `fill` recolours the whole model; it
+  fits inside `w`/`h`. Long triangles are cut to 1/24 of the model's size so the depth sort holds. Unreadable
+  or Draco-compressed files fail at `kine check` with the file named.
+- `ground` puts a soft shadow under any model on a level floor, fading as the model rises.
+  `examples/import.json` (a 15,264-triangle glTF rocket, 180 frames at 1080p, up to 7,410 triangles drawn a
+  frame) renders in 1.74 s on the GPU with 6 workers and 3.04 s on the CPU. `examples/make_media.py` writes
+  the rocket.
 - `kine check` warns past 60,000 model triangles in one frame.
 - `z` used to be ignored with a note; it is now depth in px toward the viewer.
 - `kine check` warns when text faces away from the camera (mirrored) and when a layer crosses the camera plane.

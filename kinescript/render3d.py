@@ -10,7 +10,7 @@ import numpy as np
 import skia
 
 from . import color as C
-from . import mesh, space, svgpath
+from . import mesh, models, space, svgpath
 
 MATERIAL = ("fill", "shine", "metal", "rim", "bands")
 MAX_MATERIALS = 8
@@ -211,18 +211,98 @@ def _parts(r, L):
     return hit
 
 
+def _imported(r, L, taken: int):
+    """The layer's model file: its mesh with its materials in the slots after the first `taken`, those
+    materials less the keys the layer sets itself (a layer fill recolours the whole model), and its size."""
+    hit = r._models.get(("src", L.id))
+    if hit is None:
+        imp = models.load(L.src)
+        M, mats = models.slots(imp, MAX_MATERIALS - taken)
+        own = [{k: v for k, v in m.items() if k not in L.raw} for m in mats]
+        m = imp.mesh._replace(M=np.where(M < 0, 0, M + taken).astype(np.int32))
+        hit = r._models[("src", L.id)] = (m, own, imp.size)
+    return hit
+
+
+def _fit(g, size) -> float:
+    """Scale of a model file: it fits inside w and h keeping its proportions, or its longest side is 300 px."""
+    s = [float(v) / e for v, e in ((g("w", None), size[0]), (g("h", None), size[1])) if v is not None and e > 1e-9]
+    return min(s) if s else 300.0 / max(float(size.max()), 1e-9)
+
+
 def model(r, L, g) -> tuple[mesh.Mesh, list[tuple]]:
     """The model's mesh in its own space at this frame, and its materials."""
     parts, keys = _parts(r, L)
     shape = L.raw.get("shape")
     meshes = [] if parts is None else [parts]
-    if shape:
+    if L.src:
+        m, own, size = _imported(r, L, len(keys))
+        keys = keys + own
+        meshes.insert(0, m._replace(P=m.P * _fit(g, size)))
+    elif shape:
         meshes.insert(0, _shape(r, shape, g, L.raw, L.raw.get("detail", "medium")))
     m = meshes[0] if len(meshes) == 1 else mesh.cat(meshes)
     accent = r.s.theme.get("accent", "#ff633f")
     root = lambda k, d=None: g(k, accent if k == "fill" and d is None else d)  # noqa: E731
     mats = [_material(lambda k, d=None, o=o: o.get(k, root(k, d))) for o in keys]
     return m, mats
+
+
+def _hull(p: np.ndarray) -> np.ndarray:
+    """Convex outline of 2D points, from the farthest point in each of 48 directions, in order around it."""
+    a = np.linspace(0, 2 * np.pi, 48, endpoint=False)
+    h = p[np.unique(np.argmax(p @ np.stack([np.cos(a), np.sin(a)]), axis=0))]
+    mid = h.mean(0)
+    return h[np.argsort(np.arctan2(h[:, 1] - mid[1], h[:, 0] - mid[0]))]
+
+
+def _ground(r, c: skia.Canvas, spec, rest: np.ndarray, pts: np.ndarray):
+    """A soft shadow under the model, as if lit from straight above: the footprint of its points on a level
+    floor, darkest where it touches and wider and fainter as it rises. The floor lies in the layer's parent
+    space, at the model's lowest point before it turns (`rest`), unless `y` places it."""
+    spec = spec if isinstance(spec, dict) else {}
+    local = np.linalg.solve(r._outer, r._m3d)  # the layer's own transform
+    Q = pts @ local[:3, :3].T + local[:3, 3]
+    low = float(Q[:, 1].max())  # y runs down
+    floor = float(spec["y"]) if "y" in spec else local[1, 3] + rest[:, 1].max() * np.linalg.norm(local[:3, 1])
+    lift = max(0.0, floor - low)
+    xz = Q[:, [0, 2]]
+    span = float(np.ptp(xz, axis=0).max()) or 1.0
+    op, soft = float(spec.get("opacity", 0.5)), float(spec.get("blur", 0.08 * span))
+    # A wide soft shadow of the whole footprint, and a tight dark one of the part within reach of the floor.
+    touch = xz[Q[:, 1] > low - 0.04 * span]
+    shapes = [(_hull(p), sigma, alpha) for p, sigma, alpha in
+              ((xz, soft + 0.3 * lift, 0.55 * op / (1 + 4 * lift / span)),
+               (touch, 0.25 * soft + 0.5 * lift, op * math.exp(-6 * lift / span))) if alpha >= 0.004 and len(p) >= 3]
+    if not shapes:
+        return
+    lo = np.min([h.min(0) - 3 * s for h, s, _ in shapes], axis=0)
+    hi = np.max([h.max(0) + 3 * s for h, s, _ in shapes], axis=0)
+    # Floor coordinates (x, z) to the parent's space; the unused third column keeps the matrix invertible.
+    to = r._outer @ np.array([[1.0, 0, 0, 0], [0, 0, -1, floor], [0, 1, 0, 0], [0, 0, 0, 1]])
+    box = np.array([[lo[0], lo[1], 0, 1], [hi[0], lo[1], 0, 1], [lo[0], hi[1], 0, 1], [hi[0], hi[1], 0, 1]])
+    if ((box @ to.T)[:, 3] < space.NEAR).any():
+        return  # the floor passes behind the camera
+    # Blurred seen from above at a few floor px per pixel, then laid on the floor: a blur drawn under the
+    # camera's perspective added 36 ms to a CPU frame of examples/import.json, this adds about 3.
+    px = max(1.0, soft / 4)
+    w, h = (int(math.ceil(v)) for v in (hi - lo) / px)
+    surf = skia.Surface(max(1, w), max(1, h))
+    cv = surf.getCanvas()
+    cv.scale(1 / px, 1 / px)
+    cv.translate(-lo[0], -lo[1])
+    for hull, sigma, alpha in shapes:
+        path = skia.Path()
+        path.addPoly([skia.Point(*q) for q in hull.tolist()], True)
+        cv.drawPath(path, skia.Paint(AntiAlias=True, Color=skia.ColorSetARGB(round(255 * min(1.0, alpha)), 0, 0, 0),
+                                     MaskFilter=skia.MaskFilter.MakeBlur(skia.kNormal_BlurStyle, sigma)))
+    c.save()
+    c.resetMatrix()
+    c.scale(r.scale, r.scale)
+    c.concat(space.to_skia(to))
+    c.drawImageRect(surf.makeImageSnapshot(), skia.Rect(*lo, lo[0] + w * px, lo[1] + h * px),
+                    skia.SamplingOptions(skia.FilterMode.kLinear))
+    c.restore()
 
 
 def draw(r, c: skia.Canvas, L, g, reveal: float):
@@ -245,6 +325,7 @@ def draw(r, c: skia.Canvas, L, g, reveal: float):
         P = (P[T] + (fn * reach[:, None])[:, None, :]).reshape(-1, 3)
         N, M = N[T].reshape(-1, 3), M[T].reshape(-1)
         T = np.arange(len(P), dtype=np.int32).reshape(-1, 3)
+    foot = P if amt >= 1.0 or ex > 0 else P[T.ravel()]  # what casts the ground shadow: what is drawn
     hom = P @ r._m3d[:3, :3].T + r._m3d[:3, 3]
     w = P @ r._m3d[3, :3] + r._m3d[3, 3]
     near = (w[T] < space.NEAR).any(1)
@@ -301,6 +382,8 @@ def draw(r, c: skia.Canvas, L, g, reveal: float):
                                        None if colors is None else colors[used].tolist(), idx)
         cv.drawVertices(verts, paint, skia.BlendMode.kDst)  # kDst: vertex colours as given, when there are any
     img = surf.makeImageSnapshot()
+    if L.raw.get("ground") not in (None, False):
+        _ground(r, c, L.raw["ground"], m.P, foot)
     c.save()
     c.resetMatrix()
     sampling = skia.SamplingOptions(skia.FilterMode.kLinear) if ss > 1 else skia.SamplingOptions()

@@ -66,7 +66,10 @@ MODEL_ALIAS = {"radius": "r", "thickness": "tube", "geometry": "shape", "primiti
                "extrusion": "depth", "chamfer": "bevel",
                "mesh": "shape", "gloss": "shine", "glossiness": "shine", "shininess": "shine",
                "specular": "shine", "metallic": "metal", "metalness": "metal", "toon": "bands", "steps": "bands",
-               "quality": "detail", "lighting": "light", "children": "parts", "meshes": "parts"}
+               "quality": "detail", "lighting": "light", "children": "parts", "meshes": "parts", "model": "src",
+               "floor": "ground", "groundShadow": "ground", "contactShadow": "ground"}
+GROUND = {"y", "opacity", "blur"}
+GROUND_ALIAS = {"alpha": "opacity", "strength": "opacity", "softness": "blur", "radius": "blur", "level": "y"}
 
 COMMON = {"id", "type", "at", "dur", "until", "x", "y", "anchor", "opacity", "scale", "scaleX", "scaleY", "rotate",
           "blur", "blend", "shadow", "fx", "enter", "exit", "hidden", "allowOffscreen", "z", "rotateX", "rotateY",
@@ -92,7 +95,7 @@ TYPES: dict[str, set[str]] = {
     "shader": {"preset", "uniforms", "sksl", "w", "h"},
     "group": {"children", "layers", "w", "h", "clip", "radius", "fill", "sort"},
     "model": PART - {"x", "y", "z", "rotateX", "rotateY", "rotate", "scale"} | {"detail", "parts", "explode",
-                                                                              "draw", "light"},
+                                                                              "draw", "light", "src", "ground"},
 }
 SEQUENCE = {"id", "type", "at", "clips", "transition", "fit", "volume", "w", "h", "x", "y", "anchor"}
 TYPE_ALIAS = {"rectangle": "rect", "square": "rect", "box": "rect", "shape": "rect", "txt": "text", "label": "text",
@@ -165,7 +168,7 @@ SCALAR = {"x", "y", "w", "h", "r", "opacity", "scale", "scaleX", "scaleY", "rota
           "volume", "unitX", "unitY", "unitRotate", "unitScale", "unitOpacity", "z", "rotateX", "rotateY", "fov",
           "depth", "tube", "shine", "metal", "rim", "bands", "explode", "bevel"}
 REQUIRED = {"text": ("text",), "image": ("src",), "video": ("src",), "path": ("d", "points"), "line": ("points",),
-            "captions": ("cues", "src"), "shader": ("preset", "sksl"), "model": ("shape", "parts")}
+            "captions": ("cues", "src"), "shader": ("preset", "sksl"), "model": ("shape", "parts", "src")}
 
 
 class Report:
@@ -449,6 +452,11 @@ def _layer(raw, rep: Report, path: str, comps: dict):
         del raw[key]
         rep.add("info", "renamed-key", lid, f"'{key}' read as x and y", "write \"x\" and \"y\"")
     _keys(raw, COMMON | TYPES[t], lalias, rep, lid, "")
+    shape = raw.get("shape")
+    if t == "model" and isinstance(shape, str) and shape.lower().endswith((".glb", ".gltf", ".obj")):
+        raw["src"] = raw.pop("shape")
+        rep.add("info", "renamed-key", lid, f"shape '{shape}' read as src (a model file)",
+                f"write \"src\": \"{shape}\"")
     for need in [REQUIRED.get(t)]:
         if need and not any(raw.get(k) not in (None, "", []) for k in need):
             rep.add("error", "missing-key", lid, f"a {t} layer needs " + " or ".join(f"'{k}'" for k in need),
@@ -523,6 +531,17 @@ def _outline(obj: dict, rep: Report, lid, where: str = ""):
 def _model(raw: dict, rep: Report, lid):
     _light(raw, rep, lid)
     _outline(raw, rep, lid)
+    if raw.get("src") and raw.get("shape"):
+        rep.add("warning", "ignored-key", lid, f"shape '{raw['shape']}' is ignored: the model comes from src",
+                "drop shape, or make the shape its own part")
+    gr = raw.get("ground")
+    if isinstance(gr, dict):
+        _keys(gr, GROUND, GROUND_ALIAS, rep, lid, "ground: ")
+        for k, v in gr.items():
+            if k in GROUND and (isinstance(v, bool) or not isinstance(v, (int, float))):
+                rep.add("error", "bad-value", lid, f"ground {k} is {v!r}; it takes a number")
+    elif gr is not None and not isinstance(gr, bool):
+        rep.add("error", "bad-value", lid, f"ground is {gr!r}; it takes true or an object like {{\"opacity\": 0.5}}")
     if isinstance(raw.get("fill"), dict):
         rep.add("error", "bad-value", lid, "a model's fill is one colour; gradients do not apply to models",
                 "use a colour, and give parts their own fill for more than one")

@@ -55,8 +55,10 @@ def test_depth_examples_in_docs_pass_check_with_no_rewrites():
 
 def test_model_examples_in_docs_pass_check_with_no_rewrites():
     models = [json.loads(o) for o in _objects(_section("3D MODELS"))]
-    assert {m["id"] for m in models} == {"emblem", "title3d"}
+    assert {m["id"] for m in models} == {"emblem", "title3d", "product"}
     for m in models:
+        if m.get("src"):  # the sample model examples/make_media.py writes
+            m["src"] = str(ROOT / "examples" / "media" / m["src"]).replace("\\", "/")
         r = check({"canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 4}, "layers": [m]})
         assert r["ok"] and not r["issues"], (m["id"], r["issues"])
 

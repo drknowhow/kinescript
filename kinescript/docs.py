@@ -130,7 +130,8 @@ LAYER TYPES (defaults in brackets)
             premultiplied: for a see-through colour return half4(rgb * a, a). iTime (seconds),
             iResolution, iProgress (0..1) and your uniforms are declared for you.
             Fills the canvas unless you give w and h.
-  model     a lit 3D solid, 3D text or an extruded SVG path: shape or parts (see 3D MODELS).
+  model     a lit 3D solid, 3D text, an extruded SVG path or a model file: shape, src or parts
+            (see 3D MODELS).
   group     children [layers], w, h, clip (true cuts children off at w x h), radius, fill.
             Children are placed from the group's x, y and start at the group's "at".
   sequence  clips [{"src": "a.mp4", "trim": [0, 4]}, ...] and transition {"type": "fade",
@@ -195,7 +196,16 @@ DEPTH AND CAMERA (3D)
   parts     [{"shape": "sphere", "r": 30, "x": 0, "y": -120, "z": 0, "rotateX": 0, "rotateY": 0,
             "rotate": 0, "scale": 1, "fill": "#b9f45d", "shine": 0.9}, ...] placed from the
             model's centre, in plain numbers (parts do not animate; the model does). A part takes
-            the model's material keys it does not set. A model may have shape, parts, or both.
+            the model's material keys it does not set. A model may have shape (or src), parts, or both.
+  src       a model file: .glb or .gltf (glTF 2.0), or .obj with its .mtl. Colours, shine and metal
+            come from the file; a fill on the layer recolours all of it. It fits inside w and/or h
+            keeping its shape, else its longest side is 300 px. Node transforms apply; animation,
+            skins and textures do not (a texture gives its mean colour). Long triangles are cut to
+            1/24 of its size for the depth sort. Draco- or meshopt-compressed files are not read.
+  ground    true or {"opacity": 0.5, "blur": px, "y": px}: a soft shadow on a level floor under the
+            model, as if lit from above, fainter as the model rises. The floor sits at the model's
+            lowest point before it turns, or at y in the layer's parent space (canvas px at the top
+            level): give y when the model moves up and down.
   explode   0..1: faces fly out along their normals.
   draw      0..1, or "enter": "build": triangles appear from the bottom up.
   light     top level, or on one model: studio (default) | soft | dramatic | flat (no shading),
@@ -217,6 +227,9 @@ DEPTH AND CAMERA (3D)
      "size": 240, "weight": 800, "depth": 70, "bevel": 5, "shine": 0.6,
      "rotateY": [[0, -40], [2.4, 0, "outCubic"]], "rotateX": [[0, 18], [2.4, 0, "outCubic"]],
      "enter": {"name": "build", "dur": 1.2}}
+  A product turntable from a model file, on a soft floor shadow:
+    {"id": "product", "type": "model", "src": "rocket.glb", "x": "50%", "y": "46%", "h": 600,
+     "rotateY": [[0, 0], ["end", 360]], "ground": true, "enter": {"name": "build", "dur": 1.6}}
 
 ANIMATING A VALUE (any number or colour key)
   constant     "x": 960
