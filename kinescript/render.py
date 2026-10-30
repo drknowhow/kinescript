@@ -71,6 +71,42 @@ half4 main(float2 p) {
 }
 """
 
+# Motion blur on the GPU: each sub-frame is drawn into its own surface and one pass averages them, so
+# only the result is read back. It is the integer mean (sum // n) of the 8-bit sub-frames, the same
+# bytes as averaging their readbacks in numpy; the +0.5 keeps floor() correct when the GPU's division
+# lands just under an exact multiple. The pass samples one texture per sub-frame, so up to BLUR_GPU of
+# them; more are averaged in numpy.
+BLUR_GPU = 16
+
+
+def _blur_sksl(n: int) -> str:
+    adds = "".join(f"t += floor(float4(s{k}.eval(p)) * 255 + 0.5);" for k in range(n))
+    return ("".join(f"uniform shader s{k};" for k in range(n))
+            + f"float4 main(float2 p) {{ float4 t = float4(0); {adds} return floor((t + 0.5) / {n}.0) / 255; }}")
+
+
+# Premultiplied to straight alpha with the integer rounding blurred frames have always had (_straighten).
+STRAIGHT_SKSL = """
+uniform shader src;
+float4 main(float2 p) {
+    float4 c = floor(float4(src.eval(p)) * 255 + 0.5);
+    float3 rgb = c.a > 0 ? min(floor((c.rgb * 255 + floor(c.a * 0.5) + 0.5) / c.a), float3(255)) : float3(0);
+    return float4(rgb, c.a) / 255;
+}
+"""
+
+
+def _straighten(buf: np.ndarray):
+    """Premultiplied RGBA to straight, in place: (c * 255 + a // 2) // a. Alpha 0 becomes black, alpha 255
+    is already straight, so only the partly transparent pixels are computed."""
+    a = buf[..., 3]
+    buf[a == 0] = 0
+    part = (a > 0) & (a < 255)
+    px = buf[part]
+    al = px[:, 3:4].astype(np.uint16)
+    px[:, :3] = np.minimum((px[:, :3].astype(np.uint16) * 255 + al // 2) // al, 255)
+    buf[part] = px
+
 
 def gpu_context():
     """One hidden OpenGL context per process, or None when there is no usable GPU.
@@ -247,39 +283,92 @@ class Renderer:
         self._outer = None  # the 3D matrix of the layer being drawn's parent (models put their floor in it)
         self._msurf = None  # offscreen that models draw into, antialiased, before compositing
         self.tris = 0  # model triangles drawn this frame
+        self._subframes = None  # motion blur on the GPU: (count, averaging effect, a surface per sub-frame)
+        self._straight = None  # (effect, surface) straightening blurred transparent frames on the GPU
         cm = color_matrix({k: v for k, v in scene.grade.items() if k not in ("vignette", "grain")})
         self.grade_filter = skia.ColorFilters.Matrix(cm) if cm else None
 
     # ---- public -------------------------------------------------------------------------
     def frame(self, n: int) -> np.ndarray:
         """RGBA uint8 array (h, w, 4) for frame n. The array is reused between calls."""
+        if self._compose(n) > 1 and self.transparent:
+            # A blurred frame keeps the integer rounding it has always been straightened with.
+            if self.backend == "gpu":
+                self._straightened().readPixels(self.info, self.buf, self.w * 4)
+            else:
+                self.surface.readPixels(self.info, self.buf, self.w * 4)
+                _straighten(self.buf)
+        else:
+            self.surface.readPixels(self.read_info, self.buf, self.w * 4)
+        return self.buf
+
+    def _compose(self, n: int) -> int:
+        """Draw frame n into the surface: with motion blur, the mean of its sub-frames. Returns how many."""
         mb = self.s.motion_blur
         samples = int(mb.get("samples", 0)) if mb else 0
         T = n / self.s.fps
-        if samples > 1:
-            shutter = float(mb.get("shutter", 0.5)) / self.s.fps
-            acc = np.zeros((self.h, self.w, 4), np.uint32)
-            for k in range(samples):
-                self.draw(T + (k / (samples - 1) - 0.5) * shutter)
-                self.surface.readPixels(self.info, self.buf, self.w * 4)
-                acc += self.buf
-            np.floor_divide(acc, samples, out=acc)
-            self.buf[...] = acc.astype(np.uint8)
-            if self.transparent:
-                a = self.buf[..., 3:4].astype(np.uint16)
-                rgb = np.where(a > 0, (self.buf[..., :3].astype(np.uint16) * 255 + a // 2) // np.maximum(a, 1), 0)
-                self.buf[..., :3] = np.minimum(rgb, 255).astype(np.uint8)
-            return self.buf
-        self.draw(T)
-        self.surface.readPixels(self.read_info, self.buf, self.w * 4)
-        return self.buf
+        if samples < 2:
+            self.draw(T)
+            return 1
+        shutter = float(mb.get("shutter", 0.5)) / self.s.fps
+        times = [T + (k / (samples - 1) - 0.5) * shutter for k in range(samples)]
+        if self.backend == "gpu" and samples <= BLUR_GPU:
+            self._blur_gpu(times)
+        else:
+            self._blur_cpu(times)
+        return samples
+
+    def _blur_gpu(self, times: list[float]):
+        n = len(times)
+        if self._subframes is None or self._subframes[0] != n:
+            ctx = self.surface.recordingContext()
+            self._subframes = (n, skia.RuntimeEffect.MakeForShader(_blur_sksl(n)),
+                               [skia.Surface.MakeRenderTarget(ctx, skia.Budgeted.kNo, self.info) for _ in range(n)])
+        _, eff, surfs = self._subframes
+        main = self.surface
+        try:
+            for t, surf in zip(times, surfs):
+                self.surface = surf  # draw() draws into self.surface
+                self.draw(t)
+        finally:
+            self.surface = main
+        imgs = [s.makeImageSnapshot() for s in surfs]
+        b = skia.RuntimeEffectBuilder(eff)
+        for k, img in enumerate(imgs):
+            b.setChild(f"s{k}", img.makeShader(skia.TileMode.kClamp, skia.TileMode.kClamp, skia.SamplingOptions()))
+        c = main.getCanvas()
+        c.resetMatrix()
+        c.drawPaint(skia.Paint(Shader=b.makeShader(), BlendMode=skia.BlendMode.kSrc))
+        del imgs, b  # as in frame_i420: a live snapshot makes the next draw into its surface copy it first
+
+    def _straightened(self) -> skia.Surface:
+        """A surface holding this surface's frame with straight alpha (STRAIGHT_SKSL)."""
+        if self._straight is None:
+            self._straight = (skia.RuntimeEffect.MakeForShader(STRAIGHT_SKSL), skia.Surface.MakeRenderTarget(
+                self.surface.recordingContext(), skia.Budgeted.kNo, self.info))
+        eff, surf = self._straight
+        img = self.surface.makeImageSnapshot()
+        b = skia.RuntimeEffectBuilder(eff)
+        b.setChild("src", img.makeShader(skia.TileMode.kClamp, skia.TileMode.kClamp, skia.SamplingOptions()))
+        surf.getCanvas().drawPaint(skia.Paint(Shader=b.makeShader(), BlendMode=skia.BlendMode.kSrc))
+        del img, b
+        return surf
+
+    def _blur_cpu(self, times: list[float]):
+        # 257 sub-frames of 255 still fit in 16 bits: half the memory traffic of 32-bit sums, same mean.
+        acc = np.zeros((self.h, self.w, 4), np.uint16 if len(times) <= 257 else np.uint32)
+        for t in times:
+            self.draw(t)
+            self.surface.readPixels(self.info, self.buf, self.w * 4)
+            np.add(acc, self.buf, out=acc)
+        np.floor_divide(acc, len(times), out=acc)
+        np.copyto(self.buf, acc, casting="unsafe")
+        self.surface.writePixels(skia.Pixmap(self.info, self.buf, self.w * 4))  # stills save the surface
 
     @property
     def yuv(self) -> bool:
-        """Whether frame_i420 runs on the GPU: an opaque frame, no motion blur, width a multiple of 4."""
-        mb = self.s.motion_blur
-        return (self.backend == "gpu" and not self.transparent and self.w % 4 == 0 and self.h % 2 == 0
-                and not (mb and int(mb.get("samples", 0)) > 1))
+        """Whether frame_i420 runs on the GPU: an opaque frame with width a multiple of 4."""
+        return self.backend == "gpu" and not self.transparent and self.w % 4 == 0 and self.h % 2 == 0
 
     def frame_i420(self, n: int) -> np.ndarray:
         """Frame n as an I420 buffer (BT.709, limited range), reused between calls. Needs self.yuv."""
@@ -289,7 +378,7 @@ class Renderer:
             self._i420 = (skia.RuntimeEffect.MakeForShader(I420_SKSL), info, surf,
                           np.empty(self.w * self.h * 3 // 2, np.uint8))
         eff, info, surf, buf = self._i420
-        self.draw(n / self.s.fps)
+        self._compose(n)
         img = self.surface.makeImageSnapshot()
         b = skia.RuntimeEffectBuilder(eff)
         b.setChild("src", img.makeShader(skia.TileMode.kClamp, skia.TileMode.kClamp, skia.SamplingOptions()))
