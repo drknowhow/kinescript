@@ -1,0 +1,33 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 6, "bg": "#f2f0e8"},
+  "camera": {"rotateX": 14, "rotateY": [[0, -10], ["end", 10]], "z": [[0, 160], ["end", 0]]},
+  "light": "studio",
+  "layers": [
+    {"id": "light", "type": "text", "text": "\"light\": \"studio\"", "font": "IBM Plex Mono", "x": "50%", "y": "17%",
+     "size": 40, "weight": 500, "fill": "#4a4f5c", "fixed": true, "at": 0.2, "enter": "fade"},
+    {"id": "gloss", "type": "model", "shape": "sphere", "r": 125, "x": 330, "y": 560, "detail": "high",
+     "fill": "$accent", "shine": 0.9, "ground": {"opacity": 0.5, "y": 690}, "enter": {"name": "build", "dur": 1.0}},
+    {"id": "gloss-key", "type": "text", "text": "\"shine\": 0.9", "font": "IBM Plex Mono", "x": 330, "y": 795,
+     "size": 32, "weight": 500, "fill": "#0a0c10", "at": 0.6, "enter": "fade"},
+    {"id": "steel", "type": "model", "shape": "sphere", "r": 125, "x": 645, "y": 560, "detail": "high",
+     "fill": "#e2e4ea", "metal": 0.6, "shine": 0.9, "ground": {"opacity": 0.5, "y": 690}, "at": 0.15,
+     "enter": {"name": "build", "dur": 1.0}},
+    {"id": "steel-key", "type": "text", "text": "\"metal\": 0.6", "font": "IBM Plex Mono", "x": 645, "y": 795,
+     "size": 32, "weight": 500, "fill": "#0a0c10", "at": 0.75, "enter": "fade"},
+    {"id": "toon", "type": "model", "shape": "torus", "r": 115, "tube": 46, "x": 960, "y": 560, "detail": "high",
+     "fill": "$accent2", "bands": 3, "rotateX": [[0, 70], ["end", -20]], "rotateY": [[0, 0], ["end", 90]],
+     "ground": {"opacity": 0.5, "y": 690}, "at": 0.3, "enter": {"name": "build", "dur": 1.0}},
+    {"id": "toon-key", "type": "text", "text": "\"bands\": 3", "font": "IBM Plex Mono", "x": 960, "y": 795,
+     "size": 32, "weight": 500, "fill": "#0a0c10", "at": 0.9, "enter": "fade"},
+    {"id": "rim", "type": "model", "shape": "cube", "w": 180, "x": 1275, "y": 560, "fill": "#242832", "rim": 1,
+     "rotateX": -20, "rotateY": [[0, 20], ["end", 200]], "ground": {"opacity": 0.5, "y": 690}, "at": 0.45,
+     "enter": {"name": "build", "dur": 1.0}},
+    {"id": "rim-key", "type": "text", "text": "\"rim\": 1", "font": "IBM Plex Mono", "x": 1275, "y": 795,
+     "size": 32, "weight": 500, "fill": "#0a0c10", "at": 1.05, "enter": "fade"},
+    {"id": "drama", "type": "model", "shape": "cone", "r": 100, "h": 220, "x": 1580, "y": 570, "fill": "#9299a8",
+     "light": "dramatic", "rotate": [[0, -8], ["end", 8]], "ground": {"opacity": 0.5, "y": 690}, "at": 0.6,
+     "enter": {"name": "build", "dur": 1.0}},
+    {"id": "drama-key", "type": "text", "text": "\"light\": \"dramatic\"", "font": "IBM Plex Mono", "x": 1580, "y": 795,
+     "size": 32, "weight": 500, "fill": "#0a0c10", "at": 1.2, "enter": "fade"}
+  ]
+}

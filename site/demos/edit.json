@@ -1,0 +1,22 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30},
+  "grade": {"vignette": 0.25},
+  "layers": [
+    {"id": "cut", "type": "sequence",
+     "clips": [
+       {"src": "import.mp4", "trim": [0.8, 4.6], "zoom": [[0, 1], [3.2, 1.3, "inOutSine"]], "focus": [0.5, 0.32]},
+       {"src": "dolly.mp4", "trim": [2.6, 6.6]},
+       {"src": "materials.mp4", "trim": [1.2, 6.0], "enter": {"name": "wipe-right", "dur": 0.5, "ease": "inOutSine"}}
+     ],
+     "transition": {"type": "zoom", "dur": 0.5}},
+    {"use": "lowerThird", "id": "lt", "title": "A glTF file, trimmed", "subtitle": "\"trim\": [0.8, 4.6]",
+     "at": 0.4, "dur": 2.6},
+    {"use": "callout", "id": "co", "x": "50%", "y": "32%", "r": 70, "label": "punch-in focus", "at": 1.2, "dur": 1.9},
+    {"id": "pip", "type": "video", "src": "card-flip.mp4", "trim": [0.8, 4.8], "anchor": "center", "x": "79%",
+     "y": "24%", "w": 576, "h": 324, "radius": 18, "shadow": {"y": 10, "blur": 30, "color": "#0a0c1066"},
+     "at": "cut-3.in+0.5", "until": "cut-3.out", "enter": {"name": "pop", "dur": 0.4}, "exit": "fade"},
+    {"id": "cap", "type": "captions", "mode": "karaoke", "at": "cut-2.in",
+     "cues": [[0.3, 3.2, "Three clips from one cut list"], [3.7, 7.8, "and a fourth in the corner"]]},
+    {"use": "progress", "id": "bar", "h": 6, "color": "$muted"}
+  ]
+}

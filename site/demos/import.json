@@ -1,0 +1,12 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 6, "bg": "#f2f0e8"},
+  "camera": {"rotateX": 16, "rotateY": [[0, -10], ["end", 10]]},
+  "light": "studio",
+  "layers": [
+    {"id": "rocket", "type": "model", "src": "media/rocket.glb", "x": "50%", "y": "46%", "h": 600,
+     "rotateY": [[0, -30], ["end", 330]], "rotate": [[0, 0], [3, 5, "inOutSine"], ["end", 0, "inOutSine"]],
+     "ground": {"opacity": 0.6}, "enter": {"name": "build", "dur": 1.6}},
+    {"id": "label", "type": "text", "text": "media/rocket.glb", "x": "50%", "y": "92%", "size": 34, "weight": 500,
+     "fill": "#0a0c10", "fixed": true, "at": 1.2, "enter": "fade"}
+  ]
+}
