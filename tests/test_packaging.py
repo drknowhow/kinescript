@@ -13,7 +13,9 @@ from urllib.parse import unquote, urlparse
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-README = ROOT / "README.md"
+# Every package this repository publishes to PyPI: the folder with its pyproject.toml and README.md.
+PACKAGES = {"kinescript": ROOT, "kinescript-kokoro": ROOT / "plugins" / "kinescript-kokoro"}
+each_package = pytest.mark.parametrize("pkg", list(PACKAGES))
 
 # Link targets that work on PyPI. Everything else (docs/hero.gif, ../x, /x, //host/x, a bare filename) is
 # resolved against pypi.org and breaks.
@@ -49,14 +51,15 @@ def relative_targets(text):
     return [t for t in link_targets(text) if not ABSOLUTE.match(t)]
 
 
-def _readme():
-    return README.read_text(encoding="utf-8")
+def _readme(pkg="kinescript"):
+    return (PACKAGES[pkg] / "README.md").read_text(encoding="utf-8")
 
 
 # --- README.md ---------------------------------------------------------------------------------------------
 
-def test_readme_has_no_relative_links_or_images():
-    bad = relative_targets(_readme())
+@each_package
+def test_readme_has_no_relative_links_or_images(pkg):
+    bad = relative_targets(_readme(pkg))
     assert not bad, (
         "README.md is the PyPI long description, so a relative target resolves against pypi.org and breaks, "
         "and PyPI drops any other scheme (data:, javascript:). "
@@ -72,10 +75,11 @@ REPO_FILE = re.compile(
 )
 
 
-def test_readme_points_at_files_that_exist_in_the_repo():
+@each_package
+def test_readme_points_at_files_that_exist_in_the_repo(pkg):
     # The README's images are served from the main branch. PyPI keeps the README of every release forever, so a
     # file that is renamed or deleted breaks the page of every release that links to it.
-    hits = [m for m in map(REPO_FILE.match, link_targets(_readme())) if m]
+    hits = [m for m in map(REPO_FILE.match, link_targets(_readme(pkg))) if m]
     missing = [m.group(0) for m in hits if not (ROOT / unquote(m.group(1))).exists()]
     assert not missing, f"README.md links to repo files that do not exist: {missing}"
 
@@ -102,8 +106,9 @@ def _render(text):
     return rm.render(text)
 
 
-def test_readme_renders_the_way_pypi_renders_it():
-    text = _readme()
+@each_package
+def test_readme_renders_the_way_pypi_renders_it(pkg):
+    text = _readme(pkg)
     out = _render(text)
     assert out, "readme_renderer returned nothing: PyPI would show the plain README text instead of HTML"
     out = unquote(html.unescape(out))  # comrak percent-encodes some characters in URLs
@@ -115,24 +120,26 @@ def test_readme_renders_the_way_pypi_renders_it():
 
 # --- pyproject.toml ----------------------------------------------------------------------------------------
 
-def _project():
+def _project(pkg="kinescript"):
     try:
         import tomllib
     except ModuleNotFoundError:  # Python 3.10
         tomllib = pytest.importorskip("tomli")
-    return tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    return tomllib.loads((PACKAGES[pkg] / "pyproject.toml").read_text(encoding="utf-8"))["project"]
 
 
-def test_summary_is_one_short_plain_line():
-    summary = _project()["description"]
+@each_package
+def test_summary_is_one_short_plain_line(pkg):
+    summary = _project(pkg)["description"]
     assert 20 <= len(summary) <= 120, f"{len(summary)} characters: {summary!r}"
     assert "\n" not in summary and not re.search(r"[`*\[\]<>]", summary), "the summary is plain text, not Markdown"
     assert not summary.endswith(" "), summary
 
 
-def test_classifiers_are_all_valid():
+@each_package
+def test_classifiers_are_all_valid(pkg):
     trove = pytest.importorskip("trove_classifiers")
-    listed = _project()["classifiers"]
+    listed = _project(pkg)["classifiers"]
     unknown = [c for c in listed if c not in trove.classifiers]
     deprecated = [c for c in listed if c in trove.deprecated_classifiers]
     assert not unknown, f"PyPI rejects the upload for classifiers it does not know: {unknown}"
@@ -142,13 +149,15 @@ def test_classifiers_are_all_valid():
     assert not [c for c in listed if c.startswith("License ::")]
 
 
-def test_keywords_are_unique():
-    words = [k.lower() for k in _project()["keywords"]]
+@each_package
+def test_keywords_are_unique(pkg):
+    words = [k.lower() for k in _project(pkg)["keywords"]]
     assert words and len(set(words)) == len(words)
 
 
-def test_project_links_are_complete_and_verifiable():
-    urls = _project()["urls"]
+@each_package
+def test_project_links_are_complete_and_verifiable(pkg):
+    urls = _project(pkg)["urls"]
     # These labels get an icon on PyPI (see docs.pypi.org/project_metadata, "Link icons").
     for label in ("Homepage", "Documentation", "Source", "Issues", "Changelog"):
         assert label in urls, f"missing project link {label!r}"

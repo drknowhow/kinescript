@@ -27,7 +27,7 @@ from pathlib import Path
 from . import words as W
 
 GROUP = "kinescript.voice"
-KOKORO = "kinescript-kokoro @ git+https://github.com/drknowhow/kinescript#subdirectory=plugins/kinescript-kokoro"
+KOKORO = "kinescript-kokoro"
 MARK = re.compile(r"\[\[\s*(\w+)\s*\]\]")
 
 
@@ -153,7 +153,7 @@ def _speaker(name: str | None):
     elif found:
         raise ValueError(f"several voice backends are installed ({', '.join(found)}); pick one with --backend")
     else:
-        raise ValueError(f"no voice backend is installed: pip install \"{KOKORO}\" (Python 3.10 to 3.12), "
+        raise ValueError(f"no voice backend is installed: pip install {KOKORO} (Python 3.10 to 3.12), "
                          "or set KINE_VOICE_CMD to a command that speaks")
     fn = found[key].load()
     return (lambda reqs: [fn(r) for r in reqs]), key

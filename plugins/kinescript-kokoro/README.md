@@ -17,17 +17,18 @@ kine check scene.json
 Kokoro needs Python 3.10 to 3.12 and PyTorch. Into the same environment as Kinescript:
 
 ```bash
-pip install "kinescript-kokoro @ git+https://github.com/drknowhow/kinescript#subdirectory=plugins/kinescript-kokoro"
+pip install kinescript-kokoro
 ```
 
-From a checkout, `pip install ./plugins/kinescript-kokoro` does the same. The plugin is not on PyPI.
+From a checkout of [Kinescript](https://github.com/drknowhow/kinescript), `pip install ./plugins/kinescript-kokoro`
+does the same.
 
 Kinescript itself runs on newer Pythons than Kokoro. If yours is one, install the plugin into another Python
 and point `KINE_VOICE_CMD` at it; `kine voice` sends it the lines as JSON on stdin and never through a shell:
 
 ```bash
 python3.12 -m venv ~/kokoro-env
-~/kokoro-env/bin/pip install "kinescript-kokoro @ git+https://github.com/drknowhow/kinescript#subdirectory=plugins/kinescript-kokoro"
+~/kokoro-env/bin/pip install kinescript-kokoro
 export KINE_VOICE_CMD="$HOME/kokoro-env/bin/python -m kinescript_kokoro"
 ```
 
