@@ -357,6 +357,39 @@ def test_render_mp4_with_audio(clip, tmp_path):
     assert info["audio"] and info["duration"] == pytest.approx(1.0, abs=0.1)
 
 
+@pytest.mark.parametrize("workers", [1, 3])
+def test_audio_lands_at_its_time_with_any_worker_count(clip, tmp_path, workers):
+    spec = scene([{"type": "rect", "w": 320, "h": 180, "fill": "#202020"}], duration=2)
+    spec["audio"] = [{"src": clip, "at": 1, "trim": [0, 1]}]
+    out = tmp_path / "o.mp4"
+    assert k.render(spec, str(out), quality="draft", workers=workers)["frames"] == 60
+    raw = subprocess.run([media.FFMPEG, "-v", "error", "-i", str(out), "-map", "0:a", "-ac", "1", "-ar", "8000",
+                          "-f", "f32le", "-"], capture_output=True, check=True).stdout
+    pcm = np.frombuffer(raw, np.float32)
+    assert np.sqrt(np.mean(pcm[:7200] ** 2)) < 1e-3 < 0.05 < np.sqrt(np.mean(pcm[8800:15200] ** 2))
+
+
+def test_audio_mixes_while_frames_render_and_stops_when_they_fail(clip, tmp_path, monkeypatch):
+    from kinescript import output
+    started, real_start = [], output._start_audio
+
+    def start(*a):
+        started.append(real_start(*a))
+        return started[-1]
+
+    def frames(job):
+        assert started and started[0][0].poll() is None, "the audio mix should already be running"
+        raise RuntimeError("frames failed")
+
+    monkeypatch.setattr(output, "_start_audio", start)
+    monkeypatch.setattr(output, "_render_range", frames)
+    spec = scene([{"type": "rect", "w": 320, "h": 180}], duration=60)
+    spec["audio"] = [{"src": clip, "at": t} for t in range(0, 60, 3)]  # a minute of audio takes a while to mix
+    with pytest.raises(RuntimeError, match="frames failed"):
+        k.render(spec, str(tmp_path / "o.mp4"), quality="draft", workers=1)
+    assert started[0][0].poll() is not None  # stopped, not left running
+
+
 def test_captions_from_srt(tmp_path):
     srt = tmp_path / "c.srt"
     srt.write_text("1\n00:00:00,000 --> 00:00:01,000\nHello world\n\n2\n00:00:01,000 --> 00:00:02,500\nSecond line here\n")

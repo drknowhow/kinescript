@@ -83,7 +83,7 @@ footer img { height: 26px; }
     <div class="film">
       <video src="../docs/promo.mp4" poster="../docs/poster.png" controls playsinline preload="metadata"></video>
     </div>
-    <p class="caption">This video is a Kinescript scene: <code>marketing/promo.json</code>. 35 seconds of 1080p, rendered with audio in about 4 seconds.</p>
+    <p class="caption">This video is a Kinescript scene: <code>marketing/promo.json</code>. 35 seconds of 1080p, rendered with audio in about 3.5 seconds.</p>
   </div>
 
   <section id="how">
@@ -110,8 +110,8 @@ footer img { height: 26px; }
         <h3>Render in parallel</h3>
         <p>Frames split across processes, drawn on the GPU, joined without re-encoding.</p>
 <pre><span class="k">$</span> kine render scene.json
-<span class="v">1038</span> frames  <span class="v">4.0</span> s
-<span class="v">262</span> frames/s, with audio</pre>
+<span class="v">1038</span> frames  <span class="v">3.5</span> s
+<span class="v">300</span> frames/s, with audio</pre>
       </div>
     </div>
   </section>
@@ -149,7 +149,7 @@ footer img { height: 26px; }
     <p class="sub">Skia on the GPU, one hidden OpenGL context per worker, one ffmpeg pass to join.</p>
     <div class="numbers">
       <div class="num"><b>2.7 ms</b><span>median time to draw and read back one 1080p frame of the launch video</span></div>
-      <div class="num"><b>262</b><span>frames per second, rendering the launch video with audio</span></div>
+      <div class="num"><b>300</b><span>frames per second, rendering the launch video with audio</span></div>
       <div class="num"><b>3</b><span>Python dependencies: skia-python, numpy, glfw. Plus ffmpeg.</span></div>
     </div>
     <p class="fine">Measured on an Intel Core Ultra 7 265 with an NVIDIA RTX 5060 Ti, Windows 11. Without a GPU the CPU fallback is much slower; see the README.</p>
