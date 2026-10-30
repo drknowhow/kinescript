@@ -48,6 +48,11 @@ def analyze(src: str, start: float = 0.0, end: float | None = None) -> dict:
 
 @lru_cache(maxsize=256)
 def _analyze(src: str, mtime: int, size: int, start: float, end: float | None) -> dict:
+    return measure(src, start, end)
+
+
+def measure(src: str, start: float = 0.0, end: float | None = None) -> dict:
+    """analyze without the cache, for a file that is made once and measured once, like a finished mix."""
     cut = f"atrim=start={start}" + ("" if end is None else f":end={end}") + ",asetpts=PTS-STARTPTS,"
     res = subprocess.run([media.FFMPEG, "-hide_banner", "-nostats", "-i", src, "-af",
                           cut + f"ebur128=peak=true+sample,aresample={_AN},aformat=sample_fmts=flt:channel_layouts=mono",
@@ -67,14 +72,18 @@ def _analyze(src: str, mtime: int, size: int, start: float, end: float | None) -
 
 
 def loudness(log: str) -> dict:
-    """lufs, peak and true_peak from the summary ffmpeg's ebur128 filter writes to its log."""
-    s = log[log.rfind("Summary:"):]
+    """lufs, peak, true_peak and lra (loudness range, LU) from the summary ffmpeg's ebur128 filter writes to its
+    log, and short_max, the loudest 3 s, from the lines it writes every 0.1 s."""
+    at = log.rfind("Summary:")
+    s = log[at:]
 
     def num(pattern: str) -> float:
         m = re.search(pattern, s)
         return float(m.group(1)) if m else -math.inf
+    short = [float(x) for x in re.findall(r"\bS:\s*(-?[\d.]+)", log[:at])]
     return {"lufs": num(r"I:\s+(-?[\d.]+|-inf) LUFS"), "peak": num(r"Sample peak:\s+Peak:\s+(-?[\d.]+|-inf)"),
-            "true_peak": num(r"True peak:\s+Peak:\s+(-?[\d.]+|-inf)")}
+            "true_peak": num(r"True peak:\s+Peak:\s+(-?[\d.]+|-inf)"), "lra": num(r"LRA:\s+(-?[\d.]+) LU"),
+            "short_max": max((x for x in short if x > -70), default=-math.inf)}
 
 
 def level(role: str, info: dict, levels: dict) -> float:

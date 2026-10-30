@@ -19,6 +19,16 @@
   `"duck": false` turns ducking off. Scenes where no sound has a role mix as before.
 - `gain` changes over time like any property: keyframes (`[[0, -30], [2, 0]]`), tweens or `=` expressions, in dB
   from the sound's start. `kine check` reports a gain that does not give a number.
+- `kine check` hears the sound. It mixes and measures the scene's audio, without drawing a frame and while the
+  frames are being checked (warm check time is unchanged for `examples/edit.json` and the promo), and reports a
+  voice cut off (`audio-cut`), two voices at once (`voice-overlap`), music and ambience less than 10 LU under a voice
+  (`voice-masked`), an sfx whose first sound comes more than 50 ms after its cue (`sfx-late`), a sound that plays
+  silence (`audio-silent`), and a mix off its loudness target or over its peak ceiling (`audio-loudness`,
+  `audio-peak`). Each issue has the sound's id, a time range and a fix.
+- `kine look --audio` (MCP `kine_look` with `audio`) draws the sound under the contact sheet on the frames' time
+  axis: a lane per role and one for the mix, each sound's span and id, the duck, and the issues in red. Its JSON
+  gives each sound's loudness before and after gain, its leading silence and any shift, and the mix's loudness,
+  true peak, loudness range and loudest 3 s.
 - Fixed: a scene whose sounds all ended before it did rendered a video cut short at the end of the last sound. The
   mix is now padded to the scene length. Scenes whose sound already reached the end render the same audio, bit for
   bit.

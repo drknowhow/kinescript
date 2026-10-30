@@ -311,6 +311,8 @@ SOUND
   "mix": {"loudness": -14, "peak": -1, "levels": {"music": -20}, "duck": {"depth": 10}}.
   "duck": false turns the dip off; duck also takes by and under (lists of roles), and attack, hold
   and release in seconds (0.08, 0.15, 0.4).
+  You cannot hear the mix, so read it: kine check measures it and names each sound problem with its
+  time range, and kine look --audio draws it under the frames, with each sound's loudness in the JSON.
   Sound is mixed into .mp4, .mov and .webm, and into --from/--to renders. -o mix.wav (or .m4a,
   .mp3, .flac) renders the sound alone, without drawing frames.
 
@@ -353,11 +355,18 @@ COMMANDS
   kine check scene.json           JSON list of problems. error: must fix. warning: should fix:
                                   text off the canvas or inside the outer 5% (safe-area),
                                   overlapping text, contrast under 3:1, or text shown for less
-                                  than about 0.4 s + 0.3 s per word (read-time).
+                                  than about 0.4 s + 0.3 s per word (read-time). With sound (it is
+                                  mixed and measured, see SOUND): a voice cut off (audio-cut), two
+                                  voices at once (voice-overlap), music under 10 LU below a voice
+                                  (voice-masked), an sfx whose first sound is late (sfx-late), a
+                                  silent sound, and the mix's loudness and peaks.
                                   info: a name it read for you, e.g. "'color' read as 'fill'".
   kine look scene.json --boxes    one PNG of 12 evenly spaced frames; --boxes outlines layers and
                                   labels the top-level ones; -n 16 frames, --at 1 2.5 4 exact
-                                  times (use it to see a transition), --width 480, --cols 4, -o
+                                  times (use it to see a transition), --width 480, --cols 4, -o.
+                                  --audio adds the sound under the frames on the same time axis:
+                                  a lane per role and one for the mix, the duck, and issues in red;
+                                  its JSON gives each sound's loudness and gain and the mix's.
   kine still scene.json --at 2.5  one frame as PNG (-o to name it); --at -1 is 1 s before the
                                   end; --at end is the last frame
   kine probe scene.json --at 2    every layer's and sound's start and end, and screen boxes at 2 s
@@ -374,7 +383,8 @@ COMMANDS
 
 WORKFLOW FOR AGENTS
   1. Write the scene.   2. kine check: fix every error, read the warnings, run it again.
-  3. kine look --boxes, and look at the image.   4. kine render -q draft, then the final render.
+  3. kine look --boxes, and look at the image (with sound, kine look --audio).
+  4. kine render -q draft, then the final render.
 """
 
 
