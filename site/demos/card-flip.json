@@ -1,0 +1,51 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 6, "bg": "#0a0c10"},
+  "grade": {"vignette": 0.3},
+  "camera": {"z": [[0, 260], ["end", 0]], "rotateY": [[0, -18], ["end", 14]], "rotateX": [[0, 12], ["end", 4]]},
+  "layers": [
+    {"id": "bg", "type": "shader", "preset": "score", "opacity": 0.5, "fixed": true},
+    {"id": "title", "type": "text", "text": "Change a line. Flip a card.", "x": "50%", "y": "19%", "size": 80,
+     "weight": 700, "fixed": true, "at": 0.2, "enter": {"name": "left", "dist": 28, "dur": 0.32}},
+    {"id": "card-1", "type": "group", "x": "20%", "y": "54%", "at": 0.4, "enter": {"name": "push", "dur": 0.6},
+     "rotateY": [[0.9, 0], [1.7, 180, "outBack"], [3.9, 180], [4.7, 360, "outBack"]],
+     "children": [
+       {"id": "card-1-front", "type": "group", "anchor": "center", "w": 500, "h": 290, "radius": 24,
+        "fill": "#f2f0e8", "backface": "hidden",
+        "children": [{"id": "card-1-old", "type": "text", "text": "- \"dur\": 2.5", "font": "IBM Plex Mono",
+                      "size": 52, "weight": 500, "fill": "#0a0c10"}]},
+       {"id": "card-1-back", "type": "group", "anchor": "center", "w": 500, "h": 290, "radius": 24,
+        "fill": "#b9f45d", "rotateY": 180, "backface": "hidden",
+        "children": [{"id": "card-1-new", "type": "text", "text": "+ \"dur\": 4.5", "font": "IBM Plex Mono",
+                      "size": 52, "weight": 500, "fill": "#0a0c10"}]}
+     ]},
+    {"id": "card-2", "type": "group", "x": "50%", "y": "54%", "at": "card-1.in+0.25",
+     "enter": {"name": "push", "dur": 0.6},
+     "rotateY": [[0.9, 0], [1.7, 180, "outBack"], [3.9, 180], [4.7, 360, "outBack"]],
+     "children": [
+       {"id": "card-2-front", "type": "group", "anchor": "center", "w": 500, "h": 290, "radius": 24,
+        "fill": "#f2f0e8", "backface": "hidden",
+        "children": [{"id": "card-2-old", "type": "text", "text": "- \"text\": \"Q3\"", "font": "IBM Plex Mono",
+                      "size": 52, "weight": 500, "fill": "#0a0c10"}]},
+       {"id": "card-2-back", "type": "group", "anchor": "center", "w": 500, "h": 290, "radius": 24,
+        "fill": "#b9f45d", "rotateY": 180, "backface": "hidden",
+        "children": [{"id": "card-2-new", "type": "text", "text": "+ \"text\": \"Q4\"", "font": "IBM Plex Mono",
+                      "size": 52, "weight": 500, "fill": "#0a0c10"}]}
+     ]},
+    {"id": "card-3", "type": "group", "x": "80%", "y": "54%", "at": "card-2.in+0.25",
+     "enter": {"name": "push", "dur": 0.6},
+     "rotateY": [[0.9, 0], [1.7, 180, "outBack"], [3.9, 180], [4.7, 360, "outBack"]],
+     "children": [
+       {"id": "card-3-front", "type": "group", "anchor": "center", "w": 500, "h": 290, "radius": 24,
+        "fill": "#f2f0e8", "backface": "hidden",
+        "children": [{"id": "card-3-old", "type": "text", "text": "- \"size\": 64", "font": "IBM Plex Mono",
+                      "size": 52, "weight": 500, "fill": "#0a0c10"}]},
+       {"id": "card-3-back", "type": "group", "anchor": "center", "w": 500, "h": 290, "radius": 24,
+        "fill": "#b9f45d", "rotateY": 180, "backface": "hidden",
+        "children": [{"id": "card-3-new", "type": "text", "text": "+ \"size\": 96", "font": "IBM Plex Mono",
+                      "size": 52, "weight": 500, "fill": "#0a0c10"}]}
+     ]},
+    {"id": "how", "type": "text", "text": "\"rotateY\": [[0.9, 0], [1.7, 180, \"outBack\"]]   \"backface\": \"hidden\"",
+     "font": "IBM Plex Mono", "x": "50%", "y": "86%", "size": 32, "weight": 400, "fill": "$muted", "fixed": true,
+     "at": 1.0, "enter": "fade"}
+  ]
+}

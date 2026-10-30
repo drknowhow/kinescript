@@ -1,0 +1,18 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 5, "bg": "#0a0c10"},
+  "camera": {"rotateY": [[0, 8], ["end", -6]], "rotateX": [[0, -4], ["end", 2]]},
+  "light": "studio",
+  "layers": [
+    {"id": "mark", "type": "model", "x": "50%", "y": "36%",
+     "rotateY": [[0, -70], [2.2, 0, "outCubic"]], "rotateX": [[0, 25], [2.2, 0, "outCubic"]],
+     "enter": {"name": "build", "dur": 1.2},
+     "parts": [
+       {"shape": "path", "d": "M52 36L52 164M150 36C117 36 117 100 84 100C117 100 117 164 150 164",
+        "strokeWidth": 18, "h": 380, "depth": 56, "bevel": 4, "fill": "#f2f0e8", "shine": 0.5},
+       {"shape": "sphere", "r": 44, "x": -44, "z": 74, "fill": "$accent", "shine": 0.8}
+     ]},
+    {"id": "word", "type": "model", "shape": "text", "text": "kinescript", "x": "50%", "y": "77%", "size": 190,
+     "weight": 700, "letterSpacing": -4, "depth": 46, "bevel": 3, "fill": "#f2f0e8", "shine": 0.5, "at": 0.6,
+     "rotateX": [[0, 70], [2, 0, "outCubic"]], "enter": {"name": "build", "dur": 1.2}}
+  ]
+}
