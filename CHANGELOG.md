@@ -14,6 +14,11 @@
   shades per pixel in SkSL with 4x MSAA; the CPU shades per vertex with 2x supersampling. Still no new
   dependency. `examples/model.json` (180 frames at 1080p, up to 10,800 triangles drawn a frame) renders in
   2.5 s on the GPU with 6 workers; one frame takes a median 18 ms on the GPU and 72 ms on the CPU.
+- 3D text and paths: `"shape": "text"` extrudes letters in any font and `"shape": "path"` extrudes SVG path
+  data, filled, or stroked with `strokeWidth` for line icons; `depth` and a 45-degree `bevel` in px. Holes
+  (o, a, 8) stay open, curved sides shade smoothly, and both work as `parts`. Outlines are cached per text and
+  font. `examples/title3d.json` (the brand mark and wordmark, 150 frames at 1080p, up to 5,718 triangles drawn
+  a frame) renders in 1.34 s on the GPU with 5 workers and 2.87 s on the CPU.
 - `kine check` warns past 60,000 model triangles in one frame.
 - `z` used to be ignored with a note; it is now depth in px toward the viewer.
 - `kine check` warns when text faces away from the camera (mirrored) and when a layer crosses the camera plane.

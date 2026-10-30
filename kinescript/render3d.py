@@ -10,7 +10,7 @@ import numpy as np
 import skia
 
 from . import color as C
-from . import mesh, space
+from . import mesh, space, svgpath
 
 MATERIAL = ("fill", "shine", "metal", "rim", "bands")
 MAX_MATERIALS = 8
@@ -113,6 +113,85 @@ def _material(get) -> tuple:
             float(get("rim", 0.5)))
 
 
+def _text_path(r, num, raw) -> tuple[skia.Path, float]:
+    """Outline of the text, centred on the origin (lines on their middle, capitals on theirs), and its size."""
+    size = float(num("size", 120))
+    fam = raw.get("font") or r.s.theme.get("font")
+    font = skia.Font(r._typeface(fam, int(num("weight", 600)), bool(raw.get("italic"))), size)
+    ls, lh = float(num("letterSpacing", 0)), size * float(num("lineHeight", 1.18))
+    lines = str(raw.get("text", "")).split("\n")
+    path = skia.Path()
+    for i, line in enumerate(lines):
+        glyphs = font.textToGlyphs(line)
+        xs = np.array(font.getXPos(glyphs)) + ls * np.arange(len(glyphs))
+        width = font.measureText(line) + ls * max(0, len(glyphs) - 1)
+        for gid, x in zip(glyphs, xs):
+            gp = font.getPath(gid)
+            if gp is not None:
+                path.addPath(gp, float(x) - width / 2, i * lh)
+    path.offset(0, font.getMetrics().fCapHeight / 2 - (len(lines) - 1) * lh / 2)
+    return path, size
+
+
+def _svg_path(num, raw) -> tuple[skia.Path, float]:
+    """The `d` outline (or its stroke's, with round ends, given strokeWidth) centred on the origin, scaled to
+    fit w and/or h when given, and its size."""
+    path = svgpath.parse(str(raw.get("d", "")))
+    sw = float(num("strokeWidth", 0) or 0)
+    if sw > 0:
+        outline = skia.Path()
+        skia.Paint(Style=skia.Paint.kStroke_Style, StrokeWidth=sw, StrokeCap=skia.Paint.kRound_Cap,
+                   StrokeJoin=skia.Paint.kRound_Join).getFillPath(path, outline)
+        path = outline
+    b = path.computeTightBounds()
+    w, h = num("w", None), num("h", None)
+    fits = [float(v) / s for v, s in ((w, b.width()), (h, b.height())) if v is not None and s > 0]
+    s = min(fits) if fits else 1.0
+    fit = skia.Matrix()
+    fit.setScaleTranslate(s, s, -b.centerX() * s, -b.centerY() * s)
+    path.transform(fit)
+    return path, max(b.width(), b.height()) * s
+
+
+def _extruded(r, shape: str, num, raw, detail: str) -> mesh.Mesh:
+    """A text or path model's solid. Outlines are cached per text, font and size, solids per depth and bevel,
+    so a changing counter or an animated depth costs one rebuild per distinct value."""
+    k = mesh.DETAIL.get(detail, 1.0)
+    if shape == "text":
+        key = (shape, str(raw.get("text", "")), raw.get("font") or r.s.theme.get("font"), int(num("weight", 600)),
+               bool(raw.get("italic")), *(round(float(num(n, d)), 2) for n, d in
+                                          (("size", 120), ("letterSpacing", 0), ("lineHeight", 1.18))), k)
+    else:
+        key = (shape, str(raw.get("d", "")), num("w", None), num("h", None), num("strokeWidth", 0), k)
+    if len(r._solids) > 64:
+        r._solids.clear()
+    flat = r._solids.get(key)
+    if flat is None:
+        path, extent = _text_path(r, num, raw) if shape == "text" else _svg_path(num, raw)
+        seg = max(1.0, min(10.0, extent * 0.04)) / k  # length of the pieces curves are cut into, in px
+        flat = r._solids[key] = (*mesh.shape2d(mesh.contours(path, seg)), seg, extent)
+    Q, starts, caps, seg, extent = flat
+    depth, bevel = float(num("depth", round(extent * 0.2))), float(num("bevel", 0))
+    full = key + (round(depth, 2), round(bevel, 2))
+    m = r._solids.get(full)
+    if m is None:
+        rows = max(1, min(4, round(depth / (3 * seg))))
+        # Caps are cut into triangles up to 6 pieces long: one long cap triangle sorts by its middle and
+        # can be drawn under walls it should cover (the hole of an O seen at an angle).
+        m = r._solids[full] = (mesh.extrude(Q, starts, caps, depth, bevel, rows, 6 * seg) if len(caps)
+                               else mesh.Mesh(np.zeros((0, 3)), np.zeros((0, 3)), np.zeros((0, 3), np.int32),
+                                              np.zeros(0, np.int32)))
+    return m
+
+
+def _shape(r, shape: str, num, raw, detail: str) -> mesh.Mesh:
+    """One shape's mesh at its size, centred on the origin. num(key, default) reads its numbers, raw its text."""
+    if shape in mesh.EXTRUDED:
+        return _extruded(r, shape, num, raw, detail)
+    s3, tube = mesh.size(shape, num)
+    return mesh.placed(mesh.unit(shape, detail, tube), s3)
+
+
 def _parts(r, L):
     """The model's parts merged once: mesh, and for each material slot the part keys that override the layer."""
     hit = r._models.get(L.id)
@@ -120,12 +199,11 @@ def _parts(r, L):
         detail = L.raw.get("detail", "medium")
         meshes, slots, keys = [], [], [{}]
         for p in L.raw.get("parts") or []:
-            shape = p.get("shape", "cube")
-            s3, tube = mesh.size(shape, lambda k, d: p.get(k, d))
             own = {k: p[k] for k in MATERIAL if k in p}
             if own not in keys:
                 keys.append(own)
-            meshes.append(mesh.placed(mesh.unit(shape, detail, tube), s3, mesh.part_matrix(p)))
+            m = _shape(r, p.get("shape", "cube"), lambda k, d, p=p: p.get(k, d), p, detail)
+            meshes.append(mesh.placed(m, (1.0, 1.0, 1.0), mesh.part_matrix(p)))
             slots.append(keys.index(own))
         if len(keys) > MAX_MATERIALS:
             raise ValueError(f"layer '{L.id}': {len(keys)} different materials; a model takes at most {MAX_MATERIALS}")
@@ -139,8 +217,7 @@ def model(r, L, g) -> tuple[mesh.Mesh, list[tuple]]:
     shape = L.raw.get("shape")
     meshes = [] if parts is None else [parts]
     if shape:
-        s3, tube = mesh.size(shape, g)
-        meshes.insert(0, mesh.placed(mesh.unit(shape, L.raw.get("detail", "medium"), tube), s3))
+        meshes.insert(0, _shape(r, shape, g, L.raw, L.raw.get("detail", "medium")))
     m = meshes[0] if len(meshes) == 1 else mesh.cat(meshes)
     accent = r.s.theme.get("accent", "#ff633f")
     root = lambda k, d=None: g(k, accent if k == "fill" and d is None else d)  # noqa: E731
@@ -151,7 +228,7 @@ def model(r, L, g) -> tuple[mesh.Mesh, list[tuple]]:
 def draw(r, c: skia.Canvas, L, g, reveal: float):
     """Draw model layer L on canvas c. Returns its projected bounds in device pixels, or None."""
     m, mats = model(r, L, g)
-    P, N, T, M = m
+    P, N, T, M = m.P, m.N, m.T, m.M
     amt = max(0.0, min(1.0, float(g("draw")) * reveal))
     tid = np.arange(len(T))  # each triangle's index in the whole mesh
     if amt < 1.0:

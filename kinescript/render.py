@@ -243,6 +243,7 @@ class Renderer:
         self.culled: set[str] = set()  # layers skipped this frame because they cross the camera plane
         self._lens: np.ndarray | None = None  # camera space to canvas, for lighting models
         self._models: dict = {}  # merged parts of each model layer
+        self._solids: dict = {}  # outlines and extruded meshes of text and path models
         self._msurf = None  # offscreen that models draw into, antialiased, before compositing
         self.tris = 0  # model triangles drawn this frame
         cm = color_matrix({k: v for k, v in scene.grade.items() if k not in ("vignette", "grain")})

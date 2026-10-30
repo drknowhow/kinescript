@@ -190,7 +190,9 @@ def _model(layer, **canvas):
 def test_model_frame_is_pure_function_of_index():
     spec = _model({"shape": "torus", "r": 50, "detail": "low", "rotateX": "=t*90", "rotateY": "=t*40",
                    "enter": "build", "explode": [[1, 0], ["end", 0.6]],
-                   "parts": [{"shape": "sphere", "r": 20, "fill": "#b9f45d"}]}, duration=2)
+                   "parts": [{"shape": "sphere", "r": 20, "fill": "#b9f45d"},
+                             {"shape": "text", "text": "3D", "size": 40, "depth": 12, "bevel": 2, "z": 50}]},
+                  duration=2)
     spec["camera"] = {"rotateY": [[0, -10], ["end", 10]]}
     r = Renderer(k.Scene(spec), backend="cpu")
     sequential = [r.frame(n).copy() for n in range(0, 50)]
@@ -234,6 +236,44 @@ def test_model_build_reveals_triangles_and_explode_spreads_them():
     assert 0.3 < half.tris / full.tris < 0.7
     width = lambda r: r.boxes["m"]["rect"][2] - r.boxes["m"]["rect"][0]  # noqa: E731
     assert 80 < width(full) < 100 and width(burst) > width(full) * 1.2
+
+
+def test_extruded_caps_fill_the_outline_and_its_holes():
+    import skia
+    from kinescript import mesh
+    p = skia.Path()
+    p.addRect(skia.Rect(0, 0, 200, 100))
+    p.addCircle(50, 50, 30, skia.PathDirection.kCCW)
+    p.addCircle(150, 50, 30, skia.PathDirection.kCCW)
+    p.addCircle(150, 50, 10)  # an island inside the second hole
+    Q, starts, caps = mesh.shape2d(mesh.contours(p, 4.0))
+    a, b, c = Q[caps[:, 0]], Q[caps[:, 1]], Q[caps[:, 2]]
+    cross = (b - a)[:, 0] * (c - a)[:, 1] - (b - a)[:, 1] * (c - a)[:, 0]
+    outline = sum(mesh._area(Q[s:e]) for s, e in zip(starts, [*starts[1:], len(Q)]))
+    assert outline == pytest.approx(200 * 100 - 2 * np.pi * 30 ** 2 + np.pi * 10 ** 2, rel=0.01)
+    assert (cross > -1e-9).all() and cross.sum() / 2 == pytest.approx(outline)  # no gaps, no overlaps
+    o = _frame(_model({"shape": "text", "text": "O", "size": 120, "depth": 30, "light": "flat", "fill": "#3366cc"}), 0)
+    assert tuple(o[90, 160, :3]) == (0, 0, 0) and (o[90, :, :3] == (0x33, 0x66, 0xcc)).all(-1).sum() > 20
+
+
+def test_extruded_front_cap_is_never_hidden_by_its_own_walls():
+    def cap_pixels(depth, colour=None):
+        # The part sits so its front cap stays in one plane whatever the depth, so only the walls change.
+        f = _frame(_model({"x": 320, "y": 180, "rotateY": 60, "rotateX": 40, "parts": [
+            {"shape": "text", "text": "e%", "size": 220, "weight": 800, "depth": depth, "z": -depth / 2}]},
+            w=640, h=360), 0)[..., :3]
+        if colour is None:  # a 1 px deep solid is nearly all cap
+            colour = _shades(f)[0][0]
+        return int((f == colour).all(-1).sum()), colour
+    thin, colour = cap_pixels(1)
+    deep, _ = cap_pixels(120, colour)
+    assert thin > 5000 and abs(deep - thin) <= 2  # with the caps' long ear-clipped triangles it loses about 46
+    # ...and other parts still sort against the caps by depth: the ball's front is nearer than the caps
+    # around it, though the turned text's far ends come nearer still.
+    f = _frame(_model({"light": "flat", "rotateY": 35, "parts": [
+        {"shape": "text", "text": "HHH", "size": 110, "weight": 800, "depth": 40, "fill": "#0000ff"},
+        {"shape": "sphere", "r": 40, "fill": "#ff0000"}]}), 0)
+    assert tuple(f[90, 160, :3]) == (255, 0, 0)
 
 
 def test_model_crossing_the_camera_drops_triangles_and_check_warns(monkeypatch):
