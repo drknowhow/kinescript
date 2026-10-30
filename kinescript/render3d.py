@@ -350,14 +350,14 @@ def draw(r, c: skia.Canvas, L, g, reveal: float):
     x1, y1 = min(r.w, math.ceil(hi[0]) + 2), min(r.h, math.ceil(hi[1]) + 2)
     if x1 <= x0 or y1 <= y0:
         return bounds
-    surf, ss = r._model_surface(x1 - x0, y1 - y0)
-    region = skia.Rect(0, 0, (x1 - x0) * ss, (y1 - y0) * ss)
+    surf, ss = r._model_surface()
+    region = skia.Rect(x0 * ss, y0 * ss, x1 * ss, y1 * ss)
     cv = surf.getCanvas()
     cv.save()
     cv.clipRect(region)
     cv.clear(skia.ColorTRANSPARENT)
     cv.restore()
-    q = (dev - (x0, y0)) * ss
+    q = dev * ss
     lt = _lights(light(L.raw.get("light", r.s.light)))
     if r.backend == "gpu":
         bld = skia.RuntimeShaderBuilder(_effect(len(mats)))

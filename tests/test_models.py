@@ -206,6 +206,21 @@ def test_imported_model_frames_are_pure_functions_of_their_index(tmp_path):
     assert np.array_equal(sequential[13], alone)
 
 
+def test_model_surface_is_the_frame_size_whatever_was_drawn_before():
+    # It used to grow to fit the largest model so far, and on the GPU the size it had moved model edges in
+    # later frames by up to 49 levels, so a frame depended on the frames rendered before it.
+    spec = scene([{"id": "m", "type": "model", "shape": "sphere", "r": 10, "x": 160, "y": 90,
+                   "scale": [[0, 1], [1, 8]]}], duration=1)
+    for backend in ("auto", "cpu"):
+        r = Renderer(k.Scene(spec), backend=backend)
+        sizes = []
+        for n in (0, 29, 0):
+            r.frame(n)
+            surf, ss = r._model_surface()
+            sizes.append((surf.width(), surf.height()))
+        assert sizes == [(r.w * ss, r.h * ss)] * 3, backend
+
+
 def test_model_file_keys_are_read_the_way_agents_write_them(tmp_path):
     src = str(tmp_path / "m.obj")
     (tmp_path / "m.obj").write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
