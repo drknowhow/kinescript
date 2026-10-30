@@ -117,7 +117,7 @@ A narrated beat with a click on a marked word, over music that ducks under the v
 to its scene file. The Kokoro plugin needs Python 3.10 to 3.12:
 
 ```bash
-pip install "kinescript-kokoro @ git+https://github.com/drknowhow/kinescript#subdirectory=plugins/kinescript-kokoro"
+pip install kinescript-kokoro
 ```
 
 On a newer Python, install it into another one and point `KINE_VOICE_CMD` at it

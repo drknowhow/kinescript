@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- The Kokoro voice plugin is on PyPI: `pip install kinescript-kokoro` (Python 3.10 to 3.12). Pushing a tag such
+  as `kokoro-v0.1.0` publishes it from `plugins/kinescript-kokoro` (`.github/workflows/release-kokoro.yml`), after
+  it has spoken a line on CI. With no voice backend installed, `kine voice` prints that command.
+- The project site's hero is a narrated tour, `marketing/hero.json`.
+
 ## 1.2.0 (2026-10-30)
 
 Sound. Voice-over, music and effects sit on the same timeline as the picture, are levelled and checked without
