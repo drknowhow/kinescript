@@ -69,14 +69,17 @@ class Timeline:
         self.nodes: dict[str, dict] = {}
         self.order: list[str] = []
         self.resolved: dict[str, tuple[float, float | None]] = {}
+        self._starts: dict[str, float] = {}
         self._stack: list[str] = []
 
     def add(self, lid: str, at, dur=None, until=None, natural: float | None = None,
-            prev: str | None = None, parent: str | None = None, default_end: str | None = None):
+            prev: str | None = None, parent: str | None = None, default_end: str | None = None,
+            span: bool = False):
+        """`span`: with no dur or until, end when the last child ends (a sequence's group)."""
         if lid in self.nodes:
             raise TimingError(f"duplicate layer id '{lid}'; every id must be unique", lid)
         self.nodes[lid] = dict(at=at, dur=dur, until=until, natural=natural, prev=prev,
-                               parent=parent, default_end=default_end)
+                               parent=parent, default_end=default_end, span=span)
         self.order.append(lid)
 
     def _time(self, v, owner: str, base: float) -> float:
@@ -100,10 +103,10 @@ class Timeline:
         elif name == "start":
             t = 0.0
         elif name in self.nodes:
-            t_in, t_out = self.resolve(name)
             if edge in ("", "in"):
-                t = t_in
+                t = self.start(name)
             else:
+                t_in, t_out = self.resolve(name)
                 if t_out is None:
                     raise TimingError(f"refers to '{name}.{edge}', but '{name}' runs to the scene end, so it has "
                                       f"no end time. Give '{name}' a dur or until", owner)
@@ -122,16 +125,30 @@ class Timeline:
         except TimingError as e:
             raise TimingError(f"{e} in {s!r}. Write {FORMS}", owner) from None
 
-    def resolve(self, lid: str) -> tuple[float, float | None]:
-        if lid in self.resolved:
-            return self.resolved[lid]
+    def _enter(self, lid: str):
         if lid in self._stack:
             raise TimingError("timing cycle: " + " -> ".join(self._stack + [lid])
                               + ". A layer cannot start or end relative to itself", lid)
         self._stack.append(lid)
+
+    def start(self, lid: str) -> float:
+        """When a layer starts. Worked out apart from its end, so a group can end relative to its children."""
+        if lid in self._starts:
+            return self._starts[lid]
+        self._enter(lid)
         n = self.nodes[lid]
-        base = self.resolve(n["parent"])[0] if n["parent"] else 0.0
-        t_in = self._time(n["at"], lid, base)
+        t = self._time(n["at"], lid, self.start(n["parent"]) if n["parent"] else 0.0)
+        self._stack.pop()
+        self._starts[lid] = t
+        return t
+
+    def resolve(self, lid: str) -> tuple[float, float | None]:
+        if lid in self.resolved:
+            return self.resolved[lid]
+        t_in = self.start(lid)
+        self._enter(lid)
+        n = self.nodes[lid]
+        base = self.start(n["parent"]) if n["parent"] else 0.0
         until = n["until"]
         if n["dur"] is not None:
             d = n["dur"]
@@ -145,8 +162,13 @@ class Timeline:
             t_out = self._time(until, lid, base)
         elif n["natural"] is not None and until != "end":
             t_out = t_in + n["natural"]
+        elif n["span"] and until != "end":
+            outs = [self.resolve(k)[1] for k in self.order if self.nodes[k]["parent"] == lid]
+            ends = [o for o in outs if o is not None]
+            t_out = max(ends) if ends and len(ends) == len(outs) else None  # an open child leaves it open
         elif n["default_end"] is not None and until != "end":
-            t_out = self.resolve(n["default_end"])[1]
+            # A parent still working out its end (one that ends with its children) leaves this one open.
+            t_out = None if n["default_end"] in self._stack else self.resolve(n["default_end"])[1]
         else:
             t_out = None  # open: runs to the scene end
         if t_out is not None and t_out <= t_in:

@@ -18,7 +18,7 @@ STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "children", "laye
           "blend", "clip", "mode", "volume", "hidden", "note", "words", "stops", "cap", "join", "loop",
           "allowOffscreen", "style", "audio", "shadow", "box", "fx", "fill", "stroke", "emph", "active",
           "sksl", "preset", "uniforms", "caret", "case", "italic", "smooth", "closed", "focus", "use",
-          "backface", "fixed", "sort", "shape", "detail", "parts", "light"}
+          "backface", "fixed", "sort", "shape", "detail", "parts", "light", "span"}
 # Property defaults by name; everything not listed defaults to None.
 DEFAULTS = {"x": 0.0, "y": 0.0, "opacity": 1.0, "scale": 1.0, "scaleX": 1.0, "scaleY": 1.0, "rotate": 0.0,
             "blur": 0.0, "draw": 1.0, "zoom": 1.0, "z": 0.0, "rotateX": 0.0, "rotateY": 0.0}
@@ -215,7 +215,8 @@ class Scene:
             try:
                 self.timeline.add(lid, raw.get("at", 0), raw.get("dur"), raw.get("until"), natural,
                                   prev=prev, parent=parent.id if parent else None,
-                                  default_end=parent.id if parent else None)
+                                  default_end=parent.id if parent else None,
+                                  span=ltype == "group" and bool(raw.get("span")))
             except ValueError as e:
                 raise SceneError(f"layer '{lid}': {e}", layer=lid) from e
             ctx = self.ctx

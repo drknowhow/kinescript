@@ -97,7 +97,7 @@ TYPES: dict[str, set[str]] = {
     "model": PART - {"x", "y", "z", "rotateX", "rotateY", "rotate", "scale"} | {"detail", "parts", "explode",
                                                                               "draw", "light", "src", "ground"},
 }
-SEQUENCE = {"id", "type", "at", "clips", "transition", "fit", "volume", "w", "h", "x", "y", "anchor"}
+SEQUENCE = COMMON | {"clips", "transition", "fit", "volume", "w", "h"}
 TYPE_ALIAS = {"rectangle": "rect", "square": "rect", "box": "rect", "shape": "rect", "txt": "text", "label": "text",
               "title": "text", "heading": "text", "string": "text", "img": "image", "picture": "image",
               "photo": "image", "oval": "ellipse", "caption": "captions", "subtitles": "captions",
@@ -435,6 +435,7 @@ def _layer(raw, rep: Report, path: str, comps: dict):
             return
     if t == "sequence":
         _keys(raw, SEQUENCE, {"items": "clips", "videos": "clips", "children": "clips"}, rep, lid, "")
+        _effects(raw, rep, lid)
         return
     if t is None:
         from .scene import _infer_type
@@ -463,13 +464,7 @@ def _layer(raw, rep: Report, path: str, comps: dict):
                     {"text": "\"text\": \"Hello\"", "image": "\"src\": \"photo.jpg\"", "video": "\"src\": \"clip.mp4\""}
                     .get(t, ""))
     _values(raw, t, rep, lid)
-    for key in ("enter", "exit"):
-        _motion(raw, key, rep, lid)
-    if isinstance(raw.get("shadow"), dict):
-        _keys(raw["shadow"], SHADOW, SHADOW_ALIAS, rep, lid, "shadow: ")
-    if isinstance(raw.get("fx"), dict):
-        _keys(raw["fx"], FX, {"saturation": "saturate", "grayscale": "gray", "greyscale": "gray", "hueRotate": "hue",
-                              "warmth": "temperature"}, rep, lid, "fx: ")
+    _effects(raw, rep, lid)
     if isinstance(raw.get("box"), dict):
         _keys(raw["box"], BOX, BOX_ALIAS, rep, lid, "box: ")
     if t == "shader" and raw.get("preset"):
@@ -486,6 +481,17 @@ def _layer(raw, rep: Report, path: str, comps: dict):
     if t == "group" and isinstance(kids, list):
         for i, k in enumerate(kids):
             _layer(k, rep, f"{lid}.children[{i}]", comps)
+
+
+def _effects(raw: dict, rep: Report, lid):
+    """Motions, shadow and fx, which any layer and a sequence take."""
+    for key in ("enter", "exit"):
+        _motion(raw, key, rep, lid)
+    if isinstance(raw.get("shadow"), dict):
+        _keys(raw["shadow"], SHADOW, SHADOW_ALIAS, rep, lid, "shadow: ")
+    if isinstance(raw.get("fx"), dict):
+        _keys(raw["fx"], FX, {"saturation": "saturate", "grayscale": "gray", "greyscale": "gray", "hueRotate": "hue",
+                              "warmth": "temperature"}, rep, lid, "fx: ")
 
 
 def _light(obj: dict, rep: Report, lid):

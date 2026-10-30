@@ -215,8 +215,14 @@ def expand(raw, user: dict, theme: dict, scene=None):
     return out
 
 
-def _sequence(raw: dict) -> list[dict]:
-    """Cut list -> back-to-back video layers. "transition": {"type": "fade", "dur": 0.4} overlaps them."""
+_CLIP_KEYS = ("fit", "volume", "w", "h", "x", "y", "anchor")
+
+
+def _sequence(raw: dict) -> dict:
+    """Cut list -> a group of back-to-back video layers, timed within the sequence. The group has the sequence's
+    id and ends with its last clip, so "cut.out" works as a cue. Its other layer keys (opacity, blur, fx, enter, ...)
+    apply to the whole cut; fit, volume, w, h, x, y and anchor go to each clip.
+    "transition": {"type": "fade", "dur": 0.4} overlaps the clips."""
     tr = raw.get("transition") or {}
     overlap = float(tr.get("dur", 0)) if tr else 0.0
     kind = tr.get("type", "fade") if tr else "none"
@@ -226,11 +232,11 @@ def _sequence(raw: dict) -> list[dict]:
         c = dict(clip) if isinstance(clip, dict) else {"src": clip}
         c.setdefault("type", "video")
         c.setdefault("id", f"{base}-{i + 1}")
-        for k in ("fit", "volume", "w", "h", "x", "y", "anchor"):
+        for k in _CLIP_KEYS:
             if k in raw and k not in c:
                 c[k] = raw[k]
         if i == 0:
-            c.setdefault("at", raw.get("at", 0))
+            c.setdefault("at", 0)
         else:
             prev_id = out[-1]["id"]
             c.setdefault("at", f"{prev_id}.out-{overlap}" if overlap else f"{prev_id}.out")
@@ -239,7 +245,9 @@ def _sequence(raw: dict) -> list[dict]:
                                                 "zoom": "zoom", "blur": "blur"}.get(kind, "fade"),
                                        "dur": overlap, "ease": "inOutSine", "dist": 120})
         out.append(c)
-    return out
+    group = {k: v for k, v in raw.items() if k not in ("clips", "transition") + _CLIP_KEYS}
+    group.update(type="group", id=base, children=out, span=True)
+    return group
 
 
 def _ts(s: str) -> float:

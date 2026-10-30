@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+Fixes from the first outside test, a promo reel built from `kine docs` alone (`examples/gpu-doom`, #11):
+
+- A sequence is a group that ends with its last clip, so its own id is a cue: `"until": "cut.out"` instead of naming
+  the last clip. `opacity`, `blur`, `fx`, `enter` and the other layer keys on a sequence apply to the whole cut, and
+  `kine check` accepts them. Clip times are unchanged. A group can also end relative to one of its children.
+- `**emphasis**` can start and stop inside a word: `g**P**u` colours only the P. Punctuation written outside the
+  stars, as in `**word**,`, is no longer coloured.
+- On Linux, importing Kinescript without the system EGL and GL libraries now names the packages to install, and the
+  README lists them.
+- `kine docs` says that `fx.brightness` adds to each channel and `exposure` is the key that darkens footage.
 - Fixed: a model frame could differ depending on which frames the same worker had drawn before it; on the GPU,
   edges moved by up to 49 levels. Models now draw into an offscreen the size of the frame from the start.
 - 3D models draw faster, with the same pixels: work on a mesh that no frame changes is done once, only the

@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import sys
 
 import numpy as np
 import pytest
@@ -34,6 +35,15 @@ def test_cue_reference_follows_upstream_duration():
     tl.solve()
     assert tl.resolved["b"] == (2.75, 3.75)
     assert tl.resolved["c"][0] == pytest.approx(3.25)
+
+
+def test_a_group_can_end_with_one_of_its_children():
+    tl = Timeline(30)
+    tl.add("g", 1, until="kid.out")
+    tl.add("kid", 0.5, dur=2, parent="g", default_end="g")
+    tl.add("rest", 0, parent="g", default_end="g")  # no end of its own: it ends with the group
+    tl.solve()
+    assert tl.resolved["g"] == (1, 3.5) and tl.resolved["rest"] == (1, 3.5)
 
 
 def test_timing_cycle_is_reported():
@@ -346,6 +356,40 @@ def test_sequence_crossfades_and_video_renders(clip):
     f = Renderer(s, backend="cpu").frame(45)
     assert f[..., :3].std() > 20  # test pattern is visible, not a black frame
     s.close()
+
+
+def test_sequence_id_is_a_cue_and_takes_layer_effects(clip):
+    seq = {"type": "sequence", "id": "cut", "at": 0.5,
+           "clips": [{"src": clip, "trim": [0, 1]}, {"src": clip, "trim": [1, 2.5]}]}
+    cap = {"id": "cap", "type": "text", "text": "after", "x": "50%", "y": "50%", "size": 30, "at": "cut.out", "dur": 1}
+    s = k.Scene(scene([seq, cap], bg="#000000"))
+    assert (s.by_id["cut"].t_in, s.by_id["cut"].t_out) == (0.5, pytest.approx(3.0))  # the span of its clips
+    assert s.by_id["cut-1"].t_in == 0.5 and s.by_id["cap"].t_in == pytest.approx(3.0)
+    full = Renderer(s, backend="cpu").frame(30)
+    s.close()
+    assert check(scene([dict(seq, opacity=0.5, blur=2, fx={"exposure": -1}), cap]))["errors"] == 0
+    s = k.Scene(scene([dict(seq, opacity=0.5)], bg="#000000"))
+    half = Renderer(s, backend="cpu").frame(30)
+    s.close()
+    assert half[..., :3].mean() == pytest.approx(full[..., :3].mean() / 2, rel=0.05)
+
+
+def test_missing_system_gl_libraries_name_the_packages(tmp_path):
+    # What a bare Linux container gets from skia-python, standing in for the real library here.
+    (tmp_path / "skia.py").write_text('raise ImportError("libEGL.so.1: cannot open shared object file")')
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(tmp_path), root]))
+    r = subprocess.run([sys.executable, "-c", "import kinescript"], env=env, capture_output=True, text=True)
+    assert "libEGL.so.1" in r.stderr and "sudo apt install libegl1 libgl1 libfontconfig1" in r.stderr
+
+
+def test_emphasis_can_start_and_stop_inside_a_word():
+    s = k.Scene(scene([{"id": "t", "type": "text", "text": "g**P**u(doom) **diff**, done", "size": 30}]))
+    L, r = s.by_id["t"], Renderer(s, backend="cpu")
+    lay = r._text_layout(L, 0, 0, lambda name, default=None: L.get(name, 0, 0, 0, default), L.raw["text"])
+    assert [(u.text, u.emph) for u in lay.runs] == [("g", False), ("P", True), ("u(doom)", False),
+                                                    ("diff", True), (",", False), ("done", False)]
+    assert lay.runs[0].x < lay.runs[1].x < lay.runs[2].x and lay.runs[2].char0 == 2
 
 
 def test_render_mp4_with_audio(clip, tmp_path):
