@@ -28,6 +28,10 @@
   `examples/import.json` (a 15,264-triangle glTF rocket, 180 frames at 1080p, up to 7,410 triangles drawn a
   frame) renders in 1.74 s on the GPU with 6 workers and 3.04 s on the CPU. `examples/make_media.py` writes
   the rocket.
+- `bench/stages.py` times each frame's drawing, conversion and readback, and pipe writes to ffmpeg, plus whole
+  renders, for vector, video-edit, model and motion-blur workloads. The README, site and launch-video numbers
+  are re-measured: the launch video renders in 4.0 s (was quoted as 6.4 s), `examples/edit.json` in 2.3 s
+  (was 6.1 s).
 - `kine check` warns past 60,000 model triangles in one frame.
 - `z` used to be ignored with a note; it is now depth in px toward the viewer.
 - `kine check` warns when text faces away from the camera (mirrored) and when a layer crosses the camera plane.

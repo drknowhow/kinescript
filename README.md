@@ -10,7 +10,7 @@ the frame number: any frame renders on its own, which makes previews instant and
 processes.
 
 The launch video in `docs/promo.mp4` is a Kinescript scene (`marketing/promo.json`). It is 35 seconds of 1080p
-and renders, with audio, in about 6.4 seconds on the development machine.
+and renders, with audio, in about 4 seconds on the development machine.
 
 ## What it does
 
@@ -105,13 +105,17 @@ sample footage.
 
 ## Performance
 
-Measured on the development machine (Intel Core Ultra 7 265, 20 threads, NVIDIA RTX 5060 Ti, Windows 11):
+Measured on the development machine (Intel Core Ultra 7 265, 20 threads, NVIDIA RTX 5060 Ti, Windows 11),
+2026-10-30:
 
 | Workload | Result |
 |---|---|
-| Drawing one 1080p frame of the launch video (GPU, including readback) | median 5.2 ms, p95 6.5 ms |
-| Launch video, 34.6 s at 1080p30, `-q high`, with audio | 6.4 s wall, about 160 frames/s (median of 5 runs) |
-| `examples/edit.json`, 10.4 s with two decoded video clips | 6.1 s wall, 51 frames/s |
+| Drawing one 1080p frame of the launch video on the GPU, converted to I420 and read back as a render does | median 2.7 ms, p95 3.3 ms (all 1038 frames) |
+| Launch video, 34.6 s at 1080p30, `-q high`, with audio | 4.0 s wall, about 260 frames/s (median of 5 runs) |
+| `examples/edit.json`, 10.4 s with two decoded video clips | 2.3 s wall, 135 frames/s (median of 5 runs) |
+
+`python bench/stages.py` splits the time per frame into drawing, conversion and readback, and writing to
+ffmpeg for several workloads, and times whole renders.
 
 Rendering uses Skia on the GPU through a hidden OpenGL context, one per worker process. Frames are split into
 chunks, encoded in parallel and joined without re-encoding.
@@ -121,7 +125,10 @@ chunks, encoded in parallel and joined without re-encoding.
 - Without a usable GPU, Kinescript falls back to Skia's CPU rasteriser. With the Windows `skia-python` wheel this is
   very slow (about 0.65 s per 1080p frame for the launch video); use `--scale 0.5` for previews on such machines.
   `KINE_BACKEND=cpu` forces this path.
-- 2D only. Audio is mixing (trim, gain, fades, speed), not editing or effects.
+- 3D is drawn by Skia with a depth sort, not a GL pipeline: models have no image textures, skeletal animation or
+  shadows cast on each other, and separate model layers do not hide each other per pixel (merge touching
+  objects as `parts` of one model).
+- Audio is mixing (trim, gain, fades, speed), not editing or effects.
 - Video is decoded and resampled by ffmpeg to the scene frame rate. Jumping backwards or far ahead reopens the
   decoder, which is slower than sequential playback.
 - Text layout is single-script left-to-right with greedy wrapping. No shaping for complex scripts or bidi.
