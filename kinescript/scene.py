@@ -9,7 +9,7 @@ from pathlib import Path
 from . import components, media, models, schema
 from . import presets as P
 from .props import Ctx, Prop, compile_prop
-from .timing import Timeline
+from .timing import Timeline, parse_clock
 
 LAYER_TYPES = {"rect", "circle", "ellipse", "path", "line", "arrow", "polygon", "text", "counter",
                "image", "video", "group", "captions", "shader", "model"}
@@ -18,7 +18,7 @@ STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "children", "laye
           "blend", "clip", "mode", "volume", "hidden", "note", "words", "stops", "cap", "join", "loop",
           "allowOffscreen", "style", "audio", "shadow", "box", "fx", "fill", "stroke", "emph", "active",
           "sksl", "preset", "uniforms", "caret", "case", "italic", "smooth", "closed", "focus", "use",
-          "backface", "fixed", "sort", "shape", "detail", "parts", "light", "span"}
+          "backface", "fixed", "sort", "shape", "detail", "parts", "light", "span", "sound"}
 # Property defaults by name; everything not listed defaults to None.
 DEFAULTS = {"x": 0.0, "y": 0.0, "opacity": 1.0, "scale": 1.0, "scaleX": 1.0, "scaleY": 1.0, "rotate": 0.0,
             "blur": 0.0, "draw": 1.0, "zoom": 1.0, "z": 0.0, "rotateX": 0.0, "rotateY": 0.0}
@@ -71,6 +71,15 @@ class Layer:
         return f"<{self.type} {self.id} {self.t_in:.2f}-{self.t_out:.2f}>"
 
 
+class Sound:
+    """An audio entry, or a layer's sound, placed on the timeline like a layer."""
+
+    def __init__(self, sid: str, raw: dict, src: str | None, layer: str | None = None):
+        self.id, self.raw, self.src, self.layer = sid, raw, src, layer
+        self.role = raw.get("role")
+        self.t_in = self.t_out = 0.0
+
+
 class Scene:
     def __init__(self, spec: dict, base_dir: str | Path = ".", notes: list[dict] | None = None):
         spec, report = schema.normalize(spec)
@@ -89,7 +98,7 @@ class Scene:
         self.markers = spec.get("markers", {})
         self.grade = spec.get("grade") or {}
         self.motion_blur = spec.get("motionBlur") or {}
-        self.audio = spec.get("audio", [])
+        self._sounding: list[Layer] = []
         raw_layers = _subst(copy.deepcopy(spec.get("layers", [])), theme)
         self.bg = _subst(self.bg, theme)
         user_comps = spec.get("components", {})
@@ -105,6 +114,7 @@ class Scene:
         self._build(raw_layers, None, self.layers)
         self.camera = self._camera(_subst(spec.get("camera"), theme))
         self.light = _subst(spec.get("light"), theme)
+        self.audio = self._build_audio()
         self._check_media()
         self._raise_errors()
         try:
@@ -114,6 +124,8 @@ class Scene:
             raise SceneError((f"layer '{lid}': " if lid else "") + str(e), layer=lid) from e
         for layer in self.by_id.values():
             layer.t_in, layer.t_out = self.timeline.resolved[layer.id]
+        for s in self.audio:
+            s.t_in, s.t_out = self.timeline.resolved[s.id]
         if self.camera is not None:
             self.camera.t_out = self.duration
         self.depth = {L.id for L in self.layers if uses_depth(L)}
@@ -150,9 +162,16 @@ class Scene:
                 except ValueError as e:
                     self.note("error", "bad-model", layer.id, f"model src {e}",
                               "export it again as glTF 2.0 (.glb) or .obj")
-        for i, a in enumerate(self.audio):
-            if isinstance(a, dict) and a.get("src") and not missing(self.path(a["src"]), f"audio[{i}]", "audio src"):
-                _check_trim(self, f"audio[{i}]", a.get("trim") or [0, None], media.probe(self.path(a["src"]))["duration"])
+        for s in self.audio:
+            owner = s.layer or s.id
+            if not s.src or missing(s.src, owner, "sound src" if s.layer else "audio src"):
+                continue
+            try:
+                length = media.probe(s.src)["duration"]
+            except media.MediaError as e:
+                self.note("error", "bad-media", owner, str(e), "export it again as .wav, .mp3, .m4a or .flac")
+                continue
+            _check_trim(self, owner, s.raw.get("trim") or [0, None], length)
 
     def _check_values(self):
         """Evaluate every property at the start, middle and end of its layer, so a bad value is reported
@@ -182,6 +201,42 @@ class Scene:
         p = Path(src)
         return str(p if p.is_absolute() else (self.base / p))
 
+    def _build_audio(self) -> list[Sound]:
+        """Audio entries and layer sounds as timeline nodes, so a layer can cue from a sound and a sound from a layer.
+        Only voice sets an "auto" duration: a sentence cut off at the end is never wanted, a long music bed is."""
+        entries: list[tuple[dict, str | None]] = [(a, None) for a in self.spec.get("audio") or []]
+        for L in self._sounding:
+            if not any(x.raw.get("hidden") for x in _lineage(L)):
+                entries.append((self._layer_sound(L), L.id))
+        out, prev = [], None
+        for i, (a, layer) in enumerate(entries):
+            sid = str(a.get("id") or (f"{layer}-sound" if layer else f"audio{i + 1}"))
+            src = self.path(a["src"]) if a.get("src") else None
+            try:
+                self.timeline.add(sid, a.get("at", 0), a.get("dur"), a.get("until"), _natural(a, src),
+                                  prev=None if layer else prev, counts=a.get("role") == "voice")
+            except ValueError as e:
+                raise SceneError(f"audio '{sid}': {e}", layer=sid) from e
+            if not layer:
+                prev = sid
+            out.append(Sound(sid, a, src, layer))
+        return out
+
+    def _layer_sound(self, L: Layer) -> dict:
+        """A layer's sound as an audio entry: "at" counts from the layer ("in", "out-0.1", 0.2)."""
+        s = L.raw["sound"]
+        s = {"src": s} if isinstance(s, str) else dict(s)
+        at = s.get("at", "in")
+        if isinstance(at, str) and parse_clock(at, self.fps) is not None:
+            at = parse_clock(at, self.fps)
+        if isinstance(at, (int, float)) and not isinstance(at, bool):
+            at = f"{L.id}.in{'-' if at < 0 else '+'}{abs(at):.6f}"
+        elif isinstance(at, str) and re.match(r"\s*(in|out|mid)\b", at):
+            at = f"{L.id}.{at.strip()}"
+        s["at"] = at
+        s.setdefault("role", "sfx")
+        return s
+
     def _build(self, raws: list, parent: Layer | None, out: list):
         prev = None
         for idx, raw in enumerate(raws):
@@ -198,6 +253,8 @@ class Scene:
                 raw = dict({"x": "50%", "y": "86%", "size": 46, "weight": 700}, **raw)
             layer = Layer(lid, ltype, raw, parent, len(self.by_id))
             self.by_id[lid] = layer
+            if raw.get("sound") is not None:
+                self._sounding.append(layer)
             natural = None
             if ltype in ("video", "image", "model") or (ltype == "captions" and raw.get("src")):
                 layer.src = self.path(raw["src"]) if raw.get("src") else None
@@ -267,7 +324,9 @@ class Scene:
         return {"canvas": {"w": self.w, "h": self.h, "fps": self.fps, "duration": round(self.duration, 3),
                            "frames": self.frames},
                 "layers": [{"id": l.id, "type": l.type, "in": round(l.t_in, 3), "out": round(l.t_out, 3),
-                            "parent": l.parent.id if l.parent else None} for l in self.all_layers()]}
+                            "parent": l.parent.id if l.parent else None} for l in self.all_layers()],
+                "audio": [{"id": s.id, "role": s.role, "src": s.raw.get("src"), "in": round(s.t_in, 3),
+                           "out": round(s.t_out, 3), "layer": s.layer} for s in self.audio]}
 
     def close(self):
         for layer in self.all_layers():
@@ -280,6 +339,25 @@ def uses_depth(L: Layer) -> bool:
     motions = [m for m in (L.enter, L.exit) if m]
     return (L.type == "model" or any(k in L.props for k in DEPTH_PROPS) or any(P.DEPTH & set(m.names) for m in motions)
             or any(uses_depth(c) for c in L.children))
+
+
+def _lineage(L: Layer):
+    while L is not None:
+        yield L
+        L = L.parent
+
+
+def _natural(a: dict, src: str | None) -> float | None:
+    """An audio entry's length from its trimmed source; None (runs to the scene end) when it loops or can't be read."""
+    trim = a.get("trim") or [0, None]
+    if a.get("loop") or not src or not Path(src).exists() or not isinstance(trim, (list, tuple)):
+        return None
+    try:
+        total = media.probe(src)["duration"]
+    except media.MediaError:
+        return None  # reported by _check_media
+    end = trim[1] if len(trim) > 1 and trim[1] is not None else total
+    return max(0.01, float(end) - float(trim[0]))
 
 
 def _check_trim(scene: "Scene", owner, trim, length: float):

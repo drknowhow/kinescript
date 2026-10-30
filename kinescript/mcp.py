@@ -38,7 +38,8 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"}, "at": {"type": "number"}},
                      "required": ["scene"]}},
     {"name": "kine_render", "description": "Render to a file (.mp4, .mov ProRes 4444 alpha, .webm VP9 alpha, .gif, or a "
-     ".png sequence). quality draft|standard|high; scale <1 for previews; from/to (s) for a range.",
+     ".png sequence; .wav/.m4a/.mp3/.flac for the sound alone). quality draft|standard|high; scale <1 for previews; "
+     "from/to (s) for a range.",
      "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"}, "out": {"type": "string"},
                                                       "quality": {"type": "string", "enum": ["draft", "standard", "high"]},
                                                       "scale": {"type": "number"}, "from": {"type": "number"},

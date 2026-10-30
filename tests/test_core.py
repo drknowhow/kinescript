@@ -435,6 +435,125 @@ def test_audio_mixes_while_frames_render_and_stops_when_they_fail(clip, tmp_path
     assert started[0][0].poll() is not None  # stopped, not left running
 
 
+@pytest.fixture(scope="session")
+def tone(tmp_path_factory):
+    p = tmp_path_factory.mktemp("media") / "tone.wav"
+    subprocess.run([media.FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=1000:duration=0.5",
+                    str(p)], check=True)
+    return str(p)
+
+
+def _pcm(path, channels=1):
+    raw = subprocess.run([media.FFMPEG, "-v", "error", "-i", str(path), "-map", "0:a", "-ac", str(channels),
+                          "-ar", "8000", "-f", "f32le", "-"], capture_output=True, check=True).stdout
+    return np.frombuffer(raw, np.float32).reshape(-1, channels)
+
+
+def _rms(pcm, t0, t1):
+    return float(np.sqrt(np.mean(pcm[int(t0 * 8000):int(t1 * 8000)] ** 2)))
+
+
+def test_layers_cue_from_audio_and_only_voice_extends_auto_duration(tone):
+    for role, duration in (("voice", 1.5), ("music", 1.0)):
+        spec = scene([{"id": "a", "type": "rect", "dur": 1}, {"id": "b", "type": "rect", "at": "vo.out"}])
+        spec["audio"] = [{"id": "vo", "role": role, "src": tone, "at": 1}]
+        s = k.Scene(spec)
+        assert s.by_id["b"].t_in == pytest.approx(1.5)
+        assert s.duration == pytest.approx(duration)
+        assert probe(spec)["audio"][0] == {"id": "vo", "role": role, "src": tone, "in": 1.0, "out": 1.5, "layer": None}
+
+
+def test_audio_entries_chain_with_prev(tone):
+    spec = scene([{"type": "rect", "dur": 3}])
+    spec["audio"] = [{"id": "l1", "src": tone, "at": 0.2}, {"id": "l2", "src": tone, "at": "prev.out+0.3"}]
+    assert k.Scene(spec).timeline.resolved["l2"] == pytest.approx((1.0, 1.5))
+
+
+def test_layer_sound_moves_with_its_layer_and_skips_hidden_layers(tone):
+    def sound_in(start, **extra):
+        spec = scene([{"id": "t", "type": "rect", "at": start, "dur": 0.5, "sound": dict({"src": tone, "at": "out-0.1"},
+                                                                                       **extra)}], duration=3)
+        return [(x.id, x.role, x.t_in) for x in k.Scene(spec).audio]
+    assert sound_in(0.8) == [("t-sound", "sfx", pytest.approx(1.2))]
+    assert sound_in(1.4) == [("t-sound", "sfx", pytest.approx(1.8))]
+    assert sound_in(1.4, at=0.25)[0][2] == pytest.approx(1.65)  # a number counts from the layer start
+    spec = scene([{"id": "t", "type": "rect", "hidden": True, "sound": tone}])
+    assert k.Scene(spec).audio == []
+
+
+def test_components_and_sequences_carry_a_sound(tone, clip):
+    spec = scene([{"use": "titleCard", "id": "card", "title": "Hi", "at": 0.5, "dur": 1, "sound": tone},
+                  {"type": "sequence", "id": "cut", "at": 2, "clips": [{"src": clip, "trim": [0, 1]}],
+                   "sound": {"src": tone, "at": "out"}}])
+    assert [(x.id, x.t_in) for x in k.Scene(spec).audio] == [("card-sound", 0.5), ("cut-sound", pytest.approx(3.0))]
+
+
+def test_layer_sound_renders_at_its_cue_and_a_short_mix_keeps_every_frame(tone, tmp_path):
+    spec = scene([{"id": "t", "type": "rect", "at": 1, "dur": 0.5, "sfx": tone}], duration=2.5)
+    out = tmp_path / "o.mp4"
+    k.render(spec, str(out), quality="draft")
+    pcm = _pcm(out)
+    assert _rms(pcm, 0, 0.95) < 1e-3 < 0.05 < _rms(pcm, 1.05, 1.45)
+    frames = subprocess.run([media.FFPROBE, "-v", "error", "-count_frames", "-select_streams", "v", "-show_entries",
+                             "stream=nb_read_frames", "-of", "csv=p=0", str(out)], capture_output=True, text=True).stdout
+    assert int(frames) == 75
+
+
+def test_looped_audio_repeats_to_the_scene_end(tone, tmp_path):
+    spec = scene([{"type": "rect"}], duration=2)
+    spec["audio"] = [{"role": "music", "src": tone, "loop": True}]
+    out = tmp_path / "o.wav"
+    assert k.render(spec, str(out))["seconds"] == 2
+    pcm = _pcm(out)
+    assert len(pcm) == pytest.approx(16000, abs=80) and _rms(pcm, 1.6, 1.95) > 0.05
+
+
+def test_pan_moves_sound_between_channels(tone, tmp_path):
+    spec = scene([{"type": "rect"}], duration=1)
+    spec["audio"] = [{"src": tone, "pan": -1}]
+    out = tmp_path / "o.wav"
+    k.render(spec, str(out))
+    pcm = _pcm(out, 2)
+    left, right = _rms(pcm[:, 0], 0.1, 0.4), _rms(pcm[:, 1], 0.1, 0.4)
+    assert left > 0.05 and right < left / 100
+
+
+def test_audio_only_render_draws_no_frames(tone, tmp_path, monkeypatch):
+    from kinescript import output
+
+    def frames(job):
+        raise AssertionError("no frame should be rendered")
+
+    monkeypatch.setattr(output, "_render_range", frames)
+    spec = scene([{"type": "rect"}], duration=1.5)
+    spec["audio"] = [{"src": tone, "at": 0.5}]
+    res = k.render(spec, str(tmp_path / "mix.m4a"))
+    assert res["seconds"] == 1.5 and media.probe(res["out"])["audio"]
+    with pytest.raises(ValueError, match="no audio"):
+        k.render(scene([{"type": "rect"}], duration=1), str(tmp_path / "none.wav"))
+
+
+@pytest.mark.parametrize("ext,codec", [(".mov", "pcm_s16le"), (".webm", "opus")])
+def test_mov_and_webm_carry_the_mix(tone, tmp_path, ext, codec):
+    spec = scene([{"type": "rect", "w": 100, "h": 60}], duration=1)
+    spec["audio"] = [{"src": tone}]
+    out = tmp_path / f"o{ext}"
+    assert k.render(spec, str(out), quality="draft")["audio"]
+    streams = subprocess.run([media.FFPROBE, "-v", "error", "-select_streams", "a", "-show_entries",
+                              "stream=codec_name", "-of", "csv=p=0", str(out)], capture_output=True, text=True).stdout
+    assert streams.strip() == codec
+
+
+def test_range_render_cuts_the_full_mix(tone, tmp_path):
+    spec = scene([{"type": "rect"}], duration=3)
+    spec["audio"] = [{"src": tone, "at": 1.5, "fadeIn": 0.05}]
+    out = tmp_path / "o.mp4"
+    assert k.render(spec, str(out), quality="draft", start=1.0, end=2.5)["audio"]
+    pcm = _pcm(out)
+    assert len(pcm) == pytest.approx(12000, abs=400)
+    assert _rms(pcm, 0, 0.45) < 1e-3 < 0.05 < _rms(pcm, 0.6, 0.95)
+
+
 def test_repeat_renders_reuse_warm_workers_until_idle(tmp_path, monkeypatch):
     import time
     from kinescript import output

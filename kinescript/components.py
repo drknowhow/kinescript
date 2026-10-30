@@ -129,7 +129,7 @@ COMPONENT_DOCS = {
     "kinetic": "words [list], every [0.6] (seconds per word), size [180], motion [pop], color, x, y [\"50%\"] (centre)",
 }
 _PASS = ("id", "at", "dur", "until", "enter", "exit", "opacity", "scale", "rotate", "hidden", "z", "rotateX", "rotateY",
-         "fixed")
+         "fixed", "sound")
 
 
 class Params(dict):

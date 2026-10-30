@@ -47,9 +47,12 @@ MOTION_ALIAS = {"type": "name", "preset": "name", "duration": "dur", "easing": "
 TWEEN = {"from", "to", "dur", "delay", "ease", "keys"}
 TWEEN_ALIAS = {"duration": "dur", "easing": "ease", "start": "from", "end": "to", "begin": "from"}
 GRADIENT = {"linear", "radial", "stops"}
-AUDIO = {"src", "at", "trim", "gain", "volume", "fadeIn", "fadeOut"}
+AUDIO = {"src", "at", "trim", "gain", "volume", "fadeIn", "fadeOut", "id", "role", "dur", "until", "loop", "pan"}
 AUDIO_ALIAS = {"source": "src", "file": "src", "path": "src", "start": "at", "fade_in": "fadeIn",
-               "fade_out": "fadeOut", "fadein": "fadeIn", "fadeout": "fadeOut"}
+               "fade_out": "fadeOut", "fadein": "fadeIn", "fadeout": "fadeOut", "duration": "dur", "length": "dur",
+               "end": "until", "type": "role", "kind": "role", "balance": "pan", "repeat": "loop"}
+# A layer's "sound": cued from the layer, so it has no id, until or loop of its own.
+SOUND = AUDIO - {"id", "until", "loop"}
 MOTION_BLUR = {"samples", "shutter"}
 CAMERA = {"x", "y", "z", "rotateX", "rotateY", "rotate", "fov"}
 CAMERA_ALIAS = {"rotationX": "rotateX", "rotationY": "rotateY", "rotateZ": "rotate", "rotationZ": "rotate",
@@ -73,7 +76,7 @@ GROUND_ALIAS = {"alpha": "opacity", "strength": "opacity", "softness": "blur", "
 
 COMMON = {"id", "type", "at", "dur", "until", "x", "y", "anchor", "opacity", "scale", "scaleX", "scaleY", "rotate",
           "blur", "blend", "shadow", "fx", "enter", "exit", "hidden", "allowOffscreen", "z", "rotateX", "rotateY",
-          "backface", "fixed"}
+          "backface", "fixed", "sound"}
 SHAPE = {"fill", "stroke", "strokeWidth", "draw", "drawStart", "cap", "join"}
 TEXT = {"text", "size", "weight", "font", "italic", "fill", "emph", "align", "maxWidth", "lineHeight",
         "letterSpacing", "stroke", "strokeWidth", "box", "case", "textCase", "caret", "split",
@@ -121,7 +124,8 @@ ALIAS = {"color": "fill", "colour": "fill", "fillColor": "fill", "backgroundColo
          "out": "exit", "outro": "exit", "exitAnimation": "exit", "transform": None, "kids": "children",
          "items": "children", "elements": "children", "visible": None, "zIndex": None,
          "rotationX": "rotateX", "rotationY": "rotateY", "rotateZ": "rotate", "rotationZ": "rotate",
-         "translateZ": "z", "backfaceVisibility": "backface"}
+         "translateZ": "z", "backfaceVisibility": "backface", "sfx": "sound", "audio": "sound",
+         "soundEffect": "sound"}
 TYPE_ALIASES = {
     "circle": {"radius": "r", "size": "r"}, "polygon": {"radius": "r", "points": "sides"},
     "line": {"color": "stroke", "colour": "stroke", "fill": "stroke", "width": "strokeWidth"},
@@ -146,6 +150,7 @@ ENUMS = {
     "sort": ("order", "depth"),
     "shape": ("cube", "sphere", "cylinder", "cone", "torus", "plane", "text", "path"),
     "detail": ("low", "medium", "high"),
+    "role": ("voice", "music", "sfx", "ambience"),
 }
 ENUM_ALIAS = {"middle": "center", "centre": "center", "centered": "center", "mid": "center",
               "characters": "chars", "letters": "chars", "char": "chars", "word": "words", "line": "lines",
@@ -154,7 +159,11 @@ ENUM_ALIAS = {"middle": "center", "centre": "center", "centered": "center", "mid
               "box": "cube", "cuboid": "cube", "ball": "sphere", "globe": "sphere", "donut": "torus",
               "doughnut": "torus", "ring": "torus", "tube": "cylinder", "can": "cylinder", "pipe": "cylinder",
               "card": "plane", "quad": "plane", "svg": "path", "string": "text", "med": "medium", "hi": "high",
-              "lo": "low"}
+              "lo": "low", "vo": "voice", "voiceover": "voice", "narration": "voice", "narrator": "voice",
+              "speech": "voice", "dialogue": "voice", "bed": "music", "bgm": "music", "song": "music",
+              "score": "music", "fx": "sfx", "effect": "sfx", "effects": "sfx", "soundeffect": "sfx",
+              "ambient": "ambience", "ambiance": "ambience", "atmos": "ambience", "atmosphere": "ambience",
+              "roomtone": "ambience"}
 WEIGHTS = {"thin": 100, "extralight": 200, "light": 300, "normal": 400, "regular": 400, "book": 400,
            "medium": 500, "semibold": 600, "demibold": 600, "bold": 700, "extrabold": 800, "heavy": 900,
            "black": 900}
@@ -416,6 +425,7 @@ def _layer(raw, rep: Report, path: str, comps: dict):
                 rep.add("error", "bad-component", lid, unknown("component", name, list(BUILTIN) + list(comps)))
         for key in ("enter", "exit"):
             _motion(raw, key, rep, lid)
+        _layer_sound(raw, rep, lid)
         return  # parameters are checked when the component expands (components.Params)
     t = raw.get("type")
     if isinstance(t, str) and t.strip().lower() in ENUMS["shape"] and t not in TYPES and "shape" not in raw:
@@ -436,6 +446,7 @@ def _layer(raw, rep: Report, path: str, comps: dict):
     if t == "sequence":
         _keys(raw, SEQUENCE, {"items": "clips", "videos": "clips", "children": "clips"}, rep, lid, "")
         _effects(raw, rep, lid)
+        _layer_sound(raw, rep, lid)
         return
     if t is None:
         from .scene import _infer_type
@@ -465,6 +476,7 @@ def _layer(raw, rep: Report, path: str, comps: dict):
                     .get(t, ""))
     _values(raw, t, rep, lid)
     _effects(raw, rep, lid)
+    _layer_sound(raw, rep, lid)
     if isinstance(raw.get("box"), dict):
         _keys(raw["box"], BOX, BOX_ALIAS, rep, lid, "box: ")
     if t == "shader" and raw.get("preset"):
@@ -569,6 +581,27 @@ def _model(raw: dict, rep: Report, lid):
                         "animate the model layer, or make the part its own model layer")
 
 
+def _audio_values(a: dict, rep: Report, lid, where: str):
+    _enum(a, "role", rep, lid)
+    p = a.get("pan")
+    if p is not None and (isinstance(p, bool) or not isinstance(p, (int, float)) or not -1 <= p <= 1):
+        rep.add("error", "bad-value", lid, f"{where}pan is {p!r}; it must be a number from -1 (left) to 1 (right)")
+    if not a.get("src"):
+        rep.add("error", "missing-key", lid, f"{where}an audio entry needs 'src'", "\"src\": \"music.mp3\"")
+
+
+def _layer_sound(raw: dict, rep: Report, lid):
+    s = raw.get("sound")
+    if s is None or isinstance(s, str):
+        return
+    if not isinstance(s, dict):
+        rep.add("error", "bad-value", lid, f"sound must be a file name or an object like {{\"src\": \"whoosh.wav\", "
+                f"\"at\": \"out\"}}, got {type(s).__name__}")
+        return
+    _keys(s, SOUND, AUDIO_ALIAS, rep, lid, "sound: ")
+    _audio_values(s, rep, lid, "sound: ")
+
+
 def normalize(spec) -> tuple[dict, Report]:
     """Return a cleaned copy of `spec` and a Report of notes and errors (nothing is raised here)."""
     rep = Report()
@@ -640,9 +673,12 @@ def normalize(spec) -> tuple[dict, Report]:
         if isinstance(a, str):
             audio[i] = a = {"src": a}
         if isinstance(a, dict):
-            _keys(a, AUDIO, AUDIO_ALIAS, rep, f"audio[{i}]", "")
-            if not a.get("src"):
-                rep.add("error", "missing-key", f"audio[{i}]", "an audio entry needs 'src'")
+            owner = a.get("id") or f"audio[{i}]"
+            _keys(a, AUDIO, AUDIO_ALIAS, rep, owner, "")
+            _audio_values(a, rep, owner, "")
+        else:
+            rep.add("error", "bad-value", f"audio[{i}]", f"an audio entry is a file name or an object with 'src', "
+                    f"got {type(a).__name__}")
     layers = spec.get("layers")
     if layers is None or layers == []:
         rep.add("error", "no-layers", None, "the scene has no layers", "add \"layers\": [ ... ] with at least one layer")

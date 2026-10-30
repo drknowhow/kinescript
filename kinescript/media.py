@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import queue
 import subprocess
@@ -30,6 +31,23 @@ def _version(src: str) -> tuple:
     except OSError:
         return src, 0, -1
     return src, st.st_mtime_ns, st.st_size
+
+
+@lru_cache(maxsize=1)
+def capabilities() -> dict:
+    """{'version': major version (0 when unknown), 'encoders': set of names} of the ffmpeg in use."""
+    def run(*args) -> str:
+        return subprocess.run([FFMPEG, "-hide_banner", *args], capture_output=True, text=True,
+                              creationflags=_NOWIN).stdout
+    m = re.search(r"version n?(\d+)\.", run("-version"))
+    encoders = {p[1] for p in (line.split() for line in run("-encoders").splitlines()) if len(p) > 1}
+    return {"version": int(m.group(1)) if m else 0, "encoders": encoders}
+
+
+def filter_script(path: str) -> list[str]:
+    """ffmpeg arguments that read a filter graph from a file, which has no command-line length limit.
+    ffmpeg 7 renamed -filter_complex_script to -/filter_complex; the old name still works there."""
+    return ["-/filter_complex" if capabilities()["version"] >= 7 else "-filter_complex_script", path]
 
 
 def probe(src: str) -> dict:

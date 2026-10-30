@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- Sounds are timeline cues. An audio entry takes an `id` and a `role` (voice, music, sfx, ambience) and is timed like
+  a layer, with `dur`, `until` and `prev`; layers cue from it (`"at": "vo1.out+0.3"`) and it from layers. A voice
+  stretches `"duration": "auto"` to finish; music, ambience and sfx do not, as before.
+- A layer's `sound` (`"sound": "pop.wav"`, or `{"src", "at": "out-0.1", "gain", ...}`) plays when the layer starts,
+  moves when the layer moves, is skipped when the layer is hidden, and passes through components and sequences.
+- `loop` repeats a sound's trimmed file until it ends; `pan` places it from -1 (left) to 1 (right).
+- `.mov` (PCM), `.webm` (Opus) and `--from/--to` renders carry the mix. `-o mix.wav` (or `.m4a`, `.mp3`, `.flac`)
+  renders the sound alone without drawing frames. `kine probe` lists every sound's start and end.
+- Fixed: a scene whose sounds all ended before it did rendered a video cut short at the end of the last sound. The
+  mix is now padded to the scene length. Scenes whose sound already reached the end render the same audio, bit for
+  bit.
+
 ## 1.1.1 (2026-10-30)
 
 - A project site with demos, each video beside the scene file it was rendered from:

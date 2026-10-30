@@ -63,6 +63,18 @@ def test_model_examples_in_docs_pass_check_with_no_rewrites():
         assert r["ok"] and not r["issues"], (m["id"], r["issues"])
 
 
+def test_sound_examples_in_docs_pass_check_with_no_rewrites():
+    pad = str(ROOT / "examples" / "media" / "pad.m4a").replace("\\", "/")
+    sounds = [json.loads(o) for o in _objects(_section("SOUND"))]
+    assert {s["id"] for s in sounds} == {"vo1", "bed"}
+    for s in sounds:
+        s["src"] = pad
+    spec = {"canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": "auto"}, "audio": sounds,
+            "layers": [{"id": "after", "type": "rect", "at": "vo1.out", "dur": 1}]}
+    r = check(spec)
+    assert r["ok"] and not r["issues"], r["issues"]
+
+
 def test_every_recipe_loads_with_no_rewrites(tmp_path):
     img = tmp_path / "photo.jpg"
     arr = np.zeros((90, 160, 4), np.uint8)
