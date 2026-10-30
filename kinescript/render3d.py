@@ -248,8 +248,23 @@ def model(r, L, g) -> tuple[mesh.Mesh, list[tuple]]:
     return m, mats
 
 
+def _inner(p: np.ndarray) -> np.ndarray:
+    """Which 2D points lie well inside the octagon through the points farthest along x, y and the two
+    diagonals. None of those can be the farthest point in any direction."""
+    x, y = p[:, 0], p[:, 1]
+    corners = p[[int(np.argmax(v)) for v in (x, x + y, y, y - x, -x, -x - y, -y, x - y)]]
+    edge = np.roll(corners, -1, axis=0) - corners
+    inward = np.stack([-edge[:, 1], edge[:, 0]])  # each edge's normal into the octagon, unnormalised
+    span = float(np.ptp(p, axis=0).max()) or 1.0
+    # A repeated corner leaves an edge of length 0, whose side test is 0 for every point: all are kept.
+    return (p @ inward - (corners * inward.T).sum(1) > 1e-9 * span * span).all(1)
+
+
 def _hull(p: np.ndarray) -> np.ndarray:
-    """Convex outline of 2D points, from the farthest point in each of 48 directions, in order around it."""
+    """Convex outline of 2D points, from the farthest point in each of 48 directions, in order around it.
+    Points that cannot be farthest are dropped first: of the rocket's 8,513 vertices 674 are left, and its
+    outline takes 0.44 ms instead of 1.8."""
+    p = p[~_inner(p)]
     a = np.linspace(0, 2 * np.pi, 48, endpoint=False)
     h = p[np.unique(np.argmax(p @ np.stack([np.cos(a), np.sin(a)]), axis=0))]
     mid = h.mean(0)
@@ -305,6 +320,33 @@ def _ground(r, c: skia.Canvas, spec, rest: np.ndarray, pts: np.ndarray):
     c.restore()
 
 
+def _fixed(r, L, m, what: str, make):
+    """Work on a model's mesh that no frame changes, done once while the layer keeps the same mesh. Merged
+    parts do; a primitive whose size animates gets a new mesh each frame, and this is worked out again."""
+    hit = r._models.get((what, L.id))
+    if hit is None or hit[0] is not m.P or hit[1] is not m.T:
+        hit = r._models[(what, L.id)] = (m.P, m.T, make())
+    return hit[2]
+
+
+def _faces(m) -> tuple:
+    """Each triangle's unit normal and explode jitter (a fixed per-face hash), and the mesh's extent."""
+    P, T = m.P, m.T
+    a, b, cc = P[T[:, 0]], P[T[:, 1]], P[T[:, 2]]
+    fn = np.cross(b - a, cc - a)
+    fn /= np.linalg.norm(fn, axis=1, keepdims=True)
+    jitter = 0.5 + 0.5 * np.modf(np.abs(np.sin(np.arange(len(T)) * 12.9898)) * 43758.5453)[0]
+    return fn, jitter, float(np.ptp(P, axis=0).max())
+
+
+def _compact(T: np.ndarray, n: int) -> tuple[np.ndarray, np.ndarray]:
+    """The vertices (of n) that triangles T use, in order, and T renumbered to them: what np.unique with
+    return_inverse gives, without its sort."""
+    keep = np.zeros(n, bool)
+    keep[T] = True
+    return np.flatnonzero(keep), (np.cumsum(keep) - 1)[T]
+
+
 def draw(r, c: skia.Canvas, L, g, reveal: float):
     """Draw model layer L on canvas c. Returns its projected bounds in device pixels, or None."""
     m, mats = model(r, L, g)
@@ -312,17 +354,14 @@ def draw(r, c: skia.Canvas, L, g, reveal: float):
     amt = max(0.0, min(1.0, float(g("draw")) * reveal))
     tid = np.arange(len(T))  # each triangle's index in the whole mesh
     if amt < 1.0:
-        tid = mesh.build_order(m)[:math.ceil(amt * len(T))]
+        tid = _fixed(r, L, m, "order", lambda: mesh.build_order(m))[:math.ceil(amt * len(T))]
         T = T[tid]
     ex = float(g("explode", 0.0))
     if ex > 0 and len(T):
         # Each face flies out along its own normal, some further than others (a fixed per-face hash).
-        a, b, cc = P[T[:, 0]], P[T[:, 1]], P[T[:, 2]]
-        fn = np.cross(b - a, cc - a)
-        fn /= np.linalg.norm(fn, axis=1, keepdims=True)
-        jitter = 0.5 + 0.5 * np.modf(np.abs(np.sin(tid * 12.9898)) * 43758.5453)[0]
-        reach = ex * float(np.ptp(P, axis=0).max()) * 0.6 * jitter
-        P = (P[T] + (fn * reach[:, None])[:, None, :]).reshape(-1, 3)
+        fn, jitter, extent = _fixed(r, L, m, "explode", lambda: _faces(m))
+        reach = ex * extent * 0.6 * jitter[tid]
+        P = (P[T] + (fn[tid] * reach[:, None])[:, None, :]).reshape(-1, 3)
         N, M = N[T].reshape(-1, 3), M[T].reshape(-1)
         T = np.arange(len(P), dtype=np.int32).reshape(-1, 3)
     foot = P if amt >= 1.0 or ex > 0 else P[T.ravel()]  # what casts the ground shadow: what is drawn
@@ -339,12 +378,15 @@ def draw(r, c: skia.Canvas, L, g, reveal: float):
         return None
     T = T[np.argsort(-w[T].sum(1), kind="stable")]
     r.tris += len(T)
+    # From here on, only the vertices of the triangles drawn: about half of them face away.
+    used, T = _compact(T, len(P))
+    xy, N, M = xy[used], N[used], M[used]
     # Normals into camera space: the layer matrix without the lens.
     view = np.linalg.inv(r._lens) @ r._m3d
     nv = N @ np.linalg.inv(view[:3, :3])
     nv /= np.linalg.norm(nv, axis=1, keepdims=True)
     dev = xy * r.scale
-    lo, hi = dev[T.ravel()].min(0), dev[T.ravel()].max(0)
+    lo, hi = dev.min(0), dev.max(0)
     bounds = [float(lo[0]), float(lo[1]), float(hi[0]), float(hi[1])]
     x0, y0 = max(0, math.floor(lo[0]) - 2), max(0, math.floor(lo[1]) - 2)
     x1, y1 = min(r.w, math.ceil(hi[0]) + 2), min(r.h, math.ceil(hi[1]) + 2)
@@ -373,13 +415,14 @@ def draw(r, c: skia.Canvas, L, g, reveal: float):
         # at 2x supersampling. Shading each vertex in numpy, the whole frame takes 72 ms.
         paint, colors = skia.Paint(), _shade(nv, M, mats, *lt)
     # Skia indexes vertices with 16 bits, and converts each one it is given (about 0.3 us): draw
-    # in sorted chunks, each with only the vertices its triangles use.
+    # in sorted chunks, each with only the vertices its triangles use. Indices go as a list, which
+    # Skia reads 4 times as fast as a numpy array.
     for k in range(0, len(T), 20000):
-        used, idx = np.unique(T[k:k + 20000].ravel(), return_inverse=True)
-        pos = list(map(skia.Point, q[used, 0].tolist(), q[used, 1].tolist()))
-        tex = None if colors is not None else list(map(skia.Point, u[used].tolist(), v[used].tolist()))
+        sel, idx = _compact(T[k:k + 20000], len(q))
+        pos = list(map(skia.Point.Make, q[sel, 0].tolist(), q[sel, 1].tolist()))  # Make: 13% faster
+        tex = None if colors is not None else list(map(skia.Point.Make, u[sel].tolist(), v[sel].tolist()))
         verts = skia.Vertices.MakeCopy(skia.Vertices.kTriangles_VertexMode, pos, tex,
-                                       None if colors is None else colors[used].tolist(), idx)
+                                       None if colors is None else colors[sel].tolist(), idx.ravel().tolist())
         cv.drawVertices(verts, paint, skia.BlendMode.kDst)  # kDst: vertex colours as given, when there are any
     img = surf.makeImageSnapshot()
     if L.raw.get("ground") not in (None, False):

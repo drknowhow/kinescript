@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Fixed: a model frame could differ depending on which frames the same worker had drawn before it; on the GPU,
+  edges moved by up to 49 levels. Models now draw into an offscreen the size of the frame from the start.
+- 3D models draw faster, with the same pixels: work on a mesh that no frame changes is done once, only the
+  vertices of triangles facing the camera are converted for Skia, and the ground shadow's outline skips
+  points that cannot be on it. On an RTX 5060 Ti with 6 workers, `examples/model.json` exports in 1.5 s instead
+  of 1.7 (one frame draws in a median 10 ms instead of 14.8) and `examples/import.json` in 0.84 s instead of
+  1.1 (9 ms instead of 12.9).
+
 ## 1.1.0 (2026-10-30)
 
 First release on PyPI: `pip install kinescript`.
