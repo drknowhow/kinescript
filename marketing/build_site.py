@@ -6,12 +6,14 @@
     python marketing/build_site.py sound       # only make the voice demo's bed and click again
     python marketing/build_site.py --page      # only rewrite the page fragments, no rendering
 
-The voice demo's voice (site/demos/voice/) is spoken by `kine voice` and committed, so building the site does not
-need a speech engine unless that line changes; then install plugins/kinescript-kokoro or set KINE_VOICE_CMD.
-Its music bed and click (site/demos/sound/) are synthesised here and committed too.
+The voices of the voice demo (site/demos/voice/) and of the hero (marketing/voice/) are spoken by `kine voice` and
+committed, so building the site does not need a speech engine unless a line changes; then install
+plugins/kinescript-kokoro or set KINE_VOICE_CMD. The voice demo's music bed and click (site/demos/sound/) are
+synthesised here, the hero's sounds by marketing/build_hero.py, and both are committed too.
 
 Every video on the page is a scene rendered by `kine render -q high` at a fraction of its canvas size
-(the demos at half scale: 960x540, or 540x960 for the vertical one; the launch video at 1280x720). ffmpeg then
+(the demos at half scale: 960x540, or 540x960 for the vertical one; the hero at 1280x720). The hero plays the
+demos' videos and posters, so it renders after them. ffmpeg then
 moves the index to the front of each file (`-movflags +faststart`, no re-encode) so browsers start playing
 before the whole file has arrived. Posters are `kine still` frames saved as JPEG.
 
@@ -52,7 +54,7 @@ DEMO = {
     "voice": ("site/demos/voice.json", 6.0, 0.5),
     "edit": ("site/demos/edit.json", 2.0, 0.5),
 }
-HERO = ("marketing/promo.json", 9.9, 2 / 3)
+HERO = ("marketing/hero.json", 3.6, 2 / 3)
 LOOK = "card-flip"          # the contact sheet shown in the agent section
 LISTEN = "voice"            # the contact sheet with the sound under it, in the sound section
 CHECK = "site/demos/problems.json"
@@ -250,7 +252,7 @@ def fragments() -> dict:
         out["json", name] = json_block(path)
         summary = probe(str(ROOT / scene))
         out["score", name] = score_block(summary, f"Timeline of {path.name}")
-    out["score", "hero"] = score_block(probe(str(ROOT / HERO[0])), "Timeline of marketing/promo.json")
+    out["score", "hero"] = score_block(probe(str(ROOT / HERO[0])), f"Timeline of {HERO[0]}")
 
     before = (ROOT / CUES).read_text(encoding="utf-8")
     after = before.replace(*CUES_CHANGE, 1)
@@ -307,7 +309,8 @@ def main(argv: list[str]) -> None:
     if "--page" not in argv:
         if not (DEMOS / "sound" / "bed.m4a").exists() or "sound" in names:
             sound_assets()
-        run(*KINE, "voice", DEMO["voice"][0])  # speaks only if the line changed since its file was made
+        for scene in (DEMO["voice"][0], HERO[0]):  # speaks only the lines that changed since their files were made
+            run(*KINE, "voice", scene)
         for name in names or [*DEMO, "hero", "look"]:
             if name == "sound":
                 continue

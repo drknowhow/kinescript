@@ -1,0 +1,81 @@
+{
+ "words": [
+  {
+   "word": "Time",
+   "start": 0.275,
+   "end": 0.65
+  },
+  {
+   "word": "is",
+   "start": 0.65,
+   "end": 0.7625
+  },
+  {
+   "word": "a",
+   "start": 0.7625,
+   "end": 0.825
+  },
+  {
+   "word": "reference.",
+   "start": 0.825,
+   "end": 1.65
+  },
+  {
+   "word": "Make",
+   "start": 1.7875,
+   "end": 2.025
+  },
+  {
+   "word": "one",
+   "start": 2.025,
+   "end": 2.25
+  },
+  {
+   "word": "layer",
+   "start": 2.25,
+   "end": 2.55
+  },
+  {
+   "word": "longer,",
+   "start": 2.55,
+   "end": 3.05
+  },
+  {
+   "word": "and",
+   "start": 3.125,
+   "end": 3.25
+  },
+  {
+   "word": "everything",
+   "start": 3.25,
+   "end": 3.7125
+  },
+  {
+   "word": "cued",
+   "start": 3.7125,
+   "end": 4.05
+  },
+  {
+   "word": "after",
+   "start": 4.05,
+   "end": 4.3125
+  },
+  {
+   "word": "it",
+   "start": 4.3125,
+   "end": 4.4
+  },
+  {
+   "word": "moves.",
+   "start": 4.4,
+   "end": 5.05,
+   "id": "moves"
+  }
+ ],
+ "made": {
+  "hash": "11a467a281d737bc",
+  "backend": "kinescript_kokoro",
+  "version": "kokoro 0.9.4, kinescript-kokoro 0.1.0",
+  "speaker": "af_heart"
+ }
+}

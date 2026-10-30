@@ -1,0 +1,46 @@
+{
+ "words": [
+  {
+   "word": "This",
+   "start": 0.275,
+   "end": 0.45
+  },
+  {
+   "word": "is",
+   "start": 0.45,
+   "end": 0.6
+  },
+  {
+   "word": "Kinescript.",
+   "start": 0.6,
+   "end": 1.35
+  },
+  {
+   "word": "Video",
+   "start": 1.4625,
+   "end": 1.8
+  },
+  {
+   "word": "you",
+   "start": 1.8,
+   "end": 1.9
+  },
+  {
+   "word": "can",
+   "start": 1.9,
+   "end": 2.1
+  },
+  {
+   "word": "diff.",
+   "start": 2.1,
+   "end": 2.675,
+   "id": "diff"
+  }
+ ],
+ "made": {
+  "hash": "e131cfafcc4f63a9",
+  "backend": "kinescript_kokoro",
+  "version": "kokoro 0.9.4, kinescript-kokoro 0.1.0",
+  "speaker": "af_heart"
+ }
+}

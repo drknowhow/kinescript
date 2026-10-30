@@ -1,0 +1,97 @@
+{
+ "words": [
+  {
+   "word": "Before",
+   "start": 0.25,
+   "end": 0.5375
+  },
+  {
+   "word": "it",
+   "start": 0.5375,
+   "end": 0.625
+  },
+  {
+   "word": "renders,",
+   "start": 0.625,
+   "end": 1.25
+  },
+  {
+   "word": "it",
+   "start": 1.325,
+   "end": 1.4625
+  },
+  {
+   "word": "checks",
+   "start": 1.4625,
+   "end": 1.775
+  },
+  {
+   "word": "every",
+   "start": 1.775,
+   "end": 2.0875
+  },
+  {
+   "word": "frame,",
+   "start": 2.0875,
+   "end": 2.6
+  },
+  {
+   "word": "and",
+   "start": 2.675,
+   "end": 2.7875
+  },
+  {
+   "word": "the",
+   "start": 2.7875,
+   "end": 2.875
+  },
+  {
+   "word": "mix,",
+   "start": 2.875,
+   "end": 3.475,
+   "id": "mix"
+  },
+  {
+   "word": "and",
+   "start": 3.575,
+   "end": 3.7
+  },
+  {
+   "word": "names",
+   "start": 3.7,
+   "end": 4.025
+  },
+  {
+   "word": "each",
+   "start": 4.025,
+   "end": 4.25
+  },
+  {
+   "word": "problem",
+   "start": 4.25,
+   "end": 4.6875,
+   "id": "problem"
+  },
+  {
+   "word": "with",
+   "start": 4.6875,
+   "end": 4.8125
+  },
+  {
+   "word": "its",
+   "start": 4.8125,
+   "end": 4.975
+  },
+  {
+   "word": "fix.",
+   "start": 4.975,
+   "end": 5.6
+  }
+ ],
+ "made": {
+  "hash": "0efaac6640218b9f",
+  "backend": "kinescript_kokoro",
+  "version": "kokoro 0.9.4, kinescript-kokoro 0.1.0",
+  "speaker": "af_heart"
+ }
+}
