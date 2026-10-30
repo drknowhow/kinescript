@@ -37,6 +37,10 @@ rendered from.
 - **Footage.** Video layers with trim, speed, loop, cover/contain fit, punch-in `zoom` around a `focus` point, and
   rounded picture-in-picture. A `sequence` turns a cut list into clips with fade, wipe, slide, zoom or blur
   transitions. Clip audio and music beds are mixed automatically.
+- **Sound on the timeline.** Voice-over, music and effects are cues like layers: `"at": "vo1.out+0.3"` starts a
+  layer after the voice, a layer's `"sound": "pop.wav"` plays when it appears and moves when it moves, and a voice
+  stretches an `auto` duration to finish. Sounds loop and pan, are mixed into MP4, MOV, WebM and `--from/--to`
+  renders, and `-o mix.wav` renders the sound alone.
 - **Captions** from `.srt`/`.vtt` or inline cues, with karaoke and pop modes.
 - **Shaders.** SkSL layers with `mesh`, `aurora`, `grid` and `score` presets, or your own source.
 - **Finishing.** Per-layer blur, shadow, blend modes and colour adjustments; a scene grade with vignette and film
@@ -189,7 +193,7 @@ Within one process, such as the MCP server, the workers stay warm for two minute
 - 3D is drawn by Skia with a depth sort, not a GL pipeline: models have no image textures, skeletal animation or
   shadows cast on each other, and separate model layers do not hide each other per pixel (merge touching
   objects as `parts` of one model). Draco- and meshopt-compressed model files are not read.
-- Audio is mixing (trim, gain, fades, speed), not editing or effects.
+- Audio is mixing (trim, gain, fades, speed, loop, pan), with no effects, ducking or loudness control.
 - Video is decoded and resampled by ffmpeg to the scene frame rate. Jumping backwards or far ahead reopens the
   decoder, which is slower than sequential playback.
 - Text layout is single-script left-to-right with greedy wrapping. No shaping for complex scripts or bidi.

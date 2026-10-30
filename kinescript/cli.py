@@ -30,7 +30,8 @@ def main(argv=None) -> int:
     ap.add_argument("--version", action="version", version=f"kinescript {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    r = sub.add_parser("render", help="render a scene to .mp4/.mov/.webm/.gif or a .png sequence")
+    r = sub.add_parser("render", help="render a scene to .mp4/.mov/.webm/.gif or a .png sequence, or its sound "
+                                      "alone to .wav/.m4a/.mp3/.flac")
     r.add_argument("scene")
     r.add_argument("-o", "--out")
     r.add_argument("-q", "--quality", choices=["draft", "standard", "high"], default="standard")

@@ -74,12 +74,13 @@ class Timeline:
 
     def add(self, lid: str, at, dur=None, until=None, natural: float | None = None,
             prev: str | None = None, parent: str | None = None, default_end: str | None = None,
-            span: bool = False):
-        """`span`: with no dur or until, end when the last child ends (a sequence's group)."""
+            span: bool = False, counts: bool = True):
+        """`span`: with no dur or until, end when the last child ends (a sequence's group).
+        `counts`: its end can set an "auto" scene duration (a music bed longer than the video does not)."""
         if lid in self.nodes:
-            raise TimingError(f"duplicate layer id '{lid}'; every id must be unique", lid)
+            raise TimingError(f"duplicate id '{lid}'; every layer and audio id must be unique", lid)
         self.nodes[lid] = dict(at=at, dur=dur, until=until, natural=natural, prev=prev,
-                               parent=parent, default_end=default_end, span=span)
+                               parent=parent, default_end=default_end, span=span, counts=counts)
         self.order.append(lid)
 
     def _time(self, v, owner: str, base: float) -> float:
@@ -183,7 +184,7 @@ class Timeline:
         if duration not in (None, "auto"):
             end = self._time(duration, "canvas", 0.0)
         else:
-            ends = [o for _, o in self.resolved.values() if o is not None]
+            ends = [o for lid, (_, o) in self.resolved.items() if o is not None and self.nodes[lid]["counts"]]
             end = max(ends) if ends else 5.0
         for lid, (i, o) in list(self.resolved.items()):
             if o is None:

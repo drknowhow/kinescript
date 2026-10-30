@@ -55,9 +55,7 @@ SCENE (top level)
   motionBlur  {"samples": 6, "shutter": 0.5}   (slower: renders 6 sub-frames per frame)
   camera      moves and turns the view in depth (see DEPTH AND CAMERA).
   light       how model layers are lit (see 3D MODELS).
-  audio       [{"src": "music.mp3", "at": 0, "gain": -8, "fadeIn": 1, "fadeOut": 2, "trim": [0, 30]}]
-              gain is in dB (0 = unchanged, -6 = about half as loud). fadeOut ends where the audio
-              ends: the scene end, unless trim makes the audio shorter.
+  audio       the list of sounds: voice-over, music, effects (see SOUND).
   components  your own reusable layer groups (see COMPONENTS).
 
 TIME: "at" (start), "dur" (length), "until" (end)
@@ -91,7 +89,8 @@ KEYS EVERY LAYER HAS
                 channel (-1..1), so below 0 dark footage turns black; exposure is in stops and
                 multiplies (-1 halves the light), which is the way to darken footage.
   enter, exit   a motion (see ENTER AND EXIT)
-  hidden        true skips the layer
+  hidden        true skips the layer (and its sound)
+  sound         a file played when the layer starts, timed by the layer (see SOUND)
   allowOffscreen  true stops check warning when the layer leaves the canvas
   note          free text, ignored
 
@@ -276,10 +275,32 @@ COMPONENTS  {"use": "<name>", "id": "...", "at": ..., "dur": ..., ...parameters}
   Built in (parameters):
 {components}
   x and y place the component as noted above. Components also accept enter, exit, opacity,
-  scale, rotate, hidden.
+  scale, rotate, hidden, sound.
   Your own: "components": {"badge": {"params": {"label": "NEW"}, "layers": [
               {"type": "text", "text": "{{label}}", "size": 40}]}}
   then a layer {"use": "badge", "label": "BETA", "x": 200, "y": 100}.
+
+SOUND
+  Top-level "audio" lists the sounds. Each one:
+    {"id": "vo1", "role": "voice", "src": "vo1.wav", "at": 0.5}
+  src (relative to the scene file), id, role (voice|music|sfx|ambience), at, dur, until,
+  trim [start, end] (seconds in the file), gain (dB: 0 = unchanged, -6 = about half as loud) or
+  volume (1 = unchanged), fadeIn, fadeOut (seconds), loop (true repeats the trimmed file until the
+  sound ends), pan (-1 left .. 1 right). A sound lasts as long as its trimmed file; fadeOut ends
+  where it ends, which is the scene end at the latest.
+  A sound is a cue like a layer: "at": "vo1.out+0.3" starts something 0.3 s after the voice ends,
+  and a sound can start at "title.in". "prev" is the sound listed before. A voice makes
+  "duration": "auto" long enough to finish it; music, ambience and sfx do not.
+  Music under the whole video:
+    {"id": "bed", "role": "music", "src": "music.mp3", "gain": -10, "loop": true, "fadeIn": 1,
+     "fadeOut": 2}
+  A layer's sound moves when the layer moves:
+    "sound": "pop.wav"   plays when the layer starts
+    "sound": {"src": "whoosh.wav", "at": "out-0.1", "gain": -6}
+  Its at is "in", "out" or "mid" with an offset, or seconds after the layer starts; it also takes
+  trim, dur, gain, volume, fadeIn, fadeOut, pan and role (sfx unless you say).
+  Sound is mixed into .mp4, .mov and .webm, and into --from/--to renders. -o mix.wav (or .m4a,
+  .mp3, .flac) renders the sound alone, without drawing frames.
 
 RECIPES (layers to paste into "layers")
   Title that types on:
@@ -312,7 +333,8 @@ RECIPES (layers to paste into "layers")
      "fill": {"linear": [[0, 0], [1, 1]], "stops": ["#1e3a8a", "#6d28d9"]}}
   Progress bar along the bottom for the whole video:
     {"use": "progress", "id": "progress", "color": "#ff633f", "h": 8}
-  Music under everything: top-level "audio": [{"src": "music.mp3", "gain": -10, "fadeIn": 1, "fadeOut": 2}]
+  Music under everything: top-level "audio": [{"role": "music", "src": "music.mp3", "gain": -10,
+    "loop": true, "fadeIn": 1, "fadeOut": 2}]
 
 COMMANDS
   kine new scene.json             write a starter scene
@@ -326,12 +348,13 @@ COMMANDS
                                   times (use it to see a transition), --width 480, --cols 4, -o
   kine still scene.json --at 2.5  one frame as PNG (-o to name it); --at -1 is 1 s before the
                                   end; --at end is the last frame
-  kine probe scene.json --at 2    every layer's start and end, and screen boxes at 2 s
+  kine probe scene.json --at 2    every layer's and sound's start and end, and screen boxes at 2 s
   kine probe clip.mp4             a media file's duration, w, h, fps and whether it has audio
   kine render scene.json -o out.mp4 -q draft|standard|high
                                   standard is the default, draft the fastest, high the best.
                                   Also .mov or .webm (with --transparent for no background),
                                   .gif (longest side 720 px, 15 fps), or a folder/ for PNG frames.
+                                  .wav, .m4a, .mp3 or .flac: the sound alone.
                                   --scale 0.5 halves the size; --from 2 --to 4 renders a part.
   kine watch scene.json           re-makes the contact sheet on every save
   kine doctor                     checks ffmpeg, the GPU and fonts

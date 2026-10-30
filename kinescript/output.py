@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -100,18 +101,39 @@ def _audio_inputs(scene: Scene) -> list[dict]:
         fi = layer.enter.dur if layer.enter else 0
         fo = layer.exit.dur if layer.exit else 0
         out.append(dict(src=layer.src, at=layer.t_in, trim0=float(trim[0]), dur=layer.dur * speed, gain=float(vol),
-                        fade_in=fi, fade_out=fo, speed=speed))
-    for a in scene.audio:
-        src = scene.path(a["src"])
-        at = scene.timeline._time(a.get("at", 0), "audio", 0.0)
+                        fade_in=fi, fade_out=fo, speed=speed, loop=None, pan=0.0))
+    for s in scene.audio:
+        a = s.raw
         trim = a.get("trim") or [0, None]
-        total = media.probe(src)["duration"]
-        end = trim[1] if len(trim) > 1 and trim[1] is not None else total
-        dur = min(end - trim[0], scene.duration - at)
+        loop = None
+        if a.get("loop"):  # the trimmed segment repeats
+            total = media.probe(s.src)["duration"]
+            end = trim[1] if len(trim) > 1 and trim[1] is not None else total
+            loop = max(0.01, min(float(end), total) - float(trim[0]))
         gain = 10 ** (float(a.get("gain", 0)) / 20) if "gain" in a else float(a.get("volume", 1))
-        out.append(dict(src=src, at=at, trim0=float(trim[0]), dur=max(0.01, dur), gain=gain,
-                        fade_in=float(a.get("fadeIn", 0)), fade_out=float(a.get("fadeOut", 0)), speed=1.0))
+        out.append(dict(src=s.src, at=s.t_in, trim0=float(trim[0]), dur=max(0.01, min(s.t_out, scene.duration) - s.t_in),
+                        gain=gain, fade_in=float(a.get("fadeIn", 0)), fade_out=float(a.get("fadeOut", 0)), speed=1.0,
+                        loop=loop, pan=float(a.get("pan", 0))))
     return out
+
+
+def _codec(ext: str) -> list[str] | None:
+    """Audio encoder arguments for a file extension; None when this ffmpeg cannot write it."""
+    if ext in (".opus", ".ogg", ".webm"):
+        enc = media.capabilities()["encoders"]
+        if "libopus" in enc:
+            return ["-c:a", "libopus", "-b:a", "160k", "-ar", "48000"]
+        if "opus" in enc:  # ffmpeg's own Opus encoder is marked experimental
+            return ["-c:a", "opus", "-strict", "-2", "-b:a", "160k", "-ar", "48000"]
+        return None
+    return {".wav": ["-c:a", "pcm_s16le"], ".flac": ["-c:a", "flac"],
+            ".mp3": ["-c:a", "libmp3lame", "-b:a", "192k"]}.get(ext, ["-c:a", "aac", "-b:a", "192k"])
+
+
+def _pan(p: float) -> str:
+    """Constant-power pan: -1 left, 0 unchanged, 1 right."""
+    th = (p + 1) * math.pi / 4
+    return f"aformat=channel_layouts=stereo,pan=stereo|c0={math.sqrt(2) * math.cos(th):.4f}*c0|c1={math.sqrt(2) * math.sin(th):.4f}*c1"
 
 
 def _copy(video_in: list[str], out: str):
@@ -125,9 +147,10 @@ def _copy(video_in: list[str], out: str):
         raise RuntimeError(f"concat failed: {res.stderr.strip()[:400]}")
 
 
-def _start_audio(scene: Scene, out: str):
-    """Start mixing the scene's audio to an AAC file `out`, in its own ffmpeg process so it runs while the
-    frames render; it took 0.7 s of the launch video's 3.8 s when it ran after them. None if silent."""
+def _start_audio(scene: Scene, out: str, start: float = 0.0, end: float | None = None):
+    """Start mixing the scene's audio to `out` (encoder from its extension), in its own ffmpeg process so it runs
+    while the frames render; it took 0.7 s of the launch video's 3.8 s when it ran after them. start/end cut a
+    range out of the full mix, so fades crossing them stay as they are. None if silent."""
     ins = _audio_inputs(scene)
     if not ins:
         return None
@@ -135,7 +158,11 @@ def _start_audio(scene: Scene, out: str):
     chains = []
     for k, a in enumerate(ins):
         cmd += ["-i", a["src"]]
-        f = [f"atrim=start={a['trim0']:.4f}:duration={a['dur']:.4f}", "asetpts=PTS-STARTPTS"]
+        if a["loop"]:  # 48 kHz first, so aloop's size in samples is known
+            f = [f"atrim=start={a['trim0']:.4f}:duration={a['loop']:.4f}", "asetpts=PTS-STARTPTS", "aresample=48000",
+                 f"aloop=loop=-1:size={round(a['loop'] * 48000)}", f"atrim=duration={a['dur']:.4f}"]
+        else:
+            f = [f"atrim=start={a['trim0']:.4f}:duration={a['dur']:.4f}", "asetpts=PTS-STARTPTS"]
         if a["speed"] != 1:
             f.append(f"atempo={max(0.5, min(2.0, a['speed'])):.4f}")
         if a["fade_in"]:
@@ -143,19 +170,25 @@ def _start_audio(scene: Scene, out: str):
         if a["fade_out"]:
             f.append(f"afade=t=out:st={max(0, a['dur'] / a['speed'] - a['fade_out']):.3f}:d={a['fade_out']:.3f}")
         f.append(f"volume={a['gain']:.4f}")
+        if a["pan"]:
+            f.append(_pan(a["pan"]))
         ms = int(round(a["at"] * 1000))
         f.append(f"adelay={ms}|{ms}")
         chains.append(f"[{k}:a]{','.join(f)}[a{k}]")
     mix = "".join(f"[a{k}]" for k in range(len(ins)))
-    graph = ";".join(chains) + f";{mix}amix=inputs={len(ins)}:normalize=0:dropout_transition=0,alimiter=limit=0.95,atrim=duration={scene.duration:.4f}[aout]"
-    cmd += ["-filter_complex", graph, "-map", "[aout]", "-c:a", "aac", "-b:a", "192k", out]
+    # Padded to the full length: the mux keeps the shorter stream, so a mix that ends early would cut the video.
+    cut = f"apad,atrim=duration={scene.duration:.4f}" if not start and end is None else \
+        f"apad,atrim=start={start:.4f}:end={scene.duration if end is None else end:.4f},asetpts=PTS-STARTPTS"
+    graph = ";".join(chains) + f";{mix}amix=inputs={len(ins)}:normalize=0:dropout_transition=0,alimiter=limit=0.95,{cut}[aout]"
+    script = out + ".graph"
+    Path(script).write_text(graph, encoding="utf-8")
+    cmd += [*media.filter_script(script), "-map", "[aout]", *_codec(Path(out).suffix.lower()), out]
     log = tempfile.TemporaryFile()  # as in _encoder: an unread stderr pipe can stall ffmpeg
     return subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stderr=log, creationflags=media._NOWIN), log, out
 
 
-def _mux(video_in: list[str], audio, out: str):
-    """Put the mixed audio under the video, both copied; the segments are joined on the way when video_in
-    is a concat list."""
+def _wait_audio(audio) -> str:
+    """Wait for a mix started by _start_audio and return its file."""
     proc, log, path = audio
     proc.wait()
     log.seek(0)
@@ -163,6 +196,13 @@ def _mux(video_in: list[str], audio, out: str):
     log.close()
     if proc.returncode:
         raise RuntimeError(f"audio mix failed: {err.strip()[:400]}")
+    return path
+
+
+def _mux(video_in: list[str], audio, out: str):
+    """Put the mixed audio under the video, both copied; the segments are joined on the way when video_in
+    is a concat list."""
+    path = _wait_audio(audio)
     res = subprocess.run([media.FFMPEG, "-y", "-v", "error", *video_in, "-i", path, "-map", "0:v", "-map", "1:a",
                           "-c", "copy", "-shortest", out], capture_output=True, text=True, creationflags=media._NOWIN)
     if res.returncode:
@@ -185,6 +225,8 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
     t0 = time.perf_counter()
     if ext == ".png" or out.endswith(("/", "\\")):
         return _render_pngs(scene, out_p, f0, f1, scale, transparent)
+    if ext in AUDIO_ONLY:
+        return _render_audio(scene, out_p, f0 / fps, f1 / fps, start is None and end is None, t0)
     fmt = {".mov": "mov", ".webm": "webm", ".gif": "gif"}.get(ext, "mp4")
     transparent = transparent or fmt in ("mov", "webm") and spec.get("canvas", {}).get("bg") in (None, "transparent")
     if fmt == "gif":  # render no larger than the GIF will be (long side GIF_SIDE), not full size then shrink
@@ -195,7 +237,10 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
     threads = max(1, cpu // workers)
     tmp = Path(tempfile.mkdtemp(prefix="kine-"))
     audio = None
-    mix = fmt == "mp4" and start is None and end is None
+    a_ext = {"mp4": ".m4a", "mov": ".wav", "webm": ".opus"}.get(fmt)
+    mix = a_ext is not None and _codec(a_ext) is not None
+    a_args = (str(tmp / f"audio{a_ext}"), 0.0, None) if start is None and end is None else \
+        (str(tmp / f"audio{a_ext}"), f0 / fps, f1 / fps)
     try:
         seg_ext = ".mov" if fmt == "mov" else ".webm" if fmt == "webm" else ".mp4"
         bounds = [f0 + n * k // workers for k in range(workers + 1)]
@@ -203,13 +248,13 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
                  transparent, threads)
                 for k in range(workers) if bounds[k + 1] > bounds[k]]
         if len(jobs) == 1:
-            audio = _start_audio(scene, str(tmp / "audio.m4a")) if mix else None
+            audio = _start_audio(scene, *a_args) if mix else None
             stats = [_render_range(jobs[0])]
         else:
             ex, failed = _pool(len(jobs)), True
             try:
                 pending = ex.map(_render_range, jobs)  # submitted now; the audio mix starts behind them
-                audio = _start_audio(scene, str(tmp / "audio.m4a")) if mix else None
+                audio = _start_audio(scene, *a_args) if mix else None
                 stats = list(pending)
                 failed = False
             finally:
@@ -244,7 +289,8 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
         w, h = w - w % 2, h - h % 2
     return {"out": str(out_p), "w": w, "h": h, "fps": min(fps, GIF_FPS) if fmt == "gif" else fps, "frames": n,
             "seconds": round(n / fps, 3), "wall": round(wall, 2), "fps_rendered": round(n / wall, 1),
-            "workers": len(jobs), "size_mb": round(out_p.stat().st_size / 1e6, 2) if out_p.exists() else None}
+            "workers": len(jobs), "size_mb": round(out_p.stat().st_size / 1e6, 2) if out_p.exists() else None,
+            "audio": bool(audio)}
 
 
 # Render processes stay up for WARM seconds after a render, so the next one in the same process (the MCP
@@ -331,6 +377,29 @@ def _to_gif(video_in: list[str], out: str, fps: float):
                          creationflags=media._NOWIN)
     if res.returncode:
         raise RuntimeError(f"gif failed: {res.stderr.strip()[:400]}")
+
+
+AUDIO_ONLY = (".wav", ".m4a", ".mp3", ".flac", ".opus")
+
+
+def _render_audio(scene: Scene, out: Path, start: float, end: float, full: bool, t0: float) -> dict:
+    """The mix alone, without rendering a frame."""
+    if _codec(out.suffix.lower()) is None:
+        scene.close()
+        raise RuntimeError(f"this ffmpeg has no encoder for {out.suffix} files; use .wav or .m4a")
+    tmp = Path(tempfile.mkdtemp(prefix="kine-"))
+    try:
+        audio = _start_audio(scene, str(tmp / f"mix{out.suffix.lower()}"), *((0.0, None) if full else (start, end)))
+        if audio is None:
+            raise ValueError("the scene has no audio")
+        path = _wait_audio(audio)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(path, str(out))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+        scene.close()
+    return {"out": str(out), "seconds": round(end - start, 3), "wall": round(time.perf_counter() - t0, 2),
+            "size_mb": round(out.stat().st_size / 1e6, 2)}
 
 
 def _render_pngs(scene: Scene, out: Path, f0: int, f1: int, scale: float, transparent: bool) -> dict:

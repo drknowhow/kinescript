@@ -162,6 +162,23 @@ def test_no_layers():
     assert "no-layers" in codes({"canvas": {}})[0]
 
 
+def test_audio_roles_pan_and_layer_sounds_are_checked():
+    spec = scene([{"type": "rect", "sfx": {"file": "pop.wav", "at": "out", "volum": 2}}])
+    spec["audio"] = [{"src": "vo.wav", "type": "voice-over", "pan": 1.5}, {"src": "x.wav", "role": "drums"}, 7]
+    out, rep = schema.normalize(spec)
+    got = [(i["code"], i["message"]) for i in rep.issues]
+    assert out["audio"][0]["role"] == "voice" and out["layers"][0]["sound"]["src"] == "pop.wav"
+    assert any(c == "bad-value" and m.startswith("pan is 1.5") for c, m in got)
+    assert any(c == "bad-value" and m.startswith("role: unknown value 'drums'") for c, m in got)
+    assert any(c == "unknown-key" and m.startswith("sound: unknown key 'volum'") for c, m in got)
+    assert any(c == "bad-value" and m.startswith("an audio entry is a file name") for c, m in got)
+
+
+def test_audio_and_layer_ids_share_one_namespace():
+    with pytest.raises(k.SceneError, match="duplicate id 'title'"):
+        k.Scene(dict(scene([{"id": "title", "type": "rect"}]), audio=[{"id": "title", "src": __file__}]))
+
+
 # ---- guards: the hand-kept key lists in schema.py ---------------------------------------------
 READ = collections.defaultdict(set)
 
