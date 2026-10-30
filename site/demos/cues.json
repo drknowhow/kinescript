@@ -7,7 +7,7 @@
      "at": "intro.out+0.2", "dur": 3.5, "enter": {"name": "left", "dist": 28, "dur": 0.32}, "exit": "fade"},
     {"id": "bar", "type": "rect", "x": "50%", "y": "62%", "w": {"from": 0, "to": 900, "dur": 0.8}, "h": 60,
      "fill": "$accent", "at": "title.in+0.4", "until": "title.out", "exit": "fade"},
-    {"id": "cta", "type": "text", "text": "kinescript.dev/q4", "font": "IBM Plex Mono", "x": "50%", "y": "50%",
+    {"id": "cta", "type": "text", "text": "example.com/q4", "font": "IBM Plex Mono", "x": "50%", "y": "50%",
      "size": 72, "at": "title.out", "dur": 2.5, "enter": "snap"}
   ]
 }
