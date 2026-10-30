@@ -34,7 +34,8 @@ def report(scene: Scene) -> dict | None:
     ins = O._audio_inputs(scene)
     if not ins:
         return None
-    key = repr((ins, [media._version(a["src"]) for a in ins], scene.spec.get("mix"), round(scene.duration, 4)))
+    key = repr((ins, [media._version(a["src"]) for a in ins], scene.spec.get("mix"), round(scene.duration, 4),
+                [scene.said(a["id"]) for a in ins]))
     if key in _CACHE:
         return _CACHE[key]
     tmp = Path(tempfile.mkdtemp(prefix="kine-"))
@@ -58,7 +59,7 @@ def report(scene: Scene) -> dict | None:
                        "out": a["at"] + a["dur"] / a["speed"], "lufs": info["lufs"], "peak": info["peak"],
                        "lead": info["lead"], "gain": 20 * math.log10(max(a["gain"], 1e-6)), "shift": a["shift"],
                        "ducked": bool(a["duck"]), "trim0": a["trim0"], "onset": a["onset"], "info": info, "g": g,
-                       "env": _place(a, info, n) + g})
+                       "env": _place(a, info, n) + g, "words": scene.said(a["id"])})
     rep = {"managed": plan is not None, "sounds": sounds, "duration": scene.duration, "target": cfg["loudness"],
            "ceiling": cfg["peak"], "correction": correction, "master": master, "duck": duck,
            "depth": cfg["duck"]["depth"] if cfg["duck"] else 0.0, "ducking": bool(cfg["duck"])}
@@ -304,6 +305,15 @@ def strip(c, rep: dict, found: list[dict], x: float, y: float, w: float, ts: lis
             if tw < b - a and row is not None:
                 c.drawString(s["id"], a + 2, ly + 15 + 11 * row, small, paint("#f2f0e8"))
                 free[row] = a + tw
+        said = x0  # each word a voice says: a tick where it starts, and the word where there is room
+        for _, word, w0, _ in sorted((w for s in snds for w in s["words"]), key=lambda w: w[2]):
+            a = px(w0)
+            c.drawLine(a, ly + LANE_H - 15, a, ly + LANE_H - 2, paint("#f2f0e8"))
+            tw = small.measureText(word) + 4
+            if a >= said and a + tw <= x1:
+                c.drawRect(skia.Rect(a + 1, ly + LANE_H - 15, a + tw + 1, ly + LANE_H - 3), paint("#0a0c10b0"))
+                c.drawString(word, a + 3, ly + LANE_H - 6, small, paint("#f2f0e8"))
+                said = a + tw + 3
         if rep["duck"] is not None and any(s["ducked"] for s in snds):
             dc = columns(20 * np.log10(np.maximum(rep["duck"], 1e-6)), A.RATE, np.minimum)
             line = skia.Path()

@@ -1168,7 +1168,7 @@ class Renderer:
         if cue is None:
             self._last_text = ""
             return
-        s0, s1, text = cue
+        s0, s1, text = cue[:3]
         mw = g("maxWidth") or self.s.w * 0.8
         lay = self._text_layout(L, t, T, g, text, max_w=mw)
         pad = self._pad(L) if L.raw.get("box") is not None else (0.0, 0.0)
@@ -1180,7 +1180,10 @@ class Renderer:
         ct = t - s0
         a = min(1.0, ct / 0.12, (s1 - t) / 0.12)
         active = None
-        if L.raw.get("mode") in ("karaoke", "pop"):
+        if L.raw.get("mode") in ("karaoke", "pop") and len(cue) > 3:  # word times from the voice
+            first_word = lay.runs[0].word if lay.runs else 0
+            active = first_word + sum(1 for ws, _ in cue[3] if ws <= t) - 1
+        elif L.raw.get("mode") in ("karaoke", "pop"):
             words = text.replace("**", "").split()
             total = sum(len(wd) for wd in words) or 1
             frac = ct / max(0.05, (s1 - s0) * 0.92)

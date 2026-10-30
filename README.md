@@ -38,14 +38,15 @@ rendered from.
   rounded picture-in-picture. A `sequence` turns a cut list into clips with fade, wipe, slide, zoom or blur
   transitions. Clip audio and music beds are mixed automatically.
 - **Sound on the timeline.** Voice-over, music and effects are cues like layers: `"at": "vo1.out+0.3"` starts a
-  layer after the voice, a layer's `"sound": "pop.wav"` plays when it appears and moves when it moves, and a voice
+  layer after the voice, `"at": "vo1:render"` as the voice says "render" (from a words file, such as Whisper's
+  JSON, next to it), a layer's `"sound": "pop.wav"` plays when it appears and moves when it moves, and a voice
   stretches an `auto` duration to finish. Sounds loop and pan, are mixed into MP4, MOV, WebM and `--from/--to`
   renders, and `-o mix.wav` renders the sound alone.
 - **A mix without listening.** Give a sound a `role` and it is set to that role's level: voice -18 LUFS, music
   -16, ambience -30, effects peaking at -6 dBFS. Music and ambience dip 14 dB while a voice speaks, an effect's
   leading silence is skipped so it lands on its cue, and the whole mix ends at -16 LUFS with peaks under
   -1.5 dBTP. Gain takes keyframes and expressions like any property; a top-level `mix` changes the targets.
-- **Captions** from `.srt`/`.vtt` or inline cues, with karaoke and pop modes.
+- **Captions** from `.srt`/`.vtt`, inline cues or a voice's word times, with karaoke and pop modes.
 - **Shaders.** SkSL layers with `mesh`, `aurora`, `grid` and `score` presets, or your own source.
 - **Finishing.** Per-layer blur, shadow, blend modes and colour adjustments; a scene grade with vignette and film
   grain; optional motion blur.
@@ -171,8 +172,11 @@ More scenes in [`examples/`](https://github.com/drknowhow/kinescript/tree/main/e
   extruded SVG path and the wordmark as extruded text, 5 s.
 - [`import.json`](https://github.com/drknowhow/kinescript/blob/main/examples/import.json): a glTF rocket on a
   ground shadow, 6 s.
+- [`voiceover.json`](https://github.com/drknowhow/kinescript/blob/main/examples/voiceover.json): titles cued from
+  the words of a voice-over, karaoke captions of it, and a music bed that dips under it, 5.4 s.
 
-`edit.json` and `import.json` read sample media: run `python examples/make_media.py` first to generate it.
+`edit.json`, `import.json` and `voiceover.json` read sample media: run `python examples/make_media.py` first to
+generate it.
 
 ## Performance
 

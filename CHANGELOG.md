@@ -29,6 +29,15 @@
   axis: a lane per role and one for the mix, each sound's span and id, the duck, and the issues in red. Its JSON
   gives each sound's loudness before and after gain, its leading silence and any shift, and the mix's loudness,
   true peak, loudness range and loudest 3 s.
+- Cues from words. A sound's word times come from a words file next to it (`vo1.words.json` for `vo1.wav`), from
+  a path or list in its `words` key, or from Whisper's JSON as it is. `"at": "vo1:render"` starts a layer when the
+  voice says "render"; `.in`, `.out`, `.mid` and offsets work as on any cue, and repeats are `render_2`, `render_3`.
+  Times follow the sound's start and trim. `kine probe` lists each sound's word ids and when they are said, and a
+  cue to a word that is not there names the closest one.
+- Captions of a voice: `{"type": "captions", "voice": "vo1"}` makes a cue a line from its words, starting when the
+  voice starts, and karaoke and pop light each word as it is said instead of guessing from its length.
+- `kine look --audio` marks each word a voice says in its lane.
+- `examples/voiceover.json`, with a stand-in voice and its words file from `examples/make_media.py`.
 - Fixed: a scene whose sounds all ended before it did rendered a video cut short at the end of the last sound. The
   mix is now padded to the scene length. Scenes whose sound already reached the end render the same audio, bit for
   bit.

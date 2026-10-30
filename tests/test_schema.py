@@ -235,7 +235,7 @@ def test_schema_lists_cover_every_key_the_renderer_reads(monkeypatch):
     monkeypatch.setattr(S.Layer, "get", get)
     scenes = [ROOT / "examples" / "hello.json", ROOT / "examples" / "edit.json", ROOT / "examples" / "3d.json",
               ROOT / "examples" / "model.json", ROOT / "examples" / "title3d.json", ROOT / "examples" / "import.json",
-              ROOT / "marketing" / "promo.json"]
+              ROOT / "examples" / "voiceover.json", ROOT / "marketing" / "promo.json"]
     for path in scenes:
         sc = S.load(str(path))
         for layer in sc.all_layers():
@@ -268,7 +268,7 @@ def test_component_param_lists_cover_every_param_a_builder_reads():
 
 def test_examples_and_promo_have_no_unknown_keys():
     for path in ("examples/hello.json", "examples/edit.json", "examples/3d.json", "examples/model.json",
-                 "examples/title3d.json", "examples/import.json", "marketing/promo.json",
+                 "examples/title3d.json", "examples/import.json", "examples/voiceover.json", "marketing/promo.json",
                  "marketing/og.json"):
         sc = k.load(str(ROOT / path))  # loading runs every schema check; a full `check` renders and is slow on CPU
         bad = [i for i in sc.issues if i["level"] == "error" or i["code"] in ("renamed-key", "ignored-key")]

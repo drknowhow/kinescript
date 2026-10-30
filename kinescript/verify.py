@@ -250,7 +250,7 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
                     f"{words} words on screen for {layer.dur:.2f}s; viewers need ~{need:.1f}s", "extend dur or cut words",
                     until=layer.t_out)
         if layer.type == "captions":
-            for s0, s1, txt in layer.raw.get("cues", []):
+            for s0, s1, txt, *_ in layer.raw.get("cues", []):
                 words = _words(txt)
                 if words and (s1 - s0) < 0.25 + words / 4.5:
                     add("warning", "read-time", layer.id, layer.t_in + s0,
