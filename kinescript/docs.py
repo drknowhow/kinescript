@@ -56,6 +56,7 @@ SCENE (top level)
   camera      moves and turns the view in depth (see DEPTH AND CAMERA).
   light       how model layers are lit (see 3D MODELS).
   audio       the list of sounds: voice-over, music, effects (see SOUND).
+  mix         loudness, role levels and ducking of the sound (see SOUND).
   components  your own reusable layer groups (see COMPONENTS).
 
 TIME: "at" (start), "dur" (length), "until" (end)
@@ -299,6 +300,17 @@ SOUND
     "sound": {"src": "whoosh.wav", "at": "out-0.1", "gain": -6}
   Its at is "in", "out" or "mid" with an offset, or seconds after the layer starts; it also takes
   trim, dur, gain, volume, fadeIn, fadeOut, pan and role (sfx unless you say).
+  gain changes over time like any property, timed from the sound's start: "gain": [[0, -30], [2, 0]]
+  fades a sound up over its first 2 s.
+  Give sounds a role and the mix is levelled for you: voice -18 LUFS, music -16, ambience -30, and an
+  sfx peaks at -6 dBFS; gain on a sound with a role is a change from that level. Music and ambience
+  dip 14 dB while a voice speaks. An sfx starts past the silence at the start of its file, so its
+  first sound lands on its cue. The whole mix ends at -16 LUFS with peaks under -1.5 dBTP. Sounds
+  without a role keep the gain you give them, and a scene where no sound has a role is mixed as
+  given. Change the targets with a top-level "mix", for example
+  "mix": {"loudness": -14, "peak": -1, "levels": {"music": -20}, "duck": {"depth": 10}}.
+  "duck": false turns the dip off; duck also takes by and under (lists of roles), and attack, hold
+  and release in seconds (0.08, 0.15, 0.4).
   Sound is mixed into .mp4, .mov and .webm, and into --from/--to renders. -o mix.wav (or .m4a,
   .mp3, .flac) renders the sound alone, without drawing frames.
 

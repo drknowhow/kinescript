@@ -10,6 +10,15 @@
 - `loop` repeats a sound's trimmed file until it ends; `pan` places it from -1 (left) to 1 (right).
 - `.mov` (PCM), `.webm` (Opus) and `--from/--to` renders carry the mix. `-o mix.wav` (or `.m4a`, `.mp3`, `.flac`)
   renders the sound alone without drawing frames. `kine probe` lists every sound's start and end.
+- A managed mix for scenes whose sounds have roles. Each sound is measured once (loudness, peak, leading silence)
+  and set to its role's level: voice -18 LUFS, music -16, ambience -30, sfx peaking at -6 dBFS; `gain` on it is a
+  change from that level. Music and ambience dip 14 dB while a voice speaks (0.08 s attack, 0.15 s hold, 0.4 s
+  release), worked out from the voice's levels, so the same scene always mixes the same way. An sfx starts past
+  its leading silence, so its first sound lands on its cue. The mix is measured and brought to -16 LUFS, then
+  limited to -1.5 dBTP. A top-level `mix` changes the targets: `{"loudness", "peak", "levels", "duck"}`, and
+  `"duck": false` turns ducking off. Scenes where no sound has a role mix as before.
+- `gain` changes over time like any property: keyframes (`[[0, -30], [2, 0]]`), tweens or `=` expressions, in dB
+  from the sound's start. `kine check` reports a gain that does not give a number.
 - Fixed: a scene whose sounds all ended before it did rendered a video cut short at the end of the last sound. The
   mix is now padded to the scene length. Scenes whose sound already reached the end render the same audio, bit for
   bit.

@@ -414,7 +414,8 @@ def test_audio_lands_at_its_time_with_any_worker_count(clip, tmp_path, workers):
     assert np.sqrt(np.mean(pcm[:7200] ** 2)) < 1e-3 < 0.05 < np.sqrt(np.mean(pcm[8800:15200] ** 2))
 
 
-def test_audio_mixes_while_frames_render_and_stops_when_they_fail(clip, tmp_path, monkeypatch):
+@pytest.mark.parametrize("role", [None, "music"])  # one ffmpeg process, or the managed mix's thread
+def test_audio_mixes_while_frames_render_and_stops_when_they_fail(clip, tmp_path, monkeypatch, role):
     from kinescript import output
     started, real_start = [], output._start_audio
 
@@ -429,7 +430,8 @@ def test_audio_mixes_while_frames_render_and_stops_when_they_fail(clip, tmp_path
     monkeypatch.setattr(output, "_start_audio", start)
     monkeypatch.setattr(output, "_render_range", frames)
     spec = scene([{"type": "rect", "w": 320, "h": 180}], duration=60)
-    spec["audio"] = [{"src": clip, "at": t} for t in range(0, 60, 3)]  # a minute of audio takes a while to mix
+    spec["audio"] = [dict({"src": clip, "at": t}, **({"role": role} if role else {}))
+                     for t in range(0, 60, 3)]  # a minute of audio takes a while to mix
     with pytest.raises(RuntimeError, match="frames failed"):
         k.render(spec, str(tmp_path / "o.mp4"), quality="draft", workers=1)
     assert started[0][0].poll() is not None  # stopped, not left running
@@ -552,6 +554,80 @@ def test_range_render_cuts_the_full_mix(tone, tmp_path):
     pcm = _pcm(out)
     assert len(pcm) == pytest.approx(12000, abs=400)
     assert _rms(pcm, 0, 0.45) < 1e-3 < 0.05 < _rms(pcm, 0.6, 0.95)
+
+
+@pytest.fixture(scope="session")
+def mix_media(tmp_path_factory):
+    """A 200 Hz bed, a 2 kHz voice, and an effect whose 3 kHz burst starts 0.3 s into its file."""
+    d, out = tmp_path_factory.mktemp("mix"), {}
+    for name, expr, dur in (("bed", "0.5*sin(2*PI*200*t)", 2), ("voice", "0.3*sin(2*PI*2000*t)", 1.5),
+                            ("hit", "if(between(t,0.3,0.4),0.8*sin(2*PI*3000*t),0)", 0.5)):
+        out[name] = str(d / f"{name}.wav")
+        subprocess.run([media.FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i", f"aevalsrc='{expr}':s=48000:d={dur}",
+                        out[name]], check=True)
+    return out
+
+
+def _band(pcm, t0, t1, hz):
+    """Level in dB of one frequency between t0 and t1, so one sound can be measured under another."""
+    seg = pcm[int(t0 * 8000):int(t1 * 8000)]
+    spec = np.abs(np.fft.rfft(seg * np.hanning(len(seg))))
+    return 20 * np.log10(spec[np.argmin(np.abs(np.fft.rfftfreq(len(seg), 1 / 8000) - hz))] + 1e-12)
+
+
+def _measure(path):
+    from kinescript import audio
+    log = subprocess.run([media.FFMPEG, "-hide_banner", "-nostats", "-i", str(path), "-af", "ebur128=peak=true", "-f",
+                          "null", "-"], capture_output=True, text=True).stderr
+    return audio.loudness(log)
+
+
+def test_roles_are_levelled_ducked_and_brought_to_the_loudness_target(mix_media, tmp_path):
+    spec = scene([{"type": "rect"}], duration=6)
+    spec["audio"] = [{"role": "music", "src": mix_media["bed"], "loop": True, "until": "end"},
+                     {"role": "voice", "src": mix_media["voice"], "at": 2}]
+    out = tmp_path / "o.wav"
+    k.render(spec, str(out))
+    got = _measure(out)
+    assert got["lufs"] == pytest.approx(-16, abs=1) and got["true_peak"] <= -1.5
+    pcm = _pcm(out)[:, 0]
+    free = _band(pcm, 0.5, 1.5, 200)
+    assert free - _band(pcm, 2.4, 3.4, 200) == pytest.approx(14, abs=1)  # the bed dips under the voice
+    assert _band(pcm, 4.6, 5.6, 200) == pytest.approx(free, abs=0.5)  # and comes back after it
+    spec["mix"] = {"peak": -6, "duck": False}
+    k.render(spec, str(out))
+    pcm = _pcm(out)[:, 0]
+    assert _measure(out)["true_peak"] <= -6
+    assert _band(pcm, 0.5, 1.5, 200) - _band(pcm, 2.4, 3.4, 200) == pytest.approx(0, abs=1)
+
+
+def test_an_effect_lands_on_its_cue_past_its_leading_silence(mix_media, tmp_path):
+    spec = scene([{"id": "t", "type": "rect", "at": 1, "dur": 0.5, "sound": mix_media["hit"]}], duration=2)
+    out = tmp_path / "o.wav"
+    k.render(spec, str(out))
+    pcm = _pcm(out)[:, 0]
+    assert np.argmax(np.abs(pcm) > 0.01) / 8000 == pytest.approx(1.0, abs=0.01)
+
+
+@pytest.mark.parametrize("role", [None, "music"])
+def test_keyframed_gain_changes_the_level_over_time(tmp_path, role):
+    src = tmp_path / "t44.wav"  # not 48 kHz, so the gain curve has to meet it at another rate
+    subprocess.run([media.FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i",
+                    "sine=frequency=1000:sample_rate=44100:duration=2", str(src)], check=True)
+    spec = scene([{"type": "rect"}], duration=2)
+    spec["audio"] = [dict({"src": str(src), "gain": [[0, -40], [1, 0]]}, **({"role": role} if role else {}))]
+    out = tmp_path / "o.wav"
+    k.render(spec, str(out))
+    pcm = _pcm(out)[:, 0]
+    db = lambda t0, t1: 20 * np.log10(_rms(pcm, t0, t1))  # noqa: E731
+    assert db(1.2, 1.8) - db(0.45, 0.55) == pytest.approx(20, abs=1.5)
+    assert db(1.2, 1.8) - db(0, 0.05) > 35 and len(pcm) == pytest.approx(16000, abs=80)
+
+
+def test_a_changing_gain_must_give_decibels(tone):
+    spec = dict(scene([{"type": "rect"}]), audio=[{"src": tone, "gain": [[0, "loud"], [1, 0]]}])
+    with pytest.raises(k.SceneError, match="is not a number of dB"):
+        k.Scene(spec)
 
 
 def test_repeat_renders_reuse_warm_workers_until_idle(tmp_path, monkeypatch):
