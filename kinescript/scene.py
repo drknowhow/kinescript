@@ -219,8 +219,23 @@ class Scene:
                 raise SceneError(f"audio '{sid}': {e}", layer=sid) from e
             if not layer:
                 prev = sid
+            g = a.get("gain")
+            if g is not None and (isinstance(g, bool) or not isinstance(g, (int, float))):
+                self._check_gain(layer or sid, g)
             out.append(Sound(sid, a, src, layer))
         return out
+
+    def _check_gain(self, owner: str, g):
+        """A gain that changes over time (keyframes, a tween or an expression) must give a number of dB."""
+        try:
+            prop = compile_prop("gain", g, self.ctx)
+            for t in (0.0, 0.5, 1.0):
+                v = prop.at(t, 1.0, t, 0)
+                if isinstance(v, bool) or not isinstance(v, (int, float)):
+                    raise ValueError(f"gives {v!r}")
+        except Exception as e:  # noqa: BLE001 - any failure inside a user expression
+            self.note("error", "bad-value", owner, f"gain {g!r} is not a number of dB: {e}",
+                      "use a number, keyframes like [[0, -20], [1, 0]], or an expression starting with '='")
 
     def _layer_sound(self, L: Layer) -> dict:
         """A layer's sound as an audio entry: "at" counts from the layer ("in", "out-0.1", 0.2)."""

@@ -25,7 +25,7 @@ from . import color as C
 COMMENT = {"note", "notes", "comment", "comments", "description", "name"}
 
 TOP = {"canvas", "theme", "markers", "grade", "motionBlur", "audio", "components", "layers", "meta", "version",
-       "$schema", "camera", "light"}
+       "$schema", "camera", "light", "mix"}
 TOP_ALIAS = {"layer": "layers", "elements": "layers", "objects": "layers", "items": "layers", "scene": "layers",
              "children": "layers", "tracks": "layers", "motion_blur": "motionBlur", "colorGrade": "grade",
              "music": "audio", "sound": "audio", "marker": "markers"}
@@ -53,6 +53,11 @@ AUDIO_ALIAS = {"source": "src", "file": "src", "path": "src", "start": "at", "fa
                "end": "until", "type": "role", "kind": "role", "balance": "pan", "repeat": "loop"}
 # A layer's "sound": cued from the layer, so it has no id, until or loop of its own.
 SOUND = AUDIO - {"id", "until", "loop"}
+MIX = {"loudness", "peak", "levels", "duck"}
+MIX_ALIAS = {"lufs": "loudness", "target": "loudness", "ceiling": "peak", "truePeak": "peak", "ducking": "duck",
+             "level": "levels"}
+DUCK = {"by", "under", "depth", "attack", "hold", "release"}
+DUCK_ALIAS = {"amount": "depth", "db": "depth", "key": "by", "trigger": "by", "targets": "under", "duck": "under"}
 MOTION_BLUR = {"samples", "shutter"}
 CAMERA = {"x", "y", "z", "rotateX", "rotateY", "rotate", "fov"}
 CAMERA_ALIAS = {"rotationX": "rotateX", "rotationY": "rotateY", "rotateZ": "rotate", "rotationZ": "rotate",
@@ -590,6 +595,35 @@ def _audio_values(a: dict, rep: Report, lid, where: str):
         rep.add("error", "missing-key", lid, f"{where}an audio entry needs 'src'", "\"src\": \"music.mp3\"")
 
 
+def _mix(m, rep: Report):
+    if not isinstance(m, dict):
+        rep.add("error", "bad-value", "mix", f"mix must be an object like {{\"loudness\": -16}}, got {type(m).__name__}")
+        return
+    _keys(m, MIX, MIX_ALIAS, rep, "mix", "mix: ")
+    nums = [("loudness", m.get("loudness"), -40, -5, "LUFS"), ("peak", m.get("peak"), -12, 0, "dBTP")]
+    levels = m.get("levels")
+    if isinstance(levels, dict):
+        _keys(levels, set(ENUMS["role"]), {}, rep, "mix", "mix.levels: ")
+        nums += [(f"levels.{k}", v, -60, 0, "dB") for k, v in levels.items() if k in ENUMS["role"]]
+    elif levels is not None:
+        rep.add("error", "bad-value", "mix", "mix.levels must be an object like {\"music\": -20}")
+    duck = m.get("duck")
+    if isinstance(duck, dict):
+        _keys(duck, DUCK, DUCK_ALIAS, rep, "mix", "mix.duck: ")
+        nums += [(f"duck.{k}", duck.get(k), lo, hi, unit) for k, lo, hi, unit in
+                 (("depth", 0, 40, "dB"), ("attack", 0, 5, "s"), ("hold", 0, 5, "s"), ("release", 0, 5, "s"))]
+        for k in ("by", "under"):
+            roles = duck.get(k)
+            for r in roles if isinstance(roles, list) else [] if roles is None else [roles]:
+                if r not in ENUMS["role"]:
+                    rep.add("error", "bad-value", "mix", f"mix.duck.{k}: " + unknown("role", r, ENUMS["role"]))
+    elif not (duck is None or isinstance(duck, bool)):
+        rep.add("error", "bad-value", "mix", "mix.duck is an object like {\"depth\": 14}, true or false")
+    for name, v, lo, hi, unit in nums:
+        if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or not lo <= v <= hi):
+            rep.add("error", "bad-value", "mix", f"mix.{name} is {v!r}; it must be a number from {lo} to {hi} ({unit})")
+
+
 def _layer_sound(raw: dict, rep: Report, lid):
     s = raw.get("sound")
     if s is None or isinstance(s, str):
@@ -679,6 +713,8 @@ def normalize(spec) -> tuple[dict, Report]:
         else:
             rep.add("error", "bad-value", f"audio[{i}]", f"an audio entry is a file name or an object with 'src', "
                     f"got {type(a).__name__}")
+    if spec.get("mix") is not None:
+        _mix(spec["mix"], rep)
     layers = spec.get("layers")
     if layers is None or layers == []:
         rep.add("error", "no-layers", None, "the scene has no layers", "add \"layers\": [ ... ] with at least one layer")

@@ -174,6 +174,21 @@ def test_audio_roles_pan_and_layer_sounds_are_checked():
     assert any(c == "bad-value" and m.startswith("an audio entry is a file name") for c, m in got)
 
 
+def test_the_mix_block_is_checked():
+    spec = dict(scene([{"type": "rect"}]), mix={"lufs": -14, "peak": 3, "levels": {"music": -20, "drums": -3},
+                                               "duck": {"amount": 50, "under": ["music", "pads"]}})
+    out, rep = schema.normalize(spec)
+    got = [(i["code"], i["message"]) for i in rep.issues]
+    assert out["mix"]["loudness"] == -14 and out["mix"]["duck"]["depth"] == 50
+    assert any(c == "bad-value" and m.startswith("mix.peak is 3") for c, m in got)
+    assert any(c == "unknown-key" and m.startswith("mix.levels: unknown key 'drums'") for c, m in got)
+    assert any(c == "bad-value" and m.startswith("mix.duck.depth is 50") for c, m in got)
+    assert any(c == "bad-value" and m.startswith("mix.duck.under: unknown role 'pads'") for c, m in got)
+    for ok in ({"duck": False}, {"duck": True}, {"duck": {"by": "voice", "under": "music"}}):
+        assert not [i for i in schema.normalize(dict(scene([{"type": "rect"}]), mix=ok))[1].issues
+                    if i["level"] == "error"]
+
+
 def test_audio_and_layer_ids_share_one_namespace():
     with pytest.raises(k.SceneError, match="duplicate id 'title'"):
         k.Scene(dict(scene([{"id": "title", "type": "rect"}]), audio=[{"id": "title", "src": __file__}]))
