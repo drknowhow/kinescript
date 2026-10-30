@@ -28,6 +28,16 @@
   `examples/import.json` (a 15,264-triangle glTF rocket, 180 frames at 1080p, up to 7,410 triangles drawn a
   frame) renders in 1.74 s on the GPU with 6 workers and 3.04 s on the CPU. `examples/make_media.py` writes
   the rocket.
+- `bench/stages.py` times each frame's drawing, conversion and readback, and pipe writes to ffmpeg, plus whole
+  renders, for vector, video-edit, model and motion-blur workloads. The README, site and launch-video numbers
+  are re-measured: the launch video renders in 4.0 s (was quoted as 6.4 s), `examples/edit.json` in 2.3 s
+  (was 6.1 s).
+- Motion blur averages its sub-frames on the GPU in one pass and reads back only the result, with the same
+  bytes as before. Blurred MP4 frames now take the I420 path. `examples/hello.json` with 8 samples: 8.4 ms a
+  frame instead of 111 ms, 1.46 s to render instead of 14.78 s; with a transparent background as `.mov`,
+  10.6 ms instead of 191 ms, 2.56 s instead of 13.92 s. Past 16 samples, or on the CPU, the numpy average uses
+  16-bit sums.
+- Fixed: stills and PNG sequences with motion blur saved the last sub-frame instead of the blurred frame.
 - `kine check` warns past 60,000 model triangles in one frame.
 - `z` used to be ignored with a note; it is now depth in px toward the viewer.
 - `kine check` warns when text faces away from the camera (mirrored) and when a layer crosses the camera plane.
