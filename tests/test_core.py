@@ -349,6 +349,16 @@ def test_components_expand_and_resolve():
     assert s.by_id["tc"].t_in == 3
 
 
+def test_theme_names_work_inside_a_scenes_own_components():
+    spec = scene([{"use": "tag", "id": "t1", "word": "Hi"}, {"type": "group", "id": "g", "children": [
+        {"use": "tag", "id": "t2", "word": "Yo"}]}])
+    spec["theme"] = {"brand": "#123456"}
+    spec["components"] = {"tag": {"params": {"word": ""}, "layers": [
+        {"id": "w", "type": "text", "text": "{{word}}", "fill": "$muted", "stroke": "$brand"}]}}
+    s = k.Scene(spec)
+    assert [(s.by_id[i].raw["fill"], s.by_id[i].raw["stroke"]) for i in ("t1-w", "t2-w")] == [("#9299a8", "#123456")] * 2
+
+
 def test_sequence_crossfades_and_video_renders(clip):
     spec = scene([{"type": "sequence", "id": "cut", "clips": [{"src": clip, "trim": [0, 1.5]}, {"src": clip, "trim": [1, 3]}],
                    "transition": {"type": "fade", "dur": 0.5}}])

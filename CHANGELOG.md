@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 (2026-10-30)
+
+Sound. Voice-over, music and effects sit on the same timeline as the picture, are levelled and checked without
+listening, and a voice can be spoken from a line of text in the scene.
 
 - Sounds are timeline cues. An audio entry takes an `id` and a `role` (voice, music, sfx, ambience) and is timed like
   a layer, with `dur`, `until` and `prev`; layers cue from it (`"at": "vo1.out+0.3"`) and it from layers. A voice
@@ -49,6 +52,17 @@
   shell. `plugins/kinescript-kokoro` is the first backend: Kokoro voices, with the time of each word for English.
 - Captions that follow a voice no longer get `read-time` warnings; they keep the pace the voice speaks at.
 - `examples/narrated.json`: a voice written as text, a marked word and a click on it.
+- The Kokoro plugin installs from this repository:
+  `pip install "kinescript-kokoro @ git+https://github.com/drknowhow/kinescript#subdirectory=plugins/kinescript-kokoro"`.
+  It is not on PyPI, and `kine voice` prints this command when no backend is installed.
+- The project site has a sound section: a demo whose voice Kokoro spoke from the scene's text, next to that scene,
+  and the `kine look --audio` sheet of it. The timelines under the site's videos show their sounds. The README has
+  a Sound section.
+- `kine probe` names the file a voice spoken from text plays (`voice/<id>.wav`) instead of none.
+- Fixed: theme names such as `"$muted"` were not replaced inside a scene's own components.
+- Before a mix, ffmpeg is asked only for its version, not its encoder list as well, so a one-worker render starts
+  drawing about 25 ms sooner. `examples/edit.json` renders in 2.20 s, as 1.1.1 does (2.19 s) on the same machine
+  the same day.
 - Fixed: a scene whose sounds all ended before it did rendered a video cut short at the end of the last sound. The
   mix is now padded to the scene length. Scenes whose sound already reached the end render the same audio, bit for
   bit.

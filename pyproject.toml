@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kinescript"
-version = "1.1.1"
-description = "Render motion graphics and video edits from JSON scenes on the GPU, with checks an agent can read."
+version = "1.2.0"
+description = "Render motion graphics, video edits and voice-over from JSON scenes on the GPU, with checks an agent can read."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE", "kinescript/fonts/*-OFL.txt"]
@@ -14,7 +14,8 @@ requires-python = ">=3.10"
 dependencies = ["skia-python>=87", "numpy>=1.24", "glfw>=2.5"]
 keywords = [
     "video", "video rendering", "video editing", "programmatic video", "motion graphics", "animation",
-    "json", "skia", "gpu", "ffmpeg", "3d", "captions", "mcp", "ai agents",
+    "json", "skia", "gpu", "ffmpeg", "3d", "captions", "voice-over", "text to speech", "audio mixing",
+    "loudness", "mcp", "ai agents",
 ]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
@@ -32,6 +33,7 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython",
     "Topic :: Artistic Software",
     "Topic :: Multimedia :: Graphics",
+    "Topic :: Multimedia :: Sound/Audio :: Mixers",
     "Topic :: Multimedia :: Video",
     "Topic :: Multimedia :: Video :: Conversion",
     "Topic :: Multimedia :: Video :: Non-Linear Editor",

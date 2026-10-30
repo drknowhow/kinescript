@@ -82,6 +82,9 @@ h3 { font-size: 22px; line-height: 1.25; letter-spacing: -.01em; }
   background: rgba(242, 240, 232, .6); }
 .score .bar.on { background: rgba(185, 244, 93, .38); }
 .score .bar.on::before, .score .bar.on i { background: var(--key); }
+.score .snd .bar { background: rgba(255, 99, 63, .2); }
+.score .snd .bar::before, .score .snd .bar i { background: var(--cue); }
+.score .snd .bar.on { background: rgba(255, 99, 63, .42); }
 .score .ruler { height: 22px; align-items: end; }
 .score .ruler .track { height: 14px; font-size: 10px; color: var(--dim);
   background: repeating-linear-gradient(to right, var(--track) 0 1px, transparent 1px calc(100% / var(--dur))) 0 0 / 100% 5px no-repeat; }
