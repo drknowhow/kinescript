@@ -25,7 +25,7 @@ from . import color as C
 COMMENT = {"note", "notes", "comment", "comments", "description", "name"}
 
 TOP = {"canvas", "theme", "markers", "grade", "motionBlur", "audio", "components", "layers", "meta", "version",
-       "$schema", "camera"}
+       "$schema", "camera", "light"}
 TOP_ALIAS = {"layer": "layers", "elements": "layers", "objects": "layers", "items": "layers", "scene": "layers",
              "children": "layers", "tracks": "layers", "motion_blur": "motionBlur", "colorGrade": "grade",
              "music": "audio", "sound": "audio", "marker": "markers"}
@@ -55,6 +55,15 @@ CAMERA = {"x", "y", "z", "rotateX", "rotateY", "rotate", "fov"}
 CAMERA_ALIAS = {"rotationX": "rotateX", "rotationY": "rotateY", "rotateZ": "rotate", "rotationZ": "rotate",
                 "rotation": "rotate", "roll": "rotate", "orbit": "rotateY", "tilt": "rotateX", "dolly": "z",
                 "fieldOfView": "fov"}
+LIGHT = {"preset", "key", "fill", "ambient", "rim", "from", "color"}
+LIGHT_ALIAS = {"colour": "color", "direction": "from", "dir": "from", "position": "from", "intensity": "key",
+               "ambience": "ambient", "name": "preset"}
+MATERIAL = {"fill", "shine", "metal", "rim", "bands"}
+PART = MATERIAL | {"shape", "w", "h", "depth", "r", "tube", "x", "y", "z", "rotateX", "rotateY", "rotate", "scale"}
+MODEL_ALIAS = {"radius": "r", "d": "depth", "thickness": "tube", "geometry": "shape", "primitive": "shape",
+               "mesh": "shape", "gloss": "shine", "glossiness": "shine", "shininess": "shine",
+               "specular": "shine", "metallic": "metal", "metalness": "metal", "toon": "bands", "steps": "bands",
+               "quality": "detail", "lighting": "light", "children": "parts", "meshes": "parts"}
 
 COMMON = {"id", "type", "at", "dur", "until", "x", "y", "anchor", "opacity", "scale", "scaleX", "scaleY", "rotate",
           "blur", "blend", "shadow", "fx", "enter", "exit", "hidden", "allowOffscreen", "z", "rotateX", "rotateY",
@@ -79,6 +88,8 @@ TYPES: dict[str, set[str]] = {
     "captions": TEXT | {"src", "cues", "mode", "active"},
     "shader": {"preset", "uniforms", "sksl", "w", "h"},
     "group": {"children", "layers", "w", "h", "clip", "radius", "fill", "sort"},
+    "model": PART - {"x", "y", "z", "rotateX", "rotateY", "rotate", "scale"} | {"detail", "parts", "explode",
+                                                                              "draw", "light"},
 }
 SEQUENCE = {"id", "type", "at", "clips", "transition", "fit", "volume", "w", "h", "x", "y", "anchor"}
 TYPE_ALIAS = {"rectangle": "rect", "square": "rect", "box": "rect", "shape": "rect", "txt": "text", "label": "text",
@@ -86,7 +97,8 @@ TYPE_ALIAS = {"rectangle": "rect", "square": "rect", "box": "rect", "shape": "re
               "photo": "image", "oval": "ellipse", "caption": "captions", "subtitles": "captions",
               "subtitle": "captions", "number": "counter", "count": "counter", "movie": "video", "clip": "video",
               "svg": "path", "polyline": "line", "star": "polygon", "background": "shader", "container": "group",
-              "frame": "group"}
+              "frame": "group", "mesh": "model", "3d": "model", "object": "model", "primitive": "model",
+              "solid": "model"}
 # Synonyms other tools use. A per-type entry wins over the general one.
 ALIAS = {"color": "fill", "colour": "fill", "fillColor": "fill", "backgroundColor": "fill", "background": "fill",
          "fontSize": "size", "font_size": "size", "textSize": "size", "fontWeight": "weight",
@@ -112,6 +124,7 @@ TYPE_ALIASES = {
     "counter": {"number": "value", "to": "value"},
     "captions": {"subtitles": "cues", "lines": "cues"},
     "shader": {"shader": "preset", "code": "sksl", "source": "sksl"},
+    "model": MODEL_ALIAS,
 }
 ENUMS = {
     "anchor": ("center", "topleft", "top", "topright", "left", "right", "bottomleft", "bottom", "bottomright"),
@@ -125,11 +138,16 @@ ENUMS = {
               "color"),
     "backface": ("visible", "hidden"),
     "sort": ("order", "depth"),
+    "shape": ("cube", "sphere", "cylinder", "cone", "torus", "plane"),
+    "detail": ("low", "medium", "high"),
 }
 ENUM_ALIAS = {"middle": "center", "centre": "center", "centered": "center", "mid": "center",
               "characters": "chars", "letters": "chars", "char": "chars", "word": "words", "line": "lines",
               "uppercase": "upper", "lowercase": "lower", "fill": "cover", "crop": "cover", "scale": "contain",
-              "plus": "add", "additive": "add", "soft-light": "softLight", "softlight": "softLight"}
+              "plus": "add", "additive": "add", "soft-light": "softLight", "softlight": "softLight",
+              "box": "cube", "cuboid": "cube", "ball": "sphere", "globe": "sphere", "donut": "torus",
+              "doughnut": "torus", "ring": "torus", "tube": "cylinder", "can": "cylinder", "pipe": "cylinder",
+              "card": "plane", "quad": "plane", "med": "medium", "hi": "high", "lo": "low"}
 WEIGHTS = {"thin": 100, "extralight": 200, "light": 300, "normal": 400, "regular": 400, "book": 400,
            "medium": 500, "semibold": 600, "demibold": 600, "bold": 700, "extrabold": 800, "heavy": 900,
            "black": 900}
@@ -140,9 +158,10 @@ WRAPPERS = {"tween", "tweens", "keyframes", "animate", "animation", "animations"
 SCALAR = {"x", "y", "w", "h", "r", "opacity", "scale", "scaleX", "scaleY", "rotate", "blur", "size", "weight",
           "strokeWidth", "draw", "drawStart", "zoom", "value", "radius", "dimOutside", "sides", "inner", "x1", "y1",
           "x2", "y2", "bend", "head", "maxWidth", "lineHeight", "letterSpacing", "focusX", "focusY", "speed",
-          "volume", "unitX", "unitY", "unitRotate", "unitScale", "unitOpacity", "z", "rotateX", "rotateY", "fov"}
+          "volume", "unitX", "unitY", "unitRotate", "unitScale", "unitOpacity", "z", "rotateX", "rotateY", "fov",
+          "depth", "tube", "shine", "metal", "rim", "bands", "explode"}
 REQUIRED = {"text": ("text",), "image": ("src",), "video": ("src",), "path": ("d", "points"), "line": ("points",),
-            "captions": ("cues", "src"), "shader": ("preset", "sksl")}
+            "captions": ("cues", "src"), "shader": ("preset", "sksl"), "model": ("shape", "parts")}
 
 
 class Report:
@@ -392,6 +411,11 @@ def _layer(raw, rep: Report, path: str, comps: dict):
             _motion(raw, key, rep, lid)
         return  # parameters are checked when the component expands (components.Params)
     t = raw.get("type")
+    if isinstance(t, str) and t.strip().lower() in ENUMS["shape"] and "shape" not in raw:
+        raw["type"], raw["shape"] = "model", t.strip().lower()
+        rep.add("info", "renamed-value", lid, f"type '{t}' read as a model with shape '{raw['shape']}'",
+                f"write \"type\": \"model\", \"shape\": \"{raw['shape']}\"")
+        t = "model"
     if isinstance(t, str) and t not in TYPES and t != "sequence":
         s = t.strip()
         fixed = s if s in TYPES else TYPE_ALIAS.get(s.lower()) or (s.lower() if s.lower() in TYPES else None)
@@ -444,10 +468,59 @@ def _layer(raw, rep: Report, path: str, comps: dict):
                 raw["preset"] = s
             else:
                 rep.add("error", "bad-value", lid, "preset: " + unknown("shader preset", raw["preset"], SH))
+    if t == "model":
+        _model(raw, rep, lid)
     kids = raw.get("children") if raw.get("children") is not None else raw.get("layers")
     if t == "group" and isinstance(kids, list):
         for i, k in enumerate(kids):
             _layer(k, rep, f"{lid}.children[{i}]", comps)
+
+
+def _light(obj: dict, rep: Report, lid):
+    """`light` is a preset name or an object of light amounts; both are checked here."""
+    from .render3d import FROM, LIGHTS
+    v = obj.get("light")
+    if isinstance(v, str):
+        s = v if v in LIGHTS else suggest(v, LIGHTS)
+        if s and s.lower() == v.lower():
+            obj["light"] = s
+        else:
+            rep.add("error", "bad-value", lid, "light: " + unknown("light preset", v, LIGHTS))
+    elif isinstance(v, dict):
+        _keys(v, LIGHT, LIGHT_ALIAS, rep, lid, "light: ")
+        if v.get("preset") is not None and v["preset"] not in LIGHTS:
+            rep.add("error", "bad-value", lid, "light preset: " + unknown("light preset", v["preset"], LIGHTS))
+        if v.get("from") is not None and v["from"] not in FROM:
+            rep.add("error", "bad-value", lid, "light from: " + unknown("direction", v["from"], FROM))
+        for k in ("key", "fill", "ambient", "rim"):
+            if k in v and (isinstance(v[k], bool) or not isinstance(v[k], (int, float))):
+                rep.add("error", "bad-value", lid, f"light {k} is {v[k]!r}; it takes a number (about 0 to 1)")
+        if isinstance(v.get("color"), str) and not C.is_color(v["color"]):
+            rep.add("error", "bad-colour", lid, f"light color '{v['color']}' is not a colour")
+    elif v is not None:
+        rep.add("error", "bad-value", lid, f"light must be a preset ({', '.join(LIGHTS)}) or an object, got {v!r}")
+
+
+def _model(raw: dict, rep: Report, lid):
+    _light(raw, rep, lid)
+    if isinstance(raw.get("fill"), dict):
+        rep.add("error", "bad-value", lid, "a model's fill is one colour; gradients do not apply to models",
+                "use a colour, and give parts their own fill for more than one")
+    parts = raw.get("parts")
+    if parts is not None and not isinstance(parts, list):
+        rep.add("error", "bad-value", lid, "parts must be a list of objects, each with a shape")
+        return
+    for i, p in enumerate(parts or []):
+        where = f"parts[{i}]: "
+        if not isinstance(p, dict):
+            rep.add("error", "bad-value", lid, f"{where}a part is an object like {{\"shape\": \"sphere\", \"r\": 40}}")
+            continue
+        _keys(p, PART, dict(ALIAS, **MODEL_ALIAS), rep, lid, where)
+        _values(p, "model", rep, lid)
+        for k, v in p.items():  # what _values lets through for layers but a part cannot animate or resolve
+            if k in SCALAR and (isinstance(v, (list, dict)) or (isinstance(v, str) and (v.startswith("=") or _lengthish(v)))):
+                rep.add("error", "bad-value", lid, f"{where}{k} is {v!r}; parts take plain numbers (they do not animate)",
+                        "animate the model layer, or make the part its own model layer")
 
 
 def normalize(spec) -> tuple[dict, Report]:
@@ -513,6 +586,7 @@ def normalize(spec) -> tuple[dict, Report]:
         rep.add("error", "bad-value", "camera", f"camera must be an object like {{\"z\": -200, \"rotateY\": 10}}, "
                 f"got {type(cam).__name__}")
         spec.pop("camera")
+    _light(spec, rep, None)
     audio = spec.get("audio")
     if isinstance(audio, dict):
         audio = spec["audio"] = [audio]

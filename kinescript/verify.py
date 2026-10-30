@@ -14,6 +14,10 @@ from . import color as C
 from .render import FONT_DIR, Renderer, _argb
 from .scene import Scene, SceneError, load
 
+# Model triangles one frame may draw before check warns. 100,000 took 71 ms a frame at 1080p on
+# the GPU in the 3D spike (2026-10-29), against about 15 ms at 20,000.
+TRIANGLE_BUDGET = 60_000
+
 
 def _times(scene: Scene, count: int, times=None) -> list[float]:
     if times:
@@ -153,8 +157,13 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
                                             "to": round(T, 2), "message": f"{type(e).__name__}: {e}", "fix": ""}],
                            duration=scene.duration)
         for lid in r.culled:
-            add("warning", "behind-camera", lid, T, "layer crosses the camera plane, so it is not drawn",
-                "lower its z, or move the camera back (a higher camera z)")
+            msg = ("the triangles of this model that cross the camera plane are not drawn"
+                   if scene.by_id[lid].type == "model" else "layer crosses the camera plane, so it is not drawn")
+            add("warning", "behind-camera", lid, T, msg, "lower its z, or move the camera back (a higher camera z)")
+        if r.tris > TRIANGLE_BUDGET:
+            add("warning", "triangle-budget", None, T, f"{r.tris:,} model triangles in one frame; renders slow "
+                f"down past {TRIANGLE_BUDGET:,} (about 70 ms a frame at 100,000 on a GPU)",
+                "use \"detail\": \"low\" or \"medium\", or fewer parts")
         texts = []
         for lid, b in r.boxes.items():
             if b["alpha"] < 0.3:

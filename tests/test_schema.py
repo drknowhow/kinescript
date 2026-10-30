@@ -50,6 +50,22 @@ def test_depth_keys_are_read_and_the_camera_is_checked():
     assert len(errs) == 2 and "zom" in errs[0] and "fov is 200" in errs[1]
 
 
+def test_model_keys_parts_and_light_are_checked():
+    spec, rep = schema.normalize(dict(scene([
+        {"id": "a", "type": "Sphere", "radius": 40, "metallic": 0.5},
+        {"id": "b", "type": "model", "shape": "donut", "light": {"from": "above"},
+         "parts": [{"shape": "ball", "r": "big", "colr": "#fff"}, {"shape": "cube", "x": [[0, 0], [1, 50]]}]}]),
+        light="studoi"))
+    a, b = spec["layers"]
+    assert (a["type"], a["shape"], a["r"], a["metal"]) == ("model", "sphere", 40, 0.5)
+    assert b["shape"] == "torus" and b["parts"][0]["shape"] == "sphere"
+    errs = sorted(i["message"] for i in rep.issues if i["level"] == "error")
+    assert len(errs) == 5, errs
+    assert [m for m in errs if "above" in m] and [m for m in errs if "studoi" in m and "studio" in m]
+    assert [m for m in errs if "colr" in m] and [m for m in errs if "'big'" in m]
+    assert [m for m in errs if "parts[1]: x" in m and "do not animate" in m]
+
+
 def test_line_colour_means_stroke():
     _, s = codes(scene([{"id": "l", "type": "line", "points": [[0, 0], [10, 10]], "color": "#f00"}]))
     assert s.by_id["l"].raw["stroke"] == "#f00"
@@ -172,7 +188,7 @@ def test_schema_lists_cover_every_key_the_renderer_reads(monkeypatch):
         return orig(self, name, *a, **kw)
     monkeypatch.setattr(S.Layer, "get", get)
     scenes = [ROOT / "examples" / "hello.json", ROOT / "examples" / "edit.json", ROOT / "examples" / "3d.json",
-              ROOT / "marketing" / "promo.json"]
+              ROOT / "examples" / "model.json", ROOT / "marketing" / "promo.json"]
     for path in scenes:
         sc = S.load(str(path))
         for layer in sc.all_layers():
@@ -204,7 +220,8 @@ def test_component_param_lists_cover_every_param_a_builder_reads():
 
 
 def test_examples_and_promo_have_no_unknown_keys():
-    for path in ("examples/hello.json", "examples/edit.json", "examples/3d.json", "marketing/promo.json",
+    for path in ("examples/hello.json", "examples/edit.json", "examples/3d.json", "examples/model.json",
+                 "marketing/promo.json",
                  "marketing/og.json"):
         sc = k.load(str(ROOT / path))  # loading runs every schema check; a full `check` renders and is slow on CPU
         bad = [i for i in sc.issues if i["level"] == "error" or i["code"] in ("renamed-key", "ignored-key")]

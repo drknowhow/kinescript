@@ -12,13 +12,13 @@ from .props import Ctx, Prop, compile_prop
 from .timing import Timeline
 
 LAYER_TYPES = {"rect", "circle", "ellipse", "path", "line", "arrow", "polygon", "text", "counter",
-               "image", "video", "group", "captions", "shader"}
+               "image", "video", "group", "captions", "shader", "model"}
 STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "children", "layers", "src", "trim",
           "speed", "fit", "text", "cues", "d", "points", "font", "split", "format", "align", "anchor",
           "blend", "clip", "mode", "volume", "hidden", "note", "words", "stops", "cap", "join", "loop",
           "allowOffscreen", "style", "audio", "shadow", "box", "fx", "fill", "stroke", "emph", "active",
           "sksl", "preset", "uniforms", "caret", "case", "italic", "smooth", "closed", "focus", "use",
-          "backface", "fixed", "sort"}
+          "backface", "fixed", "sort", "shape", "detail", "parts", "light"}
 # Property defaults by name; everything not listed defaults to None.
 DEFAULTS = {"x": 0.0, "y": 0.0, "opacity": 1.0, "scale": 1.0, "scaleX": 1.0, "scaleY": 1.0, "rotate": 0.0,
             "blur": 0.0, "draw": 1.0, "zoom": 1.0, "z": 0.0, "rotateX": 0.0, "rotateY": 0.0}
@@ -104,6 +104,7 @@ class Scene:
         self.by_id: dict[str, Layer] = {}
         self._build(raw_layers, None, self.layers)
         self.camera = self._camera(_subst(spec.get("camera"), theme))
+        self.light = _subst(spec.get("light"), theme)
         self._check_media()
         self._raise_errors()
         try:
@@ -272,7 +273,7 @@ class Scene:
 def uses_depth(L: Layer) -> bool:
     """True when the layer or anything inside it moves in depth."""
     motions = [m for m in (L.enter, L.exit) if m]
-    return (any(k in L.props for k in DEPTH_PROPS) or any(P.DEPTH & set(m.names) for m in motions)
+    return (L.type == "model" or any(k in L.props for k in DEPTH_PROPS) or any(P.DEPTH & set(m.names) for m in motions)
             or any(uses_depth(c) for c in L.children))
 
 
@@ -305,7 +306,8 @@ def _num(v, ref):
 
 def _infer_type(raw: dict) -> str:
     for key, t in (("text", "text"), ("cues", "captions"), ("d", "path"), ("points", "path"),
-                   ("children", "group"), ("layers", "group"), ("r", "circle")):
+                   ("children", "group"), ("layers", "group"), ("shape", "model"), ("parts", "model"),
+                   ("r", "circle")):
         if key in raw:
             return t
     if "src" in raw:

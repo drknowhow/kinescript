@@ -7,6 +7,14 @@
   its children far to near. New motions `flip`, `flip-up`, `tumble` and `push`, also per letter with `split`.
   Built on Skia's 4x4 matrices, so no new dependency, and scenes that use no depth draw exactly as before.
   `examples/3d.json` (180 frames at 1080p) renders in 0.93 s on the GPU.
+- 3D models: a `model` layer draws a lit solid, a `cube`, `sphere`, `cylinder`, `cone`, `torus` or `plane`,
+  or `parts` merged into one object whose triangles are sorted together. Materials take `fill`, `shine`,
+  `metal`, `rim` and `bands` (toon steps); a top-level or per-model `light` takes `studio`, `soft`, `dramatic`,
+  `flat` or its own amounts. `explode` sends faces outward and the `build` motion assembles a model. The GPU
+  shades per pixel in SkSL with 4x MSAA; the CPU shades per vertex with 2x supersampling. Still no new
+  dependency. `examples/model.json` (180 frames at 1080p, up to 10,800 triangles drawn a frame) renders in
+  2.5 s on the GPU with 6 workers; one frame takes a median 18 ms on the GPU and 72 ms on the CPU.
+- `kine check` warns past 60,000 model triangles in one frame.
 - `z` used to be ignored with a note; it is now depth in px toward the viewer.
 - `kine check` warns when text faces away from the camera (mirrored) and when a layer crosses the camera plane.
 - `kine check` validates every key against the schema, names the intended key first, and lists

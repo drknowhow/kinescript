@@ -27,6 +27,8 @@ and renders, with audio, in about 6.4 seconds on the development machine.
 - **Captions** from `.srt`/`.vtt` or inline cues, with karaoke and pop modes.
 - **Depth.** Any layer takes `z`, `rotateX` and `rotateY`; a scene `camera` pans, dollies and orbits with real
   perspective; `flip`, `flip-up`, `tumble` and `push` motions; two-sided cards with `"backface": "hidden"`.
+- **3D models.** Lit cubes, spheres, cylinders, cones, tori and planes, or several merged as `parts`, with
+  shine, metal, rim light and toon bands; light presets; `explode` and a `build` motion.
 - **Shaders.** SkSL layers with `mesh`, `aurora`, `grid` and `score` presets, or your own source.
 - **Finishing.** Per-layer blur, shadow, blend modes and colour adjustments; a scene grade with vignette and film
   grain; optional motion blur.
