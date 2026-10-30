@@ -11,7 +11,7 @@ import numpy as np
 import skia
 
 from . import color as C
-from . import media, svgpath
+from . import media, space, svgpath
 from .presets import IDENT, Mods
 from .scene import Layer, Scene
 
@@ -239,6 +239,8 @@ class Renderer:
         self._shaders: dict = {}
         self.stop_at: str | None = None
         self._stopped = False
+        self._m3d: np.ndarray | None = None  # world-to-canvas matrix of the layer being drawn, in 3D scenes
+        self.culled: set[str] = set()  # layers skipped this frame because they cross the camera plane
         cm = color_matrix({k: v for k, v in scene.grade.items() if k not in ("vignette", "grain")})
         self.grade_filter = skia.ColorFilters.Matrix(cm) if cm else None
 
@@ -300,6 +302,7 @@ class Renderer:
     def draw(self, T: float, stop_at: str | None = None):
         s = self.s
         self.boxes = {}
+        self.culled = set()
         self.stop_at, self._stopped = stop_at, False
         c = self.surface.getCanvas()
         c.resetMatrix()
@@ -309,16 +312,48 @@ class Renderer:
         self._background(c)
         if self.grade_filter:
             c.saveLayer(None, skia.Paint(ColorFilter=self.grade_filter))
+        cams = self._cameras(T) if s.is3d else None
         for layer in s.layers:
             if self._stopped:
                 break
-            self._layer(c, layer, T, 1.0)
+            m = None
+            if cams is not None:
+                fixed = layer.raw.get("fixed", layer.type == "captions")
+                if s.camera is not None and not fixed:
+                    m = cams[0]
+                elif layer.id in s.depth:
+                    m = cams[1]
+            self._m3d = m
+            if m is None:
+                self._layer(c, layer, T, 1.0)
+            else:
+                c.save()
+                c.concat(space.to_skia(m))
+                self._layer(c, layer, T, 1.0)
+                c.restore()
+        self._m3d = None
         if self.grade_filter:
             c.restore()
         if not stop_at:
             self._finish(c, T)
 
     # ---- scene-level ---------------------------------------------------------------------
+    def _cameras(self, T: float):
+        """(world, fixed) camera matrices at T. Fixed layers share the lens but not the moves."""
+        s, cam = self.s, self.s.camera
+        fov = float(cam.get("fov", T, T, default=space.DEFAULT_FOV)) if cam else space.DEFAULT_FOV
+        fixed = space.camera(s.w, s.h, fov)
+        if cam is None:
+            return fixed, fixed
+        g = lambda k: float(cam.get(k, T, T))  # noqa: E731
+        return space.camera(s.w, s.h, fov, g("x"), g("y"), g("z"), g("rotateX"), g("rotateY"), g("rotate")), fixed
+
+    def _far(self, L: Layer, T: float) -> float:
+        """Sort key that puts the child farthest from the camera first."""
+        t = T - L.t_in
+        p = self._m3d @ np.array([float(L.get("x", t, T)), float(L.get("y", t, T)), float(L.get("z", t, T)), 1.0])
+        return -p[3]
+
     def _background(self, c: skia.Canvas):
         bg = self.s.bg
         if isinstance(bg, dict):
@@ -365,13 +400,33 @@ class Renderer:
         if alpha <= 0.002:
             return
         box = self._box(L, t, T, g)
-        c.save()
-        c.translate(float(g("x")) + mods.dx, float(g("y")) + mods.dy)
+        x, y = float(g("x")) + mods.dx, float(g("y")) + mods.dy
         rot = float(g("rotate")) + mods.rotate
-        if rot:
-            c.rotate(rot)
         sc = float(g("scale")) * mods.scale
         sx, sy = sc * float(g("scaleX")), sc * float(g("scaleY"))
+        outer, tilt, facing = self._m3d, None, True
+        if outer is not None:
+            z, rx, ry = float(g("z")) + mods.dz, float(g("rotateX")) + mods.rx, float(g("rotateY")) + mods.ry
+            m = outer @ space.translate(x, y)
+            if z or rx or ry:
+                tilt = space.tilt(z, rx, ry)
+                m = m @ tilt
+            m = m @ space.rotate_z(rot) @ space.scale(sx, sy)
+            if box is not None:
+                xy, w = space.project(m, box)
+                if w.min() < space.NEAR:
+                    self.culled.add(L.id)
+                    return
+                facing = space.facing(xy)
+                if not facing and L.raw.get("backface") == "hidden":
+                    return
+            self._m3d = m
+        c.save()
+        c.translate(x, y)
+        if tilt is not None:
+            c.concat(space.to_skia(tilt))
+        if rot:
+            c.rotate(rot)
         if sx != 1 or sy != 1:
             c.scale(sx, sy)
         blur = float(g("blur")) + mods.blur
@@ -418,15 +473,21 @@ class Renderer:
                 fill = g("fill") if "fill" in L.props else C.parse(self.s.theme.get("paper", "#f2f0e8"))
                 info.update(size=float(g("size", 64)), fill=list(fill) if isinstance(fill, tuple) else None,
                             text=self._last_text if hasattr(self, "_last_text") else "")
+            if not facing:
+                info["mirrored"] = True
             self.boxes[L.id] = info
         if L.type == "group":
-            for child in L.children:
+            kids = L.children
+            if self._m3d is not None and L.raw.get("sort") == "depth":
+                kids = sorted(kids, key=lambda k: self._far(k, T))
+            for child in kids:
                 if self._stopped:
                     break
                 self._layer(c, child, T, parent_alpha * alpha)
         if layered:
             c.restore()
         c.restore()
+        self._m3d = outer
 
     def _box(self, L: Layer, t, T, g):
         """Local content rect (x, y, w, h) after anchoring, or None for unbounded layers."""
@@ -932,9 +993,11 @@ class Renderer:
             x1 = max(r.x + font.measureText(r.text) for r in runs)
             ucx, ucy = ox + (x0 + x1) / 2, oy + runs[0].line * lay.lh + lay.lh / 2
             c.save()
-            moved = ux or uy or urot or usc != 1
+            moved = ux or uy or urot or usc != 1 or um.rx or um.ry or um.dz
             if moved:
                 c.translate(ucx + ux, ucy + uy)
+                if um.rx or um.ry or um.dz:
+                    c.concat(space.to_skia(space.tilt(um.dz, um.rx, um.ry)))
                 if urot:
                     c.rotate(urot)
                 if usc != 1:

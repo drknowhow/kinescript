@@ -17,10 +17,12 @@ STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "children", "laye
           "speed", "fit", "text", "cues", "d", "points", "font", "split", "format", "align", "anchor",
           "blend", "clip", "mode", "volume", "hidden", "note", "words", "stops", "cap", "join", "loop",
           "allowOffscreen", "style", "audio", "shadow", "box", "fx", "fill", "stroke", "emph", "active",
-          "sksl", "preset", "uniforms", "caret", "case", "italic", "smooth", "closed", "focus", "use"}
+          "sksl", "preset", "uniforms", "caret", "case", "italic", "smooth", "closed", "focus", "use",
+          "backface", "fixed", "sort"}
 # Property defaults by name; everything not listed defaults to None.
 DEFAULTS = {"x": 0.0, "y": 0.0, "opacity": 1.0, "scale": 1.0, "scaleX": 1.0, "scaleY": 1.0, "rotate": 0.0,
-            "blur": 0.0, "draw": 1.0, "zoom": 1.0}
+            "blur": 0.0, "draw": 1.0, "zoom": 1.0, "z": 0.0, "rotateX": 0.0, "rotateY": 0.0}
+DEPTH_PROPS = ("z", "rotateX", "rotateY")
 
 
 class SceneError(ValueError):
@@ -101,6 +103,7 @@ class Scene:
         self.layers: list[Layer] = []
         self.by_id: dict[str, Layer] = {}
         self._build(raw_layers, None, self.layers)
+        self.camera = self._camera(_subst(spec.get("camera"), theme))
         self._check_media()
         self._raise_errors()
         try:
@@ -110,6 +113,10 @@ class Scene:
             raise SceneError((f"layer '{lid}': " if lid else "") + str(e), layer=lid) from e
         for layer in self.by_id.values():
             layer.t_in, layer.t_out = self.timeline.resolved[layer.id]
+        if self.camera is not None:
+            self.camera.t_out = self.duration
+        self.depth = {L.id for L in self.layers if uses_depth(L)}
+        self.is3d = self.camera is not None or bool(self.depth)
         self.frames = max(1, round(self.duration * self.fps))
         self._check_values()
         self._raise_errors()
@@ -232,6 +239,17 @@ class Scene:
                 self._build(kids, layer, layer.children)
             prev = lid
 
+    def _camera(self, raw) -> Layer | None:
+        """The camera as a layer that spans the scene, so its keys animate like any layer's."""
+        if raw is None:
+            return None
+        cam = Layer("camera", "camera", raw, None, -1)
+        try:
+            cam.props = {k: compile_prop(k, v, self.ctx) for k, v in raw.items()}
+        except (ValueError, SyntaxError) as e:
+            raise SceneError(f"camera: {e}", layer="camera") from e
+        return cam
+
     def all_layers(self):
         def walk(ls):
             for layer in ls:
@@ -249,6 +267,13 @@ class Scene:
         for layer in self.all_layers():
             if layer.video:
                 layer.video.close()
+
+
+def uses_depth(L: Layer) -> bool:
+    """True when the layer or anything inside it moves in depth."""
+    motions = [m for m in (L.enter, L.exit) if m]
+    return (any(k in L.props for k in DEPTH_PROPS) or any(P.DEPTH & set(m.names) for m in motions)
+            or any(uses_depth(c) for c in L.children))
 
 
 def _check_trim(scene: "Scene", owner, trim, length: float):

@@ -44,6 +44,15 @@ def test_complete_scene_in_docs_passes_check_with_no_rewrites():
     assert r["duration"] == 3.3
 
 
+def test_depth_examples_in_docs_pass_check_with_no_rewrites():
+    objs = [json.loads(o) for o in _objects(_section("DEPTH AND CAMERA (3D)"))]
+    card = next(o for o in objs if o.get("id") == "card")
+    whole = next(o for o in objs if "layers" in o)
+    for spec in (whole, {"canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 2}, "layers": [card]}):
+        r = check(spec)
+        assert r["ok"] and not r["issues"], r["issues"]
+
+
 def test_every_recipe_loads_with_no_rewrites(tmp_path):
     img = tmp_path / "photo.jpg"
     arr = np.zeros((90, 160, 4), np.uint8)

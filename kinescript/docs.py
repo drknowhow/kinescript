@@ -53,6 +53,7 @@ SCENE (top level)
   markers     {"drop": 12.5}: named times, usable as "at": "drop".
   grade       whole-frame look: {"contrast": 1.05, "saturate": 1.1, "vignette": 0.35, "grain": 0.05}
   motionBlur  {"samples": 6, "shutter": 0.5}   (slower: renders 6 sub-frames per frame)
+  camera      moves and turns the view in depth (see DEPTH AND CAMERA).
   audio       [{"src": "music.mp3", "at": 0, "gain": -8, "fadeIn": 1, "fadeOut": 2, "trim": [0, 30]}]
               gain is in dB (0 = unchanged, -6 = about half as loud). fadeOut ends where the audio
               ends: the scene end, unless trim makes the audio shorter.
@@ -79,6 +80,7 @@ KEYS EVERY LAYER HAS
   opacity       0..1 (default 1)
   scale, scaleX, scaleY   1 = normal size
   rotate        degrees, clockwise
+  z, rotateX, rotateY, backface, fixed   depth: see DEPTH AND CAMERA
   blur          px
   blend         normal | multiply | screen | overlay | add | lighten | darken | softLight |
                 difference | color
@@ -134,6 +136,44 @@ LAYER TYPES (defaults in brackets)
             <id>-1, <id>-2, ... Each transition overlaps the clips it joins, so 3 s + 3 s with a
             0.5 s fade lasts 5.5 s.
 
+DEPTH AND CAMERA (3D)
+  Any layer can move and turn in depth. x is right, y is down and z is toward the viewer, in px,
+  as in CSS. A scene that uses depth is seen through a camera; at z 0 everything keeps its size.
+  z           px toward the viewer. Near layers grow; far ones (negative z) shrink and drift less
+              when the camera moves.
+  rotateX     degrees: positive tips the top edge away.
+  rotateY     degrees: positive turns the right edge away. Past 90 you see the back, mirrored.
+  backface    visible (default) | hidden: hidden skips the layer while its back faces the camera.
+  fixed       true: a top-level layer ignores the camera's moves (captions are fixed).
+  sort        on a group: "depth" draws its children far to near each frame, not in list order.
+  camera      top level. Every key animates, and all default to 0 except fov:
+              {"x": 0, "y": 0, "z": 0, "rotateX": 0, "rotateY": 0, "rotate": 0, "fov": 40}
+              x and y pan (px). z moves the camera back; negative moves it in. rotateY orbits it
+              right around the canvas centre, rotateX up over it (looking down), rotate rolls it.
+              fov (5..150) sets how strong perspective looks; it does not change size at z 0.
+  Motions: flip turns in on the vertical axis (deg [90]), flip-up on the horizontal axis, tumble
+  spins in from depth, push comes forward from depth (dist [600]). With "split" each unit flips.
+  Layers still draw in list order, so put far layers first, or use a group with "sort": "depth".
+  A card that turns over: rotateY on the group, and each side hides its back:
+    {"id": "card", "type": "group", "x": "50%", "y": "50%", "rotateY": [[0.5, 0], [1.5, 180]], "children": [
+     {"id": "card-front", "type": "group", "anchor": "center", "w": 560, "h": 150, "radius": 28,
+      "fill": "#f2f0e8", "backface": "hidden", "children": [
+      {"id": "card-front-text", "type": "text", "text": "front", "size": 64, "fill": "#0a0c10"}]},
+     {"id": "card-back", "type": "group", "anchor": "center", "w": 560, "h": 150, "radius": 28,
+      "fill": "#ff633f", "rotateY": 180, "backface": "hidden", "children": [
+      {"id": "card-back-text", "type": "text", "text": "back", "size": 64, "fill": "#0a0c10"}]}]}
+  A whole scene: the camera pushes in and swings round layers at three depths; the note stays put:
+    {"canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 4},
+     "camera": {"z": [[0, 300], ["end", -100]], "rotateY": [[0, -12], ["end", 10]]},
+     "layers": [
+      {"id": "far", "type": "rect", "x": "50%", "y": "50%", "z": -600, "w": 1600, "h": 900, "radius": 40,
+       "fill": "#151922"},
+      {"id": "title", "type": "text", "text": "Depth", "x": "50%", "y": "45%", "size": 140, "weight": 800,
+       "split": "chars", "enter": {"name": "flip", "stagger": 0.05}},
+      {"id": "near", "type": "circle", "x": "78%", "y": "72%", "z": 250, "r": 60, "fill": "#ff633f"},
+      {"id": "note", "type": "text", "text": "fixed to the screen", "x": "50%", "y": "88%", "size": 40,
+       "fixed": true}]}
+
 ANIMATING A VALUE (any number or colour key)
   constant     "x": 960
   tween        "opacity": {"from": 0, "to": 1, "dur": 0.6, "delay": 0, "ease": "outCubic"}
@@ -164,7 +204,8 @@ ENTER AND EXIT
   motions: {motions}
   rise moves up into place, drop moves down, left moves left, right moves right. type is a
   typewriter. draw draws a stroke or path on. wipe reveals left to right. snap is a hard cut in
-  with a small settle. none is no motion.
+  with a small settle. flip, flip-up, tumble and push move in depth (see DEPTH AND CAMERA).
+  none is no motion.
 
 EASES  {eases}, spring, spring(stiffness, damping), bezier(x1, y1, x2, y2), steps(n)
   in* starts slow, out* ends slow (the most natural for entrances), inOut* does both.
