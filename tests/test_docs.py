@@ -65,12 +65,16 @@ def test_model_examples_in_docs_pass_check_with_no_rewrites():
 
 def test_sound_examples_in_docs_pass_check_with_no_rewrites():
     pad = str(ROOT / "examples" / "media" / "pad.m4a").replace("\\", "/")
-    sounds = [json.loads(o) for o in _objects(_section("SOUND"))]
+    objs = [json.loads(o) for o in _objects(_section("SOUND"))]
+    sounds = [o for o in objs if "src" in o]
     assert {s["id"] for s in sounds} == {"vo1", "bed"}
     for s in sounds:
         s["src"] = pad
+    sounds[0]["words"] = next(o for o in objs if "words" in o)["words"]  # the words file, as a list
     spec = {"canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": "auto"}, "audio": sounds,
-            "layers": [{"id": "after", "type": "rect", "at": "vo1.out", "dur": 1}]}
+            "layers": [{"id": "after", "type": "rect", "at": "vo1.out", "dur": 1},
+                       {"id": "said", "type": "rect", "at": "vo1:render", "until": "vo1:render.out"},
+                       next(o for o in objs if o.get("type") == "captions")]}
     r = check(spec)
     assert r["ok"] and not r["issues"], r["issues"]
 

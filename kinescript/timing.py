@@ -6,6 +6,7 @@
     "at": "title.out+0.2"   0.2 s after layer 'title' ends
     "at": "prev.in+10f"     10 frames after the previous layer starts
     "at": "drop"            a named marker from scene "markers"
+    "at": "vo1:render.out"  when sound 'vo1' finishes saying "render" (from its words file)
 
 Change one duration and everything cued from it moves with it.
 """
@@ -14,7 +15,7 @@ from __future__ import annotations
 import re
 
 _TERM = re.compile(r"\s*([+-])\s*(\d+(?:\.\d+)?)\s*(s|f|ms)?\s*")
-_BASE = re.compile(r"^\s*([A-Za-z_][\w-]*)(?:\.(in|out|mid))?")
+_BASE = re.compile(r"^\s*([A-Za-z_][\w-]*(?::\w+)?)(?:\.(in|out|mid))?")
 
 
 class TimingError(ValueError):
@@ -24,7 +25,7 @@ class TimingError(ValueError):
 
 
 FORMS = ('a number of seconds (1.5), "45f" (frames), "0:02.5", "title.out+0.2" (0.2 s after layer title ends), '
-         '"title.in", "title.mid", "prev.out", or a marker name')
+         '"title.in", "title.mid", "prev.out", a marker name, or "vo1:hello" (when sound vo1 says hello)')
 
 
 def parse_clock(s: str, fps: float) -> float | None:
@@ -40,7 +41,8 @@ def parse_clock(s: str, fps: float) -> float | None:
 
 
 def split_ref(expr: str) -> tuple[str | None, str, str]:
-    """'title.out+0.2' -> ('title', 'out', '+0.2'). Plain clocks return (None, '', expr)."""
+    """'title.out+0.2' -> ('title', 'out', '+0.2'); 'vo1:go.out' -> ('vo1:go', 'out', '').
+    Plain clocks return (None, '', expr)."""
     m = _BASE.match(expr)
     if not m or parse_clock(expr, 30) is not None:
         return None, "", expr
@@ -63,9 +65,12 @@ def offset(rest: str, fps: float) -> float:
 class Timeline:
     """Resolves in/out for every layer, following references depth-first."""
 
-    def __init__(self, fps: float, markers: dict[str, float] | None = None):
+    def __init__(self, fps: float, markers: dict[str, float] | None = None, words: dict[str, dict] | None = None):
+        """`words`: per sound id, {"ids": {word id: (start, end)} in file seconds, or None when it has no words file,
+        "trim0" and "trim1" (the part of the file that plays) and "file" (where a words file would go)."""
         self.fps = fps
         self.markers = {k: float(v) for k, v in (markers or {}).items()}
+        self.words = words or {}
         self.nodes: dict[str, dict] = {}
         self.order: list[str] = []
         self.resolved: dict[str, tuple[float, float | None]] = {}
@@ -95,11 +100,14 @@ class Timeline:
         name, edge, rest = split_ref(s)
         if name is None:
             raise TimingError(f"cannot read the time {s!r}. Write {FORMS}", owner)
+        name, _, word = name.partition(":")
         if name == "prev":
             name = self.nodes[owner]["prev"] if owner in self.nodes else None
             if name is None:
                 raise TimingError("'prev' used on the first layer, which has no previous layer", owner)
-        if name in self.markers and not edge:
+        if word:
+            t = self._word(name, word, edge, owner)
+        elif name in self.markers and not edge:
             t = self.markers[name]
         elif name == "start":
             t = 0.0
@@ -125,6 +133,29 @@ class Timeline:
             return t + offset(rest, self.fps)
         except TimingError as e:
             raise TimingError(f"{e} in {s!r}. Write {FORMS}", owner) from None
+
+    def _word(self, sid: str, word: str, edge: str, owner: str) -> float:
+        """When sound `sid` says `word`: its start in the scene, plus the word's time in the part of the file that plays."""
+        from .schema import suggest
+        w = self.words.get(sid)
+        if w is None:
+            close = suggest(sid, self.words)
+            raise TimingError(f"refers to the word '{word}' of '{sid}', which is not an audio id."
+                              + (f" Did you mean '{close}'?" if close else "")
+                              + (f" Audio ids: {', '.join(list(self.words)[:16])}" if self.words else ""), owner)
+        if w["ids"] is None:
+            raise TimingError(f"refers to the word '{word}' of '{sid}', but '{sid}' has no word times. Add {w['file']} "
+                              "(a speech-to-text tool that times words, such as Whisper, writes one) or give "
+                              f"'{sid}' a \"words\" list", owner)
+        if word not in w["ids"]:
+            close = suggest(word, w["ids"])
+            raise TimingError(f"'{sid}' has no word '{word}'." + (f" Did you mean '{close}'?" if close else "")
+                              + f" Its words: {', '.join(list(w['ids'])[:24])}", owner)
+        ws, we = w["ids"][word]
+        if ws < w["trim0"] or (w["trim1"] is not None and ws >= w["trim1"]):
+            raise TimingError(f"the word '{word}' is at {ws:.2f}s in the file of '{sid}', outside the part its trim "
+                              "plays", owner)
+        return self.start(sid) - w["trim0"] + (ws if edge in ("", "in") else we if edge == "out" else (ws + we) / 2)
 
     def _enter(self, lid: str):
         if lid in self._stack:

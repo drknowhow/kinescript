@@ -47,12 +47,13 @@ MOTION_ALIAS = {"type": "name", "preset": "name", "duration": "dur", "easing": "
 TWEEN = {"from", "to", "dur", "delay", "ease", "keys"}
 TWEEN_ALIAS = {"duration": "dur", "easing": "ease", "start": "from", "end": "to", "begin": "from"}
 GRADIENT = {"linear", "radial", "stops"}
-AUDIO = {"src", "at", "trim", "gain", "volume", "fadeIn", "fadeOut", "id", "role", "dur", "until", "loop", "pan"}
+AUDIO = {"src", "at", "trim", "gain", "volume", "fadeIn", "fadeOut", "id", "role", "dur", "until", "loop", "pan",
+         "words"}
 AUDIO_ALIAS = {"source": "src", "file": "src", "path": "src", "start": "at", "fade_in": "fadeIn",
                "fade_out": "fadeOut", "fadein": "fadeIn", "fadeout": "fadeOut", "duration": "dur", "length": "dur",
                "end": "until", "type": "role", "kind": "role", "balance": "pan", "repeat": "loop"}
-# A layer's "sound": cued from the layer, so it has no id, until or loop of its own.
-SOUND = AUDIO - {"id", "until", "loop"}
+# A layer's "sound": cued from the layer, so it has no id, until, loop or words of its own.
+SOUND = AUDIO - {"id", "until", "loop", "words"}
 MIX = {"loudness", "peak", "levels", "duck"}
 MIX_ALIAS = {"lufs": "loudness", "target": "loudness", "ceiling": "peak", "truePeak": "peak", "ducking": "duck",
              "level": "levels"}
@@ -99,7 +100,7 @@ TYPES: dict[str, set[str]] = {
     "counter": TEXT | {"value", "format"},
     "image": MEDIA,
     "video": MEDIA | {"trim", "speed", "volume", "loop"},
-    "captions": TEXT | {"src", "cues", "mode", "active"},
+    "captions": TEXT | {"src", "cues", "mode", "active", "voice"},
     "shader": {"preset", "uniforms", "sksl", "w", "h"},
     "group": {"children", "layers", "w", "h", "clip", "radius", "fill", "sort"},
     "model": PART - {"x", "y", "z", "rotateX", "rotateY", "rotate", "scale"} | {"detail", "parts", "explode",
@@ -182,7 +183,7 @@ SCALAR = {"x", "y", "w", "h", "r", "opacity", "scale", "scaleX", "scaleY", "rota
           "volume", "unitX", "unitY", "unitRotate", "unitScale", "unitOpacity", "z", "rotateX", "rotateY", "fov",
           "depth", "tube", "shine", "metal", "rim", "bands", "explode", "bevel"}
 REQUIRED = {"text": ("text",), "image": ("src",), "video": ("src",), "path": ("d", "points"), "line": ("points",),
-            "captions": ("cues", "src"), "shader": ("preset", "sksl"), "model": ("shape", "parts", "src")}
+            "captions": ("cues", "src", "voice"), "shader": ("preset", "sksl"), "model": ("shape", "parts", "src")}
 
 
 class Report:

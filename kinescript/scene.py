@@ -8,6 +8,7 @@ from pathlib import Path
 
 from . import components, media, models, schema
 from . import presets as P
+from . import words as W
 from .props import Ctx, Prop, compile_prop
 from .timing import Timeline, parse_clock
 
@@ -18,7 +19,7 @@ STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "children", "laye
           "blend", "clip", "mode", "volume", "hidden", "note", "words", "stops", "cap", "join", "loop",
           "allowOffscreen", "style", "audio", "shadow", "box", "fx", "fill", "stroke", "emph", "active",
           "sksl", "preset", "uniforms", "caret", "case", "italic", "smooth", "closed", "focus", "use",
-          "backface", "fixed", "sort", "shape", "detail", "parts", "light", "span", "sound"}
+          "backface", "fixed", "sort", "shape", "detail", "parts", "light", "span", "sound", "voice"}
 # Property defaults by name; everything not listed defaults to None.
 DEFAULTS = {"x": 0.0, "y": 0.0, "opacity": 1.0, "scale": 1.0, "scaleX": 1.0, "scaleY": 1.0, "rotate": 0.0,
             "blur": 0.0, "draw": 1.0, "zoom": 1.0, "z": 0.0, "rotateX": 0.0, "rotateY": 0.0}
@@ -108,8 +109,10 @@ class Scene:
         except ValueError as e:
             raise SceneError(str(e)) from e
         raw_layers = [x for l in raw_layers for x in (l if isinstance(l, list) else [l])]
+        self.words = self._read_words()
         self._raise_errors()
-        self.timeline = Timeline(self.fps, self.markers)
+        self.timeline = Timeline(self.fps, self.markers, {sid: dict(w, ids=None if w["words"] is None else {
+            x["id"]: (x["start"], x["end"]) for x in w["words"] if x["id"]}) for sid, w in self.words.items()})
         self.layers: list[Layer] = []
         self.by_id: dict[str, Layer] = {}
         self._build(raw_layers, None, self.layers)
@@ -202,6 +205,46 @@ class Scene:
         p = Path(src)
         return str(p if p.is_absolute() else (self.base / p))
 
+    def _read_words(self) -> dict[str, dict]:
+        """Each audio entry's word times, read before the layers so cues and captions can use them:
+        {id: {"words": [...] or None, "trim0", "trim1" (the part of the file that plays), "file"}}."""
+        out = {}
+        for i, a in enumerate(self.spec.get("audio") or []):
+            sid = str(a.get("id") or f"audio{i + 1}")
+            trim = a.get("trim") if isinstance(a.get("trim"), (list, tuple)) and a.get("trim") else [0, None]
+            try:
+                t0 = float(trim[0])
+                t1 = float(trim[1]) if len(trim) > 1 and trim[1] is not None else None
+            except (TypeError, ValueError):
+                t0, t1 = 0.0, None  # reported by _check_media
+            near = W.default_path(self.path(a["src"])) if a.get("src") else None
+            out[sid] = {"words": None, "trim0": t0, "trim1": t1,
+                        "file": Path(a["src"]).with_suffix(".words.json").as_posix() if a.get("src") else "a words file"}
+            given = a.get("words")
+            if given is None and not (near and near.exists()):
+                continue
+            try:
+                out[sid]["words"] = W.read(near if given is None else self.path(given) if isinstance(given, str)
+                                           else given)
+            except W.WordsError as e:
+                self.note("error", "bad-words", sid, str(e), "a words file is {\"words\": [{\"word\": \"Hello\", "
+                          "\"start\": 0.1, \"end\": 0.4}]}, in seconds of the sound file")
+        return out
+
+    def _voice_cues(self, lid: str, raw: dict) -> dict:
+        """Captions that follow a voice: a cue a line, each word lit when it is said, starting when the voice starts."""
+        v = str(raw["voice"])
+        w = self.words.get(v)
+        if w is None:
+            close = schema.suggest(v, self.words)
+            raise SceneError(f"layer '{lid}': voice '{v}' is not an audio id." + (f" Did you mean '{close}'?" if close else "")
+                             + (f" Audio ids: {', '.join(list(self.words)[:16])}" if self.words else ""), layer=lid)
+        if w["words"] is None:
+            raise SceneError(f"layer '{lid}': '{v}' has no word times for the captions to follow. Add {w['file']} "
+                             "(a speech-to-text tool that times words, such as Whisper, writes one), or give the "
+                             "captions cues", layer=lid)
+        return dict(raw, cues=W.cues(w["words"], w["trim0"], w["trim1"]), at=raw.get("at", v))
+
     def _build_audio(self) -> list[Sound]:
         """Audio entries and layer sounds as timeline nodes, so a layer can cue from a sound and a sound from a layer.
         Only voice sets an "auto" duration: a sentence cut off at the end is never wanted, a long music bed is."""
@@ -282,10 +325,12 @@ class Scene:
                 end = trim[1] if len(trim) > 1 and trim[1] is not None else info["duration"]
                 end = min(float(end), info["duration"]) if info["duration"] else end
                 natural = max(0.04, (end - trim[0]) / float(raw.get("speed", 1)))
-            if ltype == "captions" and (raw.get("cues") or (layer.src and Path(layer.src).exists())):
+            if ltype == "captions" and raw.get("voice") is not None:
+                raw = layer.raw = self._voice_cues(lid, raw)
+            elif ltype == "captions" and (raw.get("cues") or (layer.src and Path(layer.src).exists())):
                 raw = layer.raw = dict(raw, cues=components.load_cues(raw, layer.src))
-                if raw["cues"] and "dur" not in raw and "until" not in raw:
-                    natural = max(c[1] for c in raw["cues"])
+            if ltype == "captions" and raw.get("cues") and "dur" not in raw and "until" not in raw:
+                natural = max(c[1] for c in raw["cues"])
             try:
                 self.timeline.add(lid, raw.get("at", 0), raw.get("dur"), raw.get("until"), natural,
                                   prev=prev, parent=parent.id if parent else None,
@@ -338,12 +383,27 @@ class Scene:
         return walk(self.layers)
 
     def summary(self) -> dict:
+        audio = []
+        for s in self.audio:
+            audio.append({"id": s.id, "role": s.role, "src": s.raw.get("src"), "in": round(s.t_in, 3),
+                          "out": round(s.t_out, 3), "layer": s.layer})
+            if said := self.said(s.id):  # the ids a cue can name, and when each is said
+                audio[-1]["words"] = [[wid, round(a, 3), round(b, 3)] for wid, _, a, b in said]
         return {"canvas": {"w": self.w, "h": self.h, "fps": self.fps, "duration": round(self.duration, 3),
                            "frames": self.frames},
                 "layers": [{"id": l.id, "type": l.type, "in": round(l.t_in, 3), "out": round(l.t_out, 3),
                             "parent": l.parent.id if l.parent else None} for l in self.all_layers()],
-                "audio": [{"id": s.id, "role": s.role, "src": s.raw.get("src"), "in": round(s.t_in, 3),
-                           "out": round(s.t_out, 3), "layer": s.layer} for s in self.audio]}
+                "audio": audio}
+
+    def said(self, sid: str) -> list[tuple[str | None, str, float, float]]:
+        """The words sound `sid` plays, as (id, word, start, end) in scene seconds; [] when it has no words."""
+        w, s = self.words.get(sid), next((s for s in self.audio if s.id == sid), None)
+        if not w or not w["words"] or s is None:
+            return []
+        lag = s.t_in - w["trim0"]
+        return [(x["id"], x["word"], lag + x["start"], lag + x["end"]) for x in w["words"]
+                if x["start"] >= w["trim0"] and (w["trim1"] is None or x["start"] < w["trim1"])
+                and lag + x["start"] < min(s.t_out, self.duration)]
 
     def close(self):
         for layer in self.all_layers():

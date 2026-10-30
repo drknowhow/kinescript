@@ -1,4 +1,4 @@
-"""Generate the sample footage, music and model the examples use (no third-party media)."""
+"""Generate the sample footage, music, voice and model the examples use (no third-party media)."""
 import json
 import math
 import struct
@@ -25,6 +25,18 @@ for name, args in jobs.items():
     tail = ["-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest"] if name.endswith(".mp4") else ["-c:a", "aac"]
     subprocess.run([FFMPEG, "-y", "-v", "error", *args, *tail, str(out / name)], check=True)
     print("wrote", out / name)
+
+# A stand-in voice: a hum for each word, at the times its words file gives, so word cues can be tried
+# without a speech engine.
+WORDS = [("Write", 0.20, 0.55), ("a", 0.62, 0.72), ("scene.", 0.78, 1.30), ("Check", 1.80, 2.15), ("it.", 2.22, 2.50),
+         ("Render", 3.00, 3.45), ("it.", 3.52, 3.85)]
+hum = "+".join(f"between(t,{s},{e})*pow(sin(PI*(t-{s})/{e - s:.2f}),2)*sin(2*PI*{180 + 15 * k}*t)"
+               for k, (_, s, e) in enumerate(WORDS))
+subprocess.run([FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i", f"aevalsrc='0.35*({hum})':s=48000:d=4.2",
+                str(out / "voice.wav")], check=True)
+(out / "voice.words.json").write_text(json.dumps({"words": [{"word": w, "start": s, "end": e} for w, s, e in WORDS]},
+                                                 indent=1))
+print("wrote", out / "voice.wav", "and its words", out / "voice.words.json")
 
 
 def rocket(path: Path):

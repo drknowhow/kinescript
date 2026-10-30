@@ -1,0 +1,16 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": "auto", "bg": "$void"},
+  "audio": [
+    {"id": "vo", "role": "voice", "src": "media/voice.wav", "at": 0.4},
+    {"id": "bed", "role": "music", "src": "media/pad.m4a", "loop": true, "until": "end", "fadeIn": 0.5, "fadeOut": 1}
+  ],
+  "layers": [
+    {"id": "write", "type": "text", "text": "Write", "x": "50%", "y": "42%", "size": 180, "weight": 800,
+     "at": "vo:write", "until": "vo:check-0.1", "enter": {"name": "rise", "dur": 0.4}, "exit": "fade"},
+    {"id": "check", "type": "text", "text": "Check", "x": "50%", "y": "42%", "size": 180, "weight": 800, "fill": "$key",
+     "at": "vo:check", "until": "vo:render-0.1", "enter": {"name": "pop", "dur": 0.35}, "exit": "fade"},
+    {"id": "render", "type": "text", "text": "Render", "x": "50%", "y": "42%", "size": 180, "weight": 800,
+     "fill": "$accent", "at": "vo:render", "until": "vo.out+0.8", "enter": {"name": "pop", "dur": 0.35}, "exit": "fade"},
+    {"id": "cc", "type": "captions", "voice": "vo", "mode": "karaoke", "active": "$key"}
+  ]
+}

@@ -124,6 +124,7 @@ LAYER TYPES (defaults in brackets)
   video     src, trim [start, end] (seconds in the source file), speed [1], volume [1] (0 mutes),
             loop, w, h [canvas size], fit, zoom, focus, radius. Its sound is mixed in.
   captions  cues [[start, end, "text"], ...] (seconds from the layer start) or src (.srt/.vtt),
+            or voice: a sound's id, to caption what it says word by word (see SOUND),
             mode (karaoke|pop: highlight the current word), active (colour of that word), and
             the text keys. Defaults: x "50%", y "86%", size 46, weight 700, a dark box behind.
   shader    preset ({shaders}) with uniforms {"name": number or colour},
@@ -311,6 +312,15 @@ SOUND
   "mix": {"loudness": -14, "peak": -1, "levels": {"music": -20}, "duck": {"depth": 10}}.
   "duck": false turns the dip off; duck also takes by and under (lists of roles), and attack, hold
   and release in seconds (0.08, 0.15, 0.4).
+  Cue from what a voice says. Its word times come from a words file next to it, vo1.words.json for
+  vo1.wav, in seconds of the file:
+    {"words": [{"word": "Write", "start": 0.12, "end": 0.41}, {"word": "render.", "start": 1.2, "end": 1.5}]}
+  Whisper's JSON reads as it is; "words" on the sound names another file or holds the list. A word's
+  id is the word in lower case without punctuation, with _2, _3 for repeats; kine probe lists the ids
+  and when each is said. "at": "vo1:render" starts a layer as the voice says render, "vo1:render.out"
+  as it finishes the word, and "vo1:render_2.in+0.1" works like any cue. Captions of the voice, each
+  word lit as it is said:
+    {"id": "cc", "type": "captions", "voice": "vo1", "mode": "karaoke"}
   You cannot hear the mix, so read it: kine check measures it and names each sound problem with its
   time range, and kine look --audio draws it under the frames, with each sound's loudness in the JSON.
   Sound is mixed into .mp4, .mov and .webm, and into --from/--to renders. -o mix.wav (or .m4a,

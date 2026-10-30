@@ -704,6 +704,97 @@ def test_look_draws_the_sound_and_returns_its_measurements(mix_media, tmp_path):
     assert silent["audio"] is None
 
 
+WORDS = [{"word": "Write", "start": 0.3, "end": 0.6}, {"word": "it.", "start": 0.7, "end": 0.9},
+         {"word": "Write", "start": 1.0, "end": 1.3}]
+
+
+def _voice(mix_media, tmp_path, words=WORDS):
+    """The voice copied next to a words file, so the file is found by its name."""
+    import shutil
+    src = tmp_path / "vo.wav"
+    shutil.copy(mix_media["voice"], src)
+    if words is not None:
+        (tmp_path / "vo.words.json").write_text(json.dumps({"words": words}))
+    return str(src)
+
+
+def test_layers_cue_from_the_words_a_voice_says(mix_media, tmp_path):
+    spec = scene([{"id": "a", "type": "rect", "at": "vo:write_2", "dur": 0.2},
+                  {"id": "b", "type": "rect", "at": "vo:it.out+0.1", "dur": 0.2},
+                  {"id": "c", "type": "rect", "at": "vo:write.mid", "until": "vo:write_2.out"}], duration=3)
+    spec["audio"] = [{"id": "vo", "role": "voice", "src": _voice(mix_media, tmp_path), "at": 0.5, "trim": [0.2, 1.4]}]
+    s = k.Scene(spec)
+    # word times are seconds in the file: the voice starts at 0.5 playing from 0.2 s into it
+    assert s.by_id["a"].t_in == pytest.approx(1.3)
+    assert s.by_id["b"].t_in == pytest.approx(1.3)
+    assert (s.by_id["c"].t_in, s.by_id["c"].t_out) == (pytest.approx(0.75), pytest.approx(1.6))
+
+
+@pytest.mark.parametrize("at, says", [
+    ("vo:writ", r"has no word 'writ'\. Did you mean 'write'\?"),
+    ("voo:write", r"'voo', which is not an audio id\. Did you mean 'vo'\?"),
+    ("bed:write", r"'bed' has no word times\. Add \S*bed\.words\.json"),
+    ("vo:write", r"at 0\.30s in the file of 'vo', outside the part its trim plays"),
+])
+def test_a_word_cue_that_cannot_be_found_says_why(mix_media, tmp_path, at, says):
+    spec = scene([{"type": "rect", "at": at}], duration=1)
+    spec["audio"] = [{"id": "vo", "src": _voice(mix_media, tmp_path), "trim": [0.5, None]},
+                     {"id": "bed", "src": mix_media["bed"]}]
+    with pytest.raises(k.SceneError, match=says):
+        k.Scene(spec)
+
+
+def test_words_read_from_a_list_or_whisper_json_and_get_ids(tmp_path):
+    from kinescript import words as W
+    (tmp_path / "w.json").write_text(json.dumps({"segments": [{"words": [
+        {"word": " Don't", "start": 0.0, "end": 0.2}, {"word": " stop,", "start": 0.3, "end": 0.5}]},
+        {"words": [{"word": " stop!", "start": 0.6, "end": 0.8}, {"word": "—", "start": 0.9, "end": 1.0}]}]}))
+    assert [w["id"] for w in W.read(tmp_path / "w.json")] == ["dont", "stop", "stop_2", None]
+    got = W.read([{"word": "go", "start": 0, "end": 0.1}, {"word": "Go", "start": 0.2, "end": 0.3, "id": "go"}])
+    assert [w["id"] for w in got] == ["go_2", "go"]  # an id given in the file keeps its name
+    for bad, says in (([{"word": "go", "start": 0.5, "end": 0.1}], "ends at 0.1s, before"),
+                      ([{"word": "go", "start": "0"}], "word #0"), (tmp_path / "no.json", "words file not found")):
+        with pytest.raises(W.WordsError, match=says):
+            W.read(bad)
+
+
+def test_a_bad_words_file_is_reported_with_its_sound(mix_media, tmp_path):
+    spec = scene([{"type": "rect"}], duration=1)
+    spec["audio"] = [{"id": "vo", "src": _voice(mix_media, tmp_path, [{"word": "x", "start": 1, "end": 0}])}]
+    with pytest.raises(k.SceneError) as e:
+        k.Scene(spec)
+    assert [(i["code"], i["layer"]) for i in e.value.issues if i["level"] == "error"] == [("bad-words", "vo")]
+
+
+def test_caption_lines_break_at_sentences_pauses_and_width():
+    from kinescript import words as W
+    ws = [{"word": w, "start": s, "end": s + 0.2} for w, s in
+          (("One", 0.0), ("two.", 0.3), ("Three", 0.6), ("four", 1.6), ("five", 1.9))]
+    ws += [{"word": "word", "start": 2.2 + 0.3 * i, "end": 2.4 + 0.3 * i} for i in range(10)]
+    got = W.cues(ws, trim0=0.0)
+    assert [c[2] for c in got] == ["One two.", "Three", "four five word word word word word word",
+                                   "word word word word"]
+    assert got[0][:2] == [0.0, 0.5] and got[1][:2] == [0.5, 1.3]  # held 0.5 s, unless the next starts first
+    assert got[0][3] == [[0.0, 0.2], [0.3, 0.5]]
+    assert [c[2] for c in W.cues(ws, trim0=0.3, trim1=1.0)] == ["two.", "Three"]
+
+
+def test_captions_follow_a_voice_and_light_each_word_as_it_is_said(mix_media, tmp_path):
+    spec = scene([{"id": "cc", "type": "captions", "voice": "vo", "mode": "pop", "size": 30}], w=640, h=360,
+                 duration="auto")
+    spec["audio"] = [{"id": "vo", "role": "voice", "src": _voice(mix_media, tmp_path), "at": 1.0}]
+    s = k.Scene(spec)
+    cc = s.by_id["cc"]
+    assert cc.t_in == 1.0 and cc.raw["cues"][0][2] == "Write it." and cc.raw["cues"][1][2] == "Write"
+    r = Renderer(s)
+    lit = [int((r.frame(round(T * 30))[300:340, :, :3].max(axis=2) > 200).sum()) for T in (1.25, 1.45, 1.75)]
+    assert lit[0] == 0 < lit[1] < lit[2]  # pop: nothing before "Write" is said, then one word, then two
+    spec["layers"][0]["voice"] = "bed"
+    spec["audio"].append({"id": "bed", "src": mix_media["bed"]})
+    with pytest.raises(k.SceneError, match="'bed' has no word times for the captions"):
+        k.Scene(spec)
+
+
 def test_repeat_renders_reuse_warm_workers_until_idle(tmp_path, monkeypatch):
     import time
     from kinescript import output
