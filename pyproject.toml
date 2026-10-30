@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kinescript"
-version = "1.0.0"
+version = "1.1.0"
 description = "Motion graphics and video edits written as JSON, checked by agents, rendered on the GPU."
 readme = "README.md"
 license = "MIT"
@@ -21,10 +21,21 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Multimedia :: Graphics",
     "Topic :: Multimedia :: Video",
     "Topic :: Multimedia :: Video :: Conversion",
 ]
+
+[project.urls]
+Homepage = "https://github.com/drknowhow/kinescript"
+Source = "https://github.com/drknowhow/kinescript"
+Issues = "https://github.com/drknowhow/kinescript/issues"
+Changelog = "https://github.com/drknowhow/kinescript/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "build>=1.2"]

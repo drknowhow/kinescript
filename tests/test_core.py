@@ -480,3 +480,10 @@ def test_animated_weight_frame_is_independent_of_history():
         r.frame(n)
     after_history = r.frame(15).copy()
     assert np.array_equal(after_history, _frame(spec, 15))
+
+
+def test_doctor_reports_version_and_font(capsys):
+    from kinescript.cli import main
+    assert main(["doctor"]) == 0
+    info = json.loads(capsys.readouterr().out)
+    assert info["version"] == k.__version__ and info["font"] == "Space Grotesk", info

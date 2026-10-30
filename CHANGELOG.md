@@ -1,7 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 (2026-10-30)
 
+First release on PyPI: `pip install kinescript`.
+
+- Fixed: `kine doctor` failed with "the scene has no layers".
 - Depth: every layer takes `z`, `rotateX`, `rotateY` and `backface`; a top-level `camera` pans, dollies,
   orbits and rolls with perspective, and `fixed` layers ignore its moves; a group with `"sort": "depth"` draws
   its children far to near. New motions `flip`, `flip-up`, `tumble` and `push`, also per letter with `split`.

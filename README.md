@@ -1,8 +1,8 @@
-<p align="center"><img src="brand/logo-dark.png" width="460" alt="kinescript"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/drknowhow/kinescript/main/brand/logo-dark.png" width="460" alt="kinescript"></p>
 
 <p align="center"><b>Video you can diff.</b><br>Motion graphics and video edits written as JSON, checked by agents, rendered on the GPU.</p>
 
-<p align="center"><img src="docs/hero.gif" width="720" alt="The Kinescript launch video, rendered by Kinescript"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/drknowhow/kinescript/main/docs/hero.gif" width="720" alt="The Kinescript launch video, rendered by Kinescript"></p>
 
 Kinescript turns a JSON scene into video. Every layer, keyframe and cut is a line of data, so a scene can be
 generated, reviewed in a pull request, and changed by a script or an agent. The renderer is a pure function of
