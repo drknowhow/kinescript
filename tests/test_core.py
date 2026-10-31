@@ -409,6 +409,36 @@ def test_sequence_crossfades_and_video_renders(clip):
     s.close()
 
 
+def test_clip_decoders_close_once_their_clip_ends(clip):
+    spec = scene([{"type": "sequence", "id": "cut", "clips": [{"src": clip, "trim": [k * 0.5, k * 0.5 + 0.5]}
+                                                              for k in range(4)]}])
+    s = k.Scene(spec)
+    r = Renderer(s, backend="cpu")
+    for n in range(s.frames):
+        r.frame(n)
+    open_ = [L.id for L in s.all_layers() if L.video is not None and L.video.proc is not None]
+    s.close()
+    assert open_ == ["cut-4"]  # only the clip still on screen
+
+
+def test_grade_keeps_a_transparent_canvas_transparent():
+    layers = [{"id": "r", "type": "rect", "x": "50%", "y": "50%", "w": 100, "h": 60, "fill": "#4a7dff"}]
+    grade = {"vignette": 0.6, "grain": 0.2}
+    clear = Renderer(k.Scene(dict(scene(layers, bg="transparent"), grade=grade)), backend="cpu").frame(3).copy()
+    solid = Renderer(k.Scene(dict(scene(layers, bg="#000000"), grade=grade)), backend="cpu").frame(3)
+    assert clear[..., 3][:20, :20].max() == 0 and clear[..., 3][90, 160] == 255
+    assert np.array_equal(clear[60:120, 110:210], solid[60:120, 110:210])  # the rect is graded as before
+
+
+def test_grain_moves_on_every_frame():
+    # 123 / 30 * 30 is 122.99999999999999: the grain tile used to be picked by truncating it, so frame 123
+    # repeated frame 122's grain.
+    dot = {"id": "d", "type": "circle", "r": 2, "x": 4, "y": 4, "fill": "#808080"}
+    spec = dict(scene([dot], w=64, h=36, bg="#808080", duration=5), grade={"grain": 0.5})
+    r = Renderer(k.Scene(spec), backend="cpu")
+    assert not np.array_equal(r.frame(122).copy(), r.frame(123))
+
+
 def test_sequence_id_is_a_cue_and_takes_layer_effects(clip):
     seq = {"type": "sequence", "id": "cut", "at": 0.5,
            "clips": [{"src": clip, "trim": [0, 1]}, {"src": clip, "trim": [1, 2.5]}]}

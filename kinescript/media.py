@@ -233,6 +233,8 @@ class VideoSource:
             except (OSError, subprocess.TimeoutExpired):
                 pass
             self.proc = None
+            # The prefetched frames and the last one shown are 3-8 MB each at 1080p; at() reopens and refills.
+            self.queue = self.frame = self._buf = None
 
 
 @lru_cache(maxsize=4)
