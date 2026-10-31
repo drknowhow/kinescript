@@ -1210,10 +1210,17 @@ class Renderer:
                                         ctx=gpu_context() if self.backend == "gpu" else None)
         trim0 = float((L.raw.get("trim") or [0])[0])
         src_t = trim0 + t * speed
+        end = loop_end(L, L.video.info["duration"])  # the trim end, or the end of the file
         if L.raw.get("loop"):
-            span = loop_end(L, L.video.info["duration"]) - trim0
-            if span > 0:
-                src_t = trim0 + (t * speed) % span
+            if end - trim0 > 0:
+                src_t = trim0 + (t * speed) % (end - trim0)
+        elif end > trim0:
+            # A dur longer than the trimmed clip holds the clip's last frame (one frame before the trim end or the
+            # end of the file), the frame a clip with no dur ends on. Before, trim [2, 4] with dur 6 played on to
+            # 6.9 s of the file, and a clip that played to its end never showed its final frame. At least one source
+            # frame back, so a 60 fps scene holds a 30 fps clip's own last frame, not a time between two of them.
+            step = max(speed / self.s.fps, 1 / (L.video.info["fps"] or self.s.fps))
+            src_t = min(src_t, max(trim0, end - step))
         img = L.video.at(src_t)
         if img is not None:
             self._content(c, L, g, box, img, img.width(), img.height())

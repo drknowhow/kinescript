@@ -85,6 +85,8 @@ TIME: "at" (start), "dur" (length), "until" (end)
   or until, not both (with both, until is ignored and check warns). Times are at most 1000000 s.
   check warns about a layer whose time lies wholly outside the scene or its group: it never shows.
   A video without dur lasts as long as its trimmed clip.
+  A longer dur holds the clip's last frame (its sound stops at the trim end) and check warns
+  (clip-hold); "loop": true repeats the clip instead.
 
 KEYS EVERY LAYER HAS
   id, type, at, dur, until
@@ -150,6 +152,9 @@ LAYER TYPES (defaults in brackets)
             Its sound is mixed in at the clip's speed and stops at the trim end unless loop is true.
             An enter or exit fades the sound over its dur too; fadeIn and fadeOut (seconds, 0 for
             none) set the sound's fades instead.
+            Source seconds count from the file's first frame. A phone clip's rotation is applied.
+            Alpha is kept from .mov (ProRes 4444) and .webm (VP8/VP9 with alpha, as --transparent
+            writes it), so a transparent render can be footage in another scene.
   captions  cues [[start, end, "text"], ...] (seconds from the layer start) or src (.srt/.vtt, in
             UTF-8, UTF-16 or Windows-1252; tags are dropped, &amp; reads as &, and cues that
             overlap show together, the earlier one on top),
@@ -446,7 +451,12 @@ COMMANDS
                                   voices at once (voice-overlap), music under 10 LU below a voice
                                   (voice-masked), an sfx whose first sound is late (sfx-late), a
                                   silent sound, a sound nobody hears (audio-unheard), and the
-                                  mix's loudness and peaks.
+                                  mix's loudness and peaks. With footage: a dur past the end of
+                                  its clip, so the last frame holds (clip-hold), a file whose
+                                  picture stops before its length, cut short or damaged
+                                  (media-truncated), a file with no picture (media-no-picture) or a
+                                  still image (media-still) as a video, and a .webm whose alpha this
+                                  ffmpeg cannot read (media-alpha-lost).
                                   info: a name it read for you, e.g. "'color' read as 'fill'",
                                   or an odd canvas size (odd-size).
   kine look scene.json --boxes    one PNG of 12 evenly spaced frames; --boxes outlines layers and
@@ -462,7 +472,10 @@ COMMANDS
                                   before the end; --at end is the last frame; a time past the end
                                   draws the last frame, with a note. --scale 0.5 halves the size.
   kine probe scene.json --at 2    every layer's and sound's start and end, and screen boxes at 2 s
-  kine probe clip.mp4             a media file's duration, w, h, fps and whether it has audio
+  kine probe clip.mp4             a media file's kind (video, audio or image), duration, w and h as
+                                  shown (after rotation), fps, audio, alpha and rotation; a note
+                                  when it lists a video stream with no frames in it. A model file
+                                  (.glb, .gltf, .obj): its triangles, vertices, materials and size.
   kine render scene.json -o out.mp4 -q draft|standard|high
                                   standard is the default, draft the fastest, high the best.
                                   Also .mov or .webm (with --transparent for no background),
@@ -482,6 +495,8 @@ COMMANDS
                                   rotateY) can differ by a level or two at a few edge pixels
                                   (the GPU's glyph cache); KINE_BACKEND=cpu renders the same
                                   bytes every time.
+                                  Its JSON lists warnings for footage cut short, with no picture or
+                                  with alpha this ffmpeg cannot read, as check gives them.
   kine voice scene.json           speaks each sound's text into its file and times its words; a sound
                                   is spoken again only when its text, speaker, rate, backend or
                                   options changed (--force: all of them, --only vo1: one). Needs a

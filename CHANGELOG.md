@@ -141,7 +141,30 @@
   it; it notes one that is off whenever it is on, or for 1 s or more.
 - `kine check` notes an odd canvas size (`odd-size`): `.mp4`, `.webm` and `.gif` need even sizes, so a 321x181
   scene comes out 320x180 there, without its last column and row. PNG frames, stills and `.mov` keep 321x181.
-
+- A `.webm` with alpha keeps it as footage, as a `.mov` with alpha already did. VP9 alpha (Kinescript's own
+  `--transparent` `.webm` among them) was decoded without it: the clear parts came out black instead of the
+  background, and a 30% blue box fully blue. Such clips are now read with libvpx. `kine check` warns
+  (`media-alpha-lost`) when this ffmpeg has no libvpx decoder.
+- A phone clip stored sideways with a rotation is decoded at its full size. Its size was read before the rotation,
+  so a 1920x1080 clip shown upright in a 1080x1920 canvas was decoded at 56% and came out soft. `kine probe` gives
+  the size as shown (360x640 for such a clip, not 640x360) and the `rotation`.
+- A video file cut short or damaged is reported. A half-copied mp4 that promises 4 s froze on its frame at 2.0 s
+  without a word; `kine check` now warns (`media-truncated`) with where its picture stops, and `kine render` lists
+  the same warning in its JSON. The frame it holds is the same in order, in a still, or from a worker starting there.
+- Footage whose first frame is not at 0 s lasts as long as it plays. An `.mkv` starting at 5 s and running 7 s gave
+  a 12 s layer: 5 s of held frame, then black.
+- A clip that plays to its end shows its final frame. A 210-frame clip showed frame 208 twice and never frame 209.
+- A video `dur` longer than its trimmed clip holds the clip's last frame. With `trim` [2, 4] and `dur` 6 the
+  picture played on to 6.9 s of the file. `kine check` warns (`clip-hold`) when a `dur` runs past the trim end
+  or the end of the file; past the file it froze the last frame silently.
+- `kine probe` of a PNG says `image: true` with fps 0; ffprobe gives a still 25 fps, so it said `image: false`. A
+  model file (`.glb`, `.gltf`, `.obj`) gives its triangles, vertices, materials and size instead of an ffprobe
+  error. A media probe names its `kind` (video, audio, image or model), and a scene's probe has `ok` as a media
+  file's does.
+- A file that lists a video stream with no frames in it, such as a `.ts` cut with `-c copy` between key frames:
+  `kine probe` says so in a `note` (it gave w 0, h 0 and fps 0 and nothing more) and `kine check` warns
+  (`media-no-picture`) for a video layer that plays it. A still image as a video layer is a warning
+  (`media-still`).
 - A video clip's decoder is closed once the clip is off screen. Before, every clip a render had played kept its
   ffmpeg process and six prefetched frames to the end: a 60-cut sequence peaked at 1.66 GB and ran 60 decoders at
   once; it now peaks at 270 MB.

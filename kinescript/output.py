@@ -520,10 +520,13 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
     fps = scene.fps
     ext = out_p.suffix.lower()
     t0 = time.perf_counter()
+    from .verify import media_warnings_later
+    warned = media_warnings_later(scene)  # a clip cut short or with no picture is reported with the result
     if ext == ".png" or folder:
-        return _noted(_render_pngs(scene, out_p, f0, f1, scale, transparent), notes)
+        return warned(_noted(_render_pngs(scene, out_p, f0, f1, scale, transparent), notes))
     if ext in AUDIO_ONLY:
-        return _noted(_render_audio(scene, out_p, f0 / fps, f1 / fps, start is None and end is None, t0), notes)
+        whole = start is None and end is None
+        return warned(_noted(_render_audio(scene, out_p, f0 / fps, f1 / fps, whole, t0), notes))
     fmt = VIDEO[ext]
     if transparent and fmt in ("mp4", "gif"):
         scene.close()
@@ -589,11 +592,12 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
     w, h = max(2, round(scene.w * scale)), max(2, round(scene.h * scale))
     if fmt in ("mp4", "webm", "gif"):
         w, h = w - w % 2, h - h % 2
-    return _noted({"out": str(out_p), "w": w, "h": h, "fps": gfps if fmt == "gif" else fps,
-                   "frames": gif_frames(n, fps, gfps) if fmt == "gif" else n,  # was the scene's frames for a GIF
-                   "seconds": round(n / fps, 3), "wall": round(wall, 2), "fps_rendered": round(n / wall, 1),
-                   "workers": len(jobs), "size_mb": round(out_p.stat().st_size / 1e6, 2) if out_p.exists() else None,
-                   "audio": bool(audio)}, notes)
+    done = {"out": str(out_p), "w": w, "h": h, "fps": gfps if fmt == "gif" else fps,
+            "frames": gif_frames(n, fps, gfps) if fmt == "gif" else n,  # was the scene's frames for a GIF
+            "seconds": round(n / fps, 3), "wall": round(wall, 2), "fps_rendered": round(n / wall, 1),
+            "workers": len(jobs), "size_mb": round(out_p.stat().st_size / 1e6, 2) if out_p.exists() else None,
+            "audio": bool(audio)}
+    return warned(_noted(done, notes))
 
 
 # Render processes stay up for WARM seconds after a render, so the next one in the same process (the MCP
