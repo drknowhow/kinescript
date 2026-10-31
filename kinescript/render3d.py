@@ -208,12 +208,24 @@ def _extruded(r, shape: str, num, raw, detail: str) -> mesh.Mesh:
     return m
 
 
-def _shape(r, shape: str, num, raw, detail: str) -> mesh.Mesh:
-    """One shape's mesh at its size, centred on the origin. num(key, default) reads its numbers, raw its text."""
+def _shape(r, shape: str, num, raw, detail: str, slot=None) -> mesh.Mesh:
+    """One shape's mesh at its size, centred on the origin. num(key, default) reads its numbers, raw its text.
+    With a slot, a primitive is kept there while its size holds: placing it again each frame copied the mesh
+    and made every _fixed result be worked out again."""
     if shape in mesh.EXTRUDED:
         return _extruded(r, shape, num, raw, detail)
     s3, tube = mesh.size(shape, num)
-    return mesh.placed(mesh.unit(shape, detail, tube), s3)
+    return _kept(r, slot, (shape, detail, tube, s3), lambda: mesh.placed(mesh.unit(shape, detail, tube), s3))
+
+
+def _kept(r, slot, key, make):
+    """make(), kept in r._models[slot] until key changes (no slot: not kept)."""
+    hit = r._models.get(slot) if slot is not None else None
+    if hit is None or hit[0] != key:
+        hit = (key, make())
+        if slot is not None:
+            r._models[slot] = hit
+    return hit[1]
 
 
 def _parts(r, L):
@@ -262,10 +274,17 @@ def model(r, L, g) -> tuple[mesh.Mesh, list[tuple]]:
     if L.src:
         m, own, size = _imported(r, L, len(keys))
         keys = keys + own
-        meshes.insert(0, m._replace(P=m.P * _fit(g, size)))
+        fit = _fit(g, size)
+        meshes.insert(0, _kept(r, ("fit", L.id), fit, lambda: m._replace(P=m.P * fit)))
     elif shape:
-        meshes.insert(0, _shape(r, shape, g, L.raw, L.raw.get("detail", "medium")))
-    m = meshes[0] if len(meshes) == 1 else mesh.cat(meshes)
+        meshes.insert(0, _shape(r, shape, g, L.raw, L.raw.get("detail", "medium"), ("shape", L.id)))
+    if len(meshes) == 1:
+        m = meshes[0]
+    else:  # the same pieces as last frame: the same mesh (compared by identity, so the pieces are held)
+        hit = r._models.get(("cat", L.id))
+        if hit is None or len(hit[0]) != len(meshes) or any(a is not b for a, b in zip(hit[0], meshes)):
+            hit = r._models[("cat", L.id)] = (meshes, mesh.cat(meshes))
+        m = hit[1]
     accent = r.s.theme.get("accent", "#ff633f")
     root = lambda k, d=None: g(k, accent if k == "fill" and d is None else d)  # noqa: E731
     mats = [_material(lambda k, d=None, o=o: o.get(k, root(k, d))) for o in keys]
@@ -371,12 +390,61 @@ def _compact(T: np.ndarray, n: int) -> tuple[np.ndarray, np.ndarray]:
     return np.flatnonzero(keep), (np.cumsum(keep) - 1)[T]
 
 
+def _path_bytes(word: int, xy: np.ndarray) -> bytes:
+    """Points xy as SkPath::writeToMemory lays out a move and then lines: four int32s (version and fill type,
+    then the point, conic weight and verb counts), the points as float32 pairs, a byte per verb, zeros to 4."""
+    n = len(xy)
+    verbs = np.zeros(n + -n % 4, np.uint8)
+    verbs[1:n] = 1  # kMove, then kLine
+    return np.array([word, n, 0, n], np.int32).tobytes() + xy.astype(np.float32).tobytes() + verbs.tobytes()
+
+
+def _path_word() -> int | None:
+    """The first word this Skia writes for a path, if _path_bytes lays out a path exactly as Skia does; else None."""
+    xy = np.array([[1.5, -2.25], [3.0, 4.0], [1e6, 0.1]])
+    p = skia.Path()
+    p.moveTo(*xy[0])
+    for q in xy[1:]:
+        p.lineTo(*q)
+    raw = p.writeToMemory()
+    word = int(np.frombuffer(raw[:4], np.int32)[0])
+    return word if _path_bytes(word, xy) == raw else None
+
+
+_WORD = _path_word()
+
+
+def _points(xy: np.ndarray) -> list:
+    """skia.Points for the rows of xy, the only form drawVertices takes. Skia makes them while reading a path
+    back from bytes numpy writes, in two thirds of the time of a Point.Make call per row, freeing included
+    (models-30 makes 110,000 a frame on the GPU). The same float32 values either way; Point.Make if this
+    Skia lays paths out differently."""
+    if _WORD is not None:
+        p, buf = skia.Path(), _path_bytes(_WORD, xy)
+        if p.readFromMemory(buf) == len(buf):
+            return p.getPoints(len(xy))
+    return list(map(skia.Point.Make, xy[:, 0].tolist(), xy[:, 1].tolist()))
+
+
+def _paint(r, L, mats, lt) -> skia.Paint:
+    """The GPU's shading paint for these materials and light, kept while they hold."""
+    def make():
+        bld = skia.RuntimeShaderBuilder(_effect(len(mats)))
+        for i, mt in enumerate(mats):
+            bld.setUniform(f"base{i}", [*mt[0], mt[1]])
+            bld.setUniform(f"surf{i}", list(mt[2:]))
+        for name, v in zip(("keyDir", "fillDir", "keyCol", "amt"), lt):
+            bld.setUniform(name, v)
+        return skia.Paint(Shader=bld.makeShader())
+    return _kept(r, ("paint", L.id), (tuple(mats), tuple(map(tuple, lt))), make)
+
+
 def draw(r, c: skia.Canvas, L, g, reveal: float):
     """Draw model layer L on canvas c. Returns its projected bounds in device pixels, or None."""
     m, mats = model(r, L, g)
     P, N, T, M = m.P, m.N, m.T, m.M
     amt = max(0.0, min(1.0, float(g("draw")) * reveal))
-    tid = np.arange(len(T))  # each triangle's index in the whole mesh
+    tid = slice(None)  # each triangle's index in the whole mesh
     if amt < 1.0:
         tid = _fixed(r, L, m, "order", lambda: mesh.build_order(m))[:math.ceil(amt * len(T))]
         T = T[tid]
@@ -391,26 +459,28 @@ def draw(r, c: skia.Canvas, L, g, reveal: float):
     foot = P if amt >= 1.0 or ex > 0 else P[T.ravel()]  # what casts the ground shadow: what is drawn
     hom = P @ r._m3d[:3, :3].T + r._m3d[:3, 3]
     w = P @ r._m3d[3, :3] + r._m3d[3, 3]
-    near = (w[T] < space.NEAR).any(1)
-    if near.any():
-        r.culled.add(L.id)
-        T = T[~near]
-    xy = hom[:, :2] / np.where(np.abs(w) < 1e-9, 1e-9, w)[:, None]
-    a, b, cc = xy[T[:, 0]], xy[T[:, 1]], xy[T[:, 2]]
-    T = T[(b[:, 0] - a[:, 0]) * (cc[:, 1] - a[:, 1]) - (b[:, 1] - a[:, 1]) * (cc[:, 0] - a[:, 0]) > 0]
+    if len(w) and w.min() < space.NEAR:  # no vertex that near, no triangle crossing
+        near = (w[T] < space.NEAR).any(1)
+        if near.any():
+            r.culled.add(L.id)
+            T = T[~near]
+    d = np.where(np.abs(w) < 1e-9, 1e-9, w)
+    X, Y = hom[:, 0] / d, hom[:, 1] / d
+    x, y = X[T], Y[T]  # each triangle's corners
+    T = T[(x[:, 1] - x[:, 0]) * (y[:, 2] - y[:, 0]) - (y[:, 1] - y[:, 0]) * (x[:, 2] - x[:, 0]) > 0]
     if not len(T):
         return None
     T = T[np.argsort(-w[T].sum(1), kind="stable")]
     r.tris += len(T)
     # From here on, only the vertices of the triangles drawn: about half of them face away.
     used, T = _compact(T, len(P))
-    xy, N, M = xy[used], N[used], M[used]
+    N, M = N[used], M[used]
     # Normals into camera space: the layer matrix without the lens.
     view = np.linalg.inv(r._lens) @ r._m3d
     nv = N @ np.linalg.inv(view[:3, :3])
     nv /= np.linalg.norm(nv, axis=1, keepdims=True)
-    dev = xy * r.scale
-    lo, hi = dev.min(0), dev.max(0)
+    X, Y = X[used] * r.scale, Y[used] * r.scale  # device pixels
+    lo, hi = (X.min(), Y.min()), (X.max(), Y.max())
     bounds = [float(lo[0]), float(lo[1]), float(hi[0]), float(hi[1])]
     x0, y0 = max(0, math.floor(lo[0]) - 2), max(0, math.floor(lo[1]) - 2)
     x1, y1 = min(r.w, math.ceil(hi[0]) + 2), min(r.h, math.ceil(hi[1]) + 2)
@@ -423,30 +493,24 @@ def draw(r, c: skia.Canvas, L, g, reveal: float):
     cv.clipRect(region)
     cv.clear(skia.ColorTRANSPARENT)
     cv.restore()
-    q = dev * ss
+    q = np.stack([X, Y], 1) * ss
     lt = _lights(light(L.raw.get("light", r.s.light)))
     if r.backend == "gpu":
-        bld = skia.RuntimeShaderBuilder(_effect(len(mats)))
-        for i, mt in enumerate(mats):
-            bld.setUniform(f"base{i}", [*mt[0], mt[1]])
-            bld.setUniform(f"surf{i}", list(mt[2:]))
-        for name, v in zip(("keyDir", "fillDir", "keyCol", "amt"), lt):
-            bld.setUniform(name, v)
-        paint, colors = skia.Paint(Shader=bld.makeShader()), None
-        u, v = 2.0 * M + 0.5 + 0.45 * nv[:, 0], nv[:, 1]  # the normal, with the material slot packed in
+        paint, colors = _paint(r, L, mats, lt), None
+        uv = np.stack([2.0 * M + 0.5 + 0.45 * nv[:, 0], nv[:, 1]], 1)  # the normal, with the material slot packed in
     else:
         # The raster backend runs SkSL slowly: examples/model.json spent 275 ms a frame in drawVertices
         # at 2x supersampling. Shading each vertex in numpy, the whole frame takes 72 ms.
         paint, colors = skia.Paint(), _shade(nv, M, mats, *lt)
-    # Skia indexes vertices with 16 bits, and converts each one it is given (about 0.3 us): draw
-    # in sorted chunks, each with only the vertices its triangles use. Indices go as a list, which
-    # Skia reads 4 times as fast as a numpy array.
+    # Skia indexes vertices with 16 bits, and converts each one it is given: draw in sorted chunks, each
+    # with only the vertices its triangles use (one chunk uses them all). Indices go as a memoryview of
+    # uint16, which Skia reads 30% faster than a list and 4 times as fast as a numpy array.
     for k in range(0, len(T), 20000):
-        sel, idx = _compact(T[k:k + 20000], len(q))
-        pos = list(map(skia.Point.Make, q[sel, 0].tolist(), q[sel, 1].tolist()))  # Make: 13% faster
-        tex = None if colors is not None else list(map(skia.Point.Make, u[sel].tolist(), v[sel].tolist()))
-        verts = skia.Vertices.MakeCopy(skia.Vertices.kTriangles_VertexMode, pos, tex,
-                                       None if colors is None else colors[sel].tolist(), idx.ravel().tolist())
+        sel, idx = (slice(None), T) if len(T) <= 20000 else _compact(T[k:k + 20000], len(q))
+        tex = None if colors is not None else _points(uv[sel])
+        verts = skia.Vertices.MakeCopy(skia.Vertices.kTriangles_VertexMode, _points(q[sel]), tex,
+                                       None if colors is None else colors[sel].tolist(),
+                                       memoryview(idx.astype(np.uint16).ravel()))
         cv.drawVertices(verts, paint, skia.BlendMode.kDst)  # kDst: vertex colours as given, when there are any
     img = surf.makeImageSnapshot()
     if L.raw.get("ground") not in (None, False):
