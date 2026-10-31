@@ -5,6 +5,7 @@ renderer composes with the layer's own properties.
 """
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 
@@ -154,17 +155,47 @@ class Motion:
         return out
 
 
-def parse(spec, default_dur: float = 0.5) -> Motion | None:
+# Motion options that are numbers, and what each one is.
+NUMBERS = {"dur": "seconds, 0 or more", "stagger": "seconds between units, 0 or more", "dist": "px moved",
+           "amount": "px (blur, track) or a scale step (snap)", "deg": "degrees", "from": "the start scale"}
+
+
+def option_problem(key: str, v) -> str | None:
+    """Why a motion option's value cannot be used, or None."""
+    if key == "ease":
+        return E.problem(v) if v not in (None, "") else None
+    if key not in NUMBERS or v is None:  # null is the default
+        return None
+    try:
+        ok = not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v)
+    except OverflowError:  # an int past the float range
+        ok = False
+    if not ok or (key in ("dur", "stagger") and v < 0):
+        return f"{key} is {v!r}; it takes a number: {NUMBERS[key]}"
+    return None
+
+
+def parse(spec, default_dur: float = 0.5, key: str = "motion") -> Motion | None:
     if not spec:
         return None
     if isinstance(spec, str):
         spec = {"name": spec}
+    if not isinstance(spec, dict):
+        raise ValueError(f"{key} must be a motion name like \"rise\" or an object "
+                         f"{{\"name\": \"rise\", \"dur\": 0.5}}, "
+                         f"got {spec!r}")
     names = []
     for n in (n.strip() for n in str(spec.get("name", "fade")).split("+") if n.strip()):
         c = canonical(n)
         if c is None:
             from .schema import unknown
-            raise ValueError(unknown("motion", n, PRESETS))
+            raise ValueError(f"{key}: " + unknown("motion", n, PRESETS))
         names.append(c)
-    opts = {k: v for k, v in spec.items() if k not in ("name", "dur", "ease", "stagger")}
-    return Motion(names, float(spec.get("dur", default_dur)), spec.get("ease", ""), float(spec.get("stagger", 0)), opts)
+    for k, v in spec.items():
+        why = option_problem(k, v)
+        if why:
+            raise ValueError(f"{key}: {why}")
+    opts = {k: v for k, v in spec.items() if k not in ("name", "dur", "ease", "stagger") and v is not None}
+    dur, stagger = spec.get("dur"), spec.get("stagger")
+    return Motion(names, float(default_dur if dur is None else dur), spec.get("ease") or "",
+                  float(stagger or 0), opts)

@@ -1,45 +1,112 @@
 """Colour parsing and perceptual (OKLab) interpolation."""
 from __future__ import annotations
 
+import math
 import re
 from functools import lru_cache
 
 RGBA = tuple[float, float, float, float]
 
+# The names Kinescript knows. They are iOS-style system colours, not the CSS ones: "red" is #ff3b30 and "blue" is
+# #0a84ff. Names are read in any case ("Red", "RED").
 NAMED = {
     "black": "#000000", "white": "#ffffff", "transparent": "#00000000", "red": "#ff3b30",
     "green": "#34c759", "blue": "#0a84ff", "yellow": "#ffd60a", "orange": "#ff9f0a",
     "gray": "#8e8e93", "grey": "#8e8e93", "purple": "#bf5af2", "pink": "#ff375f", "cyan": "#64d2ff",
 }
+FORMATS = ("#rrggbb, #rgb, #rrggbbaa (aa is opacity), rgb(255, 99, 63), rgba(255, 99, 63, 0.5), or one of the "
+           "names " + ", ".join(NAMED) + " (iOS-style colours: red is #ff3b30, not CSS red)")
+
+_FUNC = re.compile(r"([a-zA-Z]+)\s*\((.*)\)", re.S)
 
 
-def is_color(v) -> bool:
-    return isinstance(v, str) and (v.startswith("#") or v.startswith("rgb") or v in NAMED)
-
-
-@lru_cache(maxsize=4096)
-def parse(c: str) -> RGBA:
-    c = NAMED.get(c, c).strip()
-    if c.startswith("#"):
-        h = c[1:]
+def _read(c: str) -> tuple[RGBA, str | None]:
+    """The colour, and a note when a channel was outside its range and was clamped. ValueError says what is wrong."""
+    s = c.strip()
+    s = NAMED.get(s.lower(), s)
+    if s.startswith("#"):
+        h = s[1:]
+        bad = next((ch for ch in h if ch not in "0123456789abcdefABCDEF"), None)
+        if bad is not None:
+            raise ValueError(f"'{c}' has '{bad}', which is not a hex digit (0-9, a-f)")
+        if len(h) not in (3, 4, 6, 8):
+            raise ValueError(f"'{c}' has {len(h)} hex digits; a hex colour has 3, 4, 6 or 8 (#rgb, #rgba, #rrggbb, "
+                             "#rrggbbaa)")
         if len(h) in (3, 4):
             h = "".join(ch * 2 for ch in h)
         if len(h) == 6:
             h += "ff"
-        if len(h) != 8:
-            raise ValueError(f"bad colour {c!r}")
-        return tuple(int(h[i:i + 2], 16) / 255 for i in (0, 2, 4, 6))  # type: ignore[return-value]
-    m = re.fullmatch(r"rgba?\(([^)]*)\)", c)
+        return tuple(int(h[i:i + 2], 16) / 255 for i in (0, 2, 4, 6)), None  # type: ignore[return-value]
+    m = _FUNC.fullmatch(s)
+    if m and m.group(1).lower() in ("rgb", "rgba"):
+        parts = [p for p in re.split(r"[\s,/]+", m.group(2).strip()) if p]
+        if len(parts) not in (3, 4):
+            raise ValueError(f"'{c}' has {len(parts)} value{'s' * (len(parts) != 1)}; {m.group(1).lower()}() takes "
+                             "red, green and blue (0-255) and an optional alpha (0-1)")
+        vals = []
+        for i, p in enumerate(parts):
+            pct = p.endswith("%")
+            try:
+                v = float(p[:-1] if pct else p)
+            except ValueError:
+                raise ValueError(f"'{c}': '{p}' is not a number") from None
+            if not math.isfinite(v):
+                raise ValueError(f"'{c}': '{p}' is not a finite number")
+            vals.append(v / 100 * (255 if i < 3 else 1) if pct else v)
+        rgb, a = vals[:3], vals[3] if len(vals) == 4 else 1.0
+        cr, ca = [max(0.0, min(255.0, v)) for v in rgb], max(0.0, min(1.0, a))
+        note = None
+        if cr != rgb or ca != a:
+            note = (f"'{c}' has a value outside its range (red, green and blue run from 0 to 255, alpha from 0 to 1); "
+                    f"it is read as rgba({', '.join(f'{v:g}' for v in cr)}, {ca:g})")
+        return (cr[0] / 255, cr[1] / 255, cr[2] / 255, ca), note
     if m:
-        parts = [float(p) for p in m.group(1).replace("/", ",").split(",") if p.strip()]
-        r, g, b = (p / 255 for p in parts[:3])
-        a = parts[3] if len(parts) > 3 else 1.0
-        return (r, g, b, a)
-    raise ValueError(f"bad colour {c!r} (use #rrggbb, #rrggbbaa, rgb(), rgba() or a name)")
+        raise ValueError(f"'{c}': {m.group(1)}() is not a colour Kinescript reads")
+    raise ValueError(f"'{c}' is not a colour name Kinescript knows" if re.fullmatch(r"[A-Za-z]+", s)
+                     else f"'{c}' is not a colour")
+
+
+@lru_cache(maxsize=4096)
+def _cached(c: str) -> tuple[RGBA, str | None]:
+    return _read(c)
+
+
+def parse(c) -> RGBA:
+    """'#ff633f', 'rgb(255, 99, 63)', 'Red' -> (r, g, b, a) in 0..1. Channels outside their range are clamped.
+    ValueError says what is wrong and which forms are read."""
+    if not isinstance(c, str):
+        raise ValueError(f"{c!r} is not a colour; write {FORMATS}")
+    try:
+        return _cached(c)[0]
+    except ValueError as e:
+        raise ValueError(f"{e}. Write {FORMATS}") from None
+
+
+def problem(v) -> str | None:
+    """Why `v` is not a colour, in one sentence without the list of forms; None when it is one."""
+    if not isinstance(v, str):
+        return f"{v!r} is not a colour"
+    try:
+        _cached(v)
+    except ValueError as e:
+        return str(e)
+    return None
+
+
+def clamped(v) -> str | None:
+    """A note when colour `v` has a channel outside its range (it is clamped); None otherwise."""
+    try:
+        return _cached(v)[1] if isinstance(v, str) else None
+    except ValueError:
+        return None
+
+
+def is_color(v) -> bool:
+    return isinstance(v, str) and problem(v) is None
 
 
 def to_argb_int(c: RGBA, alpha_mul: float = 1.0) -> int:
-    r, g, b, a = c
+    r, g, b, a = (max(0.0, min(1.0, x)) for x in c)  # a computed colour can overshoot (an outBack ease)
     a = max(0.0, min(1.0, a * alpha_mul))
     return (round(a * 255) << 24) | (round(r * 255) << 16) | (round(g * 255) << 8) | round(b * 255)
 
@@ -54,7 +121,7 @@ def _gam(x: float) -> float:
 
 
 def _to_oklab(c: RGBA):
-    r, g, b = (_lin(v) for v in c[:3])
+    r, g, b = (_lin(max(0.0, min(1.0, v))) for v in c[:3])  # a negative channel has a complex cube root
     l = (0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b) ** (1 / 3)
     m = (0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b) ** (1 / 3)
     s = (0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b) ** (1 / 3)

@@ -41,6 +41,75 @@
   or an end before its start is a `bad-captions` error naming the file and line (they were Python errors or were
   dropped), and a file with no cues is a `captions-empty` warning; nothing was drawn, with no word. Inline `cues`
   are checked the same way.
+- A bad ease is a check error that names the layer and field and says which forms work. `"ease": 5` and
+  `["outCubic"]` stopped loading with `AttributeError` or `unhashable type`, `spring(0, 0, 0)` divided by zero and
+  `bezier(1, 2)` or `steps()` recursed until Python gave up. spring takes numbers above 0, bezier four numbers with
+  x1 and x2 from 0 to 1, steps a whole number from 1.
+- Motion options are checked: `"enter": {"name": "rise", "dist": "far"}` (also `amount`, `from`, `deg`, a list as
+  `ease`) stopped the render with `can't multiply sequence`; it is now `enter: dist is 'far'; it takes a number:
+  px moved`. `null` for a motion option, a tween's `dur` or `delay`, `anchor`, an `fx` value, or a layer's number
+  or colour key means its default (a null tween `dur` used to stop the load).
+- Wrong types that crashed while drawing or were silently ignored are errors on their layer: `fx` that is not an
+  object of numbers (`5`, `"warm"`, NaN), `shadow` or `box` that is not true or an object, `box.pad` `[]` or
+  `"big"`, `font` that is not text, and `anchor`, `blend`, `split` or `align` that is a number, list or object.
+- `text` given as a number is read as its digits (`42` shows "42", with a note); a list or object is an error
+  instead of its Python repr on screen, and text with half of a surrogate pair (`"a\ud800b"`) is an error instead
+  of a crash in Skia.
+- Times are checked: `at`, `dur` or `until` of `true`, NaN, Infinity, `10**400`, a list or an object are errors
+  (true was read as 1, NaN hid the layer, 10**400 crashed), times past 1,000,000 s are refused, and a huge time
+  prints as `1e+308`, not 300 digits. `canvas.duration` of `"0"` or `"a.out-5"`, and an `"auto"` duration that
+  would end at or before 0, are errors (they gave scenes of 0 or -4 s).
+- `dur` and `until` on one layer warn that `until` is ignored. A layer whose time lies wholly outside the scene or
+  its group (`"at": -1, "dur": 0.5`, or `"at": 5` in a 2 s scene) warns that it is never shown.
+- A layer or audio id `start` or `prev` is an error: a cue reads those words first, so `"at": "start.out"` never
+  meant the layer. A marker with the same name as a layer warns that a bare `"at": "m"` reads the marker.
+- Markers take clocks (`"drop": "0:01.5"`, `"45f"`); a marker that is not a time is an error naming it, and
+  `"drop.out"` on a marker says a marker has no `.out` (it said `unknown reference 'drop'. Did you mean 'drop'?`).
+- Cues can name ids that start with a digit or use letters beyond ASCII (`"1st.out"`, `"título.in"`); a cue on an
+  id with a space or dot says that id cannot be cued instead of `cannot read the time`.
+- Numbers in text may have exponents and leading dots: `"x": "1e3"`, `".5"` and times like `"1e1"` were "not a
+  number". Keyframe times take `"500ms"`, and a time that is not one lists the forms that are.
+- An expression whose value overflows a float (`"=10**400"`, `"=exp(1000)"`) is a `bad-expression` error with
+  its layer and field instead of an `OverflowError` while drawing, and an expression nested too deeply to parse
+  (a 5000-term sum) is an error instead of `maximum recursion depth exceeded`. A colour expression that gives
+  something that is not a colour is found by `kine check`, not the render.
+- Colours: `rgb()` channels past 0..255 (and alpha past 0..1) are clamped with a `colour-clamped` warning;
+  `rgb(300, 0, 0)` drew as dark red (44, 0, 0) by wrapping around, and a negative channel crashed Skia or gave
+  complex numbers when mixed. `rgb(1, 2, 3, 4, 5)` is an error instead of ignoring the extras. A bad colour says
+  what is wrong (`'#zzzzzz' has 'z', which is not a hex digit`, `has 5 hex digits`, `rgb() takes red, green and
+  blue`) instead of `invalid literal for int() with base 16`, and `canvas.bg` errors name `canvas.bg`.
+- Colour names are matched in any case (`"RED"` was an error) and messages list the 13 names Kinescript has
+  instead of promising "a CSS colour name": they are iOS-style, so `red` is #ff3b30 and `blue` #0a84ff.
+- A `$theme` colour used inside `box`, `shadow`, a gradient, `canvas.bg` or a `light` is checked after it is
+  filled in, so a theme entry that is not a colour (or a `$name` the theme does not set) is an error on that
+  field instead of a failure while drawing.
+- Gradient objects are checked: `stops` with fewer than 2 colours, the string `"red"`, a mix of plain and
+  `[position, colour]` stops, a bad colour, or a malformed `linear` or `radial` is an error. They drew nothing,
+  raised `length of colors must be 2 or more`, or an IndexError. A stop position outside 0 to 1 (CSS `150%`)
+  warns that it is drawn at the end.
+- `"position": [x, y, z]` is read as x, y and z. A position that cannot be read (`"10,20"`, `[1]`) is an error;
+  it was deleted while a note said it had been read, so the layer sat at 0, 0.
+- A negative `radius`, `r`, `blur`, `strokeWidth` or `size`, polygon `sides` below 3, and a group with both
+  `children` and `layers` (which dropped `layers`) are errors.
+- Component placeholders: `{{ title }}` with spaces is filled in, and a placeholder with no value and no default
+  (`{{titel}}` misspelt, or a parameter left out) is a `missing-param` error that names the component, the
+  placeholder and the parameters that exist. They were drawn as the literal text `{{titel}}`. A parameter given
+  as `null` takes its default (it drew "None").
+- Scene components of the wrong shape (a list, a string, `layers` that is not a list of objects) and components
+  that use themselves, directly or through another, are errors instead of `AttributeError` or `maximum recursion
+  depth exceeded`. A built-in component parameter of the wrong type (`kinetic` `every: "fast"` or `words: 5`,
+  `callout` `r: "big"`) names the component, the parameter and the parameters it takes. `until` on a `kinetic`
+  (or any built-in) now ends it there; the builder's own `dur` won.
+- A model layer's `light` object (`{"preset": "dramatic", "from": "left"}`) is read as the docs describe. With
+  `from` in it, it was taken for a tween and rejected with `light tween: unknown key 'preset'`.
+- A font family that is not installed warns that the text falls back to another font (it fell back silently),
+  and a missing `.ttf` file warns too.
+- Values that failed while drawing are check errors on their layer: a shader uniform that is text but not a
+  colour, `sksl` that is not text, a counter `format` such as `"{:s}"`, path data `d` that does not parse
+  (`"M0 0 A 1 2"`), an image `focus` that is not `[x, y]`, and caption `cues` that are not `[start, end, text]`.
+- Check issues name their layer: issues raised while expanding a component, a duplicate id, a layer that is not an
+  object (`layers[2]`) and errors while drawing had `layer: null`; issues outside layers read `canvas.bg: ...` or
+  `markers: ...` instead of `layer 'canvas': ...`.
 
 - A video clip's decoder is closed once the clip is off screen. Before, every clip a render had played kept its
   ffmpeg process and six prefetched frames to the end: a 60-cut sequence peaked at 1.66 GB and ran 60 decoders at
@@ -57,7 +126,8 @@
   `"x": "=100+1/(t-0.7)"` is reported (`bad-expression`, with the frame) instead of failing the render at 0.7 s.
   An expression that still fails while drawing names its layer, property and time.
 - `**` in an expression is a float power: `9**9**9` made `check` run for hours computing an exact integer; it is
-  now an `OverflowError` at once. Arithmetic on text or lists (`[0]*999999999`) is refused when the scene loads.
+  now an error at once (`gives a number too large for a float`). Arithmetic on text or lists (`[0]*999999999`) is
+  refused when the scene loads.
 - `"type": "Text"` (any capitalisation of a layer type) is that layer type. `Text` was read as a 3D model with
   shape text, because model shape names were matched first.
 - A scene component whose group lists its layers under `"layers"` (not `"children"`) can be used more than once.

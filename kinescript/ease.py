@@ -99,30 +99,80 @@ def _spring(stiffness: float = 170, damping: float = 26, mass: float = 1) -> Eas
     return lambda t: 1.0 if t >= 1 else raw(t) + (1 - end) * t
 
 
-@lru_cache(maxsize=256)
+FUNCTIONS = "spring(stiffness, damping, mass), bezier(x1, y1, x2, y2), steps(n)"
+
+
+def _args(name: str, kind: str, body: str) -> list[float]:
+    out = []
+    for a in body.split(","):
+        if not a.strip():
+            continue
+        try:
+            v = float(a)
+        except ValueError:
+            raise ValueError(f"ease '{name}': '{a.strip()}' is not a number") from None
+        if not math.isfinite(v):
+            raise ValueError(f"ease '{name}': {a.strip()} is not a finite number")
+        out.append(v)
+    return out
+
+
+def _function(name: str, kind: str, args: list[float]) -> Ease:
+    """bezier(...), spring(...) and steps(...), each checked so a bad one is an error that says why, not a crash."""
+    if kind == "bezier":
+        if len(args) != 4:
+            raise ValueError(f"ease '{name}' has {len(args)} number{'s' * (len(args) != 1)}; bezier takes 4: x1, y1, "
+                             "x2, y2, as in CSS cubic-bezier, with x1 and x2 from 0 to 1")
+        if not (0 <= args[0] <= 1 and 0 <= args[2] <= 1):
+            raise ValueError(f"ease '{name}': x1 and x2 (the 1st and 3rd numbers) must be from 0 to 1")
+        return _bezier(*args)
+    if kind == "spring":
+        if len(args) > 3:
+            raise ValueError(f"ease '{name}' has {len(args)} numbers; spring takes up to 3: stiffness, damping, mass")
+        full = args + [170.0, 26.0, 1.0][len(args):]
+        if min(full) <= 0:  # no damping never settles, and no stiffness or mass divides by zero
+            raise ValueError(f"ease '{name}': stiffness, damping and mass must each be above 0, e.g. spring(170, 26)")
+        return _spring(*full)
+    if len(args) != 1 or args[0] < 1 or args[0] != int(args[0]):
+        raise ValueError(f"ease '{name}': steps takes one whole number of steps, 1 or more, like steps(4)")
+    n = int(args[0])
+    return lambda t: min(1.0, math.floor(t * n) / n) if t < 1 else 1.0
+
+
 def get(name: str | None) -> Ease:
-    """Resolve an ease by name: 'outCubic', 'spring', 'spring(120,12)', 'bezier(.2,.8,.2,1)', 'steps(4)'."""
-    if not name:
+    """Resolve an ease by name: 'outCubic', 'spring', 'spring(120,12)', 'bezier(.2,.8,.2,1)', 'steps(4)'.
+    ValueError says what is wrong with a name that is not an ease."""
+    if name is None or name == "":
         return EASES["outCubic"]
+    if not isinstance(name, str):
+        raise ValueError(f"ease {name!r} is not a name; an ease is text such as \"outCubic\" or \"spring(170, 26)\"")
+    return _get(name)
+
+
+@lru_cache(maxsize=256)
+def _get(name: str) -> Ease:
     if name in EASES:
         return EASES[name]
-    m = re.fullmatch(r"(\w+)\(([^)]*)\)", name.replace(" ", ""))
-    if m:
-        kind, args = m.group(1), [float(a) for a in m.group(2).split(",") if a]
-        if kind in ("bezier", "cubicBezier") and len(args) == 4:
-            return _bezier(*args)
-        if kind == "spring":
-            return _spring(*args)
-        if kind == "steps" and args:
-            n = max(1, int(args[0]))
-            return lambda t: min(1.0, math.floor(t * n) / n) if t < 1 else 1.0
+    m = re.fullmatch(r"(\w+)\((.*)\)", name.strip(), re.S)
+    if m and m.group(1) in ("bezier", "cubicBezier", "spring", "steps"):
+        kind = "bezier" if "ezier" in m.group(1) else m.group(1)
+        return _function(name, kind, _args(name, kind, m.group(2)))
     if name == "spring":
         return _spring()
     c = canonical(name)
-    if c:
-        return get(c)
+    if c and c != name:
+        return _get(c)
     from .schema import unknown
-    raise ValueError(unknown("ease", name, list(EASES) + ["spring"]) + ", spring(k,d), bezier(a,b,c,d), steps(n)")
+    raise ValueError(unknown("ease", name, list(EASES) + ["spring"]) + ", " + FUNCTIONS)
+
+
+def problem(name) -> str | None:
+    """Why `name` is not an ease, or None when it is one."""
+    try:
+        get(name)
+    except ValueError as e:
+        return str(e)
+    return None
 
 
 CSS = {"ease": "inOutSine", "easein": "inCubic", "easeout": "outCubic", "easeinout": "inOutCubic",

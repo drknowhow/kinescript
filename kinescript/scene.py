@@ -7,6 +7,7 @@ import math
 import re
 from pathlib import Path
 
+from . import color as C
 from . import components, media, models, schema
 from . import presets as P
 from . import voice as V
@@ -34,14 +35,31 @@ class SceneError(ValueError):
 
     def __init__(self, message: str, issues: list[dict] | None = None, layer: str | None = None):
         super().__init__(message)
-        self.issues = issues or [{"level": "error", "code": "load", "layer": layer, "message": message, "fix": ""}]
+        text = message
+        m = re.match(r"layer '([^']+)': ", message)
+        if m and layer in (None, m.group(1)):  # the issue names its layer in "layer", not null
+            layer, text = m.group(1), message[m.end():]
+        self.issues = issues or [{"level": "error", "code": "load", "layer": layer, "message": text, "fix": ""}]
 
     @classmethod
     def from_issues(cls, issues: list[dict]) -> "SceneError":
         errs = [i for i in issues if i["level"] == "error"]
-        lines = [(f"layer '{i['layer']}': " if i.get("layer") else "") + i["message"] for i in errs]
+        lines = [_where(i.get("layer"), i["message"]) + i["message"] for i in errs]
         msg = lines[0] if len(lines) == 1 else f"{len(lines)} problems:\n  " + "\n  ".join(lines)
         return cls(msg, issues)
+
+
+# Parts of a scene that are not layers; an issue there reads "canvas: ...", not "layer 'canvas': ...".
+SECTIONS = ("canvas", "markers", "theme", "grade", "motionBlur", "mix", "camera", "light", "components")
+
+
+def _where(owner, message: str) -> str:
+    """The prefix that says where an issue is, left out when the message already starts with it."""
+    if not owner:
+        return ""
+    if owner in SECTIONS or "[" in owner:  # a section, or a path such as layers[2] for a layer with no id
+        return "" if message.startswith((f"{owner}.", f"{owner}:", f"{owner} ", f"{owner}[")) else f"{owner}: "
+    return "" if message.startswith(f"layer '{owner}'") else f"layer '{owner}': "
 
 
 class Layer:
@@ -118,8 +136,11 @@ class Scene:
         raw_layers = [x for l in raw_layers for x in (l if isinstance(l, list) else [l])]
         self.words = self._read_words()
         self._raise_errors()
-        self.timeline = Timeline(self.fps, self.markers, {sid: dict(w, ids=None if w["words"] is None else {
-            x["id"]: (x["start"], x["end"]) for x in w["words"] if x["id"]}) for sid, w in self.words.items()})
+        try:
+            self.timeline = Timeline(self.fps, self.markers, {sid: dict(w, ids=None if w["words"] is None else {
+                x["id"]: (x["start"], x["end"]) for x in w["words"] if x["id"]}) for sid, w in self.words.items()})
+        except ValueError as e:
+            raise SceneError(f"markers: {e}", layer="markers") from e
         self.layers: list[Layer] = []
         self.by_id: dict[str, Layer] = {}
         self._build(raw_layers, None, self.layers)
@@ -132,7 +153,7 @@ class Scene:
             self.duration = self.timeline.solve(cv.get("duration"))
         except ValueError as e:
             lid = getattr(e, "layer", None)
-            raise SceneError((f"layer '{lid}': " if lid else "") + str(e), layer=lid) from e
+            raise SceneError(_where(lid, str(e)) + str(e), layer=lid) from e
         for layer in self.by_id.values():
             layer.t_in, layer.t_out = (_on_grid(t, self.fps) for t in self.timeline.resolved[layer.id])
         for s in self.audio:
@@ -142,8 +163,11 @@ class Scene:
         self.depth = {L.id for L in self.layers if uses_depth(L)}
         self.is3d = self.camera is not None or bool(self.depth)
         self.frames = max(1, math.floor(self.duration * self.fps + 0.5 + 1e-6))  # half a frame up: 2.45 s and 2.55 s
+        self._check_spans()
         self._check_values()
         self._check_sequences()
+        self._check_colours()
+        self._check_fonts()
         self._raise_errors()
 
     def note(self, level: str, code: str, layer, message: str, fix: str = ""):
@@ -234,14 +258,111 @@ class Scene:
                                   f"{name} failed at t={t:.2f}s: {type(e).__name__}: {e}")
                         break
                     if name in schema.COLOR_KEYS:
-                        if isinstance(v, str):
-                            self.note("error", "bad-colour", layer.id, f"{name} '{v}' is not a colour",
-                                      "use #rrggbb, #rrggbbaa, rgb(...) or a CSS colour name")
+                        if v is not None and not (isinstance(v, (tuple, list)) and len(v) in (3, 4)):
+                            self._bad_colour(v, name if t == 0 else f"{name} at t={t:.2f}s", layer.id)
                             break
                     elif name in schema.SCALAR and (isinstance(v, bool) or not isinstance(v, (int, float))):
                         self.note("error", "bad-value", layer.id, f"{name} is {v!r} at t={t:.2f}s; expected a number",
                                   "use a number, a percentage like '50%', or an expression starting with '='")
                         break
+
+    def _check_spans(self):
+        """Warn about a layer that is never on screen because its time falls wholly outside the scene (or its group),
+        and about a marker that shares its name with a layer or sound, since a bare cue then reads the marker."""
+        def walk(layers, lo, hi, within):
+            for L in layers:
+                if L.raw.get("hidden") is True:
+                    continue
+                if L.t_out <= lo + 1e-9 or L.t_in >= hi - 1e-9:
+                    self.note("warning", "never-shown", L.id, f"'{L.id}' runs from {L.t_in:.3f}s to {L.t_out:.3f}s, "
+                              f"wholly outside {within} ({lo:.3f}s to {hi:.3f}s), so it is never shown",
+                              "move at into that span, or set \"hidden\": true to keep it off on purpose")
+                    continue
+                walk(L.children, max(lo, L.t_in), min(hi, L.t_out), f"its group '{L.id}'")
+
+        walk(self.layers, 0.0, self.duration, "the scene")
+        sounds = {s.id for s in self.audio if not s.layer}
+        for m in self.markers if isinstance(self.markers, dict) else ():
+            if m in self.by_id or m in sounds:
+                what = "layer" if m in self.by_id else "audio entry"
+                self.note("warning", "marker-shadows", "markers", f"markers.{m} has the same name as the {what} "
+                          f"'{m}', so a cue \"{m}\" reads the marker; \"{m}.in\" and \"{m}.out\" read the {what}",
+                          f"rename the marker or the {what}")
+
+    def _bad_colour(self, v, field: str, lid):
+        """Report `v`, which is not a colour: a $name the theme does not set, a string Kinescript cannot read, or a
+        number from an expression."""
+        if isinstance(v, str) and v.startswith("$"):
+            self.note("error", "bad-colour", lid, f"{field} is '{v}', but the theme sets no '{v[1:]}'",
+                      f"add \"theme\": {{\"{v[1:]}\": \"#ff633f\"}}, or {schema.COLOUR_FIX}")
+        elif isinstance(v, str):
+            self.note("error", "bad-colour", lid, f"{field}: {C.problem(v)}", schema.COLOUR_FIX)
+        else:
+            self.note("error", "bad-colour", lid, f"{field} is {v!r}; a colour is text like \"#ff633f\"",
+                      schema.COLOUR_FIX)
+
+    def _check_colours(self):
+        """Colours inside objects (a box, a shadow, a gradient, a model part, canvas.bg, a light), checked again
+        once $theme names are filled in, so a theme entry that is not a colour is reported here, by field."""
+        def one(v, field, lid):
+            if v is not None and not C.is_color(v):
+                self._bad_colour(v, field, lid)
+
+        def paint(v, field, lid):  # a colour or a gradient object
+            if isinstance(v, dict) and "stops" in v:
+                for j, s in enumerate(v.get("stops") or [], 1):
+                    one(s[1] if isinstance(s, (list, tuple)) and len(s) == 2 else s, f"{field} gradient stop {j}", lid)
+            elif isinstance(v, str):
+                one(v, field, lid)
+
+        bg = self.bg
+        if not (isinstance(bg, str) and bg.strip().lower() in ("transparent", "none")):
+            paint(bg, "canvas.bg", "canvas")
+        for owner, light in [(None, self.light)] + [(L.id, L.raw.get("light")) for L in self.all_layers()]:
+            if isinstance(light, dict):
+                one(light.get("color"), "light color", owner or "light")
+        for L in self.all_layers():
+            for k in ("fill", "stroke"):
+                if isinstance(L.raw.get(k), dict) and k not in L.props:
+                    paint(L.raw[k], k, L.id)
+            for key, field in (("box", "fill"), ("shadow", "color")):
+                if isinstance(L.raw.get(key), dict):
+                    one(L.raw[key].get(field), f"{key} {field}", L.id)
+            for i, p in enumerate(L.raw.get("parts") or []):
+                for k in ("fill", "stroke"):
+                    if isinstance(p, dict) and isinstance(p.get(k), str):
+                        one(p[k], f"parts[{i}]: {k}", L.id)
+
+    def _check_fonts(self):
+        """Warn when a font family is not installed here: the text would be drawn in another font, silently."""
+        uses: dict[str, str | None] = {}
+        for L in self.all_layers():
+            f = L.raw.get("font")
+            if isinstance(f, str) and f.strip():
+                uses.setdefault(f, L.id)
+        if isinstance(self.theme.get("font"), str) and self.theme["font"] not in uses \
+                and any(L.type in ("text", "counter", "captions") for L in self.all_layers()):
+            uses[self.theme["font"]] = "theme"
+        if not uses:
+            return
+        import skia
+        from .render import BUNDLED, FONT_FALLBACK
+        for fam, owner in uses.items():
+            if fam.lower() in BUNDLED:
+                continue
+            if fam.lower().endswith((".ttf", ".otf", ".ttc")):
+                if not Path(self.path(fam)).is_file():
+                    self.note("warning", "font-missing", owner, f"font file not found: {self.path(fam)}, so the text "
+                              "is drawn in the default font", "paths are relative to the scene file")
+                continue
+            tf = skia.Typeface(fam, skia.FontStyle())
+            if tf is not None and tf.getFamilyName().lower() == fam.lower():
+                continue
+            used = next((f for f in FONT_FALLBACK if (x := skia.Typeface(f, skia.FontStyle())) is not None
+                         and x.getFamilyName().lower() == f.lower()), "the system default")
+            self.note("warning", "font-missing", owner, f"font '{fam}' is not installed here, so the text is drawn "
+                      f"in {used}", "use Space Grotesk or IBM Plex Mono (bundled), an installed family, or a .ttf "
+                      "file next to the scene")
 
     def check_expressions(self, budget: int = 200_000):
         """An expression can fail at one moment only, like 1/(t-0.7) at t=0.7. `kine check` evaluates each at every
@@ -256,10 +377,13 @@ class Scene:
                 T = n / self.fps
                 t = T - layer.t_in
                 try:
-                    prop.at(t, layer.dur, T, 0)
+                    v = prop.at(t, layer.dur, T, 0)
                 except Exception as e:  # noqa: BLE001 - any failure inside a user expression
                     self.note("error", "bad-expression", layer.id, f"{name} failed at t={t:.2f}s (frame {n}): "
                               f"{type(e).__name__}: {e}", "guard the expression, e.g. max(…, 0.001) under a division")
+                    break
+                if name in schema.COLOR_KEYS and not (isinstance(v, (tuple, list)) and len(v) in (3, 4)):
+                    self._bad_colour(v, f"{name} at t={t:.2f}s (frame {n})", layer.id)
                     break
 
     def path(self, src: str) -> str:
@@ -381,7 +505,7 @@ class Scene:
                                  f"Known: {', '.join(sorted(LAYER_TYPES))}")
             lid = str(raw.get("id") or f"{ltype}{len(self.by_id) + 1}")
             if lid in self.by_id:
-                raise SceneError(f"duplicate layer id '{lid}'")
+                raise SceneError(f"duplicate layer id '{lid}'", layer=lid)
             if ltype == "captions":
                 raw = dict({"x": "50%", "y": "86%", "size": 46, "weight": 700}, **raw)
             layer = Layer(lid, ltype, raw, parent, len(self.by_id))
@@ -451,14 +575,17 @@ class Scene:
                 for un, uv in (raw.get("uniforms") or {}).items():
                     if not isinstance(uv, (int, float, str)) or (isinstance(uv, str) and uv.startswith("=")):
                         layer.props["u_" + un] = compile_prop("u_" + un, uv, pctx)
-                layer.enter = P.parse(raw.get("enter"))
-                layer.exit = P.parse(raw.get("exit"))
+                layer.enter = P.parse(raw.get("enter"), key="enter")
+                layer.exit = P.parse(raw.get("exit"), key="exit")
             except (ValueError, SyntaxError) as e:
                 raise SceneError(f"layer '{lid}': {e}", layer=lid) from e
             out.append(layer)
             kids = raw.get("children") or raw.get("layers")
             if ltype == "group" and kids:
-                kids = [components.expand(k, self._components, self.theme, self) for k in kids]
+                try:
+                    kids = [components.expand(k, self._components, self.theme, self) for k in kids]
+                except ValueError as e:
+                    raise SceneError(str(e)) from e
                 kids = [x for k in kids for x in (k if isinstance(k, list) else [k])]
                 self._build(kids, layer, layer.children)
             prev = lid
