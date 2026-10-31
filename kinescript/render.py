@@ -475,8 +475,11 @@ class Renderer:
             # (src-atop), so it darkens and grains what is drawn and leaves the empty canvas empty. Drawn
             # straight onto a transparent canvas, the vignette made the corners half-opaque black and the
             # grain gave every pixel some alpha.
-            c.saveLayer(skia.Canvas.SaveLayerRec(None, skia.Paint(BlendMode=skia.BlendMode.kSrcATop),
-                                                 skia.Canvas.kInitWithPrevious_SaveLayerFlag))
+            # The record holds a bare pointer to the paint: keep the paint in a name, or it is freed before
+            # saveLayer reads it (a segfault on Linux).
+            atop = skia.Paint(BlendMode=skia.BlendMode.kSrcATop)
+            rec = skia.Canvas.SaveLayerRec(None, atop, skia.Canvas.kInitWithPrevious_SaveLayerFlag)
+            c.saveLayer(rec)
         if g.get("vignette"):
             v = float(g["vignette"])
             sh = skia.GradientShader.MakeRadial(skia.Point(W / 2, H / 2), math.hypot(W, H) / 2,
