@@ -6,10 +6,11 @@
     python marketing/build_site.py sound       # only make the voice demo's bed and click again
     python marketing/build_site.py --page      # only rewrite the page fragments, no rendering
 
-The voices of the voice demo (site/demos/voice/) and of the hero (marketing/voice/) are spoken by `kine voice` and
-committed, so building the site does not need a speech engine unless a line changes; then install
-plugins/kinescript-kokoro or set KINE_VOICE_CMD. The voice demo's music bed and click (site/demos/sound/) are
-synthesised here, the hero's sounds by marketing/build_hero.py, and both are committed too.
+The voices of the voice demos (site/demos/voice/) and of the hero (marketing/voice/) are spoken by `kine voice` and
+committed, so building the site does not need a speech engine unless a line changes; then install the plugin each
+sound names (voices.json uses all three) or set KINE_VOICE_CMD_<NAME>. bench/voices.py times them. The voice
+demo's music bed and click (site/demos/sound/) are synthesised here, the hero's sounds by marketing/build_hero.py,
+and both are committed too.
 
 Every video on the page is a scene rendered by `kine render -q high` at a fraction of its canvas size
 (the demos at half scale: 960x540, or 540x960 for the vertical one; the hero at 1280x720). The hero plays the
@@ -52,6 +53,7 @@ DEMO = {
     "import": ("examples/import.json", 3.0, 0.5),
     "captions": ("site/demos/captions.json", 4.0, 0.5),
     "voice": ("site/demos/voice.json", 6.0, 0.5),
+    "voices": ("site/demos/voices.json", 18.45, 0.5),
     "edit": ("site/demos/edit.json", 2.0, 0.5),
 }
 HERO = ("marketing/hero.json", 3.6, 2 / 3)
@@ -309,7 +311,7 @@ def main(argv: list[str]) -> None:
     if "--page" not in argv:
         if not (DEMOS / "sound" / "bed.m4a").exists() or "sound" in names:
             sound_assets()
-        for scene in (DEMO["voice"][0], HERO[0]):  # speaks only the lines that changed since their files were made
+        for scene in (DEMO["voice"][0], DEMO["voices"][0], HERO[0]):  # speaks only the lines that changed since their files were made
             run(*KINE, "voice", scene)
         for name in names or [*DEMO, "hero", "look"]:
             if name == "sound":

@@ -389,6 +389,16 @@ def test_theme_names_work_inside_a_scenes_own_components():
     assert [(s.by_id[i].raw["fill"], s.by_id[i].raw["stroke"]) for i in ("t1-w", "t2-w")] == [("#9299a8", "#123456")] * 2
 
 
+def test_a_component_holding_a_group_can_be_used_twice():
+    spec = scene([{"use": "card", "id": "a", "label": "A"}, {"use": "card", "id": "ab", "label": "B"}])
+    spec["components"] = {"card": {"params": {"label": ""}, "layers": [
+        {"id": "box", "type": "group", "children": [{"id": "abc", "type": "text", "text": "{{label}}"},
+                                                    {"type": "group", "children": [{"id": "dot", "type": "circle", "r": 4}]}]}]}}
+    s = k.Scene(spec)
+    assert {"a-box", "a-abc", "a-dot", "ab-box", "ab-abc", "ab-dot"} <= set(s.by_id)
+    assert s.by_id["ab-abc"].raw["text"] == "B"
+
+
 def test_sequence_crossfades_and_video_renders(clip):
     spec = scene([{"type": "sequence", "id": "cut", "clips": [{"src": clip, "trim": [0, 1.5]}, {"src": clip, "trim": [1, 3]}],
                    "transition": {"type": "fade", "dur": 0.5}}])

@@ -1,7 +1,11 @@
 # Changelog
 
-## Unreleased
+## 1.3.1 (2026-10-31)
 
+- A scene's own component can hold a group and still be used more than once: the ids of nested layers now get the
+  instance id in front too, as top-level ones did. Before, a second use stopped with `duplicate layer id`.
+- The site's sound section has a demo of the three voice backends speaking the same line,
+  `site/demos/voices.json`, with the time each took. `bench/voices.py` measures those times.
 - `kine check` warns (`media-offscreen`) when a video, image or shader layer is more than half off the canvas for
   a second or more, and for a video or shader without an `anchor` it says why: they are placed by their top-left
   corner even when `x` and `y` are set. A sequence is reported once, under its own id. Found in #11, where a clip

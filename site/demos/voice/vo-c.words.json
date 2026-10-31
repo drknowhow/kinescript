@@ -1,0 +1,58 @@
+{
+ "words": [
+  {
+   "word": "Same",
+   "start": 0.18,
+   "end": 0.4
+  },
+  {
+   "word": "line,",
+   "start": 0.48,
+   "end": 0.74
+  },
+  {
+   "word": "three",
+   "start": 1.1,
+   "end": 1.32
+  },
+  {
+   "word": "voices.",
+   "start": 1.4,
+   "end": 1.84,
+   "id": "voices"
+  },
+  {
+   "word": "Guess",
+   "start": 3.3,
+   "end": 3.5,
+   "id": "guess"
+  },
+  {
+   "word": "which",
+   "start": 3.54,
+   "end": 3.68
+  },
+  {
+   "word": "one",
+   "start": 3.82,
+   "end": 3.92
+  },
+  {
+   "word": "costs",
+   "start": 4.0,
+   "end": 4.28
+  },
+  {
+   "word": "money.",
+   "start": 4.36,
+   "end": 4.66,
+   "id": "money"
+  }
+ ],
+ "made": {
+  "hash": "3b3a95a5eddc7452",
+  "backend": "chatterbox",
+  "version": "chatterbox-tts 0.1.7 turbo, kinescript-chatterbox 0.1.0",
+  "speaker": "turbo built-in"
+ }
+}

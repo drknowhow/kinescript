@@ -1,0 +1,58 @@
+{
+ "words": [
+  {
+   "word": "Same",
+   "start": 0.32,
+   "end": 0.56
+  },
+  {
+   "word": "line,",
+   "start": 0.64,
+   "end": 1.04
+  },
+  {
+   "word": "three",
+   "start": 1.36,
+   "end": 1.6
+  },
+  {
+   "word": "voices.",
+   "start": 1.68,
+   "end": 2.24,
+   "id": "voices"
+  },
+  {
+   "word": "Guess",
+   "start": 3.52,
+   "end": 3.68,
+   "id": "guess"
+  },
+  {
+   "word": "which",
+   "start": 3.76,
+   "end": 3.92
+  },
+  {
+   "word": "one",
+   "start": 4.0,
+   "end": 4.08
+  },
+  {
+   "word": "costs",
+   "start": 4.16,
+   "end": 4.52
+  },
+  {
+   "word": "money.",
+   "start": 4.56,
+   "end": 4.88,
+   "id": "money"
+  }
+ ],
+ "made": {
+  "hash": "65ac3001f478dd77",
+  "backend": "elevenlabs",
+  "version": "eleven_v4, kinescript-elevenlabs 0.1.0",
+  "speaker": "George"
+ }
+}
