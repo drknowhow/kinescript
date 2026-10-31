@@ -9,5 +9,5 @@ except ImportError as e:  # on Linux the wheel loads the system's EGL and GL, ev
 from .output import render, still
 from .scene import Scene, SceneError, load
 
-__version__ = "1.3.1"
+__version__ = "1.4.0"
 __all__ = ["Scene", "SceneError", "load", "render", "still", "__version__"]
