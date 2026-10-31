@@ -1,6 +1,6 @@
 """Builds marketing/promo.json, the launch video, which is itself a Kinescript scene.
 
-    python marketing/build_promo.py 302 2.7   # measured fps and frame ms, shown in the video
+    python marketing/build_promo.py 288 2.0   # measured fps and frame ms, shown in the video
     kine check marketing/promo.json && kine render marketing/promo.json -o docs/promo.mp4 -q high
     kine render marketing/promo.json -o docs/hero.gif --scale 0.5 --to 10.5
     kine still marketing/promo.json --at 3 -o docs/poster.png

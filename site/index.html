@@ -425,11 +425,11 @@ kine render voice.json -o voice.mp4</code></pre>
     <h2 id="speed-title">Fast on a GPU.</h2>
     <p class="sub">Skia draws on the GPU through a hidden OpenGL context, one per worker. Frames are split into chunks, encoded in parallel and joined without re-encoding, while another ffmpeg process mixes the audio.</p>
     <ul class="speed">
-      <li><b>2.8 ms</b>median to draw one 1080p frame of the <a href="https://github.com/drknowhow/kinescript/blob/main/docs/promo.mp4">launch video</a> and read it back</li>
-      <li><b>320</b>frames per second, rendering the launch video at 1080p with audio</li>
+      <li><b>2.0 ms</b>median to draw one 1080p frame of the <a href="https://github.com/drknowhow/kinescript/blob/main/docs/promo.mp4">launch video</a> and read it back</li>
+      <li><b>290</b>frames per second, rendering the launch video at 1080p with audio</li>
       <li><b>3</b>Python dependencies: skia-python, numpy and glfw, plus ffmpeg</li>
     </ul>
-    <p class="note">Measured on an Intel Core Ultra 7 265 with an NVIDIA RTX 5060 Ti, Windows 11, on 2026-10-30. Without a GPU, Kinescript falls back to Skia's CPU rasteriser, which is much slower; the <a href="https://github.com/drknowhow/kinescript#limits">README</a> has the numbers.</p>
+    <p class="note">Measured on an Intel Core Ultra 7 265 with an NVIDIA RTX 5060 Ti, Windows 11, on 2026-10-31. Without a GPU, Kinescript falls back to Skia's CPU rasteriser, which is much slower; the <a href="https://github.com/drknowhow/kinescript#limits">README</a> has the numbers.</p>
   </section>
 
   <section id="install" class="steps" aria-labelledby="install-title">

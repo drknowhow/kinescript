@@ -240,13 +240,13 @@ More scenes in [`examples/`](https://github.com/drknowhow/kinescript/tree/main/e
 ## Performance
 
 Measured on the development machine (Intel Core Ultra 7 265, 20 threads, NVIDIA RTX 5060 Ti, Windows 11),
-2026-10-30:
+2026-10-31:
 
 | Workload | Result |
 |---|---|
-| Drawing one 1080p frame of the launch video on the GPU, converted to I420 and read back as a render does | median 2.8 ms, p95 3.8 ms (all 1038 frames) |
-| Launch video, 34.6 s at 1080p30, `-q high`, with audio | 3.3 s wall, about 320 frames/s (median of 5 runs) |
-| `examples/edit.json`, 10.4 s with two decoded video clips | 2.25 s wall, 139 frames/s (median of 5 runs) |
+| Drawing one 1080p frame of the launch video on the GPU, converted to I420 and read back as a render does | median 2.0 ms, p95 3.3 ms (all 1038 frames) |
+| Launch video, 34.6 s at 1080p30, `-q high`, with audio | 3.6 s wall, about 290 frames/s (median of 5 runs) |
+| `examples/edit.json`, 10.4 s with two decoded video clips | 1.95 s wall, 160 frames/s (median of 5 runs) |
 
 [`python bench/stages.py`](https://github.com/drknowhow/kinescript/blob/main/bench/stages.py) splits the time
 per frame into drawing, conversion and readback, and writing to ffmpeg for several workloads, and times whole
