@@ -25,7 +25,8 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"}}, "required": ["scene"]}},
     {"name": "kine_look", "description": "Contact sheet: `count` frames in one labelled image. boxes=true outlines each "
      "layer with its id. audio=true draws the sound under the frames on the same time axis (a lane per role and the "
-     "mix, with levels, the duck and issues in red) and returns its measurements. Use it to review motion, layout "
+     "mix, with levels, the duck and issues in red) and returns its measurements. times are read as kine_still reads "
+     "at; one outside the scene draws its first or last frame, with a note. Use it to review motion, layout "
      "and sound without watching video.",
      "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"},
                                                       "count": {"type": "integer", "default": 12},
@@ -33,7 +34,8 @@ TOOLS = [
                                                       "boxes": {"type": "boolean", "default": False},
                                                       "audio": {"type": "boolean", "default": False},
                                                       "width": {"type": "integer", "default": 400}}, "required": ["scene"]}},
-    {"name": "kine_still", "description": "One full-size frame at time `at` (seconds), returned as an image.",
+    {"name": "kine_still", "description": "One full-size frame at time `at` (seconds), returned as an image, then "
+     "its frame number, time and size (with notes when `at` is outside the scene).",
      "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"},
                                                       "at": {"type": ["number", "string"], "description":
                                                              "seconds; negative counts from the end; \"end\" is "
@@ -56,7 +58,8 @@ TOOLS = [
                                                       "backend": {"type": "string"}}, "required": ["scene"]}},
     {"name": "kine_render", "description": "Render to a file (.mp4, .mov ProRes 4444 alpha, .webm VP9 alpha, .gif, or a "
      ".png sequence; .wav/.m4a/.mp3/.flac for the sound alone). quality draft|standard|high; scale <1 for previews; "
-     "from/to (s) for a range.",
+     "from/to (s) for a range: every frame on screen from `from` until `to`. The result's notes say when `to` was "
+     "past the end.",
      "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"}, "out": {"type": "string"},
                                                       "quality": {"type": "string", "enum": ["draft", "standard", "high"]},
                                                       "scale": {"type": "number"}, "from": {"type": "number"},
@@ -123,8 +126,9 @@ def call(name: str, args: dict) -> list[dict]:
     if name == "kine_still":
         from .output import still
         out = str(Path(tempfile.gettempdir()) / f"kine_still_{os.getpid()}.png")
-        still(_scene(args), _need(args, "at"), out, float(args.get("scale", 0.5)))
-        return [_image(out)]
+        info = still(_scene(args), _need(args, "at"), out, float(args.get("scale", 0.5)))
+        del info["out"]  # a temporary file, gone once read
+        return [_image(out), _text(info)]  # which frame it drew, and a note when `at` was outside the scene
     if name == "kine_voice":
         from .voice import generate
         return [_text(generate(_need(args, "scene"), args.get("only"), bool(args.get("force")), args.get("backend"),
@@ -207,10 +211,13 @@ def _handle(req: dict):
         try:
             _reply(id_, {"content": call(params.get("name"), args)})
         except (ValueError, RuntimeError, OSError, KeyError) as e:
-            _reply(id_, {"content": [_text(f"error: {e}")], "isError": True})
+            from .media import explain  # which of ffmpeg and ffprobe is missing, not "[WinError 2]"
+            _reply(id_, {"content": [_text(f"error: {explain(e)}")], "isError": True})
         except Exception as e:  # noqa: BLE001 - report unexpected failures to the client instead of dying
-            _reply(id_, {"content": [_text(f"internal error: {e}\n{traceback.format_exc()[-1500:]}")],
-                         "isError": True})
+            from .cli import ISSUES_URL
+            _reply(id_, {"content": [_text(f"internal error: {type(e).__name__}: {e}. This is a bug in Kinescript; "
+                                           f"please report it at {ISSUES_URL} with the call and the scene.\n"
+                                           f"{traceback.format_exc()[-1500:]}")], "isError": True})
     elif method == "ping":
         _reply(id_, {})
     else:
