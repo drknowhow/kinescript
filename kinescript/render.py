@@ -1,11 +1,15 @@
 """Frame-pure renderer: frame n is a function of the scene and n alone."""
 from __future__ import annotations
 
+import ctypes
+import functools
 import math
 import os
 import re
 import sys
+import time
 import unicodedata
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -108,6 +112,28 @@ def _straighten(buf: np.ndarray):
     al = px[:, 3:4].astype(np.uint16)
     px[:, :3] = np.minimum((px[:, :3].astype(np.uint16) * 255 + al // 2) // al, 255)
     buf[part] = px
+
+
+# An async readback hands its callback the pixels as a PyCapsule around a pointer, valid only during the call.
+# Own prototypes, not ctypes.pythonapi's shared ones, whose argtypes other code may set differently.
+_cap_name = ctypes.PYFUNCTYPE(ctypes.c_char_p, ctypes.py_object)(("PyCapsule_GetName", ctypes.pythonapi))
+_cap_ptr = ctypes.PYFUNCTYPE(ctypes.c_void_p, ctypes.py_object, ctypes.c_char_p)(
+    ("PyCapsule_GetPointer", ctypes.pythonapi))
+
+
+def _read_back(job: list, rows: int, res) -> None:
+    """Callback of Surface.asyncRescaleAndReadPixels: copy the pixels into job[0] (rows bytes a row) and mark
+    job done. An exception is kept for the caller: one raised here would unwind through Skia's C++."""
+    try:
+        if res is None:
+            raise RuntimeError("the GPU readback of a frame failed")
+        cap = res.data(0)
+        h = job[0].size // rows
+        src = (ctypes.c_uint8 * (res.rowBytes(0) * h)).from_address(_cap_ptr(cap, _cap_name(cap)))
+        np.copyto(job[0].reshape(h, rows), np.ctypeslib.as_array(src).reshape(h, -1)[:, :rows])
+    except BaseException as e:  # noqa: BLE001
+        job[2] = e
+    job[1] = True
 
 
 BACKENDS = ("auto", "gpu", "cpu")
@@ -492,6 +518,7 @@ class Renderer:
             raise RuntimeError("GPU backend requested but no OpenGL context could be created")
         self.surface = skia.Surface.MakeRenderTarget(ctx, skia.Budgeted.kNo, self.info) if ctx else None
         self.backend = "gpu" if self.surface is not None else "cpu"
+        self.gr = ctx if self.backend == "gpu" else None
         if self.surface is None:
             self.surface = skia.Surface.MakeRaster(self.info)
         self.buf = np.empty((self.h, self.w, 4), np.uint8)
@@ -624,6 +651,49 @@ class Renderer:
 
     def frame_i420(self, n: int) -> np.ndarray:
         """Frame n as an I420 buffer (BT.709, limited range), reused between calls. Needs self.yuv."""
+        _, info, surf, buf = self._to_i420(n)
+        surf.readPixels(info, buf, self.w)
+        return buf
+
+    def frames_i420(self, frames):
+        """frame_i420 of each of frames, in order; each buffer is valid until the next one is asked for. A frame's
+        readback is queued on the GPU and collected once the next frame is drawn, so the GPU draws and reads back
+        one frame while Python draws the next. A blocking readPixels waited for both; its copy alone took 1.6 ms of
+        a 2.8 ms frame of a simple 1080p scene. The bytes are readPixels' bytes."""
+        pending: deque = deque()  # [buffer, done, error] of each frame whose readback is in flight, oldest first
+        bufs = None
+        try:
+            for k, n in enumerate(frames):
+                _, info, surf, buf = self._to_i420(n)
+                if bufs is None:
+                    bufs = (buf, np.empty_like(buf))
+                job = [bufs[k % 2], False, None]  # the other buffer is the one last handed out
+                done = functools.partial(_read_back, job, self.w)
+                surf.asyncRescaleAndReadPixels(info, skia.IRect.MakeWH(info.width(), info.height()),
+                                               skia.Surface.RescaleGamma.kSrc, done)
+                self.gr.submit()
+                pending.append(job)
+                if len(pending) > 1:
+                    yield self._collect(pending.popleft())
+            while pending:
+                yield self._collect(pending.popleft())
+        finally:
+            if pending:  # stopped early: no callback may write into these buffers later
+                self.gr.submit(skia.GrSyncCpu.kYes)
+                self.gr.checkAsyncWorkCompletion()
+
+    def _collect(self, job: list) -> np.ndarray:
+        """Wait for job's readback. Usually done already: callbacks run in the submit after the next frame's draw.
+        A blocking submit would also wait for that next frame; sleep(0) hands the core to an encoder thread."""
+        while not job[1]:
+            time.sleep(0)
+            self.gr.checkAsyncWorkCompletion()
+        if job[2] is not None:
+            raise job[2]
+        return job[0]
+
+    def _to_i420(self, n: int) -> tuple:
+        """Draw frame n and convert it into the I420 surface, not yet read back. Returns self._i420."""
         if not hasattr(self, "_i420"):
             info = skia.ImageInfo.Make(self.w // 4, self.h * 3 // 2, skia.kRGBA_8888_ColorType, skia.kPremul_AlphaType)
             surf = skia.Surface.MakeRenderTarget(self.surface.recordingContext(), skia.Budgeted.kNo, info)
@@ -640,8 +710,7 @@ class Renderer:
         # Drop the snapshot before the next draw: while it lives, drawing to the surface copies the
         # whole texture first (copy-on-write), which cost ~80 ms a frame.
         del img, b
-        surf.readPixels(info, buf, self.w)
-        return buf
+        return self._i420
 
     def snapshot(self) -> skia.Image:
         return self.surface.makeImageSnapshot()
