@@ -248,7 +248,8 @@ DEPTH AND CAMERA (3D)
             extrudes the stroke, with round ends, for line icons).
   detail    low | medium (default) | high: how many triangles. A medium sphere has about 2,200.
   fill      one colour [theme accent]   shine 0..1 [0.4]   metal 0..1 [0]   rim 0..1 [0.5] (edge
-            light)   bands [0] (2 or more: flat toon steps). These animate.
+            light)   bands [0] (2 or more: flat toon steps)   glow 0..1 [0] (shows at least fill x
+            glow however it is lit: neon, screens, lamps). These animate.
   parts     [{"shape": "sphere", "r": 30, "x": 0, "y": -120, "z": 0, "rotateX": 0, "rotateY": 0,
             "rotate": 0, "scale": 1, "fill": "#b9f45d", "shine": 0.9}, ...] placed from the
             model's centre, in plain numbers (parts do not animate; the model does). A part takes
@@ -267,7 +268,17 @@ DEPTH AND CAMERA (3D)
   light     top level, or on one model: studio (default) | soft | dramatic | flat (no shading),
             or {"preset": "studio", "key": 0.85, "fill": 0.25, "ambient": 0.22, "rim": 0.35,
             "from": "topleft", "color": "#fff4e6"}. from: topleft | top | topright | left | right |
-            front | bottomleft | bottom | bottomright. Lights move with the camera.
+            front | bottomleft | bottom | bottomright. azimuth (degrees round from the front, toward
+            the right) and elevation (degrees up) replace those parts of from. Every amount, the
+            angles and the colour animate: "azimuth": [[0, -60], ["end", 60]] sweeps the key across.
+            follow: camera (default: the light moves with the camera, so orbiting does not change
+            the shading) | world (it stays in the scene: orbit the camera for a turntable look).
+            check warns (light-behind) when the key is behind a model as the camera sees it.
+  lights    top level, or on one model: up to 3 more lights, [{"from": "right", "color":
+            "#4a7dff", "intensity": 0.6}, {"type": "point", "x": 900, "y": 200, "z": 400,
+            "range": 1000}]. A directional light takes from, azimuth, elevation and follow like the
+            key; a point light sits at x, y, z in canvas px (z toward the viewer) and lights each
+            model from where the model's centre is, at half strength range px away. These animate.
   Triangles are sorted far to near within one model, so where two parts of one model cut through
   each other the seam is stepped: let parts touch rather than cross. Separate layers draw in list
   order, except in a stage (a group with "sort": "pixel", see DEPTH AND CAMERA), where they meet
@@ -288,6 +299,12 @@ DEPTH AND CAMERA (3D)
   A product turntable from a model file, on a soft floor shadow:
     {"id": "product", "type": "model", "src": "rocket.glb", "x": "50%", "y": "46%", "h": 600,
      "rotateY": [[0, 0], ["end", 360]], "ground": true, "enter": {"name": "build", "dur": 1.6}}
+  A planet whose key light sweeps round it, with a cool light from the right and a ring that glows:
+    {"id": "planet", "type": "model", "x": "50%", "y": "50%", "detail": "high", "rotateY": [[0, -20], ["end", 20]],
+     "light": {"preset": "dramatic", "azimuth": [[0, -70], ["end", 40]]},
+     "lights": [{"from": "right", "color": "#4a7dff", "intensity": 0.5}],
+     "parts": [{"shape": "sphere", "r": 150, "fill": "#e8e2d0", "shine": 0.8},
+               {"shape": "torus", "r": 230, "tube": 12, "rotateX": 75, "fill": "#ff633f", "glow": 0.9}]}
 
 ANIMATING A VALUE (any number or colour key)
   constant     "x": 960

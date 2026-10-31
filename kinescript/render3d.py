@@ -11,11 +11,12 @@ import skia
 
 from . import color as C
 from . import mesh, models, space, svgpath
+from .props import compile_prop
 
-MATERIAL = ("fill", "shine", "metal", "rim", "bands")
+MATERIAL = ("fill", "shine", "metal", "rim", "bands", "glow")
 MAX_MATERIALS = 8
-# Lights are fixed to the camera, like a studio key light on the camera rig: turning a model
-# changes its shading, orbiting the camera around it does not.
+# Lights are fixed to the camera by default, like a studio key light on the camera rig: turning a model
+# changes its shading, orbiting the camera around it does not. "follow": "world" fixes one in the scene instead.
 LIGHTS = {"studio": {"key": 0.85, "fill": 0.25, "ambient": 0.22, "rim": 0.35, "from": "topleft"},
           "soft": {"key": 0.55, "fill": 0.4, "ambient": 0.38, "rim": 0.2, "from": "top"},
           "dramatic": {"key": 1.05, "fill": 0.06, "ambient": 0.06, "rim": 0.75, "from": "left"},
@@ -23,6 +24,8 @@ LIGHTS = {"studio": {"key": 0.85, "fill": 0.25, "ambient": 0.22, "rim": 0.35, "f
 FROM = {"topleft": (-0.5, -0.6, 0.62), "top": (0.0, -0.75, 0.66), "topright": (0.5, -0.6, 0.62),
         "left": (-0.85, -0.25, 0.46), "right": (0.85, -0.25, 0.46), "front": (0.0, 0.0, 1.0),
         "bottomleft": (-0.5, 0.6, 0.62), "bottom": (0.0, 0.75, 0.66), "bottomright": (0.5, 0.6, 0.62)}
+MORE_LIGHTS = 3  # "lights" past the key, fill and rim
+FIXED = {"preset", "from", "follow", "type"}  # light keys that do not tween
 _SKSL = """
 DECLARE
 uniform half3 keyDir;
@@ -45,26 +48,46 @@ half4 main(float2 uv) {
         s = step(0.45, s) * p.x;
     }
     half3 diffuse = b.rgb * (amt.z + amt.x * d * keyCol + amt.y * f * half3(0.85, 0.9, 1.0)) * (1.0 - 0.75 * p.z);
-    half3 spec = mix(half3(1.0), b.rgb, p.z) * s * amt.x * keyCol;
+    half3 spec = mix(half3(1.0), b.rgb, p.z) * s * amt.x * keyCol;MORE
     half rim = pow(1.0 - n.z, 3.0) * p.w * amt.w;
-    return half4(saturate(diffuse + spec + rim * keyCol), 1.0);
+    return half4(saturate(LIT), 1.0);
 }
 """
-_EFFECTS: dict[int, skia.RuntimeEffect] = {}
+# Light j of "lights", shaded as the key is (without a rim) and added to diffuse and spec.
+_MORE = """
+    half dJ = max(dot(n, dirJ), 0.0);
+    half sJ = pow(max(dot(n, normalize(dirJ + half3(0.0, 0.0, 1.0))), 0.0), p.y) * p.x;
+    if (b.a > 1.5) {
+        dJ = ceil(dJ * b.a - 0.25) / b.a;
+        sJ = step(0.45, sJ) * p.x;
+    }
+    diffuse += b.rgb * dJ * colJ * (1.0 - 0.75 * p.z);
+    spec += mix(half3(1.0), b.rgb, p.z) * sJ * colJ;"""
+_EFFECTS: dict[tuple, skia.RuntimeEffect] = {}
 
 
-def _effect(n: int) -> skia.RuntimeEffect:
+def _effect(n: int, more: int = 0, glow: bool = False) -> skia.RuntimeEffect:
     """The shading effect for n materials, one pair of uniforms each (base colour + bands, then
-    specular amount, exponent, metal and rim)."""
-    if n not in _EFFECTS:
-        decl = "\n".join(f"uniform half4 base{i};\nuniform half4 surf{i};" for i in range(n))
-        pick = " ".join(f"if (m == {i}.0) {{ b = base{i}; p = surf{i}; }}" for i in range(1, n))
-        _EFFECTS[n] = skia.RuntimeEffect.MakeForShader(_SKSL.replace("DECLARE", decl).replace("LOOKUP", pick))
-    return _EFFECTS[n]
+    specular amount, exponent, metal and rim), a glow each if any glows, and `more` lights. Without
+    either, the source is what it was before they existed, so those models draw the same bytes."""
+    if (n, more, glow) not in _EFFECTS:
+        decl = "\n".join(f"uniform half4 base{i};\nuniform half4 surf{i};" + (f"\nuniform half glow{i};" if glow else "")
+                         for i in range(n))
+        decl += "".join(f"\nuniform half3 dir{j};\nuniform half3 col{j};" for j in range(more))
+        g = "; g = glow{}" if glow else ""
+        pick = " ".join(f"if (m == {i}.0) {{ b = base{i}; p = surf{i}{g.format(i)}; }}" for i in range(1, n))
+        if glow:
+            pick = "half g = glow0;\n    " + pick
+        lit = "diffuse + spec + rim * keyCol"
+        src = (_SKSL.replace("DECLARE", decl).replace("LOOKUP", pick)
+               .replace("MORE", "".join(_MORE.replace("J", str(j)) for j in range(more)))
+               .replace("LIT", f"max({lit}, b.rgb * g)" if glow else lit))
+        _EFFECTS[n, more, glow] = skia.RuntimeEffect.MakeForShader(src)
+    return _EFFECTS[n, more, glow]
 
 
 def light(spec) -> dict:
-    """A light preset name or {key, fill, ambient, rim, from, color} on top of the studio preset."""
+    """A light preset name or {key, fill, ambient, rim, from, color, ...} on top of the studio preset."""
     if isinstance(spec, dict):
         out = dict(LIGHTS["studio"], color="#fff4e6", **LIGHTS.get(spec.get("preset"), {}))
         out.update({k: v for k, v in spec.items() if k != "preset"})
@@ -72,22 +95,72 @@ def light(spec) -> dict:
     return dict(LIGHTS.get(spec or "studio", LIGHTS["studio"]), color="#fff4e6")
 
 
+def at(cache: dict, ctx, spec, t: float, d: float, T: float):
+    """A light object with each key that tweens (keyframes, a tween or an expression) at local time t of d.
+    Compiled once per object and kept in cache."""
+    if not isinstance(spec, dict):
+        return spec
+    hit = cache.get(id(spec))
+    if hit is None or hit[0] is not spec:
+        hit = cache[id(spec)] = (spec, {k: compile_prop(k, v, ctx) for k, v in spec.items()
+                                        if k not in FIXED and not isinstance(v, (int, float))})
+    return dict(spec, **{k: p.at(t, d, T) for k, p in hit[1].items()})
+
+
 def _unit(v) -> list[float]:
     v = np.asarray(v, float)
     return (v / (np.linalg.norm(v) or 1.0)).tolist()
 
 
-def _lights(lt: dict) -> tuple:
-    """Key and fill directions in camera space, key colour, and the four amounts, as the shader takes them."""
-    key = _unit(FROM.get(lt.get("from"), FROM["topleft"]))
-    return (key, _unit((-key[0], 0.35, 0.8)), list(C.parse(lt.get("color", "#fff4e6"))[:3]),
+def _rgb(v) -> list[float]:
+    return list((v if isinstance(v, tuple) else C.parse(v))[:3])
+
+
+def toward(lt: dict) -> list[float]:
+    """Unit vector toward a light, in the space it follows: its `from`, with `azimuth` (degrees round from the
+    front, toward the right) and `elevation` (degrees up) in place of those parts of it."""
+    v = _unit(FROM.get(lt.get("from"), FROM["topleft"]))
+    az, el = lt.get("azimuth"), lt.get("elevation")
+    if az is None and el is None:
+        return v
+    az = math.radians(float(az)) if az is not None else math.atan2(v[0], v[2])
+    el = math.radians(float(el)) if el is not None else math.asin(max(-1.0, min(1.0, -v[1])))
+    return [math.cos(el) * math.sin(az), -math.sin(el), math.cos(el) * math.cos(az)]
+
+
+def _lights(lt: dict, R=None) -> tuple:
+    """Key and fill directions in camera space, key colour, and the four amounts, as the shader takes them.
+    R turns world directions into camera space, for a key that follows the world."""
+    key = toward(lt)
+    if lt.get("follow") == "world" and R is not None:
+        key = _unit(R @ key)
+    return (key, _unit((-key[0], 0.35, 0.8)), _rgb(lt.get("color", "#fff4e6")),
             [float(lt.get(k, 0)) for k in ("key", "fill", "ambient", "rim")])
 
 
-def _shade(nv, M, mats, key, fill, col, amt) -> np.ndarray:
+def _more(specs, R, centre, w: float, h: float) -> list[tuple]:
+    """The extra lights as (direction in camera space, colour times intensity). A point light lights the
+    whole model from where its centre is, fading to half at `range` px."""
+    out = []
+    for s in specs[:MORE_LIGHTS]:
+        col = np.asarray(_rgb(s.get("color", "#ffffff"))) * float(s.get("intensity", 0.6))
+        if s.get("type") == "point":
+            v = np.array([float(s.get("x", w / 2)), float(s.get("y", h / 2)), float(s.get("z", 600.0))]) - centre
+            dist = float(np.linalg.norm(v)) or 1.0
+            d = R @ (v / dist)
+            col = col / (1.0 + (dist / max(float(s.get("range", 1000.0)), 1e-6)) ** 2)
+        else:
+            d = np.asarray(toward(s))
+            if s.get("follow") == "world":
+                d = R @ d
+        out.append((_unit(d), col.tolist()))
+    return out
+
+
+def _shade(nv, M, mats, key, fill, col, amt, more=()) -> np.ndarray:
     """The shader's lighting, per vertex, as 0xAARRGGBB: the raster backend's path."""
     base = np.array([(*m[0], m[1]) for m in mats])[M]
-    sp, ex, metal, rim = np.array([m[2:] for m in mats])[M].T
+    sp, ex, metal, rim = np.array([m[2:6] for m in mats])[M].T
     n = np.c_[nv[:, :2], np.sqrt(np.clip(1 - (nv[:, :2] ** 2).sum(1), 0, 1))]
     d, f = np.clip(n @ key, 0, None), np.clip(n @ fill, 0, None)
     s = np.clip(n @ _unit(np.add(key, (0, 0, 1))), 0, None) ** ex * sp
@@ -100,7 +173,17 @@ def _shade(nv, M, mats, key, fill, col, amt) -> np.ndarray:
     light = amt[2] + amt[0] * d[:, None] * col + amt[1] * f[:, None] * (0.85, 0.9, 1.0)
     rgb = base[:, :3] * light * (1 - 0.75 * metal)[:, None]
     rgb += (1 - metal[:, None] + metal[:, None] * base[:, :3]) * (s * amt[0])[:, None] * col
+    for dj, cj in more:
+        dd = np.clip(n @ dj, 0, None)
+        sj = np.clip(n @ _unit(np.add(dj, (0, 0, 1))), 0, None) ** ex * sp
+        dd = np.where(toon, np.ceil(dd * b - 0.25) / np.maximum(b, 1), dd)
+        sj = np.where(toon, (sj >= 0.45) * sp, sj)
+        rgb += base[:, :3] * (dd[:, None] * cj) * (1 - 0.75 * metal)[:, None]
+        rgb += (1 - metal[:, None] + metal[:, None] * base[:, :3]) * sj[:, None] * cj
     rgb += ((1 - n[:, 2]) ** 3 * rim * amt[3])[:, None] * col
+    glow = np.array([m[6] for m in mats])[M]
+    if glow.any():  # at least its fill times glow, however it is lit
+        rgb = np.maximum(rgb, base[:, :3] * glow[:, None])
     c = np.round(np.clip(rgb, 0, 1) * 255).astype(np.uint32)
     return 0xFF000000 | (c[:, 0] << 16) | (c[:, 1] << 8) | c[:, 2]
 
@@ -110,7 +193,7 @@ def _material(get) -> tuple:
     col = C.parse(col) if isinstance(col, str) else col
     shine, metal = float(get("shine", 0.4)), float(get("metal", 0.0))
     return (tuple(col[:3]), float(get("bands", 0)), 0.6 * shine + 0.4 * metal, 6 + 90 * shine * shine, metal,
-            float(get("rim", 0.5)))
+            float(get("rim", 0.5)), float(get("glow", 0.0)))
 
 
 def _text_path(r, num, raw) -> tuple[skia.Path, float]:
@@ -431,22 +514,56 @@ def _points(xy: np.ndarray) -> list:
     return list(map(skia.Point.Make, xy[:, 0].tolist(), xy[:, 1].tolist()))
 
 
-def _paint(r, L, mats, lt) -> skia.Paint:
-    """The GPU's shading paint for these materials and light, kept while they hold."""
+def _paint(r, L, mats, lt, more) -> skia.Paint:
+    """The GPU's shading paint for these materials and lights, kept while they hold."""
+    glow = any(mt[6] for mt in mats)
+
     def make():
-        bld = skia.RuntimeShaderBuilder(_effect(len(mats)))
+        bld = skia.RuntimeShaderBuilder(_effect(len(mats), len(more), glow))
         for i, mt in enumerate(mats):
             bld.setUniform(f"base{i}", [*mt[0], mt[1]])
-            bld.setUniform(f"surf{i}", list(mt[2:]))
+            bld.setUniform(f"surf{i}", list(mt[2:6]))
+            if glow:
+                bld.setUniform(f"glow{i}", mt[6])
         for name, v in zip(("keyDir", "fillDir", "keyCol", "amt"), lt):
             bld.setUniform(name, v)
+        for j, (d, col) in enumerate(more):
+            bld.setUniform(f"dir{j}", d)
+            bld.setUniform(f"col{j}", col)
         return skia.Paint(Shader=bld.makeShader())
-    return _kept(r, ("paint", L.id), (tuple(mats), tuple(map(tuple, lt))), make)
+    key = (tuple(mats), tuple(map(tuple, lt)), tuple((tuple(d), tuple(c)) for d, c in more))
+    return _kept(r, ("paint", L.id), key, make)
 
 
-def draw(r, c: skia.Canvas, L, g, reveal: float):
-    """Draw model layer L on canvas c. Returns its projected bounds in device pixels, or None."""
+def _lighting(r, L, m, t: float, T: float) -> tuple:
+    """The model's light and extra lights at this frame, as _paint and _shade take them. A light set on the
+    layer tweens on the layer's time, the scene's on the scene's."""
+    def get(key, spec):
+        if key in L.raw:
+            return at(r._lit, r.s.ctx, spec, t, L.dur, T)
+        return at(r._lit, r.s.ctx, spec, T, r.s.duration, T)
+    lt = light(get("light", L.raw.get("light", r.s.light)))
+    specs = L.raw["lights"] if "lights" in L.raw else r.s.lights
+    specs = [get("lights", s) for s in ([specs] if isinstance(specs, dict) else specs or []) if isinstance(s, dict)]
+    R = centre = None
+    cam = r._cam if r._cam is not None else r._lens
+    if lt.get("follow") == "world" or specs:
+        R = (np.linalg.inv(r._lens) @ cam)[:3, :3]
+    if any(s.get("type") == "point" for s in specs):
+        mid = _fixed(r, L, m, "centre", lambda: (m.P.min(0) + m.P.max(0)) / 2 if len(m.P) else np.zeros(3))
+        world = np.linalg.solve(cam, r._m3d) @ np.append(mid, 1.0)
+        centre = world[:3] / (world[3] or 1.0)
+    out = _lights(lt, R)
+    if out[0][2] < -0.5 and out[3][0] > 0:
+        r.unlit.add(L.id)
+    return out, _more(specs, R, centre, r.s.w, r.s.h)
+
+
+def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float = 0.0):
+    """Draw model layer L on canvas c at its time t (scene_t on the scene's clock). Returns its projected bounds
+    in device pixels, or None."""
     m, mats = model(r, L, g)
+    lt, more = _lighting(r, L, m, t, scene_t)
     P, N, T, M = m.P, m.N, m.T, m.M
     amt = max(0.0, min(1.0, float(g("draw")) * reveal))
     tid = slice(None)  # each triangle's index in the whole mesh
@@ -499,14 +616,13 @@ def draw(r, c: skia.Canvas, L, g, reveal: float):
     cv.clear(skia.ColorTRANSPARENT)
     cv.restore()
     q = np.stack([X, Y], 1) * ss
-    lt = _lights(light(L.raw.get("light", r.s.light)))
     if r.backend == "gpu":
-        paint, colors = _paint(r, L, mats, lt), None
+        paint, colors = _paint(r, L, mats, lt, more), None
         uv = np.stack([2.0 * M + 0.5 + 0.45 * nv[:, 0], nv[:, 1]], 1)  # the normal, with the material slot packed in
     else:
         # The raster backend runs SkSL slowly: examples/model.json spent 275 ms a frame in drawVertices
         # at 2x supersampling. Shading each vertex in numpy, the whole frame takes 72 ms.
-        paint, colors = skia.Paint(), _shade(nv, M, mats, *lt)
+        paint, colors = skia.Paint(), _shade(nv, M, mats, *lt, more)
     # Skia indexes vertices with 16 bits, and converts each one it is given: draw in sorted chunks, each
     # with only the vertices its triangles use (one chunk uses them all). Indices go as a memoryview of
     # uint16, which Skia reads 30% faster than a list and 4 times as fast as a numpy array.

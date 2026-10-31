@@ -270,6 +270,72 @@ def test_cube_seen_from_a_corner_shows_three_differently_lit_faces():
     assert tuple(cols[0]) == (0x33, 0x66, 0xcc) and share[0] > 0.85  # flat light: the fill, unshaded
 
 
+def _sides(frame):
+    """Mean brightness of the left and right halves of a model at the centre of a 320 x 180 frame."""
+    row = frame[60:120, :, :3].astype(float).sum(2)
+    return row[:, 100:160].mean(), row[:, 160:220].mean()
+
+
+def _key(light, **layer):
+    return _model(dict({"shape": "sphere", "r": 60, "fill": "#808080", "shine": 0, "rim": 0,
+                        "light": dict({"fill": 0, "ambient": 0}, **light)}, **layer), duration=1)
+
+
+def test_light_azimuth_tweens_across_a_model():
+    spec = _key({"azimuth": [[0, -80], ["end", 80]], "elevation": 0})
+    first, last = _sides(_frame(spec, 0)), _sides(_frame(spec, 29))
+    assert first[0] > 2 * first[1] and last[1] > 2 * last[0]  # lit from the left, then from the right
+    assert _frame(_key({"from": "left"}), 0).tobytes() == _frame(_key({"from": "left", "follow": "camera"}), 0).tobytes()
+
+
+def test_a_world_light_stays_put_as_the_camera_orbits():
+    def frame(follow, ry):
+        spec = _key({"from": "front", "follow": follow})
+        spec["camera"] = {"rotateY": ry}
+        return _frame(spec, 0)
+    # A sphere lit from the camera looks the same from anywhere, but for where its triangles fall.
+    assert np.abs(frame("camera", 0).astype(int) - frame("camera", 70)).mean() < 0.2
+    left, right = _sides(frame("world", 70))
+    assert left > 2 * right  # the camera went round to the right: the light is on the sphere's left now
+
+
+def test_more_lights_add_their_colour_and_a_point_light_fades():
+    dark = {"key": 0, "fill": 0, "ambient": 0, "rim": 0}
+    red = _key(dark, lights=[{"from": "right", "color": "#ff0000", "intensity": 1}])
+    left, right = _sides(_frame(red, 0))
+    f = _frame(red, 0)
+    assert right > 4 * max(left, 1) and f[90, 200, 0] > 100 and f[90, 200, 1:3].max() == 0
+
+    def point(z):
+        return _sides(_frame(_key(dark, lights=[{"type": "point", "x": 160, "y": 90, "z": z, "range": 200}]), 0))
+    near, far = point(300), point(1200)
+    assert sum(near) > 2 * sum(far) > 0
+
+
+def test_glow_keeps_a_model_at_least_its_fill():
+    f = _frame(_key({"key": 0, "rim": 0}, fill="#3366cc", glow=1), 0)
+    assert tuple(f[90, 160, :3]) == (0x33, 0x66, 0xcc)  # unlit, it shows its fill
+    dim = _frame(_key({"key": 0, "rim": 0}, fill="#3366cc", glow=0.5), 0)
+    assert abs(int(dim[90, 160, 2]) - 0xcc // 2) <= 1
+
+
+def test_gpu_and_cpu_agree_on_more_lights_and_glow():
+    spec = _key({"azimuth": 30}, glow=0.3, lights=[{"from": "right", "color": "#ff5a36"},
+                                                    {"type": "point", "x": 60, "y": 40, "z": 300, "color": "#4a7dff"}])
+    cpu = _frame(spec, 0, "cpu").astype(int)
+    try:
+        gpu = _frame(spec, 0, "gpu").astype(int)
+    except RuntimeError:
+        pytest.skip("no GPU")
+    assert np.abs(cpu - gpu).mean() < 1.0
+
+
+def test_check_warns_when_the_key_light_is_behind_a_model():
+    spec = _key({"azimuth": 180})
+    assert [i["layer"] for i in check(spec)["issues"] if i["code"] == "light-behind"] == ["m"]
+    assert not [i for i in check(_key({"azimuth": 60}))["issues"] if i["code"] == "light-behind"]
+
+
 def test_model_parts_hide_each_other_by_depth_not_list_order():
     spec = _model({"light": "flat", "parts": [{"shape": "sphere", "r": 30, "z": 80, "fill": "#ff0000"},
                                               {"shape": "cube", "w": 100, "fill": "#0000ff"}]})

@@ -62,8 +62,10 @@ no depth draw exactly as before.
   on a floor layer.
 - **Model layers.** `"type": "model"` draws a lit `cube`, `sphere`, `cylinder`, `cone`, `torus` or `plane`, or
   several shapes merged as `parts` so their triangles are depth-sorted together. Materials take `fill`, `shine`,
-  `metal`, `rim` and `bands` (toon steps). `light`, for the scene or one model, takes `studio`, `soft`,
-  `dramatic` or `flat`, or your own amounts. `explode` sends faces outward and the `build` motion assembles a model.
+  `metal`, `rim`, `bands` (toon steps) and `glow`. `light`, for the scene or one model, takes `studio`, `soft`,
+  `dramatic` or `flat`, or your own amounts, and every amount, its `azimuth`, `elevation` and colour animate. It
+  follows the camera, or with `"follow": "world"` stays in the scene as the camera orbits. `lights` adds up to three
+  more, directional or point. `explode` sends faces outward and the `build` motion assembles a model.
 - **Extruded text and SVG paths.** `"shape": "text"` extrudes letters in any font and `"shape": "path"` extrudes
   SVG path data, filled, or stroked with `strokeWidth` for line icons. Both take a `depth` and a 45-degree `bevel`.
 - **Model files.** `src` reads `.glb` and `.gltf` (glTF 2.0) and `.obj` with its `.mtl`: node transforms, base
@@ -234,6 +236,9 @@ More scenes in [`examples/`](https://github.com/drknowhow/kinescript/tree/main/e
   ground shadow, 6 s.
 - [`stage.json`](https://github.com/drknowhow/kinescript/blob/main/examples/stage.json): a ring through a panel
   and a ball that comes through it, on a floor, in a stage, 6 s.
+- [`lights.json`](https://github.com/drknowhow/kinescript/blob/main/examples/lights.json): a ringed planet under a
+  key light that stays in the scene as the camera orbits, a blue light from the side, a warm point light below and
+  a glowing ring, 6 s.
 - [`voiceover.json`](https://github.com/drknowhow/kinescript/blob/main/examples/voiceover.json): titles cued from
   the words of a voice-over, karaoke captions of it, and a music bed that dips under it, 5.4 s.
 - [`narrated.json`](https://github.com/drknowhow/kinescript/blob/main/examples/narrated.json): the same idea

@@ -50,7 +50,7 @@ class SceneError(ValueError):
 
 
 # Parts of a scene that are not layers; an issue there reads "canvas: ...", not "layer 'canvas': ...".
-SECTIONS = ("canvas", "markers", "theme", "grade", "motionBlur", "mix", "camera", "light", "components")
+SECTIONS = ("canvas", "markers", "theme", "grade", "motionBlur", "mix", "camera", "light", "lights", "components")
 
 
 def _where(owner, message: str) -> str:
@@ -148,6 +148,8 @@ class Scene:
         self._build(raw_layers, None, self.layers)
         self.camera = self._camera(_subst(spec.get("camera"), theme))
         self.light = _subst(spec.get("light"), theme)
+        self.lights = _subst(spec.get("lights"), theme)
+        self._compile_lights()
         self.audio = self._build_audio()
         self._check_media()
         self._raise_errors()
@@ -320,9 +322,14 @@ class Scene:
         bg = self.bg
         if not (isinstance(bg, str) and bg.strip().lower() in ("transparent", "none")):
             paint(bg, "canvas.bg", "canvas")
-        for owner, light in [(None, self.light)] + [(L.id, L.raw.get("light")) for L in self.all_layers()]:
-            if isinstance(light, dict):
-                one(light.get("color"), "light color", owner or "light")
+        def lights(v):
+            return [v] if isinstance(v, dict) else [x for x in v if isinstance(x, dict)] if isinstance(v, list) else []
+        for owner, key, v in [(None, "light", self.light), (None, "lights", self.lights)] + [
+                (L.id, k, L.raw.get(k)) for L in self.all_layers() for k in ("light", "lights")]:
+            for light in lights(v) if key == "lights" else [v] if isinstance(v, dict) else []:
+                col = light.get("color")
+                for c in [k[1] for k in col if isinstance(k, list) and len(k) >= 2] if isinstance(col, list) else [col]:
+                    one(c, f"{key} color", owner or key)
         for L in self.all_layers():
             for k in ("fill", "stroke"):
                 if isinstance(L.raw.get(k), dict) and k not in L.props:
@@ -607,6 +614,23 @@ class Scene:
         except (ValueError, SyntaxError) as e:
             raise SceneError(f"camera: {e}", layer="camera") from e
         return cam
+
+    def _compile_lights(self):
+        """Compile the keys of every light that tween, so a bad expression stops the load rather than a frame."""
+        from .render3d import FIXED
+        specs = [(None, "light", self.light), (None, "lights", self.lights)]
+        specs += [(L.id, k, L.raw.get(k)) for L in self.all_layers() for k in ("light", "lights")]
+        for owner, key, v in specs:
+            for spec in v if isinstance(v, list) else [v]:
+                if not isinstance(spec, dict):
+                    continue
+                for k, x in spec.items():
+                    if k in FIXED or isinstance(x, (int, float)):
+                        continue
+                    try:
+                        compile_prop(k, x, self.ctx)
+                    except (ValueError, SyntaxError) as e:
+                        raise SceneError(_where(owner, str(e)) + f"{key} {k}: {e}", layer=owner or key) from e
 
     def all_layers(self):
         def walk(ls):

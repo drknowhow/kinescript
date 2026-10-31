@@ -407,6 +407,10 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
             msg = ("the triangles of this model that cross the camera plane are not drawn"
                    if scene.by_id[lid].type == "model" else "layer crosses the camera plane, so it is not drawn")
             add("warning", "behind-camera", lid, T, msg, "lower its z, or move the camera back (a higher camera z)")
+        for lid in r.unlit:
+            add("warning", "light-behind", lid, T, "the key light is behind this model as the camera sees it, so "
+                "its front shows only ambient and rim light", "turn the light toward the camera: an azimuth between "
+                "-90 and 90, or \"follow\": \"camera\"")
         if r.tris > TRIANGLE_BUDGET:
             add("warning", "triangle-budget", None, T, f"{r.tris:,} model triangles in one frame; renders slow "
                 f"down past {TRIANGLE_BUDGET:,} (about 70 ms a frame at 100,000 on a GPU)",

@@ -1,0 +1,18 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 6, "bg": {"radial": [0.5, 0.45], "stops": ["#1b1d26", "#0b0c10"]}},
+  "camera": {"rotateY": [[0, -35], ["end", 35, "inOutSine"]], "rotateX": 10, "z": -60},
+  "light": {"preset": "dramatic", "follow": "world", "azimuth": [[0, -60], ["end", 50, "inOutSine"]], "elevation": 35,
+            "key": 0.75, "fill": 0.08, "ambient": 0.08},
+  "lights": [{"from": "right", "follow": "world", "elevation": 10, "color": "#4a7dff", "intensity": 0.5},
+             {"type": "point", "x": "50%", "y": 820, "z": 200, "range": 500, "color": "#ff633f",
+              "intensity": [[0, 0], [2, 0], [3, 0.7, "outCubic"], ["end", 0.55]]}],
+  "layers": [
+    {"id": "planet", "type": "model", "x": "50%", "y": "47%", "detail": "high", "rotate": -12,
+     "rotateY": [[0, 0], ["end", 40]], "ground": {"y": 800, "opacity": 0.55},
+     "parts": [{"shape": "sphere", "r": 210, "fill": "#cfc8b6", "shine": 0.55},
+               {"shape": "torus", "r": 330, "tube": 14, "rotateX": 76, "fill": "#ff633f", "shine": 0.9,
+                "glow": 0.85}]},
+    {"id": "title", "type": "text", "text": "the key light stays in the scene as the camera turns", "x": "50%",
+     "y": "92%", "size": 38, "weight": 400, "fill": "$muted", "fixed": true, "at": 0.4, "enter": "fade"}
+  ]
+}

@@ -30,7 +30,7 @@ from .timing import KEYWORDS, LIMIT, finite as _finite_secs, parse_clock, show
 COMMENT = {"note", "notes", "comment", "comments", "description", "name"}
 
 TOP = {"canvas", "theme", "markers", "grade", "motionBlur", "audio", "components", "layers", "meta", "version",
-       "$schema", "camera", "light", "mix"}
+       "$schema", "camera", "light", "lights", "mix"}
 TOP_ALIAS = {"layer": "layers", "elements": "layers", "objects": "layers", "items": "layers", "scene": "layers",
              "children": "layers", "tracks": "layers", "motion_blur": "motionBlur", "colorGrade": "grade",
              "music": "audio", "sound": "audio", "marker": "markers"}
@@ -71,10 +71,15 @@ CAMERA = {"x", "y", "z", "rotateX", "rotateY", "rotate", "fov"}
 CAMERA_ALIAS = {"rotationX": "rotateX", "rotationY": "rotateY", "rotateZ": "rotate", "rotationZ": "rotate",
                 "rotation": "rotate", "roll": "rotate", "orbit": "rotateY", "tilt": "rotateX", "dolly": "z",
                 "fieldOfView": "fov"}
-LIGHT = {"preset", "key", "fill", "ambient", "rim", "from", "color"}
+LIGHT = {"preset", "key", "fill", "ambient", "rim", "from", "color", "azimuth", "elevation", "follow"}
 LIGHT_ALIAS = {"colour": "color", "direction": "from", "dir": "from", "position": "from", "intensity": "key",
-               "ambience": "ambient", "name": "preset"}
-MATERIAL = {"fill", "shine", "metal", "rim", "bands"}
+               "ambience": "ambient", "name": "preset", "angle": "azimuth", "height": "elevation",
+               "altitude": "elevation"}
+# One of "lights", the lights past the key: directional (from, azimuth, elevation, follow) or point (x, y, z, range).
+MORE_LIGHT = {"type", "from", "azimuth", "elevation", "follow", "x", "y", "z", "color", "intensity", "range"}
+MORE_LIGHT_ALIAS = {"colour": "color", "kind": "type", "direction": "from", "dir": "from", "strength": "intensity",
+                    "amount": "intensity", "falloff": "range", "angle": "azimuth", "height": "elevation"}
+MATERIAL = {"fill", "shine", "metal", "rim", "bands", "glow"}
 PART = MATERIAL | {"shape", "w", "h", "depth", "r", "tube", "x", "y", "z", "rotateX", "rotateY", "rotate", "scale",
                    "text", "size", "font", "weight", "italic", "letterSpacing", "lineHeight", "d", "strokeWidth",
                    "bevel"}
@@ -111,7 +116,8 @@ TYPES: dict[str, set[str]] = {
     "shader": {"preset", "uniforms", "sksl", "w", "h"},
     "group": {"children", "layers", "w", "h", "clip", "radius", "fill", "sort"},
     "model": PART - {"x", "y", "z", "rotateX", "rotateY", "rotate", "scale"} | {"detail", "parts", "explode",
-                                                                              "draw", "light", "src", "ground"},
+                                                                              "draw", "light", "lights", "src",
+                                                                              "ground"},
 }
 SEQUENCE = COMMON | {"clips", "transition", "fit", "volume", "w", "h"}
 TRANSITION = {"type", "dur"}
@@ -198,7 +204,8 @@ SCALAR = {"x", "y", "w", "h", "r", "opacity", "scale", "scaleX", "scaleY", "rota
 REQUIRED = {"text": ("text",), "image": ("src",), "video": ("src",), "path": ("d", "points"), "line": ("points",),
             "captions": ("cues", "src", "voice"), "shader": ("preset", "sksl"), "model": ("shape", "parts", "src")}
 # Keys whose value is an object of their own: never a tween, even with a "from" key (a light's direction).
-OBJECTS = {"light", "ground", "shadow", "box", "fx", "uniforms", "sound", "enter", "exit", "parts", "transition"}
+OBJECTS = {"light", "lights", "ground", "shadow", "box", "fx", "uniforms", "sound", "enter", "exit", "parts",
+           "transition"}
 # Props that cannot be below 0, and the least each may be.
 AT_LEAST = {"radius": 0, "r": 0, "sides": 3, "blur": 0, "strokeWidth": 0, "size": 0}
 COLOUR_FIX = f"write {C.FORMATS}"
@@ -982,9 +989,42 @@ def _look(obj: dict, key: str, allowed: set, alias: dict, rep: Report, lid):
             rep.add("error", "bad-value", lid, f"{key} {k} is {_show(x)}; it takes a number")
 
 
+def _tweens(v, colour: bool = False) -> bool:
+    """A value a light key can take: a number (a colour), keyframes of them, a tween object or an expression."""
+    if isinstance(v, str) and v.startswith("="):
+        return True
+    if isinstance(v, dict) and ("to" in v or "keys" in v):
+        return all(_tweens(v[k], colour) for k in ("from", "to") if k in v)
+    if isinstance(v, list) and v and all(isinstance(k, list) and 2 <= len(k) <= 3 and _is_time(k[0]) for k in v):
+        return all(_tweens(k[1], colour) for k in v)
+    if colour:
+        return isinstance(v, str)
+    if isinstance(v, str):
+        return bool(_LEN.match(v))  # "50%", "20vw"
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and _finite(v)
+
+
+def _light_values(v: dict, nums, rep: Report, lid, where: str):
+    from .render3d import FROM
+    if v.get("from") is not None and v["from"] not in FROM:
+        rep.add("error", "bad-value", lid, f"{where}from: " + unknown("direction", v["from"], FROM))
+    if v.get("follow") is not None and v["follow"] not in ("camera", "world"):
+        rep.add("error", "bad-value", lid, f"{where}follow is {v['follow']!r}; it takes \"camera\" or \"world\"")
+    for k in nums:
+        if k in v and not _tweens(v[k]):
+            rep.add("error", "bad-value", lid, f"{where}{k} is {_show(v[k])}; it takes a number, or keyframes of them")
+    if v.get("color") is not None:
+        if isinstance(v["color"], str):
+            _colour(v["color"], f"{where}color", rep, lid)
+        elif not _tweens(v["color"], colour=True):
+            rep.add("error", "bad-value", lid, f"{where}color is {_show(v['color'])}; it takes a colour, or keyframes")
+
+
 def _light(obj: dict, rep: Report, lid):
-    """`light` is a preset name or an object of light amounts; both are checked here."""
-    from .render3d import FROM, LIGHTS
+    """`light` is a preset name or an object of light amounts, `lights` up to three more lights; both are
+    checked here."""
+    from .render3d import LIGHTS, MORE_LIGHTS
+    _more_lights(obj, rep, lid, MORE_LIGHTS)
     v = obj.get("light")
     if isinstance(v, str):
         s = v if v in LIGHTS else suggest(v, LIGHTS)
@@ -996,15 +1036,33 @@ def _light(obj: dict, rep: Report, lid):
         _keys(v, LIGHT, LIGHT_ALIAS, rep, lid, "light: ")
         if v.get("preset") is not None and v["preset"] not in LIGHTS:
             rep.add("error", "bad-value", lid, "light preset: " + unknown("light preset", v["preset"], LIGHTS))
-        if v.get("from") is not None and v["from"] not in FROM:
-            rep.add("error", "bad-value", lid, "light from: " + unknown("direction", v["from"], FROM))
-        for k in ("key", "fill", "ambient", "rim"):
-            if k in v and (isinstance(v[k], bool) or not isinstance(v[k], (int, float))):
-                rep.add("error", "bad-value", lid, f"light {k} is {v[k]!r}; it takes a number (about 0 to 1)")
-        if v.get("color") is not None:
-            _colour(v["color"], "light color", rep, lid)
+        _light_values(v, ("key", "fill", "ambient", "rim", "azimuth", "elevation"), rep, lid, "light ")
     elif v is not None:
         rep.add("error", "bad-value", lid, f"light must be a preset ({', '.join(LIGHTS)}) or an object, got {v!r}")
+
+
+def _more_lights(obj: dict, rep: Report, lid, most: int):
+    v = obj.get("lights")
+    if isinstance(v, dict):
+        v = obj["lights"] = [v]
+    if v is None:
+        return
+    if not isinstance(v, list):
+        rep.add("error", "bad-value", lid, f"lights is a list of light objects, got {_show(v)}",
+                '"lights": [{"type": "point", "x": 300, "y": 200, "z": 400, "color": "#7fb2ff"}]')
+        obj.pop("lights")
+        return
+    if len(v) > most:
+        rep.add("warning", "ignored-key", lid, f"lights has {len(v)} lights; only the first {most} light a model")
+    for j, x in enumerate(v):
+        where = f"lights[{j}] "
+        if not isinstance(x, dict):
+            rep.add("error", "bad-value", lid, f"{where}is {_show(x)}; each light is an object")
+            continue
+        _keys(x, MORE_LIGHT, MORE_LIGHT_ALIAS, rep, lid, where.rstrip() + ": ")
+        if x.get("type", "directional") not in ("directional", "point"):
+            rep.add("error", "bad-value", lid, f"{where}type is {x['type']!r}; it takes \"directional\" or \"point\"")
+        _light_values(x, ("azimuth", "elevation", "x", "y", "z", "intensity", "range"), rep, lid, where)
 
 
 def _outline(obj: dict, rep: Report, lid, where: str = ""):

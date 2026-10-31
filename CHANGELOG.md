@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Lights animate. Every amount of `light` (`key`, `fill`, `ambient`, `rim`), its colour and two new angles,
+  `azimuth` (degrees round from the front) and `elevation` (degrees up), take keyframes, tweens and expressions,
+  so a key light sweeping across a model is one key. `"follow": "world"` keeps a light in the scene, so orbiting
+  the camera changes the shading as on a turntable; the default, `"camera"`, is the light as before.
+- `lights`, for the scene or one model, adds up to three lights: directional (`from`, `azimuth`, `elevation`,
+  `follow`) or point (`x`, `y`, `z`, at half strength `range` px away), with `color` and `intensity`. A point light
+  lights a whole model from where the model's centre is. `examples/lights.json` renders in 1.95 s on the GPU,
+  against 1.84 s with one fixed light and no glow; on the CPU in 9.3 s either way.
+- Material `glow` (0 to 1): a model shows at least its fill times glow, however it is lit.
+- `kine check` warns (`light-behind`) when the key light is behind a model as the camera sees it, so its front
+  shows only ambient and rim light.
+- Models without `lights` or `glow` draw the same bytes as before: `bench/same.py` finds no difference against the
+  stages commit (#57) on either backend.
 - A group with `"sort": "pixel"` is a stage: each child draws on its own with an image of its depth, and at each pixel
   the nearer child shows. A ring passes through a card, a model through a panel, and a ground shadow lies on a floor
   that is another child. A model's depth comes from its triangles; any other child, a group included, lies flat in
