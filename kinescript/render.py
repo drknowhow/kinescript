@@ -555,6 +555,9 @@ class Renderer:
         self._stopped = False
         self._m3d: np.ndarray | None = None  # world-to-canvas matrix of the layer being drawn, in 3D scenes
         self.culled: set[str] = set()  # layers skipped this frame because they cross the camera plane
+        self.unlit: set[str] = set()  # models drawn this frame with the key light behind them
+        self._lit: dict = {}  # light objects with their tweening keys compiled (render3d.at)
+        self._cam: np.ndarray | None = None  # the camera matrix of the top-level layer being drawn
         self._lens: np.ndarray | None = None  # camera space to canvas, for lighting models
         self._models: dict = {}  # merged parts of each model layer
         self._solids: dict = {}  # outlines and extruded meshes of text and path models
@@ -795,7 +798,7 @@ class Renderer:
         only they draw, ungraded; `under` is an image of that, which the sub-frame starts from in their place."""
         s = self.s
         self.boxes = {}
-        self.culled = set()
+        self.culled, self.unlit = set(), set()
         self.tris = 0
         self.stop_at, self.stop_after, self._stopped = stop_at, stop_after, False
         self._frame_t = frame_t
@@ -833,7 +836,7 @@ class Renderer:
                     m = cams[0]
                 elif layer.id in s.depth:
                     m = cams[1]
-            self._m3d = m
+            self._m3d = self._cam = m
             if m is None:
                 self._layer(c, layer, T, 1.0)
             else:
@@ -1481,7 +1484,7 @@ class Renderer:
         c.drawRect(skia.Rect.MakeXYWH(*box), skia.Paint(Shader=b.makeShader(mtx)))
 
     def _draw_model(self, c, L, t, T, g, box, reveal, mods):
-        return render3d.draw(self, c, L, g, reveal)
+        return render3d.draw(self, c, L, g, reveal, t, T)
 
     def _model_surface(self):
         """The offscreen models are drawn in at their place in the frame, and its supersampling factor: 2x, which

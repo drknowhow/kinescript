@@ -389,3 +389,21 @@ def test_a_model_light_object_is_read():
     assert s is not None and s.by_id["m"].raw["light"] == light
     e = one_error(scene([{"id": "m", "type": "model", "shape": "cube", "light": {"preset": "nope"}}]), "m")
     assert e["message"].startswith("light preset"), e
+
+
+def test_lights_and_tweening_light_keys_are_checked():
+    cube = {"id": "m", "type": "model", "shape": "cube"}
+    ok = dict(scene([cube]), light={"azimuth": [[0, -40], ["end", 40]], "color": [[0, "#ffffff"], [1, "#ffd166"]],
+                                    "follow": "world", "key": "=0.8+0.2*sin(t)"},
+              lights=[{"type": "point", "x": "50%", "y": 0, "z": 400, "range": 600}, {"from": "right"}])
+    errs, s = errors(ok)
+    assert s is not None and not errs, errs
+    e = one_error(dict(scene([cube]), lights=[{"type": "spot"}]))
+    assert "lights[0] type" in e["message"], e
+    e = one_error(dict(scene([cube]), light={"follow": "scene"}))
+    assert "follow" in e["message"], e
+    e = one_error(scene([dict(cube, light={"key": [[0, "bright"]]})]), "m")
+    assert e["message"].startswith("light key"), e
+    assert warnings(dict(scene([cube]), lights=[{}, {}, {}, {}]), "ignored-key")
+    with pytest.raises(k.SceneError, match="light key"):
+        k.Scene(dict(scene([cube]), light={"key": "=0.5 +"}))

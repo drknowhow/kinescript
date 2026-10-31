@@ -73,9 +73,11 @@ Each bullet is about one PR. Phases 2 and 3 can run in parallel once Phase 1 is 
 - Edges: rendering already supersamples 2x without MSAA, and a model's colour and depth come from the same
   triangles at that size, so their coverage matches and the downsample antialiases the merged result. No depth
   growing was needed.
-- Found on the way: Skia's CPU backend draws into RGBA8888 surfaces about 33 times slower than into BGRA8888 on
-  this Windows wheel (a 1200 x 1200 copy: 49.5 ms against 1.5). Every CPU surface in Kinescript is RGBA8888.
-  That is a separate change for the whole CPU backend, not part of 1.5's 3D work.
+- Found on the way: the Windows skia-python 144.1 wheel rasterises about 30 times slower than the Linux one on the
+  same machine (a translucent 1080p rect: 55.6 ms against 1.6 in Docker; an AA circle: 13.9 against 0.48). Only an
+  unscaled image drawn onto a BGRA8888 surface skips the slow path (1.4 ms against 58.7 into RGBA8888). Moving
+  Kinescript's CPU surfaces to BGRA sped up CPU frames 1.0 to 2.1 times on Windows (model.json the most), shifted
+  pixels by up to 3 levels, and on Linux made translucent fills twice as slow, so it was dropped.
 
 ### Phase 1: per-pixel stage
 
@@ -98,8 +100,8 @@ Status (2026-10-31, branch `stage-pixel-depth`): built, not merged. Changes from
 - `coplanar-in-stage` is not built: ties go to the later child, so equal depths don't flicker between frames.
 - `examples/stage.json` is a floor, a turning panel, a ring through it and a ball with a ground shadow.
 - `stage-16` in `bench/stress.py`: 120 frames in 2.88 s (42 fps) against models-30's 49 fps.
-- CPU stages are slow: `examples/stage.json` takes 22.7 s against 6.6 with the group as `"order"`. Most of it is
-  Skia's RGBA8888 raster path (see Phase 0); a BGRA CPU backend is its own PR.
+- CPU stages are slow on Windows: `examples/stage.json` takes 22.7 s against 6.6 with the group as `"order"`. The
+  Windows wheel's slow rasteriser (see Phase 0) draws the merged stage back at 1x in about 68 ms a frame.
 
 ### Phase 2: light, shadow, fog
 
@@ -121,6 +123,14 @@ Status (2026-10-31, branch `stage-pixel-depth`): built, not merged. Changes from
   models per pixel on the GPU and per vertex on the CPU; inside a stage, per pixel from the depth image.
 - Check rules: `light-behind` (the key light sits behind what the camera sees, so a model shows only ambient),
   `fog-hides` (a layer lies wholly past `far`).
+
+Status (2026-10-31): split into four PRs. Lights (branch `animated-lights`): `light` tweens, `azimuth`,
+`elevation`, `follow`, `lights` (directional and point), material `glow` and `light-behind` are built. Changes from
+the bullets above:
+- The GPU shader gets no fragment position, so a point light lights a whole model from where its centre is.
+- `glow` is a floor, max(lit, fill x glow), not an addition: added to a lit surface it washed the colour to white.
+- glTF `emissiveFactor` is not read yet.
+Still to come, each its own PR: `env`, `fog`, and shadows (`ground` `"from": "light"`, stage `shadows`).
 
 ### Phase 3: camera
 
