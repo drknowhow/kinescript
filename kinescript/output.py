@@ -1,20 +1,26 @@
 """Encoding: frames piped to ffmpeg, split across worker processes, audio mixed alongside them."""
 from __future__ import annotations
 
+import functools
 import json
 import math
 import os
 import shutil
+import struct
 import subprocess
 import tempfile
 import threading
 import time
+import zlib
+from collections import deque
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
+import numpy as np
+
 from . import audio as A
 from . import media
-from .render import Renderer, frame_size, loop_end
+from .render import Renderer, _straighten, frame_size, loop_end
 from .scene import Scene, load
 
 QUALITY = {  # crf, x264 preset
@@ -771,12 +777,20 @@ def _render_pngs(scene: Scene, out: Path, f0: int, f1: int, scale: float, transp
     except (TypeError, ValueError):
         name = f"{stem}_{{:05d}}".format
     t0 = time.perf_counter()
+    ahead: deque = deque()  # (path, encoding) of frames whose bands are still being compressed
     try:
         folder.mkdir(parents=True, exist_ok=True)
         r = Renderer(scene, scale=scale)
+        held = 2 * r.w * r.h * 4  # what a frame in flight holds: its pixels and its filtered rows
         for n in range(f0, f1):
-            r.frame(n)
-            save_image(r.snapshot(), folder / f"{name(n)}.png")
+            # The next frames draw while this one compresses; the copy because frame() reuses its array.
+            ahead.append((folder / f"{name(n)}.png", _png_start(_straight(r, r.frame(n)).copy())))
+            while len(ahead) > 1 and len(ahead) * held > PNG_AHEAD:
+                p, job = ahead.popleft()
+                p.write_bytes(_png_end(job))
+        while ahead:
+            p, job = ahead.popleft()
+            p.write_bytes(_png_end(job))
     finally:
         scene.close()
     return {"out": str(folder), "frames": f1 - f0, "wall": round(time.perf_counter() - t0, 2)}
@@ -791,8 +805,11 @@ def still(src, at, out: str, scale: float = 1.0) -> dict:
         _scale(scene, scale)
         p = out_path(scene, out, IMAGE)
         r = Renderer(scene, scale=scale)
-        r.frame(n)
-        save_image(r.snapshot(), p)
+        px = r.frame(n)
+        if p.suffix.lower() == ".png":
+            save_png(_straight(r, px), p)
+        else:
+            save_image(r.snapshot(), p)
     finally:
         scene.close()
     return _noted({"out": str(p), "frame": n, "at": round(n / scene.fps, 3), "w": r.w, "h": r.h},
@@ -800,14 +817,84 @@ def still(src, at, out: str, scale: float = 1.0) -> dict:
 
 
 def save_image(img, path: Path):
-    """PNG or JPEG by the extension, parent folders made. Skia's own save returns None whether or not it wrote
-    the file, so a still into a folder that did not exist said ok and left nothing."""
+    """A Skia image to PNG or JPEG by the extension, parent folders made. Skia's own save returns None whether or
+    not it wrote the file, so a still into a folder that did not exist said ok and left nothing."""
     import skia
-    data = img.encodeToData(skia.kPNG if path.suffix.lower() == ".png" else skia.kJPEG, 100)
+    if path.suffix.lower() == ".png":
+        save_png(img.toarray(colorType=skia.kRGBA_8888_ColorType, alphaType=skia.kUnpremul_AlphaType), path)
+        return
+    data = img.encodeToData(skia.kJPEG, 100)
     if data is None:
         raise RuntimeError(f"could not encode {path.name}")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(bytes(data))
+
+
+# PNGs are written here, not by Skia: its encoder tried every row filter on every row at zlib level 6 and took
+# 337 ms for a 1080p frame of examples/hello.json, 1.33 s for a 4K frame of bench/stress.py's uhd-4k. Here every
+# row takes the Sub filter (each byte less the one a pixel to its left: one numpy subtraction) and deflates at
+# level 5, in bands of about 1 MB that the threads compress at once; zlib and numpy let go of the GIL while they
+# work. On one thread with zlib-ng 2.2 (2026-10-31): 71 ms and 1.14 MB for that 1080p frame (Skia's: 1.10 MB),
+# 319 ms and 5.81 MB for the 4K one (6.06 MB). Level 6 took 1.8-1.9 times as long for files 4-7% smaller; no
+# filter, Up, Average and Paeth were larger or slower. The band size is fixed, not taken from the CPU count, so a
+# file's bytes do not depend on how many cores wrote it.
+PNG_LEVEL = 5
+PNG_BAND = 1 << 20
+PNG_AHEAD = 64 << 20  # bytes of frames a PNG sequence keeps compressing while it draws; at least one frame
+_ZLIB_HEAD = zlib.compress(b"", PNG_LEVEL)[:2]  # the stream header zlib writes at this level
+
+
+@functools.cache
+def _png_pool() -> ThreadPoolExecutor:
+    return ThreadPoolExecutor(os.cpu_count() or 4, thread_name_prefix="kine-png")
+
+
+def _straight(r: Renderer, px: np.ndarray) -> np.ndarray:
+    """A frame as a PNG holds it, with straight alpha. A transparent renderer reads it so; an opaque one reads it
+    premultiplied, the same while every pixel is opaque, as its background makes them."""
+    if not r.transparent and px[..., 3].min() < 255:
+        _straighten(px)
+    return px
+
+
+def _png_band(px: np.ndarray, raw: np.ndarray, last: bool) -> bytes:
+    """Filter rows of RGBA into raw (a filter byte, then the row) and deflate them as one piece of the stream."""
+    rows = px.reshape(len(px), -1)
+    raw[:, 0] = 1  # Sub
+    raw[:, 1:5] = rows[:, :4]
+    np.subtract(rows[:, 4:], rows[:, :-4], out=raw[:, 5:])  # wraps at 256, as the filter does
+    z = zlib.compressobj(PNG_LEVEL, zlib.DEFLATED, -15)  # bare deflate: the pieces join into one stream
+    return z.compress(raw) + z.flush(zlib.Z_FINISH if last else zlib.Z_SYNC_FLUSH)
+
+
+def _png_start(px: np.ndarray) -> tuple:
+    """Start encoding straight RGBA, an (h, w, 4) uint8 array, as a PNG: its bands go to the threads now and
+    _png_end collects the file. px must not change until then."""
+    h, w = px.shape[:2]
+    raw = np.empty((h, w * 4 + 1), np.uint8)
+    step = max(1, PNG_BAND // raw.shape[1])
+    pool = _png_pool()
+    return w, h, raw, [pool.submit(_png_band, px[y:y + step], raw[y:y + step], y + step >= h)
+                       for y in range(0, h, step)]
+
+
+def _png_end(job: tuple) -> bytes:
+    w, h, raw, bands = job
+    body = b"".join(b.result() for b in bands)
+    idat = _ZLIB_HEAD + body + struct.pack(">I", zlib.adler32(raw))
+    head = struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)  # 8 bits a channel, RGBA, no interlace
+    return b"\x89PNG\r\n\x1a\n" + _chunk(b"IHDR", head) + _chunk(b"IDAT", idat) + _chunk(b"IEND", b"")
+
+
+def _chunk(kind: bytes, data: bytes) -> bytes:
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(data, zlib.crc32(kind)))
+
+
+def save_png(px: np.ndarray, path: Path):
+    """Straight RGBA, an (h, w, 4) uint8 array, to a PNG file, parent folders made."""
+    data = _png_end(_png_start(px))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
 
 
 def frame_at(scene: Scene, at) -> int:

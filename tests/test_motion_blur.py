@@ -70,15 +70,40 @@ def test_blurred_mp4_frames_take_the_i420_path():
     assert np.abs(got - want).max() <= 1
 
 
+def _png(data: bytes) -> np.ndarray:
+    """A PNG's pixels as stored: straight RGBA, not premultiplied on the way through."""
+    codec = skia.Codec.MakeFromData(data)
+    w, h = codec.getInfo().width(), codec.getInfo().height()
+    px = np.empty((h, w, 4), np.uint8)
+    info = skia.ImageInfo.Make(w, h, skia.kRGBA_8888_ColorType, skia.kUnpremul_AlphaType)
+    assert codec.getPixels(info, px, w * 4) == skia.Codec.kSuccess
+    return px
+
+
 @pytest.mark.parametrize("backend", ["gpu", "cpu"])
-def test_stills_and_png_frames_save_the_blurred_frame(tmp_path, monkeypatch, backend):
+@pytest.mark.parametrize("bg", ["#101418", "transparent"])
+def test_stills_and_png_frames_save_the_blurred_frame(tmp_path, monkeypatch, backend, bg):
     if backend == "cpu":
         monkeypatch.setenv("KINE_BACKEND", "cpu")
         monkeypatch.setattr(sys.modules["kinescript.render"], "_GL", {})
-    spec = _spec(6)
+    spec = _spec(6, bg)
     want = _renderer(spec, "auto").frame(17).copy()
-    k.still(_spec(6), 17 / 30, str(tmp_path / "s.png"))
-    k.render(_spec(6), str(tmp_path / "seq") + "/", start=17 / 30, end=18 / 30)
+    k.still(spec, 17 / 30, str(tmp_path / "s.png"))
+    k.render(spec, str(tmp_path / "seq") + "/", start=17 / 30, end=18 / 30)
     for png in (tmp_path / "s.png", tmp_path / "seq" / "frame_00017.png"):
-        got = skia.Image.open(str(png)).toarray(colorType=skia.kRGBA_8888_ColorType)
-        assert np.array_equal(got, want), png
+        data = png.read_bytes()
+        assert data[25] == 6  # RGBA: a transparent frame keeps its alpha, an opaque one is written as before
+        assert np.array_equal(_png(data), want), png  # transparent: Skia's encoder rounded some colours 1 off
+
+
+@pytest.mark.parametrize("backend", ["gpu", "cpu"])
+def test_a_transparent_png_is_within_a_level_of_what_skias_encoder_wrote(backend):
+    # PNGs were Skia's encoding of the premultiplied surface; they are now the straight frame, as a .mov or .webm
+    # gets it. Straightening a blurred frame rounds its colour a level apart from Skia's encoder in a few pixels.
+    from kinescript import output
+    r = _renderer(_spec(6, "transparent"), backend)
+    for n in (3, 17):
+        ours = _png(output._png_end(output._png_start(r.frame(n).copy())))
+        before = _png(bytes(r.snapshot().encodeToData(skia.kPNG, 100)))
+        d = np.abs(ours.astype(int) - before.astype(int))
+        assert d[..., 3].max() == 0 and d.max() <= 1, n
