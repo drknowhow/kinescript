@@ -30,6 +30,15 @@
   `bench/stages.py` grabs a frame in 3.8 ms at the median, from 5.5 (on the CPU, 0.97 s from 1.48); the blur-alpha
   stress scene (16 samples) in 7.2, from 10.2; `examples/edit.json` with 8 samples in 6.9, from 8.9. Frames where
   the bottom layer moves cost what they did, so put still layers first.
+- Split text draws its letters without a save and restore for each, and on the CPU blurs a letter without blurring
+  the whole canvas. Every frame, each unit of a `split` text looked up its shaping and width again and drew inside
+  its own save and restore, moved or not, and a unit blurring in drew into a layer the size of the canvas, which the
+  CPU blurred in 370 ms at 1080p. Units and their shaping are now kept with the layout, only a moved unit saves, and
+  on the CPU the blur layer ends a font size plus 3 sigma past the unit's right and bottom edges; it starts where the canvas-sized
+  one did, so glyphs land on the same subpixels. On the GPU any bounds change the blur by up to 9 levels, so the
+  layer stays canvas-sized there. The pixels are the same on both. The text-split stress scene draws a frame in 76
+  ms on the GPU, from 87 (median frame 17-20 ms, from 31-39), and a frame of letters blurring in takes 1.0 s on the
+  CPU, from 11.9; text-wrap draws in 5.9 ms on the GPU, from 14.5, and in 15.6 on the CPU, from 25.5.
 - Model layers draw in two thirds of the time, with the same pixels. Of the 2.5 ms a model took each frame,
   1.5 ms went on making two `skia.Point`s per vertex, handing them and the indices to Skia, and freeing them;
   Skia now makes the points while reading back a path numpy writes, indices go as a uint16 memoryview, and a

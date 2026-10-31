@@ -1,6 +1,7 @@
 """Rendering fixes: group fades with blended children, blends under a scene grade, motion blur at a layer's ends,
 grain under motion blur, repeatable GPU models, boxes that hold the ink, check rules (hidden text, flashes, odd sizes,
-glyphs), text in scripts the layer's font does not have, and fades drawn without an offscreen layer."""
+glyphs), text in scripts the layer's font does not have, fades drawn without an offscreen layer, and blurred letters in
+bounded layers."""
 import subprocess
 
 import numpy as np
@@ -356,3 +357,30 @@ def test_a_fading_layer_drawn_in_one_call_matches_its_offscreen_fade(backend, la
         grouped = scene([{"id": "g", "type": "group", "opacity": op, "children": [layer]}], bg=bg)
         offscreen = _renderer(grouped, backend).frame(15).astype(int)
         assert np.abs(alone - offscreen).max() <= 3, op
+
+
+# ---- P3: blurred letters in bounded layers ------------------------------------------------------------------------
+
+BLUR_RISE = {"name": "rise+blur", "dur": 0.5, "stagger": 0.01, "dist": 20}
+
+
+@pytest.mark.parametrize("layer, canvas, n", [
+    # A line of bench/stress.py's text-split: at frame 57 its 79th letter, a t, sits on a subpixel boundary, and in a
+    # layer bounded on all sides it was drawn a quarter of a pixel to the left (63 levels).
+    ({"text": "checked **scene** agent written frames cue motion rendered layer render checked **scene** agent written",
+      "x": 960, "y": 966, "size": 22, "at": 0.72, "enter": BLUR_RISE, "unitY": "=sin(T*4 + i*0.3)*3"},
+     {"w": 1500, "h": 1000}, 57),
+    ({"text": "Wavy **glyphs**", "x": 160, "y": 90, "size": 48, "italic": True, "stroke": "#4a7dff", "strokeWidth": 6,
+      "enter": dict(BLUR_RISE, dur=1, stagger=0.06)}, {}, 12),
+    ({"text": "sca**l**ed words", "x": 150.3, "y": 80.6, "size": 36, "split": "words", "unitScale": "=1 + i*0.2",
+      "enter": dict(BLUR_RISE, dur=1, stagger=0.2), "exit": {"name": "track", "dur": 2}}, {}, 9),
+])
+def test_blurred_letters_match_their_unbounded_layer(layer, canvas, n, monkeypatch):
+    spec = scene([dict({"id": "t", "type": "text", "split": "chars"}, **layer)], **canvas)
+    bounds = []
+    blur_bounds = Renderer._blur_bounds
+    monkeypatch.setattr(Renderer, "_blur_bounds", lambda *a: bounds.append(blur_bounds(*a)) or bounds[-1])
+    bounded = _renderer(spec).frame(n).astype(int)
+    assert any(b is not None for b in bounds)  # the CPU bounds its blur layers; the GPU does not
+    monkeypatch.setattr(Renderer, "_blur_bounds", lambda *a: None)
+    assert np.array_equal(bounded, _renderer(spec).frame(n).astype(int))
