@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "kinescript-chatterbox"
 version = "0.1.1"
-description = "Chatterbox voices for kine voice: laughs and sighs from tags, cloned voices, and the time of each word"
+description = "Chatterbox voices for kine voice: cloned voices, tags it acts some of the time, and the time of each word"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
