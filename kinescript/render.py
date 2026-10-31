@@ -525,6 +525,7 @@ class Renderer:
         self._frame_t: float | None = None  # while drawing a motion-blur sub-frame, the time of its frame
         self._blended: dict[str, bool] = {}  # group id -> whether a layer inside it has a blend mode
         self._ink: skia.Rect | None = None  # track: device bounds of the strokes the layer being drawn made
+        self._alpha = 1.0  # the opacity of the layer being drawn when its paint carries it (_one_draw), else 1
         cm = color_matrix({k: v for k, v in scene.grade.items() if k not in ("vignette", "grain")})
         self.grade_filter = skia.ColorFilters.Matrix(cm) if cm else None
         self._videos = [L for L in scene.all_layers() if L.type == "video"]
@@ -813,14 +814,20 @@ class Renderer:
         shadow = L.raw.get("shadow")
         fx = L.raw.get("fx")
         blend = L.raw.get("blend")
-        layered = alpha < 0.999 or blur > 0.05 or shadow or fx or (blend and blend != "normal")
-        if layered and L.children and not (blur > 0.05 or shadow or fx or (blend and blend != "normal")) \
-                and self._blends_inside(L):
+        effects = blur > 0.05 or shadow or fx or (blend and blend != "normal")
+        layered = alpha < 0.999 or effects
+        paint_alpha = 1.0
+        if layered and L.children and not effects and self._blends_inside(L):
             # A fading group whose children blend: they keep blending with what is behind the group, and the
             # group mixes from that backdrop to its full result, so blend does not turn into normal (and the
             # frame jump) as opacity drops below 1.
             layered = 2
             self._fade_layers(c, alpha)
+        elif layered and not effects and self._one_draw(L):
+            # Opacity alone on a layer drawn in one call: the paint carries it, to within 3 levels. An offscreen layer
+            # for each fading shape cost far more than the shape: 600 fading circles took 26 ms a frame on the GPU
+            # and 45 s on the CPU, now 8 and 15 ms.
+            layered, paint_alpha = False, alpha
         elif layered:
             paint = skia.Paint(Alphaf=alpha)
             filt = None
@@ -849,7 +856,7 @@ class Renderer:
                 c.clipRect(skia.Rect(*clip), doAntiAlias=True)
         reveal = mods.reveal if not mods.wipe else 1.0
         draw = getattr(self, "_draw_" + L.type)
-        self._ink = None
+        self._ink, self._alpha = None, paint_alpha
         drawn = draw(c, L, t, T, g, box, reveal, mods)  # a model returns its projected bounds
         if self.track and (box is not None or drawn):
             m = c.getTotalMatrix()
@@ -890,6 +897,22 @@ class Renderer:
             hit = self._blended[L.id] = any(k.raw.get("blend") not in (None, "normal") or self._blends_inside(k)
                                             for k in L.children)
         return hit
+
+    @staticmethod
+    def _one_draw(L: Layer) -> bool:
+        """Whether the layer draws in a single call, so its opacity can go in that call's paint. Two draws that
+        overlap, faded one by one, darken where they meet: a stroke over a fill, an arrow's head on its shaft, a
+        rect's dimOutside, a stroke around a picture, glyphs that touch. So does a stroke alone once it is thin enough
+        to draw as a hairline, at its joints. Strokes, groups, text, shaders (whose output an offscreen layer clamps
+        before it fades) and models keep the offscreen layer."""
+        ty, raw = L.type, L.raw
+        if L.children:
+            return False
+        if ty in ("rect", "circle", "ellipse", "path", "polygon"):  # the fill (_shape)
+            return raw.get("stroke") is None and not (ty == "rect" and raw.get("dimOutside"))
+        if ty in ("image", "video"):  # the picture (_content)
+            return raw.get("stroke") is None
+        return False
 
     @staticmethod
     def _fade_layers(c: skia.Canvas, alpha: float):
@@ -1019,7 +1042,8 @@ class Renderer:
         """Fill then stroke. 'draw' (0..1) trims the stroke and fades the fill with it."""
         amt = max(0.0, min(1.0, float(g("draw")) * reveal))
         has_stroke = L.raw.get("stroke") is not None
-        fp = self._fill_paint(L, g, box, alpha=amt, default=None if has_stroke else self.s.theme.get("paper", "#f2f0e8"))
+        fp = self._fill_paint(L, g, box, alpha=amt * self._alpha,
+                              default=None if has_stroke else self.s.theme.get("paper", "#f2f0e8"))
         if fp is not None and amt > 0:
             c.drawPath(path, fp)
         sp = self._stroke_paint(L, g, box)
@@ -1186,7 +1210,8 @@ class Renderer:
         px, py = bx + fx * bw, by + fy * bh
         dst = skia.Rect.MakeXYWH(px + (cx0 - px) * zoom, py + (cy0 - py) * zoom, cw * zoom, ch * zoom)
         if img is not None:
-            c.drawImageRect(img, dst, CUBIC if L.type == "video" else SAMPLING, skia.Paint(AntiAlias=True))
+            c.drawImageRect(img, dst, CUBIC if L.type == "video" else SAMPLING,
+                            skia.Paint(AntiAlias=True, Alphaf=self._alpha))
         c.restore()
         sp = self._stroke_paint(L, g, box)
         if sp:

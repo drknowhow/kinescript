@@ -20,6 +20,13 @@
   processes and took 17.5 s on the GPU, and `examples/edit.json` took 6.9 s. Only the contrast and covered-text
   checks, which read pixels, decode now: 2.8 s with 36 processes (most of them the sound check's), and 1.2 s. The
   results are the same. `kine probe --at` no longer decodes either.
+- A fading shape or picture draws faster: a rect, circle, ellipse, path or polygon with a fill and no stroke, or an
+  image or video without a stroke, whose only effect is its opacity now carries that opacity in its paint instead
+  of drawing into an offscreen layer of its own. The `expressions` stress scene (600 fading circles) draws a frame
+  in a median 8.2 ms instead of 26.3 on the GPU and in about 15 ms instead of 45 s on the CPU; `layers-2000` in
+  21.0 ms instead of 24.2 on the GPU and 24-46 ms instead of 35 s on the CPU. Pixels move by at most 3 levels.
+  Strokes, text, groups, shaders and models keep the offscreen layer: a stroke over a fill, or a hairline's joints,
+  would darken where the two draws overlap.
 - An output that can't be written (a read-only file, one another program holds, or a folder this account can't
   write in) is an error before the first frame. A 30 s 1080p render to a read-only `.mp4` drew every frame and
   failed after 2.4 s with `[Errno 13] Permission denied`; it now stops at once and says why.
