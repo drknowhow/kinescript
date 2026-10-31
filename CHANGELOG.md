@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- A group with `"sort": "pixel"` is a stage: each child draws on its own with an image of its depth, and at each pixel
+  the nearer child shows. A ring passes through a card, a model through a panel, and a ground shadow lies on a floor
+  that is another child. A model's depth comes from its triangles; any other child, a group included, lies flat in
+  its own plane. Within one model triangles still sort in painter's order, and stages do not nest. On the GPU the
+  depth is kept in 24 bits of an RGBA8 image, since its float targets are F16 (about 1.5 px of depth at z 0); the CPU
+  keeps float32. A stage holds four frame-sized images at the models' 2x supersampling, 33 MB each at 1080p, in each
+  render process. `examples/stage.json`, four children, renders in 2.0 s on the GPU against 1.8 s with its group set
+  to `"order"`, and in 22.7 s on the CPU against 6.6. `kine check` warns (`stage-cost`) about a stage with more than
+  16 children, since each is drawn and merged on its own.
+- Groups with `"order"` or `"depth"` draw as before. `bench/same.py` renders sampled frames of five examples at the
+  working tree and at a git revision, on either backend, and compares the bytes: against 1.4.0 none differ.
+
 ## 1.4.0 (2026-10-31)
 
 - `.mp4` and `.gif` exports on the GPU read a frame back while the next one draws. Each frame waited in a blocking

@@ -17,7 +17,7 @@ import numpy as np
 import skia
 
 from . import color as C
-from . import media, render3d, space, svgpath
+from . import media, render3d, space, stage, svgpath
 from .presets import IDENT, Mods
 from .scene import Layer, Scene
 
@@ -560,6 +560,9 @@ class Renderer:
         self._solids: dict = {}  # outlines and extruded meshes of text and path models
         self._outer = None  # the 3D matrix of the layer being drawn's parent (models put their floor in it)
         self._msurf = None  # offscreen that models draw into, antialiased, before compositing
+        self._stages = None  # surfaces of groups with "sort": "pixel" (stage.Stage)
+        self._stage = None  # the stage whose child is being drawn
+        self._dev = 1.0  # stage px per device px of the canvas being drawn on (models draw in device px)
         self.tris = 0  # model triangles drawn this frame
         self._subframes = None  # motion blur on the GPU: (count, averaging effect, a surface per sub-frame)
         self._under = None  # motion blur on the GPU: the layers every sub-frame shares (_held)
@@ -978,6 +981,8 @@ class Renderer:
                 if not facing and L.raw.get("backface") == "hidden":
                     return
             self._m3d, self._outer = m, outer
+            if self._stage is not None and self._stage.child is L:
+                self._stage.m = m
         c.save()
         c.translate(x, y)
         if tilt is not None:
@@ -1054,10 +1059,13 @@ class Renderer:
             kids = L.children
             if self._m3d is not None and L.raw.get("sort") == "depth":
                 kids = sorted(kids, key=lambda k: self._far(k, T))
-            for child in kids:
-                if self._stopped:
-                    break
-                self._layer(c, child, T, parent_alpha * alpha)
+            if self._m3d is not None and L.raw.get("sort") == "pixel" and self._stage is None:
+                stage.stage(self).draw(self, c, kids, T, parent_alpha * alpha)
+            else:
+                for child in kids:
+                    if self._stopped:
+                        break
+                    self._layer(c, child, T, parent_alpha * alpha)
         if layered == 2:
             c.restore()
         if layered:

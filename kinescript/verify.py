@@ -14,7 +14,7 @@ import numpy as np
 import skia
 
 from . import color as C
-from . import listen, media, models
+from . import listen, media, models, stage
 from .render import FONT_DIR, Renderer, _argb, joining, loop_end
 from .scene import Scene, SceneError, load
 
@@ -512,6 +512,13 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
                 + (f"; it overlaps '{under}'" if under else ""),
                 f"move it clear of '{under}', or add a box or a shadow" if under
                 else "add a box, a shadow, or change the colour")
+    for layer in scene.all_layers():
+        n = len(layer.children)
+        if layer.type == "group" and layer.raw.get("sort") == "pixel" and n > stage.CHILDREN:
+            add("warning", "stage-cost", layer.id, layer.t_in,
+                f"a stage draws and merges each of its {n} children on its own, so frames slow down past "
+                f"{stage.CHILDREN} children", "keep layers that cross nothing outside the stage, or merge touching "
+                "models as parts of one", until=layer.t_out)
     # Characters that cannot be drawn as written.
     for layer in scene.all_layers():
         if not (layer.type in ("text", "counter", "captions") or layer.type == "model" and layer.raw.get("shape") == "text"):

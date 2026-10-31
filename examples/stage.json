@@ -1,0 +1,19 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 6, "bg": {"linear": [[0,0],[1,1]], "stops": ["#0e0f13", "#1b1d26"]}},
+  "camera": {"z": [[0, 80], ["end", -200, "inOutCubic"]], "rotateY": [[0, -20], ["end", 18, "inOutCubic"]],
+             "rotateX": [[0, 16], ["end", 8, "inOutCubic"]]},
+  "layers": [
+    {"id": "stage", "type": "group", "x": "50%", "y": "50%", "sort": "pixel", "children": [
+      {"id": "floor", "type": "rect", "y": 250, "w": 1500, "h": 900, "radius": 40, "rotateX": 90, "fill": "#232a39"},
+      {"id": "panel", "type": "rect", "w": 640, "h": 380, "radius": 32, "fill": "#f2f0e8",
+       "rotateY": [[0, -24], ["end", 22, "inOutSine"]]},
+      {"id": "ring", "type": "model", "shape": "torus", "r": 230, "tube": 34, "x": -150, "detail": "high",
+       "fill": "$accent2", "shine": 0.7, "metal": 0.35, "rotateY": 74, "rotateX": [[0, 0], ["end", 50, "inOutSine"]]},
+      {"id": "ball", "type": "model", "shape": "sphere", "r": 110, "x": 250, "y": 110, "detail": "high", "fill": "$accent",
+       "shine": 0.8, "z": [[0, -280], [3, 170, "inOutCubic"], ["end", -40, "inOutCubic"]],
+       "ground": {"y": 250, "opacity": 0.6}}
+    ]},
+    {"id": "label", "type": "text", "text": "a stage: whatever is nearer shows, pixel by pixel", "x": "50%", "y": "92%",
+     "size": 38, "weight": 400, "fill": "$muted", "fixed": true, "at": 0.4, "enter": "fade"}
+  ]
+}

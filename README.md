@@ -57,6 +57,9 @@ no depth draw exactly as before.
   `camera` pans, dollies, orbits and rolls with perspective; `fixed` layers ignore its moves, and a group with
   `"sort": "depth"` draws its children far to near. The `flip`, `flip-up`, `tumble` and `push` motions work on
   whole layers and per letter with `split`. A two-sided card is a group with `"backface": "hidden"` on each side.
+- **Stages.** A group with `"sort": "pixel"` draws each child with an image of its depth and shows the nearest at
+  each pixel, so models and cards pass through each other with a clean edge, and a model's `ground` shadow lies
+  on a floor layer.
 - **Model layers.** `"type": "model"` draws a lit `cube`, `sphere`, `cylinder`, `cone`, `torus` or `plane`, or
   several shapes merged as `parts` so their triangles are depth-sorted together. Materials take `fill`, `shine`,
   `metal`, `rim` and `bands` (toon steps). `light`, for the scene or one model, takes `studio`, `soft`,
@@ -229,6 +232,8 @@ More scenes in [`examples/`](https://github.com/drknowhow/kinescript/tree/main/e
   extruded SVG path and the wordmark as extruded text, 5 s.
 - [`import.json`](https://github.com/drknowhow/kinescript/blob/main/examples/import.json): a glTF rocket on a
   ground shadow, 6 s.
+- [`stage.json`](https://github.com/drknowhow/kinescript/blob/main/examples/stage.json): a ring through a panel
+  and a ball that comes through it, on a floor, in a stage, 6 s.
 - [`voiceover.json`](https://github.com/drknowhow/kinescript/blob/main/examples/voiceover.json): titles cued from
   the words of a voice-over, karaoke captions of it, and a music bed that dips under it, 5.4 s.
 - [`narrated.json`](https://github.com/drknowhow/kinescript/blob/main/examples/narrated.json): the same idea
@@ -265,8 +270,8 @@ Within one process, such as the MCP server, the workers stay warm for two minute
   very slow (about 0.65 s per 1080p frame for the launch video); use `--scale 0.5` for previews on such machines.
   `KINE_BACKEND=cpu` forces this path.
 - 3D is drawn by Skia with a depth sort, not a GL pipeline: models have no image textures, skeletal animation or
-  shadows cast on each other, and separate model layers do not hide each other per pixel (merge touching
-  objects as `parts` of one model). Draco- and meshopt-compressed model files are not read.
+  shadows cast on each other. Separate layers hide each other per pixel only inside a stage, and parts of one
+  model that cut through each other meet at a stepped seam. Draco- and meshopt-compressed model files are not read.
 - Audio is mixing and levelling (trim, gain over time, fades, speed, loop, pan, role levels, ducking, a loudness
   target), with no effects such as EQ, compression of single sounds or reverb.
 - Kinescript does not speak by itself: `kine voice` needs a plugin or a command. The Kokoro plugin times words

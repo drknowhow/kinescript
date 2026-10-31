@@ -346,6 +346,82 @@ def test_gpu_and_cpu_agree_roughly():
     assert np.abs(cpu - gpu).mean() < 1.0
 
 
+def _crossed(**group):
+    """Two cards crossing in an X: the red one's left edge is near, the blue one's right edge."""
+    kids = [{"id": "red", "type": "rect", "w": 160, "h": 80, "rotateY": 40, "fill": "#ff0000"},
+            {"id": "blue", "type": "rect", "w": 160, "h": 80, "rotateY": -40, "fill": "#0000ff"}]
+    return scene([dict({"id": "g", "type": "group", "x": 160, "y": 90, "children": kids}, **group)], bg="#000000")
+
+
+def test_stage_shows_the_nearer_child_at_each_pixel():
+    listed, staged = _frame(_crossed(), 0), _frame(_crossed(sort="pixel"), 0)
+    assert tuple(listed[90, 130, :3]) == (0, 0, 255)  # in list order blue, drawn last, covers the crossing
+    assert tuple(staged[90, 130, :3]) == (255, 0, 0)
+    assert tuple(staged[90, 190, :3]) == (0, 0, 255)
+
+
+def test_stage_lets_a_model_pass_through_a_card():
+    kids = [{"id": "ball", "type": "model", "shape": "sphere", "r": 40, "light": "flat", "fill": "#ff0000"},
+            {"id": "card", "type": "rect", "w": 200, "h": 120, "fill": "#0000ff"}]
+    spec = lambda **g: scene([dict({"id": "g", "type": "group", "x": 160, "y": 90, "children": kids}, **g)],  # noqa: E731
+                             bg="#000000")
+    listed, staged = _frame(spec(), 0), _frame(spec(sort="pixel"), 0)
+    assert tuple(listed[90, 160, :3]) == (0, 0, 255)
+    assert tuple(staged[90, 160, :3]) == (255, 0, 0)  # the ball's front half is in front of the card
+    assert tuple(staged[90, 240, :3]) == (0, 0, 255)
+
+
+def test_stage_ground_shadow_lies_on_a_floor_listed_after_the_model():
+    def frame(ground):
+        ball = {"id": "ball", "type": "model", "shape": "sphere", "r": 30, "fill": "#ff0000", "ground": ground}
+        floor = {"id": "floor", "type": "rect", "w": 300, "h": 300, "y": 40, "rotateX": 90, "fill": "#808080"}
+        spec = scene([{"id": "g", "type": "group", "x": 160, "y": 90, "sort": "pixel", "children": [ball, floor]}],
+                     bg="#000000")
+        spec["camera"] = {"rotateX": 35}
+        return _frame(spec, 0).astype(int)
+    lit, shaded = frame(False), frame({"y": 40, "opacity": 0.8})
+    assert ((lit - shaded)[..., :3].min(2) > 20).sum() > 50  # a floor in the shadow's plane does not hide it
+
+
+def test_stage_frame_is_pure_function_of_index():
+    kids = [{"id": "ball", "type": "model", "shape": "sphere", "r": 30, "detail": "low", "z": "=sin(t*3)*60",
+             "ground": {"y": 40}},
+            {"id": "card", "type": "rect", "w": 120, "h": 70, "rotateY": "=t*90", "fill": "#3ddbd9"},
+            {"id": "floor", "type": "rect", "w": 260, "h": 200, "y": 40, "rotateX": 90, "fill": "#2a3040"}]
+    spec = scene([{"id": "g", "type": "group", "x": 160, "y": 90, "sort": "pixel", "children": kids}], duration=1)
+    spec["camera"] = {"rotateX": 20, "rotateY": [[0, -10], ["end", 10]]}
+    r = Renderer(k.Scene(spec), backend="cpu")
+    sequential = [r.frame(n).copy() for n in range(0, 20)]
+    assert np.array_equal(sequential[17], _frame(spec, 17))
+
+
+def test_stage_without_depth_draws_as_a_group():
+    kids = [{"type": "rect", "x": 0, "y": 0, "w": 80, "h": 60, "fill": "#ff0000"},
+            {"type": "circle", "x": 30, "y": 10, "r": 30, "fill": "#0000ff"}]
+    plain = scene([{"type": "group", "x": 160, "y": 90, "children": kids}])
+    staged = scene([{"type": "group", "x": 160, "y": 90, "sort": "pixel", "children": kids}])
+    assert np.array_equal(_frame(plain, 0), _frame(staged, 0))
+
+
+def test_stage_gpu_and_cpu_agree_roughly():
+    spec = _crossed(sort="pixel")
+    spec["layers"][0]["children"].append({"id": "ball", "type": "model", "shape": "sphere", "r": 30, "z": 10})
+    cpu = _frame(spec, 0, "cpu").astype(int)
+    try:
+        gpu = _frame(spec, 0, "gpu").astype(int)
+    except RuntimeError:
+        pytest.skip("no GPU")
+    assert np.abs(cpu - gpu).mean() < 1.0
+
+
+def test_check_warns_about_a_stage_with_many_children():
+    kids = [{"type": "rect", "x": 10 * i, "y": 0, "w": 8, "h": 8, "z": i} for i in range(17)]
+    spec = scene([{"id": "g", "type": "group", "x": 80, "y": 90, "sort": "pixel", "children": kids}], duration=0.5)
+    assert any(i["code"] == "stage-cost" and i["layer"] == "g" for i in check(spec)["issues"])
+    kids.pop()
+    assert not any(i["code"] == "stage-cost" for i in check(spec)["issues"])
+
+
 def test_draw_trims_stroke():
     spec = scene([{"type": "line", "points": [[10, 90], [310, 90]], "stroke": "#ffffff", "strokeWidth": 6,
                    "draw": [[0, 0], [1, 1, "linear"]], "cap": "butt"}], bg="#000000", duration=1)

@@ -47,8 +47,10 @@ def test_complete_scene_in_docs_passes_check_with_no_rewrites():
 def test_depth_examples_in_docs_pass_check_with_no_rewrites():
     objs = [json.loads(o) for o in _objects(_section("DEPTH AND CAMERA (3D)"))]
     card = next(o for o in objs if o.get("id") == "card")
+    staged = next(o for o in objs if o.get("id") == "stage")
     whole = next(o for o in objs if "layers" in o)
-    for spec in (whole, {"canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 2}, "layers": [card]}):
+    for spec in (whole, *({"canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 2}, "layers": [o]}
+                          for o in (card, staged))):
         r = check(spec)
         assert r["ok"] and not r["issues"], r["issues"]
 
