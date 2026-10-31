@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.4.0 (2026-10-31)
 
 - `.mp4` and `.gif` exports on the GPU read a frame back while the next one draws. Each frame waited in a blocking
   `readPixels` while the GPU finished drawing it and copied it out, the copy alone 1.6 ms of the 2.8 ms a simple
