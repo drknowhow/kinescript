@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Model layers draw in two thirds of the time, with the same pixels. Of the 2.5 ms a model took each frame,
+  1.5 ms went on making two `skia.Point`s per vertex, handing them and the indices to Skia, and freeing them;
+  Skia now makes the points while reading back a path numpy writes, indices go as a uint16 memoryview, and a
+  primitive's mesh and the GPU's shading paint are kept while they hold. The models-30 stress scene drew a frame
+  in 79 ms on the GPU and now in 52 (224 and 186 on the CPU), and rendered at 36 fps on 4 workers and now at 50;
+  `examples/model.json` in `bench/stages.py` draws in 7.8 ms at the median and 31.5 at p95, from 10.7 and 41.6.
 - An output that can't be written (a read-only file, one another program holds, or a folder this account can't
   write in) is an error before the first frame. A 30 s 1080p render to a read-only `.mp4` drew every frame and
   failed after 2.4 s with `[Errno 13] Permission denied`; it now stops at once and says why.

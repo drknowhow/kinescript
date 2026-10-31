@@ -122,6 +122,31 @@ def test_gpu_model_frames_are_repeatable():
         assert np.array_equal(first, _renderer(spec, "gpu").frame(n)), n
 
 
+@pytest.mark.parametrize("backend", ["cpu", "gpu"])
+def test_model_meshes_and_paints_kept_between_frames_follow_what_changes(backend):
+    # Kept between frames: a primitive's mesh until its size changes, the pieces joined until one of them does,
+    # and the GPU's shading paint until a material or the light does. Any frame comes out the same drawn in
+    # order, out of order, or by a fresh renderer.
+    spec = scene([{"id": "m", "type": "model", "shape": "sphere", "r": [[0, 30], [1, 60]], "x": 150, "y": 90,
+                   "fill": [[0, "#ff5a36"], [1, "#4a7dff"]], "rotateY": "=T*60", "light": {"preset": "dramatic"},
+                   "parts": [{"shape": "cube", "w": 30, "x": 75, "fill": "#e8e2d0", "bands": 3}]}])
+    r = _renderer(spec, backend)
+    got = [r.frame(n).copy() for n in (40, 5, 59, 5, 40)]
+    assert np.array_equal(got[0], got[4]) and np.array_equal(got[1], got[3])
+    assert not np.array_equal(got[0], got[1])
+    for n, f in zip((40, 5, 59), got):
+        assert np.array_equal(f, _renderer(spec, backend).frame(n)), n
+
+
+def test_model_points_made_from_path_bytes_equal_point_make():
+    from kinescript import render3d
+    # This Skia writes paths as _path_bytes does, so models take the fast way to their skia.Points.
+    assert render3d._WORD is not None
+    xy = np.concatenate([np.random.default_rng(3).normal(0, 3000, (999, 2)), [[0.1, -0.0], [1e-20, 3e38]]])
+    got = [(p.x(), p.y()) for p in render3d._points(xy)]
+    assert got == [(p.x(), p.y()) for p in map(skia.Point.Make, xy[:, 0].tolist(), xy[:, 1].tolist())]
+
+
 # ---- D25: boxes hold the ink, check rules -------------------------------------------------------------------------
 
 @pytest.mark.parametrize("layer", [
