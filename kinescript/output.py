@@ -72,14 +72,15 @@ def _render_range(args) -> dict:
     r = Renderer(scene, scale=scale, even=fmt in ("mp4", "webm", "gif"), alpha=fmt not in ("mp4", "gif"))
     yuv = r.yuv and fmt in ("mp4", "gif")
     enc, log = _encoder(path, r.w, r.h, scene.fps, fmt, quality, threads, yuv)
-    grab = r.frame_i420 if yuv else r.frame
+    stream = r.frames_i420(range(start, end)) if yuv else (r.frame(n) for n in range(start, end))
     t0 = time.perf_counter()
     try:
-        for n in range(start, end):
-            enc.stdin.write(grab(n).data)  # type: ignore[union-attr]
+        for px in stream:
+            enc.stdin.write(px.data)  # type: ignore[union-attr]
     except BrokenPipeError:
         pass  # ffmpeg quit early; its own message is reported below
     finally:
+        stream.close()  # a readback still in flight finishes before its buffers go
         scene.close()
         try:
             enc.stdin.close()  # type: ignore[union-attr]

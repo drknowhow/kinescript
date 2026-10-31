@@ -7,7 +7,7 @@ import pytest
 
 import kinescript as k
 from kinescript import media
-from kinescript.render import Renderer
+from kinescript.render import Renderer, _read_back
 
 SWATCHES = ["#ff0000", "#00ff00", "#0000ff", "#ff633f", "#808080", "#f2f0e8"]
 
@@ -40,6 +40,32 @@ def test_gpu_i420_matches_the_bt709_formula():
         r.surface.readPixels(r.info, r.buf, r.w * 4)
         assert np.abs(got - _ref_i420(r.buf).astype(int)).max() <= 1, n
     s.close()
+
+
+def test_gpu_i420_stream_is_the_blocking_reads_in_order():
+    """frames_i420 reads a frame back while the next one draws: the same bytes as frame_i420, in order, also when
+    the stream stops early, and a failed readback is an error, not a frame."""
+    a, b = k.load("examples/hello.json"), k.load("examples/hello.json")
+    ra, rb = Renderer(a, even=True), Renderer(b, even=True)
+    if not ra.yuv:
+        a.close()
+        b.close()
+        pytest.skip("GPU I420 path needs the GPU backend")
+    ns = [0, 40, 41, 125, 3, 3]
+    want = [ra.frame_i420(n).copy() for n in ns]
+    same = [np.array_equal(px, w) for px, w in zip(rb.frames_i420(ns), want, strict=True)]
+    assert same == [True] * len(ns)
+    stream = rb.frames_i420(ns)
+    assert np.array_equal(next(stream), want[0])
+    stream.close()  # frame 40's readback is still in flight
+    assert np.array_equal(rb.frame_i420(41), want[2])
+    job = [np.zeros(8, np.uint8), False, None]
+    _read_back(job, 4, None)
+    assert job[1] and isinstance(job[2], RuntimeError)
+    with pytest.raises(RuntimeError, match="readback"):
+        rb._collect(job)
+    a.close()
+    b.close()
 
 
 @pytest.mark.parametrize("backend", ["gpu", "cpu"])

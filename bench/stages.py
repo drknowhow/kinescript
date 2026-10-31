@@ -69,23 +69,27 @@ def stages(name: str, src, ext: str, frames: int) -> dict:
     ctx = gpu_context() if r.backend == "gpu" else None
     enc, log = output._encoder(str(Path(tempfile.gettempdir()) / f"kine-bench{ext}"), r.w, r.h, scene.fps, fmt,
                                "standard", 0, yuv)
-    grab = r.frame_i420 if yuv else r.frame
     picks = np.linspace(0, scene.frames - 1, min(frames, scene.frames)).round().astype(int)
+    ns = [picks[0]] * 3 + list(picks)  # three warm-up frames
     draw, frame, pipe = [], [], []
     mb = int(scene.motion_blur.get("samples", 0)) if scene.motion_blur else 0
-    for i, n in enumerate([picks[0]] * 3 + list(picks)):  # three warm-up frames
+    for i, n in enumerate(ns):
         t0 = time.perf_counter()
         for s in range(max(1, mb)):  # drawing alone, waiting until the GPU has finished
             r.draw(n / scene.fps + s * 1e-4)
             if ctx:
                 ctx.flushAndSubmit(skia.GrSyncCpu.kYes)
+        if i >= 3:
+            draw.append(time.perf_counter() - t0)
+    # What an export does per frame: draw, convert, read back (on the I420 path, while the next frame draws).
+    stream = r.frames_i420(ns) if yuv else (r.frame(n) for n in ns)
+    for i in range(len(ns)):
         t1 = time.perf_counter()
-        buf = grab(n)  # what an export does per frame: draw, convert, read back
+        buf = next(stream)
         t2 = time.perf_counter()
         enc.stdin.write(buf.data)
         t3 = time.perf_counter()
         if i >= 3:
-            draw.append(t1 - t0)
             frame.append(t2 - t1)
             pipe.append(t3 - t2)
     enc.stdin.close()
