@@ -326,6 +326,36 @@ def test_check_flags_offscreen_text_and_overlap():
     assert "text-offscreen" in codes and "text-overlap" in codes and not res["ok"]
 
 
+def test_check_flags_media_mostly_off_canvas(clip):
+    # A video sits by its top-left corner, so x and y at the middle without an anchor push it off to the bottom right.
+    placed = {"id": "v", "type": "video", "src": clip, "x": "50%", "y": "50%", "w": 320, "h": 180, "dur": 2}
+    res = check(scene([placed], duration=2))
+    hit = [i for i in res["issues"] if i["code"] == "media-offscreen"]
+    assert len(hit) == 1 and hit[0]["layer"] == "v" and hit[0]["level"] == "warning" and "anchor" in hit[0]["fix"]
+    assert "75% off" in hit[0]["message"] and hit[0]["to"] - hit[0]["from"] >= 1.5
+    for fixed in ({"anchor": "center"}, {"allowOffscreen": True}):
+        res = check(scene([dict(placed, **fixed)], duration=2))
+        assert not [i for i in res["issues"] if i["code"] == "media-offscreen"], fixed
+    # A sequence's clips get its x, y and anchor, so they are reported once, as the sequence; its allowOffscreen
+    # covers them.
+    seq = {"id": "cut", "type": "sequence", "x": "50%", "y": "50%", "w": 320, "h": 180,
+           "clips": [{"src": clip, "trim": [0, 1.5]}, {"src": clip, "trim": [1.5, 3]}]}
+    res = check(scene([seq], duration=3))
+    hit = [i for i in res["issues"] if i["code"] == "media-offscreen"]
+    assert [i["layer"] for i in hit] == ["cut"] and hit[0]["to"] > 2.5
+    res = check(scene([dict(seq, allowOffscreen=True)], duration=3))
+    assert not [i for i in res["issues"] if i["code"] == "media-offscreen"]
+
+
+def test_check_lets_media_pass_through_the_edge():
+    # Sliding in from off the canvas is mostly off for under a second, which is not a misplaced layer.
+    shader = {"id": "s", "type": "shader", "preset": "score", "w": 320, "h": 180, "dur": 2}
+    res = check(scene([dict(shader, x=[[0, -320], [0.5, 0, "outCubic"]])], duration=2))
+    assert not [i for i in res["issues"] if i["code"] == "media-offscreen"]
+    res = check(scene([dict(shader, x=-240)], duration=2))  # left there, the same layer is flagged
+    assert [i["layer"] for i in res["issues"] if i["code"] == "media-offscreen"] == ["s"]
+
+
 def test_check_flags_low_contrast():
     res = check(scene([{"id": "a", "type": "text", "text": "Grey", "x": 160, "y": 90, "size": 30, "fill": "#20232a"}],
                       bg="#1b1d22", duration=2))

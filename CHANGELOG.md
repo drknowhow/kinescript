@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- `kine check` warns (`media-offscreen`) when a video, image or shader layer is more than half off the canvas for
+  a second or more, and for a video or shader without an `anchor` it says why: they are placed by their top-left
+  corner even when `x` and `y` are set. A sequence is reported once, under its own id. Found in #11, where a clip
+  set to the middle of the canvas landed mostly off it and `check` said nothing.
+- `allowOffscreen` on a group or sequence now covers the layers inside it.
+- `kine docs` says plainly which layers default to `topleft`: video and shader always, an image only without `x`.
+
 ## 1.3.0 (2026-10-30)
 
 Voices that act. A line's text can say how to speak it, each sound picks its own voice backend, and two new
