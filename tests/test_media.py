@@ -92,6 +92,26 @@ def test_a_dur_longer_than_the_trim_holds_the_last_frame_of_the_trim(idx, tmp_pa
     assert not [i for i in check(looped)["issues"] if i["code"] == "clip-hold"]
 
 
+def test_a_resampled_clip_holds_one_frame_however_the_render_reaches_it(idx, tmp_path):
+    # At 24 fps a 30 fps clip's hold read on from an earlier frame landed on frame 28 or 29 depending on where the
+    # render started, so the held picture could change where one render chunk ends and the next begins.
+    spec = _spec(idx, fps=24, trim=[0.5, 1.0], dur=1.5)
+    for start in range(0, 14):
+        s = k.Scene(spec)
+        r = Renderer(s, backend="cpu")
+        got = [_shown(r.frame(n)) for n in range(start, 36)]
+        s.close()
+        assert got[max(0, 12 - start):] == [29] * (36 - max(12, start)), (start, got)
+    # Half speed at 60 fps, the last frame's time is 0.9917 s, within half a source frame of the trim end: a clip
+    # opened there shows the nearest frame, 30, past the end, so the time asked for stops short of that.
+    assert _cold(_spec(idx, fps=60, speed=0.5, trim=[0, 1.0]), 119) == 29
+    # Picture 2 s, sound 3 s: opened past the picture at 24 fps, the clip held frame 58, a frame short of its end.
+    longer = str(tmp_path / "longer.mp4")
+    _ff("-f", "lavfi", "-i", f"color=c=black:s=128x16:r=30:d=2,{INDEX}", "-f", "lavfi", "-i", "sine=d=3",
+        "-pix_fmt", "yuv420p", "-c:v", "libx264", "-qp", 0, longer)
+    assert [_cold(_spec(longer, fps=24), n) for n in (60, 70)] == [59, 59]
+
+
 def test_a_dur_longer_than_the_file_holds_its_last_frame_and_check_says_so(idx):
     spec = _spec(idx, dur=3)
     assert _played(spec)[55:] == [55, 56, 57, 58] + [59] * 31

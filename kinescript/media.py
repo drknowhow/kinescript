@@ -258,6 +258,7 @@ class VideoSource:
         # A VP8/VP9 clip with alpha (Kinescript's own transparent .webm, for one) is read by libvpx, which keeps it.
         self.decoder = alpha_decoder(self.info)
         self.end: float | None = None  # the time of the last frame, once a read has run out of picture before it
+        self.held_at: float | None = None  # the time held() opened at, while the pipe still shows that frame
         if self.ctx is not None:  # 4:2:0 planes need even sizes
             self.w, self.h = max(2, self.w - self.w % 2), max(2, self.h - self.h % 2)
             self.yuv_info = skia.YUVAInfo((self.w, self.h), skia.YUVAInfo.kY_U_V, skia.YUVAInfo.k420,
@@ -270,10 +271,13 @@ class VideoSource:
 
     def _vf(self) -> str:
         w, h = self.w, self.h
+        # eof_action=pass: resampled to another fps, the last frame of the file was dropped when the end of the file
+        # fell before the next output frame's time, so a clip opened near its end held the frame before its last one.
+        timing = f"setpts=(PTS-STARTPTS)/{self.speed},fps={self.fps}:eof_action=pass"
         if self.ctx is not None:  # cover or stretch, kept in YUV and limited range
             fit = ":force_original_aspect_ratio=increase" if self.fit == "cover" else ""
             crop = f",crop={w}:{h}" if self.fit == "cover" else ""
-            return f"setpts=(PTS-STARTPTS)/{self.speed},fps={self.fps},scale={w}:{h}{fit}:out_range=tv{crop},format=yuv420p"
+            return f"{timing},scale={w}:{h}{fit}:out_range=tv{crop},format=yuv420p"
         # The same matrix the YUV path uses, so GPU and raster renders of a clip agree.
         m = {skia.kRec709_YUVColorSpace: "bt709", skia.kRec601_YUVColorSpace: "bt601",
              skia.kBT2020_YUVColorSpace: "bt2020"}[yuv_matrix(self.info)]
@@ -285,14 +289,16 @@ class VideoSource:
             size = f"scale={w}:{h}{cm},format=rgba"
         else:
             size = f"scale={w}:{h}{cm}:force_original_aspect_ratio=increase,crop={w}:{h},format=rgba"
-        return f"setpts=(PTS-STARTPTS)/{self.speed},fps={self.fps},{size}"
+        return f"{timing},{size}"
 
     def _open(self, t: float):
         self.close()
         self.t0 = max(0.0, t)
         # Seek half a source frame early: -ss drops the frames before it, and 41/30 written as 1.3667 lies past
         # frame 41's own time, so a clip opened there started a frame late. The first frame is now the nearest one.
-        ss = max(0.0, self.t0 - 0.5 / max(self.info["fps"] or self.fps, 1))
+        # Rounded down, never up: a 60 fps scene asks for times exactly half a 30 fps frame past one, and 0.96667
+        # written as 0.9667 dropped that frame too, where a clip played through holds it for that output frame.
+        ss = int(max(0.0, self.t0 - 0.5 / max(self.info["fps"] or self.fps, 1)) * 1e4) / 1e4
         dec = ["-c:v", self.decoder] if self.decoder else []
         cmd = [FFMPEG, "-v", "error", *dec, "-ss", f"{ss:.4f}", "-i", self.src, "-an", "-vf", self._vf(),
                "-f", "rawvideo", "-pix_fmt", "yuv420p" if self.ctx is not None else "rgba", "-"]
@@ -357,6 +363,7 @@ class VideoSource:
     def at(self, src_t: float) -> skia.Image | None:
         """Frame showing source time src_t (seconds into the file). Past the last frame, the last frame: what a
         clip played up to that time holds once its picture runs out."""
+        self.held_at = None
         dur = self.info["duration"]
         src_t = max(0.0, min(src_t, dur) if dur else src_t)
         if self.end is not None:
@@ -370,6 +377,17 @@ class VideoSource:
         while self.index < want:
             if not self._read():
                 break
+        return self.frame
+
+    def held(self, src_t: float) -> skia.Image | None:
+        """The frame a clip that has played out holds, src_t being the time of its last frame: always the frame a
+        fresh open at src_t shows. A pipe that reached src_t by reading on from an earlier time can land on the
+        source frame either side of it when the scene's fps is not the clip's, so a hold read that way could change
+        partway through, where one render chunk ends and the next begins. Opened once; later calls reuse it."""
+        if self.held_at != src_t or self.proc is None:
+            self.close()
+            self.at(src_t)
+            self.held_at = src_t
         return self.frame
 
     def _last(self, t: float):

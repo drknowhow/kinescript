@@ -156,7 +156,9 @@
 - A clip that plays to its end shows its final frame. A 210-frame clip showed frame 208 twice and never frame 209.
 - A video `dur` longer than its trimmed clip holds the clip's last frame. With `trim` [2, 4] and `dur` 6 the
   picture played on to 6.9 s of the file. `kine check` warns (`clip-hold`) when a `dur` runs past the trim end
-  or the end of the file; past the file it froze the last frame silently.
+  or the end of the file; past the file it froze the last frame silently. The held frame is the same however a
+  render reaches it: a 30 fps clip in a 24 fps scene held frame 28 or 29 depending on where a render worker
+  started, and opened past its picture it held the frame before its last.
 - `kine probe` of a PNG says `image: true` with fps 0; ffprobe gives a still 25 fps, so it said `image: false`. A
   model file (`.glb`, `.gltf`, `.obj`) gives its triangles, vertices, materials and size instead of an ffprobe
   error. A media probe names its `kind` (video, audio, image or model), and a scene's probe has `ok` as a media
