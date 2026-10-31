@@ -1,0 +1,222 @@
+# Kinescript 1.5: 3D plan
+
+Proposal, 2026-10-31. Nothing here is built. Numbers marked "target" are budgets to measure against; the
+others come from the 1.4 CHANGELOG or from the spike below.
+
+## Where 3D stands in 1.4
+
+- Depth on any layer (`z`, `rotateX`, `rotateY`, `backface`, `fixed`), a top-level `camera` that pans, dollies
+  and orbits around the canvas centre, and groups with `"sort": "depth"` (`space.py`, `Renderer._cameras`,
+  `Renderer._layer`).
+- `model` layers: six primitives, extruded text and SVG paths, `parts`, and glTF and OBJ files (`mesh.py`,
+  `models.py`). `render3d.draw` sorts each model's triangles far to near and draws them with `drawVertices` into a
+  frame-sized offscreen at 2x supersampling. The GPU shades per pixel in SkSL, with the normal and the material
+  slot packed into the two texture coordinates; the CPU shades per vertex in numpy.
+- One light rig, fixed to the camera: key, fill, ambient and rim from one of nine directions. It does not animate:
+  `Scene.light` is the raw value, where `camera` is compiled like a layer.
+- `ground`: a blurred footprint straight below the model.
+
+README.md:267 lists the limits users run into: no image textures, no skeletal animation, no shadows cast on other
+objects, separate model layers that don't hide each other per pixel, and no Draco or meshopt files. The code adds
+three more: lights can't move, `parts` can't animate, and 3D text isn't shaped (`kine check` warns
+`unshaped-3d-text`).
+
+## What the spike settled
+
+A short test against skia-python 144.1 on the raster backend found:
+
+- A `kRGBA_F32` surface with `BlendMode.kDarken` keeps the minimum per pixel. Triangles drawn with their depth in
+  the texture coordinate and a one-line SkSL shader leave the nearest depth at each pixel, in any draw order.
+- A runtime shader can't read `sk_FragCoord` (SkSL reports "unknown identifier"), and `drawVertices` gives the
+  shader one pair of texture coordinates. Vertex colours go to the blend mode, not to the shader.
+- A canvas-sized `drawPaint` with image children works, and there the shader's coordinate is the device pixel.
+- `TextBlob.Iter` and `Font.getPath` exist, so shaped glyph runs can be turned into outlines.
+
+So a depth test inside one `drawVertices` call isn't possible with public SkSL, and triangles inside one model
+keep the depth sort. Per-pixel visibility between layers is possible: each layer draws a colour image and a depth
+image, and a compositing pass keeps the nearer pixel. 1.5 is built on that, with no new required dependency.
+
+Phase 0 then measured the GPU side (RTX 5060 Ti, skia-python 144.1), below.
+
+## Rules every change keeps
+
+- A frame is a pure function of (scene, frame number). Skinned poses, glTF animations, camera shake and repeat
+  expressions are sampled at the frame's time, and caches key on values, as `render3d._kept` does.
+  `tests/test_core.py::test_frame_is_pure_function_of_index` gets a case for each new feature.
+- Scenes that use none of the new keys draw the same bytes as 1.4. `bench/same.py` draws five frames each of
+  `examples/3d.json`, `model.json`, `title3d.json`, `import.json` and `hello.json` at the branch and at `main`, GPU
+  and CPU, and every PR runs it.
+- No new required dependency. Draco is the one candidate, as an optional extra (decision 2).
+- Every feature works on both backends. Where the CPU takes a cheaper path, such as per-vertex instead of
+  per-pixel, `kine docs` says so, as it does for shading now.
+- Every new key is validated in `schema.py` with errors that name the layer and field, documented in `docs.py`
+  for small models, and gets a `kine check` rule for its most likely mistake.
+- Before a visual change is called done: `kine check`, then `kine look --boxes`, and look at the image. Numbers in
+  the CHANGELOG, README and site are measured.
+
+## Phases
+
+Each bullet is about one PR. Phases 2 and 3 can run in parallel once Phase 1 is in.
+
+### Phase 0: GPU spike (done, 2026-10-31)
+
+- Float targets: the GL context makes F16 render targets but not F32. F16 keeps 1.2345678 as 1.234375, about
+  1.5 px of depth at z 0, too coarse for surfaces that touch. Depth is packed into 24 bits of an RGBA8 image by an
+  SkSL shader instead: the largest error over a ramp was 6.5e-8 of the range, 0.0001 px over a 2000 px deep
+  stage. Each model writes its depth in its own sort order with `kSrc`. The CPU writes float32 through a linear
+  gradient shader into an F32 raster surface (error 5.9e-8).
+- Compositing on the GPU at 3840x2160 (1080p at 2x): 0.21 to 0.49 ms a layer for 2 to 16 layers. At 7680x4320
+  (4K at 2x) it took 28 ms a layer, but other processes held 14.8 of the card's 16.3 GB at the time, so that
+  number needs a quiet GPU.
+- Compositing on the CPU at 3840x2160: numpy over the whole frame took 469 ms a layer in float32 and 60 ms with
+  uint32 pixel selects; limited to where two layers overlap (8% of the frame in the test), 4.8 ms.
+- Edges: rendering already supersamples 2x without MSAA, and a model's colour and depth come from the same
+  triangles at that size, so their coverage matches and the downsample antialiases the merged result. No depth
+  growing was needed.
+- Found on the way: Skia's CPU backend draws into RGBA8888 surfaces about 33 times slower than into BGRA8888 on
+  this Windows wheel (a 1200 x 1200 copy: 49.5 ms against 1.5). Every CPU surface in Kinescript is RGBA8888.
+  That is a separate change for the whole CPU backend, not part of 1.5's 3D work.
+
+### Phase 1: per-pixel stage
+
+- `"sort": "pixel"` on a group makes it a stage. Each child draws a colour image and a depth image. Models take
+  depth from the minimum pass. Flat layers take it from their quad: 1/w is linear across a plane on screen, so
+  four corners give exact depth. The stage merges children into two accumulators one at a time, so memory doesn't
+  grow with the number of children; one F16 surface at 4K with 2x supersampling is 265 MB.
+- Models that pass through each other, and cards that pass through models, now meet at a clean line. Inside one
+  model the triangle sort stays, so the docs' advice changes from "put touching things in one model as parts" to
+  "put things that cross in a stage as separate layers".
+- Check rules: `stage-cost` (more than 16 children), `coplanar-in-stage` (two surfaces at the same depth flicker).
+- `examples/stage.json`: two interlocking rings, a sphere passing through a card, a title in depth.
+- `stage-16` stress scene in `bench/stress.py`.
+
+Status (2026-10-31, branch `stage-pixel-depth`): built, not merged. Changes from the bullets above:
+- The GPU keeps depth in 24 bits of RGBA8 (no F32 targets), so a stage holds four frame-sized RGBA8 images at 2x,
+  33 MB each at 1080p. The merge runs four passes, none drawing into an image it reads: drawing into a surface with
+  a live snapshot makes Skia copy it, and with those copies 6 workers rendered `examples/stage.json` in 5.8 s
+  instead of 1.9 (14.2 GB of the card's 16.3 GB held by other programs).
+- `coplanar-in-stage` is not built: ties go to the later child, so equal depths don't flicker between frames.
+- `examples/stage.json` is a floor, a turning panel, a ring through it and a ball with a ground shadow.
+- `stage-16` in `bench/stress.py`: 120 frames in 2.88 s (42 fps) against models-30's 49 fps.
+- CPU stages are slow: `examples/stage.json` takes 22.7 s against 6.6 with the group as `"order"`. Most of it is
+  Skia's RGBA8888 raster path (see Phase 0); a BGRA CPU backend is its own PR.
+
+### Phase 2: light, shadow, fog
+
+- `light` compiles like `camera`, so every amount tweens, and `from` also takes `azimuth` and `elevation` in
+  degrees. A light sweeping across a 3D logo is one keyframed key.
+- `"follow": "camera"` (the default, as now) or `"world"`. With world lights, orbiting the camera around a product
+  changes its shading, as on a real turntable.
+- `lights`: up to three more, each `directional` (`from`) or `point` (`x`, `y`, `z` in scene px, with falloff),
+  with `color` and `intensity`. The SkSL effect gets uniforms per light; the CPU shades them per vertex.
+- `env`: reflections on shiny and metal materials from a procedural environment, `studio`, `sunset`, `night`,
+  `chrome` or `{"top", "horizon", "bottom"}` colours, looked up by the reflected normal.
+- Material `glow` (0..1): emissive colour that light doesn't change.
+- `ground` takes `"from": "light"` to project the footprint along the key light instead of straight down, so the
+  shadow moves with the light. The default stays straight down, with the same bytes.
+- `"shadows": true` on a stage: the stage draws a depth image of its models from the key light (orthographic),
+  and the compositing pass darkens pixels the light doesn't reach, on models and on flat layers. A rect turned 90
+  degrees on `rotateX` becomes a floor that takes shadows.
+- `fog` at the top level: `{"color", "near", "far"}` in px from the camera. Flat layers are tinted as a whole;
+  models per pixel on the GPU and per vertex on the CPU; inside a stage, per pixel from the depth image.
+- Check rules: `light-behind` (the key light sits behind what the camera sees, so a model shows only ambient),
+  `fog-hides` (a layer lies wholly past `far`).
+
+### Phase 3: camera
+
+- `target`: a point `[x, y, z]` or a layer id. `rotateX` and `rotateY` orbit the target instead of the canvas
+  centre; a layer id makes the camera follow that layer.
+- `shake`: `{"amount": px, "speed": hz, "seed": n}`, smooth noise of the frame's time, for handheld moves.
+- Depth of field: `focus` (z in px, or a layer id) and `aperture` (px of blur per 1000 px from the focus plane).
+  Flat layers blur whole, by their depth, through the existing `blur`. In a stage the blur is per pixel: four
+  blurred copies and a per-pixel choice by depth. A canvas-sized blur took 370 ms at 1080p on the CPU in the 1.4
+  split-text work, so `kine check` warns when a CPU render uses per-pixel depth of field.
+- `kine docs` recipes for orbit, crane, push-in and dolly zoom. Dolly zoom needs no new key: `fov` already keeps
+  the size at z 0, so animating `fov` alone does it.
+- Check rules: `camera-inside-model`, `focus-on-nothing` (the focus plane is nearer or farther than every layer).
+
+### Phase 4: textures and surface looks
+
+- Texture coordinates: every primitive makes them (cube per face, sphere and cylinder wrapped, plane 0..1,
+  extruded text and paths planar on the caps), and glTF `TEXCOORD_0` is read.
+- `texture` on a model or part: an image or video file, or `"#groupId"` to put a rendered group on the surface,
+  such as an animated UI on a phone's screen or footage on a curved panel. `repeat` and `offset` adjust it. The
+  group renders at the frame's own time, so frames stay pure.
+- glTF `baseColorTexture` is drawn as a texture instead of being averaged to one colour; `emissiveTexture` drives
+  `glow`.
+- Drawing: the texture coordinates now carry the texture, so they can't carry the normal. Textured models draw
+  diffuse light, specular and texture as separate passes of the same sorted triangles and combine them (the GPU
+  per pixel; the CPU per-vertex light times a per-pixel texture, which raster Skia samples quickly). Skia maps an
+  image affinely across each triangle, so textured triangles are split by their size on screen to stop the image
+  sliding.
+- `edges`: `{"width", "color", "angle"}` draws creases sharper than `angle` and silhouettes, for technical and
+  toon looks; `"edges": "all"` is a wireframe. Edge quads join the sorted triangle list just in front of their
+  faces, so hidden lines stay hidden without a depth buffer.
+- `opacity` on models, drawn in sort order. Order-independent transparency stays out of scope.
+- Check rules: `no-uvs` (a texture on a mesh without coordinates), `texture-missing`, `texture-swim` (a textured
+  triangle still too large on screen).
+
+### Phase 5: motion from files, parts and repeats
+
+- glTF animation: node translation, rotation and scale channels (LINEAR, STEP, CUBICSPLINE), morph target weights,
+  and skins (`JOINTS_0`, `WEIGHTS_0`, inverse bind matrices; linear blend skinning in numpy). The layer key
+  `animation` takes a clip name or `{"name", "speed", "loop", "start"}` on the layer's clock.
+- `parts` animate: part keys take keyframes and expressions like layer keys. The merged mesh is rebuilt only on
+  frames where a part moves.
+- `repeat`: `{"count": n, "x": "...", "y": "...", "z": "...", "rotateY": "...", "scale": "...", "fill": "..."}`,
+  with expressions over `i`, `n` and `t` in the existing AST-checked expression engine. The copies merge into one
+  mesh and sort together, so a waving grid of 400 cubes is one layer.
+- `kine probe` on a model file lists its animations with durations, skins, morph targets, textures and texture
+  coordinate sets.
+- Check rules: `unknown-animation` (naming the clips the file has), `skin-influences` (a vertex with more than
+  four joints; the extra weights are dropped).
+- `examples/make_media.py` writes a skinned, animated glTF (a tube bending on three joints) and a textured one, so
+  tests and examples need no downloaded assets.
+
+### Phase 6: shapes, 3D text, compressed files
+
+- `cube` takes `radius` for a rounded box. New shapes: `capsule`; `lathe`, where `profile` (`[[r, y], ...]` or
+  path data) turns around the vertical axis; and `tube`, a round tube along path data `d`, where `draw` grows it
+  along its length for 3D lines and routes.
+- Shaped 3D text: glyph runs from `TextBlob.MakeFromShapedText` (HarfBuzz, which 2D text already uses), read with
+  `TextBlob.Iter`, outlines from `Font.getPath`. Arabic letters join, marks sit on their letters and right-to-left
+  runs read right to left. `unshaped-3d-text` narrows to colour emoji, which have no outline to extrude.
+- `EXT_meshopt_compression` decoded in numpy. Draco per decision 2.
+
+### Phase 7: tooling and release
+
+- `kine look --depth` shows a stage's depth image; `kine look --wire` draws triangle edges over the frame.
+- Stress scenes `stage-16`, `textured-100k`, `skinned`, `repeat-1000` and `dof-stage`, each with frame time and
+  peak memory in the 1.5 report.
+- Examples: `stage.json`, `product.json` (a textured glTF turntable under world lights with `env`, depth of field
+  and a floor that takes its shadow), `character.json`, `cubes.json`.
+- README 3D section and its limitations line, `kine docs`, site/, CHANGELOG with measured numbers, version 1.5.0.
+  A 3D shot in the launch video is optional and means re-measuring the promo.
+
+## Out of scope
+
+- A depth test inside one model, which the SkSL limits above rule out.
+- Ray tracing, global illumination, ambient occlusion, physics, HDR image lighting, order-independent
+  transparency.
+- A second GL pipeline (moderngl or PyOpenGL). It would give a depth buffer and shadow maps directly, but it adds
+  a dependency and a second renderer that the CPU path would have to match.
+
+## Risks
+
+- Stage cost grows with children and resolution. The two accumulators, `stage-cost` and the Phase 0 gate bound it.
+- CPU time for per-pixel fog, shadows and depth of field: 1080p at 2x is 8.3 million pixels a pass in numpy.
+  Phase 0 measures it; a feature that misses its budget gets a CPU warning in `kine check`.
+- Textures sliding under affine mapping, and the triangles that splitting adds.
+- Byte identity for 1.4 scenes. The hash test fails on the first PR that breaks it.
+
+## Decisions (agreed 2026-10-31)
+
+1. Per-pixel visibility only inside `"sort": "pixel"` groups, so 1.4 scenes keep their bytes.
+2. Draco as an optional extra, `pip install kinescript[draco]` (DracoPy), keeping today's error that names the file
+   when the extra is missing.
+3. 1.5.0 ships with Phases 0 to 4 and 7. Phases 5 and 6 go in if they pass their checks by then, otherwise in
+   1.5.1.
+
+Byte identity is checked with `bench/same.py`, which draws sampled frames at this tree and at a git revision on
+both backends, instead of committed frame hashes: CI renders on Linux's CPU backend, whose bytes differ from a
+Windows machine's.

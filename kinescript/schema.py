@@ -166,7 +166,7 @@ ENUMS = {
     "blend": ("normal", "multiply", "screen", "overlay", "add", "lighten", "darken", "softLight", "difference",
               "color"),
     "backface": ("visible", "hidden"),
-    "sort": ("order", "depth"),
+    "sort": ("order", "depth", "pixel"),
     "shape": ("cube", "sphere", "cylinder", "cone", "torus", "plane", "text", "path"),
     "detail": ("low", "medium", "high"),
     "role": ("voice", "music", "sfx", "ambience"),

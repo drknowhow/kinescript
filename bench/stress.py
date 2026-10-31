@@ -200,6 +200,17 @@ def models_30() -> dict:
     return _scene(out, camera={"rotateY": [[0, -10], ["end", 10]]}, light="studio")
 
 
+def stage_16() -> dict:  # 12 spinning rings and 4 turning cards that pass through them, each merged on its own
+    kids = [{"id": f"ring{n}", "type": "model", "shape": "torus", "r": 120, "tube": 22, "detail": "high",
+             "x": -750 + (n % 6) * 300, "y": -160 + (n // 6) * 320, "rotateY": 90 * (n % 2),
+             "rotateX": [[0, 0], [4, 90 + 30 * n]], "fill": ("#ff5a36", "#4a7dff", "#e8e2d0")[n % 3], "shine": 0.6}
+            for n in range(12)]
+    kids += [{"id": f"card{n}", "type": "rect", "x": -600 + n * 400, "w": 260, "h": 700, "radius": 24,
+              "fill": "#f2f0e8", "opacity": 0.9, "rotateY": [[0, -40 + 20 * n], [4, 40 - 20 * n]]} for n in range(4)]
+    return _scene([{"id": "stage", "type": "group", "x": "50%", "y": "50%", "sort": "pixel", "children": kids}],
+                  camera={"rotateY": [[0, -14], ["end", 14]], "rotateX": [[0, 10], ["end", -6]]}, light="studio")
+
+
 def captions_600() -> dict:
     cues = [[round(n * 0.05, 2), round(n * 0.05 + 0.05, 2), _sentence(n, 3)] for n in range(600)]
     return _scene([{"id": "cc", "type": "captions", "mode": "karaoke", "cues": cues},
@@ -244,6 +255,7 @@ SCENES = {
     "sequence-60": (sequence_60, ".mp4", "60 cuts with transitions: decoder reopen per clip"),
     "audio-40": (audio_40, ".mp4", "music bed, voice, 40 panned clicks, ducking, loudness target"),
     "models-30": (models_30, ".mp4", "30 lit primitives at high detail and 3 glTF rockets"),
+    "stage-16": (stage_16, ".mp4", "a stage: 12 rings and 4 cards passing through them, merged by depth per pixel"),
     "captions-600": (captions_600, ".mp4", "600 karaoke cues and 200 pop cues in 30 s"),
     "odd-size": (odd_size, ".mp4", "1365x767 canvas into H.264 (even rounding)"),
     "gif": (gif_out, ".gif", "hello.json to GIF"),

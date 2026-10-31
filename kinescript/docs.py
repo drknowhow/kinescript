@@ -193,6 +193,11 @@ DEPTH AND CAMERA (3D)
   backface    visible (default) | hidden: hidden skips the layer while its back faces the camera.
   fixed       true: a top-level layer ignores the camera's moves (captions are fixed).
   sort        on a group: "depth" draws its children far to near each frame, not in list order.
+              "pixel" makes the group a stage: each child is drawn on its own and at each pixel the
+              nearest one shows, so models and cards pass through each other with a clean edge. A
+              model is as deep as its triangles; any other child lies flat in its own plane (a group
+              child too). Each child costs a merge (check warns past 16), and a blend inside a stage
+              has nothing under it. Stages do not nest.
   camera      top level. Every key animates, and all default to 0 except fov:
               {"x": 0, "y": 0, "z": 0, "rotateX": 0, "rotateY": 0, "rotate": 0, "fov": 40}
               x and y pan (px). z moves the camera back; negative moves it in. rotateY orbits it
@@ -220,6 +225,11 @@ DEPTH AND CAMERA (3D)
       {"id": "near", "type": "circle", "x": "78%", "y": "72%", "z": 250, "r": 60, "fill": "#ff633f"},
       {"id": "note", "type": "text", "text": "fixed to the screen", "x": "50%", "y": "88%", "size": 40,
        "fixed": true}]}
+  A ring through a panel, in a stage:
+    {"id": "stage", "type": "group", "x": "50%", "y": "50%", "sort": "pixel", "children": [
+     {"id": "ring", "type": "model", "shape": "torus", "r": 200, "tube": 40, "rotateY": 70,
+      "rotateX": [[0, 0], ["end", 30]]},
+     {"id": "panel", "type": "rect", "w": 560, "h": 320, "radius": 28, "fill": "#f2f0e8"}]}
 
 3D MODELS
   A model layer is a lit solid in the space of DEPTH AND CAMERA, so z, rotateX, rotateY, rotate,
@@ -258,10 +268,12 @@ DEPTH AND CAMERA (3D)
             or {"preset": "studio", "key": 0.85, "fill": 0.25, "ambient": 0.22, "rim": 0.35,
             "from": "topleft", "color": "#fff4e6"}. from: topleft | top | topright | left | right |
             front | bottomleft | bottom | bottomright. Lights move with the camera.
-  Triangles are sorted far to near within one model, so things that touch or pass through each
-  other go in one model as parts. Where two surfaces cut through each other the seam is stepped,
-  so let parts touch rather than cross. Separate layers draw in list order. check warns past
-  60,000 triangles in a frame.
+  Triangles are sorted far to near within one model, so where two parts of one model cut through
+  each other the seam is stepped: let parts touch rather than cross. Separate layers draw in list
+  order, except in a stage (a group with "sort": "pixel", see DEPTH AND CAMERA), where they meet
+  at a clean edge wherever they cross: put things that cross in a stage as separate layers. A
+  ground shadow in a stage lies on a floor layer in the same plane. check warns past 60,000
+  triangles in a frame.
   A ring around a ball that builds in, turns, and flies apart:
     {"id": "emblem", "type": "model", "x": "50%", "y": "45%", "detail": "high",
      "rotateX": [[0, 64], ["end", 18]], "rotateY": [[0, -30], ["end", 70]],

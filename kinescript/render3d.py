@@ -356,11 +356,16 @@ def _ground(r, c: skia.Canvas, spec, rest: np.ndarray, pts: np.ndarray):
                                      MaskFilter=skia.MaskFilter.MakeBlur(skia.kNormal_BlurStyle, sigma)))
     c.save()
     c.resetMatrix()
-    c.scale(r.scale, r.scale)
+    c.scale(r.scale * r._dev, r.scale * r._dev)
     c.concat(space.to_skia(to))
     c.drawImageRect(surf.makeImageSnapshot(), skia.Rect(*lo, lo[0] + w * px, lo[1] + h * px),
                     skia.SamplingOptions(skia.FilterMode.kLinear))
     c.restore()
+    st = r._stage
+    if st is not None and st.child.type == "model":
+        # In a stage the shadow lies on the floor, a little nearer than a floor layer in the same plane.
+        corners = box @ to.T
+        st.plane(to, corners[:, :2] / corners[:, 3:] * st.k, bias=1 + 1e-5)
 
 
 def _fixed(r, L, m, what: str, make):
@@ -515,9 +520,12 @@ def draw(r, c: skia.Canvas, L, g, reveal: float):
     img = surf.makeImageSnapshot()
     if L.raw.get("ground") not in (None, False):
         _ground(r, c, L.raw["ground"], m.P, foot)
+    if r._stage is not None and r._stage.child is L:
+        r._stage.depth(q, 1.0 / w[used], T)
     c.save()
     c.resetMatrix()
-    sampling = skia.SamplingOptions(skia.FilterMode.kLinear) if ss > 1 else skia.SamplingOptions()
+    c.scale(r._dev, r._dev)
+    sampling = skia.SamplingOptions(skia.FilterMode.kLinear) if ss > r._dev else skia.SamplingOptions()
     c.drawImageRect(img, region, skia.Rect(x0, y0, x1, y1), sampling)
     c.restore()
     del img  # a live snapshot makes the next draw into the surface copy it first
