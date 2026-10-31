@@ -1,11 +1,14 @@
 """Rendering fixes: group fades with blended children, blends under a scene grade, motion blur at a layer's ends,
 grain under motion blur, repeatable GPU models, boxes that hold the ink, check rules (hidden text, flashes, odd sizes,
-glyphs), and text in scripts the layer's font does not have."""
+glyphs), text in scripts the layer's font does not have, and fades drawn without an offscreen layer."""
+import subprocess
+
 import numpy as np
 import pytest
 import skia
 
 import kinescript as k
+from kinescript import media
 from kinescript.render import Renderer, _bidi_order, _fallback, _text_font, color_matrix
 from kinescript.verify import check, probe
 
@@ -299,3 +302,57 @@ def test_text_in_other_scripts_is_pure_function_of_index():
     seq = [r.frame(n).copy() for n in range(0, 40, 3)]
     alone = Renderer(k.Scene(spec), backend="cpu").frame(21)
     assert np.array_equal(seq[7], alone)
+
+
+# ---- P2: the opacity of a layer drawn in one call goes in its paint ---------------------------------------------
+
+@pytest.fixture(scope="module")
+def pictures(tmp_path_factory):
+    d = tmp_path_factory.mktemp("pictures")
+    surf = skia.Surface(64, 48)
+    c = surf.getCanvas()
+    c.drawPaint(skia.Paint(Shader=skia.GradientShader.MakeLinear([(0, 0), (64, 48)], [0xFF00FF80, 0x40FF8000])))
+    c.drawCircle(32, 24, 16, skia.Paint(AntiAlias=True, Color=0xFFFFFFFF))
+    surf.makeImageSnapshot().save(str(d / "pic.png"), skia.kPNG)
+    subprocess.run([media.FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=160x90:rate=30", "-t", "1",
+                    "-pix_fmt", "yuv420p", str(d / "clip.mp4")], check=True)
+    return {"image": str(d / "pic.png"), "video": str(d / "clip.mp4")}
+
+
+ZIGZAG = [[0, 0], [50, 130], [100, 0], [150, 130], [200, 0], [20, 60], [190, 70]]
+
+
+@pytest.mark.parametrize("backend", ["cpu", "gpu"])
+@pytest.mark.parametrize("layer, one", [
+    ({"type": "rect", "w": 120, "h": 70, "radius": 12, "fill": "#ff5a36"}, True),
+    ({"type": "rect", "w": 120, "h": 70, "rotate": 20,
+      "fill": {"linear": [[0, 0], [1, 0]], "stops": ["#ff0000", "#0000ff80"]}}, True),
+    ({"type": "circle", "r": 50, "fill": {"radial": [0.5, 0.5, 0.6], "stops": ["#ffffff", "#00ff0000"]}}, True),
+    ({"type": "ellipse", "w": 140, "h": 60, "fill": "#4a7dff80", "rotate": 20}, True),
+    ({"type": "polygon", "r": 60, "sides": 5, "inner": 0.45, "fill": "#e8e2d0", "rotate": 10}, True),
+    ({"type": "path", "points": [[0, 0], [120, 80], [0, 120], [140, 10], [60, 140]], "closed": True,
+      "anchor": "center", "fill": "#b9f45d"}, True),
+    ({"type": "rect", "w": 120, "h": 70, "fill": "#ffcc00", "enter": {"name": "wipe-right", "dur": 1}}, True),
+    ({"type": "image", "src": "image", "w": 128, "h": 96, "radius": 16, "rotate": 8}, True),
+    ({"type": "video", "src": "video", "w": 160, "h": 90, "radius": 10}, True),
+    # Two draws that overlap, faded one by one, darken where they meet: 38 levels at 0.5 for the stroke over the fill.
+    # A stroke thin enough to draw as a hairline does it on its own at every joint: 25 levels at 0.5 for the zigzag.
+    ({"type": "path", "points": ZIGZAG, "anchor": "center", "stroke": "#000000", "strokeWidth": 1}, False),
+    ({"type": "rect", "w": 120, "h": 70, "fill": "#000000", "stroke": "#ffffff", "strokeWidth": 12}, False),
+    ({"type": "rect", "w": 120, "h": 70, "fill": "#ff5a36", "dimOutside": 0.5}, False),
+    ({"type": "line", "points": [[-80, 0], [80, 0]], "strokeWidth": 7}, False),
+    ({"type": "arrow", "x1": -80, "y1": 0, "x2": 80, "y2": 0, "strokeWidth": 6}, False),
+    ({"type": "image", "src": "image", "w": 128, "h": 96, "stroke": "#ffffff", "strokeWidth": 6}, False),
+])
+def test_a_fading_layer_drawn_in_one_call_matches_its_offscreen_fade(backend, layer, one, pictures):
+    layer = dict(layer, id="l", x=160, y=90)
+    if layer.get("src") in pictures:
+        layer["src"] = pictures[layer["src"]]
+    bg = {"linear": [[0, 0], [1, 1]], "stops": ["#203040", "#d0c0a0"]}
+    assert Renderer._one_draw(k.Scene(scene([layer])).by_id["l"]) == one
+    for op in (0.85, 0.5, 0.2):
+        alone = _renderer(scene([dict(layer, opacity=op)], bg=bg), backend).frame(15).astype(int)
+        # The same layer at full opacity in a group at op: an offscreen layer faded as a whole, as it drew before.
+        grouped = scene([{"id": "g", "type": "group", "opacity": op, "children": [layer]}], bg=bg)
+        offscreen = _renderer(grouped, backend).frame(15).astype(int)
+        assert np.abs(alone - offscreen).max() <= 3, op
