@@ -120,14 +120,20 @@ A narrated beat with a click on a marked word, over music that ducks under the v
 
 `kine voice scene.json` speaks it once. The
 [voice demo](https://drknowhow.github.io/kinescript/#sound) on the project site plays the result with sound, next
-to its scene file. The Kokoro plugin needs Python 3.10 to 3.12:
+to its scene file. Install the plugin for the voice you want next to Kinescript:
 
 ```bash
-pip install kinescript-kokoro
+pip install kinescript-kokoro       # local and fast; Python 3.10 to 3.12
+pip install kinescript-chatterbox   # local, acts on tags, copies a voice from a clip; installs PyTorch
+pip install kinescript-elevenlabs   # ElevenLabs' API, acts on tags; needs ELEVENLABS_API_KEY
 ```
 
-On a newer Python, install it into another one and point `KINE_VOICE_CMD` at it
-([details](https://github.com/drknowhow/kinescript/tree/main/plugins/kinescript-kokoro)).
+A plugin can also live in another Python, for Kokoro on Python 3.13 or newer or to keep PyTorch out of
+Kinescript's environment: point `KINE_VOICE_CMD`, or `KINE_VOICE_CMD_<NAME>` for one backend, at it. Each plugin's
+README has the details:
+[Kokoro](https://github.com/drknowhow/kinescript/tree/main/plugins/kinescript-kokoro),
+[Chatterbox](https://github.com/drknowhow/kinescript/tree/main/plugins/kinescript-chatterbox),
+[ElevenLabs](https://github.com/drknowhow/kinescript/tree/main/plugins/kinescript-elevenlabs).
 
 ## Built for agents
 

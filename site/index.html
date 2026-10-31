@@ -105,7 +105,7 @@
 
   <section id="sound" aria-labelledby="sound-title">
     <h2 id="sound-title">A voice from a line of text.</h2>
-    <p class="sub">Write what the voice says in the scene. <code>kine voice</code> speaks it with a plugin (Kokoro is the first) and writes the time of every word, so <code>"at": "vo:text"</code> starts a layer on that word and captions follow the voice. Give sounds a role and the mix is levelled for you. Rendering never calls the speech engine.</p>
+    <p class="sub">Write what the voice says in the scene. <code>kine voice</code> speaks it with a plugin and writes the time of every word, so <code>"at": "vo:text"</code> starts a layer on that word and captions follow the voice. Tags such as <code>[whispers]</code> or <code>[laughs]</code> in the text say how to deliver the line. Give sounds a role and the mix is levelled for you. Rendering never calls the speech engine.</p>
 
     <article class="demo" id="voice">
       <div class="demo-head">
@@ -134,7 +134,7 @@ kine check voice.json   # also mixes and measures it
 kine look voice.json --audio
 kine render voice.json -o voice.mp4</code></pre>
         </div>
-        <p class="note"><code>kine voice</code> speaks a line again only when its text, speaker or rate changed, and <code>kine check</code> says when one is missing or out of date. The Kokoro plugin is <code>pip install kinescript-kokoro</code> on Python 3.10 to 3.12 (<a href="https://github.com/drknowhow/kinescript/tree/main/plugins/kinescript-kokoro">source and details</a>); any other engine can be a plugin or a command.</p>
+        <p class="note"><code>kine voice</code> speaks a line again only when its text, speaker, rate, backend or options changed, and <code>kine check</code> says when one is missing or out of date. Each sound picks its plugin with <code>backend</code>: <a href="https://github.com/drknowhow/kinescript/tree/main/plugins/kinescript-kokoro">Kokoro</a> runs locally and fast, on Python 3.10 to 3.12, and says the line without its tags; <a href="https://github.com/drknowhow/kinescript/tree/main/plugins/kinescript-chatterbox">Chatterbox</a> runs locally, acts on tags and copies a voice from a clip; <a href="https://github.com/drknowhow/kinescript/tree/main/plugins/kinescript-elevenlabs">ElevenLabs</a> acts on tags through its API and needs a key. Each is <code>pip install kinescript-&lt;name&gt;</code>, and any other engine can be a plugin or a command.</p>
       </div>
       <div>
         <ul class="tools-list" style="grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);">
@@ -423,7 +423,7 @@ kine render voice.json -o voice.mp4</code></pre>
           <pre class="code out"><code>pip install kinescript
 kine doctor</code></pre>
         </div>
-        <p class="note">Needs Python 3.10 or newer and ffmpeg on your <code>PATH</code>. <code>kine doctor</code> prints the ffmpeg path, whether a GPU context opened, and the default font. Space Grotesk and IBM Plex Mono ship with the package, so default text looks the same on every machine.</p>
+        <p class="note">Needs Python 3.10 or newer and ffmpeg on your <code>PATH</code>. <code>kine doctor</code> prints the ffmpeg path, whether a GPU context opened, and the default font. Space Grotesk and IBM Plex Mono ship with the package, so default text looks the same on every machine. For voice-over from text, add a <a href="#sound">voice plugin</a>: <code>kinescript-kokoro</code>, <code>kinescript-chatterbox</code> or <code>kinescript-elevenlabs</code>.</p>
       </div>
       <div>
         <div class="pane">
