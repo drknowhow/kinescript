@@ -282,7 +282,8 @@ COMPONENTS  {"use": "<name>", "id": "...", "at": ..., "dur": ..., ...parameters}
   scale, rotate, hidden, sound.
   Your own: "components": {"badge": {"params": {"label": "NEW"}, "layers": [
               {"type": "text", "text": "{{label}}", "size": 40}]}}
-  then a layer {"use": "badge", "label": "BETA", "x": 200, "y": 100}.
+  then a layer {"use": "badge", "label": "BETA", "x": 200, "y": 100}. Its layers' ids, nested ones too,
+  get the instance id in front ("b1-title" for "title" in {"use": "badge", "id": "b1"}).
 
 SOUND
   Top-level "audio" lists the sounds. Each one:

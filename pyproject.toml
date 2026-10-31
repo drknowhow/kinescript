@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kinescript"
-version = "1.3.0"
+version = "1.3.1"
 description = "Render motion graphics, video edits and voice-over from JSON scenes on the GPU, with checks an agent can read."
 readme = "README.md"
 license = "MIT"

@@ -1,0 +1,58 @@
+{
+ "words": [
+  {
+   "word": "Same",
+   "start": 0.325,
+   "end": 0.575
+  },
+  {
+   "word": "line,",
+   "start": 0.575,
+   "end": 0.9
+  },
+  {
+   "word": "three",
+   "start": 0.95,
+   "end": 1.175
+  },
+  {
+   "word": "voices.",
+   "start": 1.175,
+   "end": 1.9,
+   "id": "voices"
+  },
+  {
+   "word": "Guess",
+   "start": 2.0375,
+   "end": 2.325,
+   "id": "guess"
+  },
+  {
+   "word": "which",
+   "start": 2.325,
+   "end": 2.525
+  },
+  {
+   "word": "one",
+   "start": 2.525,
+   "end": 2.725
+  },
+  {
+   "word": "costs",
+   "start": 2.725,
+   "end": 3.1
+  },
+  {
+   "word": "money.",
+   "start": 3.1,
+   "end": 3.7,
+   "id": "money"
+  }
+ ],
+ "made": {
+  "hash": "e6fb2186b87c5c4e",
+  "backend": "kokoro",
+  "version": "kokoro 0.9.4, kinescript-kokoro 0.1.0",
+  "speaker": "af_heart"
+ }
+}

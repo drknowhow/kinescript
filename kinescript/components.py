@@ -182,6 +182,17 @@ def _fill_template(v, params):
 _counter = [0]
 
 
+def _own(layers, pid: str) -> None:
+    """Put the instance id in front of the ids of a scene component's layers, nested ones too, so it can be used
+    more than once."""
+    for k in layers:
+        if not isinstance(k, dict):
+            continue
+        if "id" in k and not str(k["id"]).startswith(f"{pid}-"):
+            k["id"] = f"{pid}-{k['id']}"
+        _own(k.get("children") or [], pid)
+
+
 def expand(raw, user: dict, theme: dict, scene=None):
     if not isinstance(raw, dict):
         return raw
@@ -201,7 +212,7 @@ def expand(raw, user: dict, theme: dict, scene=None):
         _unused(name, raw, names, scene)
         for i, k in enumerate(body):
             k.setdefault("id", f"{params['id']}-{i}")
-            k["id"] = f"{params['id']}-{k['id']}" if not str(k["id"]).startswith(params["id"]) else k["id"]
+        _own(body, params["id"])
         out = {"type": "group", "x": raw.get("x", 0), "y": raw.get("y", 0), "children": body}
     elif name in BUILTIN:
         out = BUILTIN[name](params, theme)
