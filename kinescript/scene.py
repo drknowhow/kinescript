@@ -64,7 +64,7 @@ def _where(owner, message: str) -> str:
 
 class Layer:
     __slots__ = ("id", "type", "raw", "t_in", "t_out", "props", "enter", "exit", "children", "parent",
-                 "index", "src", "video", "ctx")
+                 "index", "src", "video", "ahead", "ctx")
 
     def __init__(self, lid: str, ltype: str, raw: dict, parent: "Layer | None", index: int):
         self.id, self.type, self.raw, self.parent, self.index = lid, ltype, raw, parent, index
@@ -74,6 +74,8 @@ class Layer:
         self.children: list[Layer] = []
         self.src: str | None = None
         self.video: media.VideoSource | None = None
+        # (size, decoder) opened before the clip first draws (Renderer._prime); it becomes .video when it does.
+        self.ahead: tuple[tuple[int, int], media.VideoSource] | None = None
         self.ctx: Ctx | None = None
 
     @property
@@ -641,6 +643,9 @@ class Scene:
         for layer in self.all_layers():
             if layer.video:
                 layer.video.close()
+            if layer.ahead:
+                layer.ahead[1].close()
+                layer.ahead = None
 
 
 def uses_depth(L: Layer) -> bool:

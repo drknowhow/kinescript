@@ -39,6 +39,8 @@ SAMPLING = skia.SamplingOptions(skia.FilterMode.kLinear, skia.MipmapMode.kNone)
 # Video frames arrive at source size and upscale here. Catmull-Rom interpolates (a 1:1 draw is
 # exact); Mitchell, used before, blurred every native-size frame (mean error 14.8 vs 4.7 on a sharp clip).
 CUBIC = skia.SamplingOptions(skia.CubicResampler.CatmullRom())
+# Seconds ahead that a render drawing forward opens the decoders of the clips coming on (Renderer._prime).
+AHEAD = 1.0
 _FMT = re.compile(r"\{:([^{}]*)\}")
 _GL: dict = {}
 
@@ -433,6 +435,13 @@ def loop_end(L: Layer, duration: float) -> float:
     return min(duration, float(trim[1])) if len(trim) > 1 and trim[1] is not None else duration
 
 
+def _lineage(L: Layer | None):
+    """L and the layers it sits in."""
+    while L is not None:
+        yield L
+        L = L.parent
+
+
 def _see_through(bg) -> bool:
     """Whether the canvas can end up less than opaque: no background, or a partly transparent colour or gradient."""
     if bg in (None, "transparent", "none"):
@@ -556,6 +565,7 @@ class Renderer:
         cm = color_matrix({k: v for k, v in scene.grade.items() if k not in ("vignette", "grain")})
         self.grade_filter = skia.ColorFilters.Matrix(cm) if cm else None
         self._videos = [L for L in scene.all_layers() if L.type == "video"]
+        self._on: float | None = None  # the frame time the last draw showed, to tell a render drawing forward
 
     # ---- public -------------------------------------------------------------------------
     def frame(self, n: int) -> np.ndarray:
@@ -735,6 +745,10 @@ class Renderer:
             # the top level works on the background: in a layer that started empty, a multiply drew as its plain fill.
             c.saveLayer(None, skia.Paint(ColorFilter=self.grade_filter))
         self._background(c)
+        on = T if frame_t is None else frame_t
+        if self.footage and self._videos:
+            last, self._on = self._on, on
+            self._prime(on, AHEAD if last is not None and 0 < on - last <= AHEAD else 0.0)
         cams = self._cameras(T) if s.is3d else None
         for layer in s.layers:
             if self._stopped:
@@ -761,10 +775,33 @@ class Renderer:
             self._finish(c, T)
         # A clip's decoder holds an ffmpeg process and its prefetched frames; once the clip is off screen,
         # free them, or a cut list keeps every clip it has played open to the end (60 cuts: 1.6 GB).
-        on = T if frame_t is None else frame_t
         for L in self._videos:
             if L.video is not None and L.video.proc is not None and not L.t_in <= on < L.t_out:
                 L.video.close()
+            if L.ahead is not None and not (L.t_in <= on + AHEAD and on < L.t_out):  # as _prime reckons it
+                L.ahead[1].close()
+                L.ahead = None
+
+    def _prime(self, on: float, ahead: float):
+        """Open the decoder of each clip shown at frame time `on`, and of each coming on within `ahead` seconds, where
+        it will first read, before any is waited on. ffmpeg takes about 0.12 s to give a 720p H.264 clip's first
+        frame: opened one by one as each clip drew, the nine clips on video-grid's first frame waited 1 s, and the 60
+        cuts of sequence-60 6.5 s of an 11 s render. A clip not drawn yet gets its decoder in L.ahead, which it takes
+        when it draws if its box asks for the same size: a clip decodes at the size its first frame drawn gives."""
+        for L in self._videos:
+            T = max(on, L.t_in)
+            if T > on + ahead or not all(p.visible(T) for p in _lineage(L)):
+                continue
+            t, v = T - L.t_in, L.video
+            if v is None:
+                g = lambda name, default=None: L.get(name, t, T, 0, default)  # noqa: E731
+                size = self._decode_size(L, *self._box(L, t, T, g)[2:])
+                if L.ahead is None or L.ahead[0] != size:
+                    L.ahead = (size, self._decoder(L, size))
+                v = L.ahead[1]
+            elif T > on:
+                continue  # opened for an earlier frame drawn: a render that went back
+            v.prime(self._src_time(L, t, v.info))
 
     # ---- scene-level ---------------------------------------------------------------------
     def _cameras(self, T: float):
@@ -1293,20 +1330,8 @@ class Renderer:
 
     def _draw_video(self, c, L, t, T, g, box, reveal, mods):
         bx, by, bw, bh = box
-        speed = float(L.raw.get("speed", 1))
         if L.video is None:
-            zmax = 1.0
-            zp = L.props.get("zoom")
-            if zp is not None:
-                zmax = max(float(zp.at(L.dur * k / 8, L.dur)) for k in range(9))
-            info = media.probe(L.src)
-            # Decode at no more than the source's own resolution: piping upscaled RGBA (8 MB a frame at
-            # 1080p) costs more than the decode, and the GPU upscales it at draw time anyway.
-            rw, rh = info["w"] / max(bw, 1), info["h"] / max(bh, 1)
-            native = (min if L.raw.get("fit", "cover") == "cover" else max)(rw, rh) if info["w"] else 1.0
-            k = min(max(1.0, zmax) * self.scale, native)
-            L.video = media.VideoSource(L.src, round(bw * k), round(bh * k), self.s.fps, speed, L.raw.get("fit", "cover"),
-                                        ctx=gpu_context() if self.backend == "gpu" else None)
+            L.video = self._decoder(L, self._decode_size(L, bw, bh))
         if not self.footage:  # its box and stroke only; made above all the same, so its decode size does not change
             self._content(c, L, g, box, None, bw, bh)
             return
@@ -1314,18 +1339,46 @@ class Renderer:
             # A motion-blur sub-frame shows its frame's picture (footage carries its own blur). Sub-frame times lie
             # between the decoder's output frames, so each would reopen it; they used to round to whichever was near.
             t = min(max(self._frame_t, L.t_in), math.nextafter(L.t_out, -math.inf)) - L.t_in
+        img = L.video.at(self._src_time(L, t, L.video.info))
+        if img is not None:
+            self._content(c, L, g, box, img, img.width(), img.height())
+
+    def _decode_size(self, L: Layer, bw: float, bh: float) -> tuple[int, int]:
+        """The size video layer L decodes at in a bw x bh box."""
+        zmax = 1.0
+        zp = L.props.get("zoom")
+        if zp is not None:
+            zmax = max(float(zp.at(L.dur * k / 8, L.dur)) for k in range(9))
+        info = media.probe(L.src)
+        # Decode at no more than the source's own resolution: piping upscaled RGBA (8 MB a frame at
+        # 1080p) costs more than the decode, and the GPU upscales it at draw time anyway.
+        rw, rh = info["w"] / max(bw, 1), info["h"] / max(bh, 1)
+        native = (min if L.raw.get("fit", "cover") == "cover" else max)(rw, rh) if info["w"] else 1.0
+        k = min(max(1.0, zmax) * self.scale, native)
+        return round(bw * k), round(bh * k)
+
+    def _decoder(self, L: Layer, size: tuple[int, int]) -> media.VideoSource:
+        """A decoder for video layer L at `size`: the one _prime opened for it at that size, or a new one."""
+        ahead, L.ahead = L.ahead, None
+        if ahead is not None:
+            if ahead[0] == size:
+                return ahead[1]
+            ahead[1].close()
+        return media.VideoSource(L.src, *size, self.s.fps, float(L.raw.get("speed", 1)), L.raw.get("fit", "cover"),
+                                 ctx=gpu_context() if self.backend == "gpu" else None)
+
+    def _src_time(self, L: Layer, t: float, info: dict) -> float:
+        """The source time video layer L shows at its own time t; info is its clip's probe."""
+        speed = float(L.raw.get("speed", 1))
         trim0 = float((L.raw.get("trim") or [0])[0])
         src_t = trim0 + t * speed
-        end = loop_end(L, L.video.info["duration"])  # the trim end, or the end of the file
+        end = loop_end(L, info["duration"])  # the trim end, or the end of the file
         if L.raw.get("loop") and end - trim0 > 0:
             src_t = trim0 + (t * speed) % (end - trim0)
         # Up to the time whose nearest frame (VideoSource) lies before the end: a dur longer than the trimmed clip
         # holds the frame it ends on, the same frame for every frame of the hold. Before, trim [2, 4] with dur 6
         # played on to 6.9 s of the file.
-        src_t = min(src_t, max(trim0, end - 0.5 / (L.video.info["fps"] or self.s.fps)))
-        img = L.video.at(src_t)
-        if img is not None:
-            self._content(c, L, g, box, img, img.width(), img.height())
+        return min(src_t, max(trim0, end - 0.5 / (info["fps"] or self.s.fps)))
 
     # ---- shader layer ---------------------------------------------------------------------
     def _draw_shader(self, c, L, t, T, g, box, reveal, mods):
