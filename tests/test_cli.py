@@ -199,7 +199,10 @@ def _alive(pid: int) -> bool:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
-    return True
+    try:  # exited but not yet reaped by whoever adopted it
+        return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0] != "Z"
+    except OSError:
+        return True
 
 
 def test_warm_render_workers_exit_when_their_parent_is_killed():
