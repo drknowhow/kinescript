@@ -417,39 +417,81 @@ def _seconds(name: str, v) -> float | None:
     return t
 
 
+def _scale(scene: Scene, scale) -> None:
+    """ValueError unless `scale` draws the scene at 2 px a side or more (and no larger than frame_size allows).
+    Below that every side was drawn at 2 px: --scale 0.0001 made a 2x2 video and said nothing."""
+    frame_size(scene.w, scene.h, scale)
+    if scale < 1 and min(scene.w * scale, scene.h * scale) < 1.5:
+        raise ValueError(f"scale {scale:g} makes a {scene.w * scale:.3g} x {scene.h * scale:.3g} px frame of this "
+                         f"{scene.w}x{scene.h} scene; each side must be 2 px or more")
+
+
+def _frames(scene: Scene, start: float | None, end: float | None, notes: list[str]) -> tuple[int, int]:
+    """The frames from `start` to `end` seconds: every frame on screen in that time, from the one showing at `start`
+    to the last one that starts before `end`. Rounding `start` to the nearest frame made --from 2.99 on a 3 s scene
+    round to 3 s and render nothing. A `to` past the end stops at the end, with a note saying so."""
+    fps, frames = scene.fps, scene.frames
+    f0 = 0 if start is None else math.floor(start * fps + 1e-6)  # within a millionth of a frame of a boundary: on it
+    f1 = frames if end is None else math.ceil(end * fps - 1e-6)
+    if f0 >= frames:
+        raise ValueError(f"from {start:g}s is past the end of the {scene.duration:g}s scene; its last frame starts at "
+                         f"{(frames - 1) / fps:.3f}s")
+    if f1 <= f0:
+        raise ValueError(f"nothing to render: from {start or 0:g}s to {end:g}s holds no frame; to must be after from")
+    if f1 > frames:
+        notes.append(f"to {end:g}s is past the end of the {scene.duration:g}s scene, so the render stops at the end "
+                     f"({frames / fps:.3f}s)")
+        f1 = frames
+    return f0, f1
+
+
+def _cap_workers(asked: int, frames: int, cpu: int, notes: list[str]) -> int:
+    """`asked` render processes, but no more than one per frame or per CPU: -j 100 on 60 frames started 60."""
+    most = max(1, min(frames, cpu))
+    if asked > most:
+        notes.append(f"workers {asked} is more than this render can use; it used {most} (at most one per frame and "
+                     f"one per CPU: {frames} frames, {cpu} CPUs)")
+        return most
+    return asked
+
+
+def _noted(res: dict, notes: list[str]) -> dict:
+    if notes:
+        res["notes"] = notes
+    return res
+
+
 def render(src, out: str, quality: str = "standard", workers: int | None = None, scale: float = 1.0,
            start: float | None = None, end: float | None = None, transparent: bool = False) -> dict:
     """Render a scene to a file. Format from the extension: .mp4, .mov (ProRes 4444 alpha), .webm (VP9 alpha),
-    .gif, or a directory / pattern ending in .png for a frame sequence."""
+    .gif, or a directory / pattern ending in .png for a frame sequence. The result's "notes" say where an argument
+    was changed: a `to` past the end, or more workers than the render can use."""
+    from .render import backend_setting
     if quality not in QUALITY:
         raise ValueError(f"quality must be one of {', '.join(QUALITY)}, got {quality!r}")
     if workers is not None and (isinstance(workers, bool) or not isinstance(workers, int) or workers < 0):
         raise ValueError(f"workers must be a whole number, 1 or more (0 picks for you), got {workers!r}")
     start, end = _seconds("from", start), _seconds("to", end)
+    backend_setting()  # a bad KINE_BACKEND is an error here, not in each worker
     scene = load(src)
+    notes: list[str] = []
     try:
-        frame_size(scene.w, scene.h, scale)
+        _scale(scene, scale)
         out = str(out if out is not None else "")
         folder = out.endswith(("/", "\\"))  # a folder for a PNG sequence
         out_p = Path(out) if folder else out_path(scene, out, (*VIDEO, ".png", *AUDIO_ONLY))
+        f0, f1 = _frames(scene, start, end, notes)
     except ValueError:
         scene.close()
         raise
     spec, base = scene.spec, str(scene.base.resolve())  # warm workers keep the directory they started in
     fps = scene.fps
-    f0 = 0 if start is None else int(round(start * fps))
-    f1 = scene.frames if end is None else min(scene.frames, int(round(end * fps)))
-    if f1 <= f0:
-        scene.close()
-        raise ValueError(f"nothing to render: from {f0 / fps:g}s to {f1 / fps:g}s of a {scene.duration:g}s scene"
-                         if start is None or start < scene.duration else
-                         f"from {start:g}s is past the end of the scene ({scene.duration:g}s)")
     ext = out_p.suffix.lower()
     t0 = time.perf_counter()
     if ext == ".png" or folder:
-        return _render_pngs(scene, out_p, f0, f1, scale, transparent)
+        return _noted(_render_pngs(scene, out_p, f0, f1, scale, transparent), notes)
     if ext in AUDIO_ONLY:
-        return _render_audio(scene, out_p, f0 / fps, f1 / fps, start is None and end is None, t0)
+        return _noted(_render_audio(scene, out_p, f0 / fps, f1 / fps, start is None and end is None, t0), notes)
     fmt = VIDEO[ext]
     if transparent and fmt in ("mp4", "gif"):
         scene.close()
@@ -458,8 +500,9 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
     if fmt == "gif":  # render no larger than the GIF will be (long side GIF_SIDE), not full size then shrink
         scale = min(scale, GIF_SIDE / max(scene.w, scene.h))
     n = f1 - f0
+    gfps = gif_rate(n, fps) if fmt == "gif" else fps
     cpu = os.cpu_count() or 4
-    workers = workers or _workers(scene, n, cpu, fmt)
+    workers = _cap_workers(workers, n, cpu, notes) if workers else _workers(scene, n, cpu, fmt)
     threads = max(1, cpu // workers)
     tmp = Path(tempfile.mkdtemp(prefix="kine-"))
     audio = None
@@ -495,7 +538,7 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
         out_p.parent.mkdir(parents=True, exist_ok=True)
         final = str(tmp / f"final{seg_ext}")
         if ext == ".gif":
-            _to_gif(video_in, str(out_p), fps)
+            _to_gif(video_in, str(out_p), gfps)
         elif audio:
             _mux(video_in, audio, final, n / fps)
         else:
@@ -514,10 +557,11 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
     w, h = max(2, round(scene.w * scale)), max(2, round(scene.h * scale))
     if fmt in ("mp4", "webm", "gif"):
         w, h = w - w % 2, h - h % 2
-    return {"out": str(out_p), "w": w, "h": h, "fps": min(fps, GIF_FPS) if fmt == "gif" else fps, "frames": n,
-            "seconds": round(n / fps, 3), "wall": round(wall, 2), "fps_rendered": round(n / wall, 1),
-            "workers": len(jobs), "size_mb": round(out_p.stat().st_size / 1e6, 2) if out_p.exists() else None,
-            "audio": bool(audio)}
+    return _noted({"out": str(out_p), "w": w, "h": h, "fps": gfps if fmt == "gif" else fps,
+                   "frames": gif_frames(n, fps, gfps) if fmt == "gif" else n,  # was the scene's frames for a GIF
+                   "seconds": round(n / fps, 3), "wall": round(wall, 2), "fps_rendered": round(n / wall, 1),
+                   "workers": len(jobs), "size_mb": round(out_p.stat().st_size / 1e6, 2) if out_p.exists() else None,
+                   "audio": bool(audio)}, notes)
 
 
 # Render processes stay up for WARM seconds after a render, so the next one in the same process (the MCP
@@ -609,8 +653,20 @@ def _workers(scene: Scene, frames: int, cpu: int, fmt: str = "mp4") -> int:
 GIF_SIDE, GIF_FPS = 720, 15  # a 6 s portrait GIF at full width and 20 fps ran past 10 MB
 
 
-def _to_gif(video_in: list[str], out: str, fps: float):
-    gfps = min(fps, GIF_FPS)
+def gif_rate(frames: int, fps: float) -> float:
+    """The GIF's frame rate: GIF_FPS at most, or the scene's own when GIF_FPS would leave no frame (one frame of a
+    60 fps scene; ffmpeg then failed with "Error writing trailer")."""
+    return min(fps, GIF_FPS) if gif_frames(frames, fps, min(fps, GIF_FPS)) else fps
+
+
+def gif_frames(frames: int, fps: float, gfps: float) -> int:
+    """How many frames ffmpeg's fps filter keeps of `frames` at `fps` when it resamples them to `gfps` (it rounds
+    each output time to the nearest input frame). Measured against ffprobe for 1 to 39, 61, 89 to 91 and 151 frames
+    at 12, 15, 23.976, 24, 25, 29.97, 30, 50 and 60 fps: all equal."""
+    return math.floor(frames * gfps / fps + 0.5)
+
+
+def _to_gif(video_in: list[str], out: str, gfps: float):
     # 128 colours with ordered dither and changed-rectangle updates: about half the size of error
     # diffusion on moving gradients (6.6 -> 3.5 MB on a 6 s portrait clip) with no visible loss.
     vf = (f"scale=in_color_matrix=bt709:in_range=tv,format=rgb24,fps={gfps},split[a][b];[a]palettegen=stats_mode=diff:max_colors=128[p];"
@@ -671,13 +727,16 @@ def still(src, at, out: str, scale: float = 1.0) -> dict:
     scene = load(src)
     try:
         n = frame_at(scene, at)
+        note = at_note(scene, at)
+        _scale(scene, scale)
         p = out_path(scene, out, IMAGE)
         r = Renderer(scene, scale=scale)
         r.frame(n)
         save_image(r.snapshot(), p)
     finally:
         scene.close()
-    return {"out": str(p), "frame": n, "at": round(n / scene.fps, 3), "w": r.w, "h": r.h}
+    return _noted({"out": str(p), "frame": n, "at": round(n / scene.fps, 3), "w": r.w, "h": r.h},
+                  [note] if note else [])
 
 
 def save_image(img, path: Path):
@@ -703,6 +762,21 @@ def frame_at(scene: Scene, at) -> int:
         raise ValueError(f"at must be seconds, negative seconds from the end, or \"end\"; got {at!r}")
     n = int(round((scene.duration + t if t < 0 else t) * scene.fps))
     return max(0, min(scene.frames - 1, n))
+
+
+def at_note(scene: Scene, at) -> str | None:
+    """What frame_at did with a time outside the scene, for the result to say; None for a time inside it.
+    still --at 99 and look --at 99 drew the last frame and said nothing."""
+    if str(at).strip().lower() == "end":
+        return None
+    t = float(at)
+    s = scene.duration + t if t < 0 else t
+    if s > scene.duration + 1e-9:
+        return (f"at {t:g}s is past the end of the {scene.duration:g}s scene, so it drew the last frame "
+                f"({(scene.frames - 1) / scene.fps:.3f}s)")
+    if s < -1e-9:
+        return f"at {t:g}s is before the start of the {scene.duration:g}s scene, so it drew the first frame (0s)"
+    return None
 
 
 def dump_json(obj) -> str:

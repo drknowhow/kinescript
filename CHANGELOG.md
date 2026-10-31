@@ -91,6 +91,37 @@
 - Render workers kept warm by the MCP server exit when the server is killed. Before, they ran until someone
   killed them.
 - `kine doctor` names ffmpeg or ffprobe when one is not on the PATH and exits 1. `kine new` makes missing folders.
+- A time or range outside the scene is reported instead of clamped in silence. `render --to 99` on a 2 s scene
+  renders to the end and its JSON has a note saying so; `look --at 99` and `still --at 99` draw the last frame,
+  and `--at -100` the first, each with a note. Over MCP, `kine_still` also returns the frame number, time and
+  size it drew, with the same notes.
+- `render --from` starts at the frame on screen at that time. `--from 2.99` on a 3 s scene was rounded to 3 s and
+  said there was nothing to render; it now renders the last frame. A range takes every frame on screen from
+  `--from` until `--to`, so `--from 1.01 --to 1.02` renders the one frame showing then. An empty range says `to
+  must be after from`, and a `--from` past the end gives the time the last frame starts.
+- A GIF's `frames` in the render's JSON is the number of frames in the GIF: 30 for 2 s at 30 fps, which the GIF
+  plays at 15 fps, not the scene's 60. A GIF of one frame of a 60 fps scene failed with `Error writing trailer`;
+  it now holds that frame.
+- A scene's frame count rounds half a frame up. 2.55 s at 30 fps (76.5 frames) gave 76 while 2.45 s (73.5) gave
+  74; they are now 77 and 74.
+- `--scale` that makes a side of the frame smaller than 2 px is an error. `still --scale 0.0001` and `render
+  --scale 0.001` drew a 2x2 image or video and said nothing.
+- `render -j` uses at most one process per frame and one per CPU, and its JSON has a note when it cut the number.
+  `-j 100` on a 60-frame scene started 60 processes.
+- When ffmpeg or ffprobe is not on the PATH, `render`, `still`, `look`, `probe`, `check` and the MCP tools say
+  which one is missing and how to install it. They said only `[WinError 2] The system cannot find the file
+  specified`.
+- `KINE_BACKEND` takes `cpu`, `gpu` or `auto` (the default). Any other value is an error that lists them;
+  `KINE_BACKEND=bogus` was taken to mean the GPU. `gpu` is an error on a machine with no GPU instead of falling
+  back to the CPU.
+- `kine voice` names `KINE_VOICE_CMD` (or `KINE_VOICE_CMD_<NAME>`) when its command fails. A program that is not
+  there said only `[WinError 2] The system cannot find the file specified`, and a command that printed something
+  other than JSON said `Expecting value: line 1 column 1 (char 0)`. A command that prints the wrong number of
+  results, and a variable that is not a command (an unclosed JSON list), are also named.
+- An unexpected error in `kine` exits 3 with one line that says what failed and where, and asks for a bug report
+  (`KINE_DEBUG=1` also prints the traceback). It exited 1 with a traceback, the code `check` uses for a scene with
+  errors. Ctrl+C exits 130 without a traceback. `kine docs` lists the exit codes: 0 done, 1 `check` found errors
+  or `doctor` found ffmpeg missing, 2 a bad argument, scene or file, 3 a bug.
 
 ## 1.3.1 (2026-10-31)
 

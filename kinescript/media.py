@@ -17,6 +17,25 @@ import skia
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
 FFPROBE = shutil.which("ffprobe") or "ffprobe"
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+INSTALL_FFMPEG = ("install ffmpeg, which includes ffprobe (winget install Gyan.FFmpeg, brew install ffmpeg or "
+                  "sudo apt install ffmpeg), open a new terminal, and run kine doctor to check")
+
+
+def missing_tools() -> list[str]:
+    """Which of ffmpeg and ffprobe cannot be found."""
+    return [name for name, path in (("ffmpeg", FFMPEG), ("ffprobe", FFPROBE)) if not shutil.which(path)]
+
+
+def explain(e: BaseException) -> str:
+    """The message for an error: when a program could not be started and ffmpeg or ffprobe is not on the PATH, which
+    one and how to install it. Starting a program that is not there said only "[WinError 2] The system cannot find
+    the file specified", without naming it."""
+    if isinstance(e, FileNotFoundError) and e.filename in (None, FFMPEG, FFPROBE):
+        gone = missing_tools()
+        if gone:
+            return (f"{' and '.join(gone)} {'is' if len(gone) == 1 else 'are'} not on the PATH, and Kinescript runs "
+                    f"{'it' if len(gone) == 1 else 'them'} to read and write media: {INSTALL_FFMPEG}")
+    return str(e)
 
 
 class MediaError(RuntimeError):

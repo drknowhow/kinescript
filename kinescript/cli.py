@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
+import traceback
 from pathlib import Path
 
 from . import __version__
@@ -36,9 +38,11 @@ def main(argv=None) -> int:
     r.add_argument("-o", "--out")
     r.add_argument("-q", "--quality", choices=["draft", "standard", "high"], default="standard")
     r.add_argument("--scale", type=float, default=1.0, help="resolution multiplier, e.g. 0.5 for a fast preview")
-    r.add_argument("--from", dest="start", type=float)
-    r.add_argument("--to", dest="end", type=float)
-    r.add_argument("-j", "--workers", type=int)
+    r.add_argument("--from", dest="start", type=float, help="seconds: start with the frame on screen then")
+    r.add_argument("--to", dest="end", type=float, help="seconds: end with the last frame that starts before then "
+                                                          "(past the end of the scene: the end, with a note)")
+    r.add_argument("-j", "--workers", type=int, help="render processes, at most one per frame and one per CPU "
+                                                     "(by default kine picks)")
     r.add_argument("--transparent", action="store_true", help="drop the background (use .mov or .webm)")
 
     s = sub.add_parser("still", help="render one frame to PNG/JPG")
@@ -96,8 +100,37 @@ def main(argv=None) -> int:
     try:
         return _run(a)
     except (ValueError, RuntimeError, OSError) as e:
-        _emit({"ok": False, "error": str(e)})
-        return 2
+        _emit({"ok": False, "error": _message(e)})
+        return BAD
+    except KeyboardInterrupt:
+        print("stopped", file=sys.stderr)
+        return STOPPED
+    except Exception as e:  # noqa: BLE001 - a bug: one line, not a traceback with the code a lint error has
+        _emit({"ok": False, "error": crash_message(e)})
+        if os.environ.get("KINE_DEBUG"):
+            traceback.print_exc()
+        return CRASH
+
+
+# Exit codes, as kine docs lists them. A crash exited 1, the code `check` uses for a scene with errors.
+OK, ISSUES, BAD, CRASH, STOPPED = 0, 1, 2, 3, 130
+ISSUES_URL = "https://github.com/drknowhow/kinescript/issues"
+
+
+def _message(e: BaseException) -> str:
+    if isinstance(e, FileNotFoundError):
+        from .media import explain  # which of ffmpeg and ffprobe is missing, not "[WinError 2]"
+        return explain(e)
+    return str(e)
+
+
+def crash_message(e: BaseException) -> str:
+    """One line for an error Kinescript did not expect: what it was, where, and where to report it."""
+    tb = traceback.extract_tb(e.__traceback__)
+    where = next((f for f in reversed(tb) if Path(f.filename).parent.name == "kinescript"), tb[-1] if tb else None)
+    at = f" at {Path(where.filename).name}:{where.lineno}" if where else ""
+    return (f"internal error: {type(e).__name__}: {e}{at}. This is a bug in Kinescript; please report it at "
+            f"{ISSUES_URL} with the command and the scene (KINE_DEBUG=1 prints the traceback)")
 
 
 def _default_out(scene: str, suffix: str) -> str:
@@ -124,18 +157,19 @@ def _run(a) -> int:
         return 0
     if a.cmd == "doctor":
         from . import media
-        from .render import gpu_context, Renderer
+        from .render import backend_setting, gpu_context, Renderer
         from .scene import Scene
         import shutil
         tools = {name: shutil.which(path) for name, path in (("ffmpeg", media.FFMPEG), ("ffprobe", media.FFPROBE))}
-        info = {"version": __version__, **tools, "gpu": gpu_context() is not None}
+        info = {"version": __version__, **tools, "backend": backend_setting(), "gpu": gpu_context() is not None}
         r = Renderer(Scene({"canvas": {"w": 64, "h": 64}, "layers": [{"type": "text", "text": "kine"}]}))
         info["font"] = r._typeface(r.s.theme["font"], 600, False).getFamilyName()
-        missing = [name for name, path in tools.items() if not path]
+        missing = media.missing_tools()
         if missing:
-            info["error"] = f"{' and '.join(missing)} not found on PATH; Kinescript needs both to read and write media"
+            info["error"] = (f"{' and '.join(missing)} not found on the PATH; Kinescript needs both to read and write "
+                             f"media: {media.INSTALL_FFMPEG}")
         _emit(info)
-        return 1 if missing else 0
+        return ISSUES if missing else OK
     if a.cmd == "render":
         from . import output
         from .output import render
@@ -163,7 +197,7 @@ def _run(a) -> int:
         from .verify import check
         res = check(a.scene, a.step)
         _emit(res)
-        return 0 if res["ok"] else 1
+        return OK if res["ok"] else ISSUES
     if a.cmd == "probe":
         from .verify import probe
         if Path(a.scene).suffix.lower() != ".json" and Path(a.scene).exists():
@@ -194,12 +228,12 @@ def _run(a) -> int:
                     except PermissionError:  # held open by the editor or a virus scanner: read it again
                         last = 0.0
                     except (ValueError, RuntimeError, OSError) as e:
-                        print(f"{time.strftime('%H:%M:%S')} error: {e}", file=sys.stderr)
+                        print(f"{time.strftime('%H:%M:%S')} error: {_message(e)}", file=sys.stderr)
                 time.sleep(0.5)
         except KeyboardInterrupt:
             print("stopped", file=sys.stderr)
-            return 0
-    return 1
+            return OK
+    return BAD
 
 
 if __name__ == "__main__":

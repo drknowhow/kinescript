@@ -220,3 +220,179 @@ def test_warm_render_workers_exit_when_their_parent_is_killed():
     finally:
         if _alive(worker):
             os.kill(worker, 9 if sys.platform != "win32" else 1)
+
+
+def test_times_and_ranges_past_the_end_are_noted(capsys, tmp_path, s):
+    rc, res = _run(capsys, "render", s, "--to", "99", "--scale", "0.25", "-o", tmp_path / "a.mp4")
+    assert rc == 0 and res["frames"] == 60 and "to 99s is past the end of the 2s scene" in res["notes"][0]  # silent
+    rc, res = _run(capsys, "render", s, "--to", "2", "--scale", "0.25", "-o", tmp_path / "b.mp4")
+    assert res["frames"] == 60 and "notes" not in res  # the end itself is not past it
+    rc, res = _run(capsys, "look", s, "--at", "99", "1", "-100", "--width", "64", "-o", tmp_path / "c.png")
+    assert res["times"] == [1.967, 1.0, 0.0] and len(res["notes"]) == 2, res  # clamped and said nothing
+    assert "at 99s is past the end" in res["notes"][0] and "at -100s is before the start" in res["notes"][1]
+    rc, res = _run(capsys, "still", s, "--at", "99", "--scale", "0.1", "-o", tmp_path / "d.png")
+    assert res["frame"] == 59 and "drew the last frame" in res["notes"][0]
+    rc, res = _run(capsys, "still", s, "--at", "end", "--scale", "0.1", "-o", tmp_path / "e.png")
+    assert res["frame"] == 59 and "notes" not in res
+
+
+@pytest.mark.parametrize("args, says", [
+    (["still", "{s}", "--at", "1", "--scale", "0.0001"], "each side must be 2 px or more"),  # was a 2x2 image
+    (["render", "{s}", "-o", "{tmp}/a.mp4", "--scale", "0.001"], "each side must be 2 px or more"),  # a 2x2 video
+    (["render", "{s}", "-o", "{tmp}/a.mp4", "--from", "1", "--to", "1"], "to must be after from"),
+    (["render", "{s}", "-o", "{tmp}/a.mp4", "--to", "0"], "to must be after from"),
+    (["render", "{s}", "-o", "{tmp}/a.mp4", "--from", "2"], "past the end of the 2s scene; its last frame starts at"),
+])
+def test_bad_ranges_and_scales_say_what_is_wrong(capsys, tmp_path, s, args, says):
+    rc, res = _run(capsys, *(a.format(s=s, tmp=tmp_path) for a in args))
+    assert rc == 2 and says in res["error"], res
+
+
+def test_from_inside_the_last_frame_renders_it(capsys, tmp_path):
+    p = tmp_path / "three.json"
+    p.write_text(json.dumps(dict(SCENE, canvas=dict(SCENE["canvas"], duration=3))), encoding="utf-8")
+    rc, res = _run(capsys, "render", p, "--from", "2.99", "--scale", "0.25", "-o", tmp_path / "a.mp4")
+    assert rc == 0 and res["frames"] == 1, res  # 2.99 rounded to 3 s: "nothing to render"
+    rc, res = _run(capsys, "render", p, "--from", "1.01", "--to", "1.02", "--scale", "0.25", "-o", tmp_path / "b.mp4")
+    assert rc == 0 and res["frames"] == 1, res  # the frame on screen from 1.0 s to 1.033 s
+    rc, res = _run(capsys, "render", p, "--from", "0.5", "--to", "1", "-o", tmp_path / "seq" / "f_%03d.png")
+    assert res["frames"] == 15 and sorted(q.name for q in (tmp_path / "seq").iterdir())[0] == "f_015.png"
+
+
+def _gif_frames(path) -> int:
+    from kinescript import media
+    return int(subprocess.run([media.FFPROBE, "-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries",
+                               "stream=nb_read_frames", "-of", "csv=p=0", str(path)], capture_output=True,
+                              text=True, check=True).stdout.strip())
+
+
+def test_a_gif_reports_its_own_frames(capsys, tmp_path, s):
+    rc, res = _run(capsys, "render", s, "--scale", "0.25", "-o", tmp_path / "a.gif")
+    assert rc == 0 and res["fps"] == 15 and res["frames"] == 30 == _gif_frames(tmp_path / "a.gif")  # said 60
+    fast = tmp_path / "fast.json"
+    fast.write_text(json.dumps(dict(SCENE, canvas=dict(SCENE["canvas"], fps=60))), encoding="utf-8")
+    rc, res = _run(capsys, "render", fast, "--to", "0.01", "--scale", "0.25", "-o", tmp_path / "one.gif")
+    assert rc == 0 and res["frames"] == 1 == _gif_frames(tmp_path / "one.gif"), res  # ffmpeg failed on no frame
+
+
+@pytest.mark.parametrize("duration, frames", [(2.45, 74), (2.55, 77), (0.49, 15), (1.0, 30), (0.01, 1)])
+def test_the_frame_count_rounds_half_a_frame_up(duration, frames):
+    from kinescript.scene import Scene
+    assert Scene(dict(SCENE, canvas=dict(SCENE["canvas"], duration=duration))).frames == frames  # 2.55 s gave 76
+
+
+def test_workers_are_capped_and_the_number_used_is_reported(capsys, tmp_path, s, monkeypatch):
+    monkeypatch.setenv("KINE_BACKEND", "cpu")
+    rc, res = _run(capsys, "render", s, "-j", "100", "--to", "0.1", "--scale", "0.25", "-o", tmp_path / "a.mp4")
+    assert rc == 0 and res["workers"] == 3, res  # -j 100 on 60 frames started 60 processes
+    assert "workers 100 is more than this render can use; it used 3" in res["notes"][0]
+    assert output._cap_workers(100, 60, 8, []) == 8 and output._cap_workers(4, 60, 8, []) == 4
+
+
+def test_kine_backend_must_be_one_it_knows(capsys, tmp_path, s, monkeypatch):
+    from kinescript.render import _GL, backend_setting, gpu_context
+    monkeypatch.setenv("KINE_BACKEND", "bogus")  # was the GPU
+    for args in (["still", s, "--at", "1", "-o", tmp_path / "a.png"], ["render", s, "-o", tmp_path / "a.mp4"],
+                 ["doctor"]):
+        rc, res = _run(capsys, *args)
+        assert rc == 2 and "KINE_BACKEND='bogus' is not a backend: use cpu, gpu" in res["error"], res
+    monkeypatch.setenv("KINE_BACKEND", " CPU ")
+    assert backend_setting() == "cpu"
+    monkeypatch.setenv("KINE_BACKEND", "gpu")
+    monkeypatch.setitem(_GL, "ctx", None)  # as on a machine with no GPU
+    with pytest.raises(RuntimeError, match="KINE_BACKEND=gpu, but no OpenGL context"):
+        gpu_context()
+
+
+def test_a_missing_ffmpeg_or_ffprobe_is_named(capsys, tmp_path, s, monkeypatch):
+    import wave
+    from kinescript import media
+    with wave.open(str(tmp_path / "tone.wav"), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(8000)
+        w.writeframes(b"\0\0" * 800)
+    (tmp_path / "sound.json").write_text(json.dumps(dict(SCENE, audio=[{"src": "tone.wav"}])), encoding="utf-8")
+    monkeypatch.setattr(media, "FFMPEG", "kine-test-no-ffmpeg")
+    monkeypatch.setattr(media, "FFPROBE", "kine-test-no-ffprobe")
+    rc, res = _run(capsys, "render", s, "--to", "0.1", "-o", tmp_path / "a.mp4")
+    assert rc == 2 and res["error"].startswith("ffmpeg and ffprobe are not on the PATH"), res  # was [WinError 2]
+    assert "winget install Gyan.FFmpeg" in res["error"]
+    rc, res = _run(capsys, "probe", tmp_path / "tone.wav")
+    assert rc == 2 and "ffprobe are not on the PATH" in res["error"], res
+    rc, res = _run(capsys, "check", tmp_path / "sound.json")
+    assert rc == 1 and "ffprobe are not on the PATH" in res["issues"][0]["message"], res
+    rc, res = _run(capsys, "doctor")
+    assert rc == 1 and "install ffmpeg" in res["error"] and res["ffmpeg"] is None
+    mcp._handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                 "params": {"name": "kine_probe", "arguments": {"scene": str(tmp_path / "tone.wav")}}})
+    reply = json.loads(capsys.readouterr().out)["result"]
+    assert reply["isError"] and "ffprobe are not on the PATH" in reply["content"][0]["text"]
+
+
+def test_a_voice_command_that_fails_says_which_variable(capsys, tmp_path, monkeypatch):
+    from kinescript import voice
+    monkeypatch.setattr(voice, "backends", lambda: {})
+    p = tmp_path / "v.json"
+    p.write_text(json.dumps(dict(SCENE, audio=[{"id": "vo", "role": "voice", "text": "Hello there"}])), encoding="utf-8")
+    tool = tmp_path / "say.py"
+    tool.write_text("print('not json')\n")
+    for cmd, says in [
+        ("kine-test-no-such-program", "KINE_VOICE_CMD could not start kine-test-no-such-program"),  # [WinError 2]
+        (json.dumps([sys.executable, str(tool)]), "printed 'not json', not JSON; it must print a JSON list"),
+        ('["python", "-m"', "KINE_VOICE_CMD is not a command"),
+        ("[]", "KINE_VOICE_CMD is not a command: '[]' names no program"),
+    ]:
+        monkeypatch.setenv("KINE_VOICE_CMD", cmd)
+        rc, res = _run(capsys, "voice", p)
+        assert rc == 2 and says in res["error"], res
+    tool.write_text("import sys; sys.stdin.read(); print('[]')\n")
+    monkeypatch.setenv("KINE_VOICE_CMD", json.dumps([sys.executable, str(tool)]))
+    rc, res = _run(capsys, "voice", p)
+    assert rc == 2 and "must print a JSON list of 1 result object, one per request" in res["error"], res
+
+
+def test_exit_codes_tell_a_crash_from_a_lint_error(capsys, tmp_path, s, monkeypatch):
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps({"canvas": {"w": 320, "h": 180}, "layers": [{"type": "nonsense"}]}), encoding="utf-8")
+    assert _run(capsys, "check", bad)[0] == 1  # check found errors
+    assert _run(capsys, "still", s, "--at", "nan")[0] == 2  # a bad argument
+
+    def boom(*a, **kw):
+        return 1 / 0
+    monkeypatch.setattr(output, "render", boom)
+    rc, res = _run(capsys, "render", s, "-o", tmp_path / "a.mp4")
+    assert rc == 3, res  # was 1, the code check uses for a scene with errors, with a traceback
+    assert res["error"].startswith("internal error: ZeroDivisionError: division by zero at cli.py:")
+    assert "This is a bug in Kinescript; please report it at https://github.com/drknowhow/kinescript/issues" \
+        in res["error"]
+    monkeypatch.setenv("KINE_DEBUG", "1")
+    assert main(["render", s]) == 3 and "Traceback" in capsys.readouterr().err
+
+    def stop(*a, **kw):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(output, "render", stop)
+    assert main(["render", s]) == 130
+
+
+def test_new_makes_folders_and_mcp_leaves_no_temporary_images(capsys, tmp_path, s):
+    rc, res = _run(capsys, "new", tmp_path / "sub" / "dir" / "x.json")
+    assert rc == 0 and (tmp_path / "sub" / "dir" / "x.json").is_file()  # [Errno 2] before
+    rc, res = _run(capsys, "render", s, "--to", "0.1", "--scale", "0.25", "-o", tmp_path / "new" / "dir" / "a.mp4")
+    assert rc == 0 and (tmp_path / "new" / "dir" / "a.mp4").is_file()  # as render, still and look all do
+    sheet = mcp.call("kine_look", {"scene": SCENE, "count": 2, "width": 64, "times": [99]})
+    assert sheet[0]["type"] == "image" and "past the end" in json.loads(sheet[1]["text"])["notes"][0]
+    image, info = mcp.call("kine_still", {"scene": SCENE, "at": 99, "scale": 0.1})
+    assert image["type"] == "image" and json.loads(info["text"])["frame"] == 59
+    assert "drew the last frame" in json.loads(info["text"])["notes"][0]
+    tmp = Path(tempfile.gettempdir())
+    assert not (tmp / f"kine_look_{os.getpid()}.png").exists() and not (tmp / f"kine_still_{os.getpid()}.png").exists()
+
+
+def test_a_scene_that_is_not_utf8_is_named(capsys, tmp_path):
+    p = tmp_path / "utf16.json"
+    p.write_text(json.dumps(SCENE), encoding="utf-16")
+    rc, res = _run(capsys, "check", p)
+    assert rc == 1 and "utf16.json is not UTF-8 text" in res["issues"][0]["message"], res
+    rc, res = _run(capsys, "render", p, "-o", tmp_path / "a.mp4")
+    assert rc == 2 and "utf16.json is not UTF-8 text" in res["error"], res  # 'utf-8' codec can't decode byte 0xff

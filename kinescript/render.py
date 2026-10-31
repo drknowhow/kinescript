@@ -108,14 +108,33 @@ def _straighten(buf: np.ndarray):
     buf[part] = px
 
 
+BACKENDS = ("auto", "gpu", "cpu")
+
+
+def backend_setting() -> str:
+    """KINE_BACKEND: auto (the default, the GPU when there is one), gpu (the GPU or an error) or cpu (the raster
+    backend). Any other value is an error; KINE_BACKEND=bogus used to mean the GPU."""
+    raw = os.environ.get("KINE_BACKEND", "")
+    v = raw.strip().lower() or "auto"
+    if v not in BACKENDS:
+        raise ValueError(f"KINE_BACKEND={raw!r} is not a backend: use cpu, gpu (the GPU, or an error when there is "
+                         "none) or auto (the default: the GPU when there is one, else the CPU)")
+    return v
+
+
 def gpu_context():
     """One hidden OpenGL context per process, or None when there is no usable GPU.
-    Set KINE_BACKEND=cpu to force the raster backend."""
-    if "ctx" in _GL:
-        return _GL["ctx"]
-    _GL["ctx"] = None
-    if os.environ.get("KINE_BACKEND", "").lower() == "cpu":
-        return None
+    KINE_BACKEND=cpu forces the raster backend; KINE_BACKEND=gpu makes no GPU an error."""
+    want = backend_setting()
+    if "ctx" not in _GL:
+        _GL["ctx"] = None if want == "cpu" else _make_gl()
+    if want == "gpu" and _GL["ctx"] is None:
+        raise RuntimeError("KINE_BACKEND=gpu, but no OpenGL context could be made on this machine; set it to auto "
+                           "or cpu to draw on the CPU")
+    return _GL["ctx"]
+
+
+def _make_gl():
     try:
         import glfw
         if not glfw.init():
@@ -126,10 +145,9 @@ def gpu_context():
             return None
         glfw.make_context_current(win)
         _GL["win"] = win
-        _GL["ctx"] = skia.GrDirectContext.MakeGL()
+        return skia.GrDirectContext.MakeGL()
     except (ImportError, RuntimeError, OSError):
-        _GL["ctx"] = None
-    return _GL["ctx"]
+        return None
 
 
 @dataclass
