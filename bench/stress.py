@@ -1,0 +1,463 @@
+"""Stress scenes: each one pushes one dimension (layer count, nesting, text, expressions, keyframes, shaders,
+resolution, length, frame rate, motion blur, alpha, footage, cuts, sound, models, captions, odd sizes, output
+formats) well past what the examples do. Every scene is generated here, checked, rendered and its output probed,
+each in its own process so a crash or a leak in one cannot spoil the next.
+
+    python bench/stress.py                       # every scene
+    python bench/stress.py layers-2000 uhd-4k    # some of them
+    python bench/stress.py --list                # names and what each one stresses
+    python bench/stress.py --keep out/stress     # keep the scene JSON and the rendered files
+    python bench/stress.py --json results.json   # also write the rows as JSON
+
+Columns: check = errors/warnings from kine check; frames ok = the output holds exactly the frames the scene
+has (ffprobe packet count, or PNG files); peak MB = the largest working set of this process plus the render
+processes it started (ffmpeg not counted), summed, so it is an upper bound on memory in use at once.
+Wall times depend on the machine and on what else runs on it; say which machine ran them when quoting."""
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import os
+import platform
+import subprocess
+import sys
+import tempfile
+import time
+import traceback
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+MEDIA = ROOT / "examples" / "media"
+WORDS = ("motion", "written", "checked", "rendered", "frames", "scene", "layer", "cue", "agent", "render")
+
+
+def _m(name: str) -> str:
+    return (MEDIA / name).as_posix()
+
+
+def _scene(layers: list, w: int = 1920, h: int = 1080, fps: float = 30, dur: float | str = 4, bg="#0e0f13",
+           **top) -> dict:
+    return {"canvas": {"w": w, "h": h, "fps": fps, "duration": dur, "bg": bg}, **top, "layers": layers}
+
+
+def _sentence(n: int, words: int) -> str:
+    return " ".join(WORDS[(n * 7 + k * 3) % len(WORDS)] for k in range(words))
+
+
+def layers_2000() -> dict:
+    out = []
+    for n in range(2000):
+        x, y = 40 + (n % 50) * 37, 60 + (n // 50) * 24
+        L = {"id": f"s{n}", "type": "circle" if n % 2 else "rect", "x": x, "y": [[0, y], [4, y + 30, "inOutSine"]],
+             "fill": f"#{(n * 37) % 256:02x}{(n * 91) % 256:02x}c8", "at": round(n * 0.001, 3), "enter": "fade"}
+        L.update({"r": 9} if n % 2 else {"w": 18, "h": 14, "radius": 3})
+        out.append(L)
+    return _scene(out)
+
+
+def groups_deep() -> dict:
+    stacks = []
+    for s in range(10):
+        node = {"id": f"leaf{s}", "type": "text", "text": f"depth {s}", "size": 28}
+        for d in range(30):
+            node = {"id": f"g{s}-{d}", "type": "group", "rotate": f"=sin(t + {d})*3", "scale": 0.99,
+                    "children": [node, {"id": f"r{s}-{d}", "type": "rect", "w": 260 - d * 6, "h": 160 - d * 4,
+                                        "stroke": "#4a7dff", "strokeWidth": 1}]}
+            if d % 5 == 0:
+                node.update({"w": 280, "h": 180, "clip": True, "radius": 12})
+        node.update({"x": 200 + (s % 5) * 380, "y": 300 + (s // 5) * 480})
+        stacks.append(node)
+    return _scene(stacks)
+
+
+def text_split() -> dict:
+    return _scene([{"id": f"t{n}", "type": "text", "text": _sentence(n, 14).replace("scene", "**scene**"),
+                    "x": "50%", "y": 30 + n * 26, "size": 22, "split": "chars", "at": n * 0.02,
+                    "enter": {"name": "rise+blur", "dur": 0.5, "stagger": 0.01, "dist": 20},
+                    "unitY": "=sin(T*4 + i*0.3)*3"} for n in range(40)])
+
+
+def text_wrap() -> dict:  # each paragraph wraps to about 20 lines
+    return _scene([{"id": f"p{n}", "type": "text", "text": _sentence(n, 200), "x": 40 + (n % 4) * 470,
+                    "y": 60 + (n // 4) * 200, "anchor": "topleft", "size": 9, "maxWidth": 440, "at": n * 0.1,
+                    "enter": {"name": "type", "dur": 2.5}, "caret": True} for n in range(20)])
+
+
+def expressions() -> dict:
+    return _scene([{"id": f"e{n}", "type": "circle", "r": f"=6 + 3*sin(t*3 + {n})",
+                    "x": f"=960 + cos(t*{1 + n % 7} + {n})*{100 + n}", "y": f"=540 + sin(t*{1 + n % 5} + {n})*{50 + n % 400}",
+                    "opacity": f"=0.5 + 0.5*sin(t + {n})", "fill": "$accent"} for n in range(600)])
+
+
+def keys_dense() -> dict:
+    out = []
+    for n in range(300):
+        keys = [[round(k * 4 / 120, 4), 100 + (n * 13 + k * 29) % 1700] for k in range(121)]
+        out.append({"id": f"k{n}", "type": "rect", "w": 16, "h": 16, "x": keys,
+                    "y": [[round(k * 4 / 120, 4), 80 + (n * 3 + k * 17) % 900, "inOutCubic"] for k in range(121)],
+                    "rotate": [[round(k * 4 / 120, 4), k * 9] for k in range(121)],
+                    "fill": [[round(k * 4 / 30, 4), ("#ff5a36", "#4a7dff", "#e8e2d0")[(n + k) % 3]] for k in range(31)]})
+    return _scene(out)
+
+
+def counters() -> dict:
+    return _scene([{"id": f"c{n}", "type": "counter", "x": 120 + (n % 10) * 180, "y": 80 + (n // 10) * 100,
+                    "size": 40, "value": {"from": 0, "to": 10 ** (1 + n % 6), "dur": 3.5}, "format": "{:,.0f}"}
+                   for n in range(100)])
+
+
+def shaders() -> dict:
+    blends = ("normal", "screen", "add", "overlay")
+    return _scene([{"id": p, "type": "shader", "preset": p, "opacity": 1 if b == "normal" else 0.6, "blend": b}
+                   for p, b in zip(("mesh", "aurora", "grid", "score"), blends)],
+                  grade={"vignette": 0.5, "grain": 0.08, "contrast": 1.1})
+
+
+def uhd_4k() -> dict:
+    return _scene([{"id": "bg", "type": "shader", "preset": "aurora"},
+                {"id": "title", "type": "text", "text": "Four **thousand** pixels", "x": "50%", "y": "42%",
+                 "size": 280, "weight": 800, "split": "chars", "enter": {"name": "rise+blur", "dur": 0.8, "stagger": 0.03}},
+                {"id": "sub", "type": "text", "text": _sentence(1, 12), "x": "50%", "y": "60%", "size": 80,
+                 "at": 0.5, "enter": "rise"},
+                {"id": "ring", "type": "circle", "x": "50%", "y": "50%", "r": 900, "stroke": "$accent",
+                 "strokeWidth": 12, "fill": "transparent", "draw": [[0, 0], [3, 1, "inOutCubic"]], "shadow": {"blur": 30}}],
+               w=3840, h=2160, grade={"vignette": 0.4, "grain": 0.05})
+
+
+def long_120s() -> dict:
+    return _scene([{"id": "bg", "type": "rect", "x": "50%", "y": "50%", "w": 1920, "h": 1080, "fill": "#14161d"},
+                   *({"id": f"o{n}", "type": "circle", "r": 30, "fill": "$accent2",
+                      "x": f"=960 + cos(t*0.{n + 3} + {n})*700", "y": f"=540 + sin(t*0.{n + 2})*400"} for n in range(6)),
+                   {"id": "clock", "type": "counter", "x": "50%", "y": "50%", "size": 120,
+                    "value": "=t", "format": "{:.2f}"}], dur=120)
+
+
+def _hello(**canvas) -> dict:
+    spec = json.loads((ROOT / "examples" / "hello.json").read_text(encoding="utf-8"))
+    spec["canvas"].update(canvas)
+    return spec
+
+
+def fps_120() -> dict:
+    return _hello(fps=120)
+
+
+def fps_23976() -> dict:
+    return _hello(fps=23.976)
+
+
+def blur_alpha() -> dict:
+    spec = _hello(bg="transparent")
+    spec["motionBlur"] = {"samples": 16, "shutter": 0.5}
+    return spec
+
+
+def alpha_webm() -> dict:
+    return _hello(bg="transparent")
+
+
+def video_grid() -> dict:
+    out = []
+    for n in range(9):
+        src = ("cells.mp4", "fractal.mp4")[n % 2]
+        L = {"id": f"v{n}", "type": "video", "src": _m(src), "x": 320 + (n % 3) * 640, "y": 180 + (n // 3) * 360,
+             "w": 620, "h": 345, "radius": 18, "fit": "cover", "trim": [0.2 * n, 0.2 * n + 3], "loop": True,
+             "speed": (0.5, 1, 1.5, 2)[n % 4], "volume": 0.2}
+        if n % 3 == 0:
+            L.update({"zoom": [[0, 1], [6, 1.6, "inOutSine"]], "focus": [0.3, 0.6]})
+        out.append(L)
+    return _scene(out, dur=8)
+
+
+def sequence_60() -> dict:
+    clips = [{"src": _m(("cells.mp4", "fractal.mp4")[n % 2]), "trim": [0.1 * (n % 30), 0.1 * (n % 30) + 0.6]}
+             for n in range(60)]
+    return _scene([{"id": "cut", "type": "sequence", "clips": clips, "transition": {"type": "slide", "dur": 0.2}},
+                   {"id": "note", "type": "text", "text": "60 cuts", "x": "50%", "y": "88%", "size": 48, "fixed": True}],
+                  dur="auto")
+
+
+def audio_40() -> dict:
+    audio = [{"id": "bed", "role": "music", "src": _m("pad.m4a"), "loop": True, "until": "end", "fadeIn": 0.5,
+              "fadeOut": 1},
+             {"id": "vo", "role": "voice", "src": _m("voice.wav"), "at": 1.0}]
+    audio += [{"role": "sfx", "src": _m("click.wav"), "at": round(0.25 + n * 0.2, 2), "pan": round(math.sin(n), 2),
+               "gain": -6 - n % 6} for n in range(40)]
+    return _scene([{"id": f"b{n}", "type": "rect", "x": 100 + n * 43, "y": "50%", "w": 30, "h": 200, "fill": "$accent",
+                    "at": round(0.25 + n * 0.2, 2), "dur": 0.2} for n in range(40)],
+                  dur=9, audio=audio, mix={"loudness": -14, "peak": -1, "duck": {"depth": 10}})
+
+
+def models_30() -> dict:
+    shapes = ("cube", "sphere", "cylinder", "cone", "torus")
+    out = [{"id": f"m{n}", "type": "model", "shape": shapes[n % 5], "detail": "high", "r": 60, "w": 110, "h": 120,
+            "tube": 22, "x": 160 + (n % 6) * 320, "y": 150 + (n // 6) * 200, "z": -100 * (n % 4),
+            "rotateX": [[0, 10 * n], [4, 10 * n + 180]], "rotateY": [[0, 0], [4, 270]],
+            "fill": ("#ff5a36", "#4a7dff", "#e8e2d0")[n % 3], "shine": 0.6, "metal": 0.3} for n in range(30)]
+    out += [{"id": f"rocket{n}", "type": "model", "src": _m("rocket.glb"), "x": 480 + n * 480, "y": "85%", "scale": 0.6,
+             "rotateY": [[0, 0], [4, 360]]} for n in range(3)]
+    return _scene(out, camera={"rotateY": [[0, -10], ["end", 10]]}, light="studio")
+
+
+def captions_600() -> dict:
+    cues = [[round(n * 0.05, 2), round(n * 0.05 + 0.05, 2), _sentence(n, 3)] for n in range(600)]
+    return _scene([{"id": "cc", "type": "captions", "mode": "karaoke", "cues": cues},
+                   {"id": "pop", "type": "captions", "mode": "pop", "y": "20%", "cues": cues[::3]}], dur=30)
+
+
+def odd_size() -> dict:
+    return _hello(w=1365, h=767)
+
+
+def gif_out() -> dict:
+    return _hello()
+
+
+def png_seq() -> dict:
+    return _hello(duration=1)
+
+
+def still_8k() -> dict:
+    s = uhd_4k()
+    s["canvas"].update(w=7680, h=4320)
+    return s
+
+
+# name: (builder, output extension or "png/" or "still", what it stresses)
+SCENES = {
+    "layers-2000": (layers_2000, ".mp4", "2000 shapes, keyframed y, staggered fades: per-layer CPU cost"),
+    "groups-deep": (groups_deep, ".mp4", "10 stacks of 30 nested groups with clips and expressions"),
+    "text-split": (text_split, ".mp4", "40 lines split per char, blur-rise stagger, per-unit wave"),
+    "text-wrap": (text_wrap, ".mp4", "20 wrapped 200-word paragraphs typed on with a caret"),
+    "expressions": (expressions, ".mp4", "600 layers, 4 expressions each"),
+    "keys-dense": (keys_dense, ".mp4", "300 layers x 121 keyframes on x, y, rotate, plus colour keys"),
+    "counters": (counters, ".mp4", "100 counters formatting every frame"),
+    "shaders": (shaders, ".mp4", "4 full-frame SkSL presets blended, grain and vignette"),
+    "uhd-4k": (uhd_4k, ".mp4", "3840x2160: shader, split text, stroke draw, shadow, grade"),
+    "long-120s": (long_120s, ".mp4", "3600 frames: worker split, segment joins"),
+    "fps-120": (fps_120, ".mp4", "hello.json at 120 fps"),
+    "fps-23.976": (fps_23976, ".mp4", "hello.json at 23.976 fps"),
+    "blur-alpha": (blur_alpha, ".mov", "16-sample motion blur on a transparent canvas to ProRes 4444"),
+    "alpha-webm": (alpha_webm, ".webm", "transparent canvas to VP9 with alpha"),
+    "video-grid": (video_grid, ".mp4", "9 decoded clips at once: trims, speeds, loops, punch-in"),
+    "sequence-60": (sequence_60, ".mp4", "60 cuts with transitions: decoder reopen per clip"),
+    "audio-40": (audio_40, ".mp4", "music bed, voice, 40 panned clicks, ducking, loudness target"),
+    "models-30": (models_30, ".mp4", "30 lit primitives at high detail and 3 glTF rockets"),
+    "captions-600": (captions_600, ".mp4", "600 karaoke cues and 200 pop cues in 30 s"),
+    "odd-size": (odd_size, ".mp4", "1365x767 canvas into H.264 (even rounding)"),
+    "gif": (gif_out, ".gif", "hello.json to GIF"),
+    "png-seq": (png_seq, "png/", "1 s of hello.json as a PNG sequence"),
+    "still-8k": (still_8k, "still", "one 7680x4320 frame"),
+}
+
+
+def build(name: str) -> dict:
+    return SCENES[name][0]()
+
+
+# --- memory: peak working set of this process and its children (the warm render pool) --------------------------
+
+def _peaks_windows() -> int:
+    import ctypes
+    from ctypes import wintypes
+
+    class Entry(ctypes.Structure):
+        _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD), ("th32ProcessID", wintypes.DWORD),
+                    ("th32DefaultHeapID", ctypes.c_size_t), ("th32ModuleID", wintypes.DWORD),
+                    ("cntThreads", wintypes.DWORD), ("th32ParentProcessID", wintypes.DWORD),
+                    ("pcPriClassBase", ctypes.c_long), ("dwFlags", wintypes.DWORD), ("szExeFile", ctypes.c_char * 260)]
+
+    class Counters(ctypes.Structure):
+        _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD)] + \
+                   [(f, ctypes.c_size_t) for f in ("PeakWorkingSetSize", "WorkingSetSize", "QuotaPeakPagedPoolUsage",
+                                                   "QuotaPagedPoolUsage", "QuotaPeakNonPagedPoolUsage",
+                                                   "QuotaNonPagedPoolUsage", "PagefileUsage", "PeakPagefileUsage")]
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    k32.OpenProcess.restype = wintypes.HANDLE
+    k32.Process32First.argtypes = k32.Process32Next.argtypes = [wintypes.HANDLE, ctypes.POINTER(Entry)]
+    k32.K32GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.POINTER(Counters), wintypes.DWORD]
+    k32.CloseHandle.argtypes = [wintypes.HANDLE]
+    me, pids = os.getpid(), []
+    snap = k32.CreateToolhelp32Snapshot(0x2, 0)
+    e = Entry()
+    e.dwSize = ctypes.sizeof(Entry)
+    ok = k32.Process32First(snap, ctypes.byref(e))
+    while ok:
+        if e.th32ParentProcessID == me and e.szExeFile.lower().startswith(b"python"):
+            pids.append(e.th32ProcessID)
+        ok = k32.Process32Next(snap, ctypes.byref(e))
+    k32.CloseHandle(snap)
+    total = 0
+    for pid in [me] + pids:
+        h = k32.OpenProcess(0x1000 | 0x10, False, pid)
+        if not h:
+            continue
+        c = Counters()
+        c.cb = ctypes.sizeof(Counters)
+        if k32.K32GetProcessMemoryInfo(h, ctypes.byref(c), c.cb):
+            total += c.PeakWorkingSetSize
+        k32.CloseHandle(h)
+    return total
+
+
+def _peaks_linux() -> int:
+    me, total = os.getpid(), 0
+    for d in Path("/proc").iterdir():
+        if not d.name.isdigit():
+            continue
+        try:
+            status = (d / "status").read_text()
+        except OSError:
+            continue
+        fields = dict(line.split(":", 1) for line in status.splitlines() if ":" in line)
+        if int(d.name) == me or int(fields.get("PPid", "0").strip()) == me:
+            total += int(fields.get("VmHWM", "0 kB").split()[0]) * 1024
+    return total
+
+
+def peak_mb() -> float | None:
+    try:
+        if sys.platform == "win32":
+            return round(_peaks_windows() / 2 ** 20)
+        if Path("/proc/self/status").exists():
+            return round(_peaks_linux() / 2 ** 20)
+        import resource
+        return round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 2 ** 20)  # macOS: bytes, this process
+    except Exception:  # noqa: BLE001 - memory is a nice-to-have column, never a reason to fail a scene
+        return None
+
+
+# --- one scene, in its own process --------------------------------------------------------------------------------
+
+def _packets(path: Path) -> int | None:
+    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries",
+                        "stream=nb_read_packets", "-of", "csv=p=0", str(path)], capture_output=True, text=True)
+    try:
+        return int(r.stdout.strip().split(",")[0])
+    except ValueError:
+        return None
+
+
+def one(name: str, work: Path, scale: float) -> dict:
+    sys.path.insert(0, str(ROOT))
+    import kinescript as k
+    from kinescript import output, verify
+
+    row: dict = {"scene": name, "ok": False}
+    stage = "build"
+    try:
+        path = work / f"{name}.json"
+        path.write_text(json.dumps(build(name), indent=1), encoding="utf-8")
+        stage = "load"
+        t = time.perf_counter()
+        scene = k.load(str(path))
+        row.update(load_s=round(time.perf_counter() - t, 3), frames=scene.frames, w=scene.w, h=scene.h)
+        scene.close()
+        stage = "check"
+        t = time.perf_counter()
+        rep = verify.check(str(path))
+        row.update(check_s=round(time.perf_counter() - t, 2), errors=rep["errors"], warnings=rep["warnings"],
+                   codes=sorted({i["code"] for i in rep["issues"] if i["level"] in ("error", "warning")}))
+        stage = "render"
+        ext = SCENES[name][1]
+        if ext == "still":
+            out = work / f"{name}.png"
+            t = time.perf_counter()
+            output.still(str(path), 0.5 * scene.frames / scene.fps, str(out), scale=scale)
+            row.update(render_s=round(time.perf_counter() - t, 2), frames_ok=out.exists())
+        elif ext == "png/":
+            out = work / f"{name}-png" / "frame.png"
+            info = output.render(str(path), str(out), scale=scale)
+            got = len(list(out.parent.glob("*.png")))
+            row.update(render_s=info["wall"], workers=info.get("workers"), frames_ok=got == scene.frames)
+        else:
+            out = work / f"{name}{ext}"
+            info = output.render(str(path), str(out), scale=scale)
+            got = _packets(out) if ext != ".gif" else None
+            row.update(render_s=info["wall"], fps=info["fps_rendered"], workers=info["workers"],
+                       size_mb=info["size_mb"], audio=info["audio"],
+                       frames_ok=None if got is None else got == scene.frames, frames_out=got)
+        row["ok"] = True
+    except Exception as e:  # noqa: BLE001 - the row records the failure; the next scene still runs
+        row.update(stage=stage, error=f"{type(e).__name__}: {e}"[:300], trace=traceback.format_exc()[-1500:])
+    row["peak_mb"] = peak_mb()
+    return row
+
+
+# --- the table ----------------------------------------------------------------------------------------------------
+
+def _fmt(row: dict) -> str:
+    def v(key, spec="", missing="-"):
+        x = row.get(key)
+        return missing if x is None else format(x, spec)
+
+    check = f"{row['errors']}/{row['warnings']}" if "errors" in row else "-"
+    ok = {True: "yes", False: "NO", None: "-"}[row.get("frames_ok")]
+    status = "ok" if row["ok"] else f"FAIL at {row.get('stage')}: {row.get('error', '')[:70]}"
+    return (f"{row['scene']:13s} {v('frames', 'd'):>6s} {check:>6s} {v('check_s', '.2f'):>7s} {v('render_s', '.2f'):>8s} "
+            f"{v('fps', '.0f'):>6s} {v('workers', 'd'):>4s} {v('peak_mb', '.0f'):>7s} {v('size_mb', '.2f'):>7s} "
+            f"{ok:>6s}  {status}")
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Generated stress scenes: check, render and probe each one.")
+    ap.add_argument("names", nargs="*", default=list(SCENES))
+    ap.add_argument("--list", action="store_true", help="name and purpose of every scene")
+    ap.add_argument("--keep", metavar="DIR", help="write the scenes and renders here instead of a temporary folder")
+    ap.add_argument("--json", metavar="PATH", help="also write the rows as JSON")
+    ap.add_argument("--scale", type=float, default=1.0, help="render scale (1 = the scene's own size)")
+    ap.add_argument("--timeout", type=float, default=900, help="seconds before a scene counts as hung")
+    ap.add_argument("--one", help=argparse.SUPPRESS)
+    ap.add_argument("--work", help=argparse.SUPPRESS)
+    a = ap.parse_args()
+    if a.one:
+        print(json.dumps(one(a.one, Path(a.work), a.scale)))
+        return
+    if a.list:
+        for name, (_, ext, what) in SCENES.items():
+            print(f"{name:13s} {ext:6s} {what}")
+        return
+    unknown = [n for n in a.names if n not in SCENES]
+    if unknown:
+        sys.exit(f"unknown scene: {', '.join(unknown)} (see --list)")
+    if not (MEDIA / "cells.mp4").exists():
+        subprocess.run([sys.executable, str(ROOT / "examples" / "make_media.py")], check=True)
+    git = subprocess.run(["git", "describe", "--always", "--dirty"], cwd=ROOT, capture_output=True, text=True).stdout
+    print(f"# {git.strip()} · {platform.processor() or platform.machine()} · {os.cpu_count()} threads · "
+          f"Python {platform.python_version()} · scale {a.scale}")
+    print(f"{'scene':13s} {'frames':>6s} {'check':>6s} {'check s':>7s} {'render s':>8s} {'fps':>6s} {'wrk':>4s} "
+          f"{'peak MB':>7s} {'out MB':>7s} {'frames':>6s}  status")
+    rows = []
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(a.keep or tmp)
+        work.mkdir(parents=True, exist_ok=True)
+        for name in a.names:
+            cmd = [sys.executable, __file__, "--one", name, "--work", str(work), "--scale", str(a.scale)]
+            t = time.perf_counter()
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=a.timeout)
+                lines = [ln for ln in r.stdout.splitlines() if ln.startswith("{")]
+                row = json.loads(lines[-1]) if lines else {
+                    "scene": name, "ok": False, "stage": "process", "error": f"exit {r.returncode}: {r.stderr[-300:]}"}
+            except subprocess.TimeoutExpired:
+                row = {"scene": name, "ok": False, "stage": "process", "error": f"timed out after {a.timeout:.0f} s"}
+            row["total_s"] = round(time.perf_counter() - t, 2)
+            rows.append(row)
+            print(_fmt(row))
+            sys.stdout.flush()
+    if a.json:
+        Path(a.json).write_text(json.dumps(rows, indent=1), encoding="utf-8")
+    failed = [r["scene"] for r in rows if not r["ok"] or r.get("frames_ok") is False]
+    if failed:
+        print(f"\n{len(failed)} of {len(rows)} failed: {', '.join(failed)}")
+        for r in rows:
+            if r.get("trace"):
+                print(f"\n--- {r['scene']} ({r['stage']})\n{r['trace']}")
+    sys.exit(1 if failed else 0)
+
+
+if __name__ == "__main__":
+    main()

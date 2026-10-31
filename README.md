@@ -250,7 +250,10 @@ Measured on the development machine (Intel Core Ultra 7 265, 20 threads, NVIDIA 
 
 [`python bench/stages.py`](https://github.com/drknowhow/kinescript/blob/main/bench/stages.py) splits the time
 per frame into drawing, conversion and readback, and writing to ffmpeg for several workloads, and times whole
-renders.
+renders. [`python bench/stress.py`](https://github.com/drknowhow/kinescript/blob/main/bench/stress.py) generates
+23 scenes that each push one thing far past the examples (2000 layers, 60 cuts, 4K, 120 s, 16-sample motion blur
+with alpha, 600 caption cues and more), then checks, renders and probes each one in its own process and reports
+time, peak memory and whether the output holds every frame.
 
 Rendering uses Skia on the GPU through a hidden OpenGL context, one per worker process. Frames are split into
 chunks, encoded in parallel and joined without re-encoding, while another ffmpeg process mixes the audio.
