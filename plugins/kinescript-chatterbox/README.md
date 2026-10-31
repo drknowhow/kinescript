@@ -2,8 +2,8 @@
 
 [Chatterbox](https://github.com/resemble-ai/chatterbox) voices for `kine voice`, from Resemble AI's open models. It
 speaks the `text` of a scene's sounds into WAV files on your own machine and writes the time of each word, so
-layers can start on a word and captions follow the voice. Chatterbox Turbo acts on tags such as `[laugh]` and
-`[sigh]`, and either model can copy the voice of a short clip.
+layers can start on a word and captions follow the voice. Chatterbox Turbo takes tags such as `[laugh]` and
+`[sigh]`, though it acts them only some of the time (see Tags), and either model can copy the voice of a short clip.
 
 ```json
 {"id": "vo1", "role": "voice", "backend": "chatterbox",
@@ -57,6 +57,12 @@ Turbo (in chatterbox-tts 0.1.7) knows 19 tags:
 A tag written the way ElevenLabs writes it, such as `[laughs]`, `[whispers]` or `[clears throat]`, is read as
 Turbo's `[laugh]`, `[whispering]` or `[clear throat]`, so one scene works with both. A tag Turbo does not know is left
 out, so it is not read aloud, and listed under `ignored` in what `kine voice` prints.
+
+Turbo acts its tags only some of the time. With the built-in voice and seeds 0 to 2, nine takes with `[laugh]`
+(three lines) had no sound where the laugh goes in three: a silent pause in two, no pause in one. The other six had
+sound there, not checked by ear. Seven takes with `[whispering]` never whispered: the words stayed 81 to 99% voiced,
+like plain speech (86 to 96%), where ElevenLabs' whisper is 1% voiced. Listen to a tagged line before you rely on
+it, try another `seed` in `options`, or give that sound `"backend": "elevenlabs"`.
 
 ## Voices and settings
 

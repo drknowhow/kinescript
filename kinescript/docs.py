@@ -341,8 +341,10 @@ SOUND
   backend (kokoro, chatterbox, elevenlabs, each a plugin) and hands it settings with options:
     {"id": "vo2", "role": "voice", "text": "[whispers] Nobody knows. [laughs] Yet.", "backend": "elevenlabs",
      "speaker": "George", "options": {"stability": 0.3}}
-  chatterbox acts on [laugh], [chuckle], [sigh], [gasp], [cough], [clear throat], [whispering], [angry],
-  [happy], [sarcastic], [surprised], [crying] and a few more ([laughs] reads as [laugh]); its speaker
+  chatterbox takes [laugh], [chuckle], [sigh], [gasp], [cough], [clear throat], [whispering], [angry],
+  [happy], [sarcastic], [surprised], [crying] and a few more ([laughs] reads as [laugh]), but acts them
+  only some of the time ([laugh] made a sound in 6 of 9 test takes, [whispering] whispered in 0 of 7),
+  so use elevenlabs when a line needs its tags heard; its speaker
   is a clip of 5 s or more whose voice it copies, and "options": {"model": "standard", "exaggeration": 0.8}
   trades the tags for stronger emotion. elevenlabs needs an ELEVENLABS_API_KEY and uses the account's
   quota; its speaker is a voice name or id, its options model (eleven_v4), stability, style and
