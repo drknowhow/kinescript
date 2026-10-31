@@ -287,6 +287,7 @@ class Renderer:
         self._straight = None  # (effect, surface) straightening blurred transparent frames on the GPU
         cm = color_matrix({k: v for k, v in scene.grade.items() if k not in ("vignette", "grain")})
         self.grade_filter = skia.ColorFilters.Matrix(cm) if cm else None
+        self._videos = [L for L in scene.all_layers() if L.type == "video"]
 
     # ---- public -------------------------------------------------------------------------
     def frame(self, n: int) -> np.ndarray:
@@ -432,6 +433,11 @@ class Renderer:
             c.restore()
         if not stop_at:
             self._finish(c, T)
+        # A clip's decoder holds an ffmpeg process and its prefetched frames; once the clip is off screen,
+        # free them, or a cut list keeps every clip it has played open to the end (60 cuts: 1.6 GB).
+        for L in self._videos:
+            if L.video is not None and L.video.proc is not None and not L.t_in <= T < L.t_out:
+                L.video.close()
 
     # ---- scene-level ---------------------------------------------------------------------
     def _cameras(self, T: float):
@@ -462,6 +468,18 @@ class Renderer:
     def _finish(self, c: skia.Canvas, T: float):
         g = self.s.grade
         W, H = self.s.w, self.s.h
+        if not (g.get("vignette") or g.get("grain")):
+            return
+        if self.transparent:
+            # The grade goes on a copy of the frame that is put back only where the frame already has alpha
+            # (src-atop), so it darkens and grains what is drawn and leaves the empty canvas empty. Drawn
+            # straight onto a transparent canvas, the vignette made the corners half-opaque black and the
+            # grain gave every pixel some alpha.
+            # The record holds a bare pointer to the paint: keep the paint in a name, or it is freed before
+            # saveLayer reads it (a segfault on Linux).
+            atop = skia.Paint(BlendMode=skia.BlendMode.kSrcATop)
+            rec = skia.Canvas.SaveLayerRec(None, atop, skia.Canvas.kInitWithPrevious_SaveLayerFlag)
+            c.saveLayer(rec)
         if g.get("vignette"):
             v = float(g["vignette"])
             sh = skia.GradientShader.MakeRadial(skia.Point(W / 2, H / 2), math.hypot(W, H) / 2,
@@ -470,12 +488,14 @@ class Renderer:
             c.drawRect(skia.Rect(0, 0, W, H), skia.Paint(Shader=sh))
         if g.get("grain"):
             tiles = media.grain_tiles()
-            n = int(T * self.s.fps)
+            n = int(T * self.s.fps + 1e-6)  # n / fps * fps can land just under n (frame 123 at 30 fps)
             tile = tiles[n % len(tiles)]
             mtx = skia.Matrix.Translate((n * 37) % 256, (n * 91) % 256)
             p = skia.Paint(Shader=tile.makeShader(skia.TileMode.kRepeat, skia.TileMode.kRepeat, SAMPLING, mtx),
                            Alphaf=min(1.0, float(g["grain"])), BlendMode=skia.BlendMode.kOverlay)
             c.drawRect(skia.Rect(0, 0, W, H), p)
+        if self.transparent:
+            c.restore()
 
     # ---- layers --------------------------------------------------------------------------
     def _layer(self, c: skia.Canvas, L: Layer, T: float, parent_alpha: float):

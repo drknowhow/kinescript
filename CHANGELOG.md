@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- A video clip's decoder is closed once the clip is off screen. Before, every clip a render had played kept its
+  ffmpeg process and six prefetched frames to the end: a 60-cut sequence peaked at 1.66 GB and ran 60 decoders at
+  once; it now peaks at 270 MB.
+- `grade` vignette and grain no longer paint into the alpha channel of a transparent `.mov`, `.webm` or PNG. The
+  vignette made the corners about half-opaque black and the grain gave every pixel some alpha, which also made
+  files huge (4 s of `hello.json` as VP9 with alpha: 93 MB, now 0.46 MB). Drawn layers are graded as before.
+- Film grain changes on every frame. Frame 123 at 30 fps (and about 2% of frames at most rates) repeated the
+  previous frame's grain, because the frame number was recovered from the time by truncation.
+
 ## 1.3.1 (2026-10-31)
 
 - A scene's own component can hold a group and still be used more than once: the ids of nested layers now get the
