@@ -94,7 +94,9 @@ MODEL_ALIAS = {"radius": "r", "thickness": "tube", "geometry": "shape", "primiti
                "specular": "shine", "metallic": "metal", "metalness": "metal", "toon": "bands", "steps": "bands",
                "quality": "detail", "lighting": "light", "children": "parts", "meshes": "parts", "model": "src",
                "floor": "ground", "groundShadow": "ground", "contactShadow": "ground"}
-GROUND = {"y", "opacity", "blur"}
+GROUND = {"y", "opacity", "blur", "from"}
+SHADOWS = {"opacity", "soft"}
+SHADOWS_ALIAS = {"alpha": "opacity", "strength": "opacity", "softness": "soft", "blur": "soft"}
 GROUND_ALIAS = {"alpha": "opacity", "strength": "opacity", "softness": "blur", "radius": "blur", "level": "y"}
 
 COMMON = {"id", "type", "at", "dur", "until", "x", "y", "anchor", "opacity", "scale", "scaleX", "scaleY", "rotate",
@@ -119,7 +121,7 @@ TYPES: dict[str, set[str]] = {
     "video": MEDIA | {"trim", "speed", "volume", "loop", "fadeIn", "fadeOut"},
     "captions": TEXT | {"src", "cues", "mode", "active", "voice"},
     "shader": {"preset", "uniforms", "sksl", "w", "h"},
-    "group": {"children", "layers", "w", "h", "clip", "radius", "fill", "sort"},
+    "group": {"children", "layers", "w", "h", "clip", "radius", "fill", "sort", "shadows"},
     "model": PART - {"x", "y", "z", "rotateX", "rotateY", "rotate", "scale"} | {"detail", "parts", "explode",
                                                                               "draw", "light", "lights", "env",
                                                                               "src", "ground"},
@@ -209,8 +211,8 @@ SCALAR = {"x", "y", "w", "h", "r", "opacity", "scale", "scaleX", "scaleY", "rota
 REQUIRED = {"text": ("text",), "image": ("src",), "video": ("src",), "path": ("d", "points"), "line": ("points",),
             "captions": ("cues", "src", "voice"), "shader": ("preset", "sksl"), "model": ("shape", "parts", "src")}
 # Keys whose value is an object of their own: never a tween, even with a "from" key (a light's direction).
-OBJECTS = {"light", "lights", "env", "ground", "shadow", "box", "fx", "uniforms", "sound", "enter", "exit", "parts",
-           "transition"}
+OBJECTS = {"light", "lights", "env", "ground", "shadow", "shadows", "box", "fx", "uniforms", "sound", "enter", "exit",
+           "parts", "transition"}
 # Props that cannot be below 0, and the least each may be.
 AT_LEAST = {"radius": 0, "r": 0, "sides": 3, "blur": 0, "strokeWidth": 0, "size": 0}
 COLOUR_FIX = f"write {C.FORMATS}"
@@ -799,6 +801,8 @@ def _layer(raw, rep: Report, path: str, comps: dict):
                 rep.add("error", "bad-value", lid, "preset: " + unknown("shader preset", raw["preset"], SH))
     if t == "model":
         _model(raw, rep, lid)
+    if t == "group":
+        _shadows(raw, rep, lid)
     kids = raw.get("children") if raw.get("children") is not None else raw.get("layers")
     if t == "group" and raw.get("children") is not None and raw.get("layers") is not None:
         rep.add("error", "duplicate-key", lid, "a group lists its layers under 'children' or 'layers', not both",
@@ -809,6 +813,24 @@ def _layer(raw, rep: Report, path: str, comps: dict):
     if t == "group" and isinstance(kids, list):
         for i, k in enumerate(kids):
             _layer(k, rep, f"{lid}.children[{i}]", comps)
+
+
+def _shadows(raw: dict, rep: Report, lid):
+    """A stage's `shadows`: true or {"opacity", "soft"}."""
+    v = raw.get("shadows")
+    if v is None or v is False:
+        return
+    if isinstance(v, dict):
+        _keys(v, SHADOWS, SHADOWS_ALIAS, rep, lid, "shadows: ")
+        for k in sorted(SHADOWS & set(v)):
+            if not _number(v[k]):
+                rep.add("error", "bad-value", lid, f"shadows {k} is {_show(v[k])}; it takes a number")
+    elif v is not True:
+        rep.add("error", "bad-value", lid, f"shadows is {_show(v)}; it takes true or an object like "
+                "{\"opacity\": 0.5, \"soft\": 4}")
+        return
+    if raw.get("sort") != "pixel":
+        rep.add("warning", "ignored-key", lid, "shadows fall only in a stage", "add \"sort\": \"pixel\" to the group")
 
 
 def _number(v) -> bool:
@@ -1139,7 +1161,11 @@ def _model(raw: dict, rep: Report, lid):
     if isinstance(gr, dict):
         _keys(gr, GROUND, GROUND_ALIAS, rep, lid, "ground: ")
         for k, v in gr.items():
-            if k in GROUND and (isinstance(v, bool) or not isinstance(v, (int, float))):
+            if k == "from":
+                if v not in ("above", "light"):
+                    rep.add("error", "bad-value", lid, f"ground from is {v!r}; it takes \"above\" or \"light\"",
+                            "\"light\" casts the footprint along the key light, \"above\" (the default) straight down")
+            elif k in GROUND and (isinstance(v, bool) or not isinstance(v, (int, float))):
                 rep.add("error", "bad-value", lid, f"ground {k} is {v!r}; it takes a number")
     elif gr is not None and not isinstance(gr, bool):
         rep.add("error", "bad-value", lid, f"ground is {gr!r}; it takes true or an object like {{\"opacity\": 0.5}}")

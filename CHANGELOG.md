@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- `"shadows": true` (or `{"opacity", "soft"}`) on a stage: its models cast shadows from the scene's key light onto
+  every child, so a ring shades a card, a cube the floor and a wall behind it. The stage draws a 1024-texel map of
+  how near the light each model triangle turned away from it is, seen along the light; each frame pixel finds its
+  place from its depth and is darkened where the map holds something nearer, softened over 9 taps. A surface
+  turned from the light, found from its neighbours' depths, takes no shadow: it has no key light to lose, and tested
+  against itself an edge-on face shaded itself in stripes. Flat layers receive shadows but do not cast them. On the
+  CPU the test runs once a frame pixel and only as far as each pixel needs: at 2x over every pixel it took 2 s a
+  1080p frame. `examples/shadows.json` renders in 6.3 s on the GPU with or without shadows (22 ms a frame against
+  15), and in 34.9 s on the CPU against 23.7 s.
+- `ground` takes `"from": "light"`: the footprint is cast along the model's key light onto the floor, so it moves as
+  the light does. The default, `"above"`, is straight down as before.
 - `fog` at the top level fades far layers into a colour: `true`, or `{"color", "near", "far", "amount"}` with `near`
   and `far` in px from the camera, all of which animate. By default the colour is the canvas background and the fog
   starts at z 0, so a layer at z 0 is clear. A model is fogged at each vertex, any other layer by the depth of its

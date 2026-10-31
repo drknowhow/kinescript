@@ -1,0 +1,20 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 6, "bg": {"radial": [0.5, 0.4], "stops": ["#22252f", "#0b0c10"]}},
+  "camera": {"rotateX": [[0, 24], ["end", 16, "inOutSine"]], "rotateY": [[0, -14], ["end", 14, "inOutSine"]]},
+  "light": {"preset": "dramatic", "follow": "world", "azimuth": [[0, -65], ["end", 65, "inOutSine"]], "elevation": 30,
+            "key": 0.95, "fill": 0.12, "ambient": 0.12},
+  "layers": [
+    {"id": "stage", "type": "group", "x": "50%", "y": "52%", "sort": "pixel", "shadows": {"opacity": 0.55, "soft": 3},
+     "children": [
+      {"id": "floor", "type": "rect", "y": 200, "w": 1500, "h": 900, "radius": 40, "rotateX": 90, "fill": "#2b3242"},
+      {"id": "wall", "type": "rect", "y": -60, "z": -260, "w": 1500, "h": 520, "radius": 24, "fill": "#363e51"},
+      {"id": "cone", "type": "model", "shape": "cone", "r": 90, "h": 260, "x": -380, "y": 70, "z": -60,
+       "fill": "#e8e2d4", "shine": 0.3},
+      {"id": "ring", "type": "model", "shape": "torus", "r": 120, "tube": 34, "y": 46, "detail": "high",
+       "rotateY": [[0, -30], ["end", 60]], "fill": "#ff633f", "shine": 0.8},
+      {"id": "cube", "type": "model", "shape": "cube", "w": 170, "x": 370, "y": 115, "z": 40,
+       "rotateY": [[0, 20], ["end", -25]], "fill": "#b9f45d", "shine": 0.4}]},
+    {"id": "title", "type": "text", "text": "shadows move with the key light, onto the floor, the wall and each other",
+     "x": "50%", "y": "92%", "size": 38, "weight": 400, "fill": "$muted", "fixed": true, "at": 0.4, "enter": "fade"}
+  ]
+}

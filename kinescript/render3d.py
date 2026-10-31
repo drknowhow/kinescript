@@ -191,6 +191,14 @@ def environment(spec) -> dict | None:
                 **{k: v for k, v in spec.items() if k != "preset"})
 
 
+def sun(r, T: float) -> tuple[list[float], float]:
+    """The scene's key light at scene time T: its direction in camera space and its amount."""
+    lt = light(at(r._lit, r.s.ctx, r.s.light, T, r.s.duration, T))
+    cam = r._cam if r._cam is not None else r._lens
+    key, _, _, amounts = _lights(lt, (np.linalg.inv(r._lens) @ cam)[:3, :3])
+    return key, amounts[0]
+
+
 def fog(r, T: float) -> tuple | None:
     """The scene's fog at scene time T as (colour, near, far, amount, focus), near and far in px from the camera
     and focus the distance of the canvas plane (z 0) from it, or None."""
@@ -485,10 +493,11 @@ def _hull(p: np.ndarray) -> np.ndarray:
     return h[np.argsort(np.arctan2(h[:, 1] - mid[1], h[:, 0] - mid[0]))]
 
 
-def _ground(r, c: skia.Canvas, spec, rest: np.ndarray, pts: np.ndarray, fg=None):
-    """A soft shadow under the model, as if lit from straight above: the footprint of its points on a level
-    floor, darkest where it touches and wider and fainter as it rises. The floor lies in the layer's parent
-    space, at the model's lowest point before it turns (`rest`), unless `y` places it."""
+def _ground(r, c: skia.Canvas, spec, rest: np.ndarray, pts: np.ndarray, fg=None, key=None):
+    """A soft shadow under the model, as if lit from straight above (or with "from": "light", along key, the key
+    light's direction in camera space): the footprint of its points on a level floor, darkest where it touches
+    and wider and fainter as it rises. The floor lies in the layer's parent space, at the model's lowest point
+    before it turns (`rest`), unless `y` places it."""
     spec = spec if isinstance(spec, dict) else {}
     local = np.linalg.solve(r._outer, r._m3d)  # the layer's own transform
     Q = pts @ local[:3, :3].T + local[:3, 3]
@@ -497,6 +506,13 @@ def _ground(r, c: skia.Canvas, spec, rest: np.ndarray, pts: np.ndarray, fg=None)
     lift = max(0.0, floor - low)
     xz = Q[:, [0, 2]]
     span = float(np.ptp(xz, axis=0).max()) or 1.0
+    if spec.get("from") == "light" and key is not None:
+        up = np.linalg.solve((np.linalg.inv(r._lens) @ r._outer)[:3, :3], key)  # toward the light, parent space
+        if up[1] >= 0:
+            return  # lit from below the floor
+        step = up[[0, 2]] / -up[1]  # how far along the floor the shadow moves per px of height (y runs down)
+        step *= min(1.0, 5.0 / (np.linalg.norm(step) or 1.0))  # a light under 11 degrees up casts it 5 heights
+        xz = xz - (floor - Q[:, 1])[:, None] * step
     op, soft = float(spec.get("opacity", 0.5)), float(spec.get("blur", 0.08 * span))
     # A wide soft shadow of the whole footprint, and a tight dark one of the part within reach of the floor.
     touch = xz[Q[:, 1] > low - 0.04 * span]
@@ -674,6 +690,9 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
         N, M = N[T].reshape(-1, 3), M[T].reshape(-1)
         T = np.arange(len(P), dtype=np.int32).reshape(-1, 3)
     foot = P if amt >= 1.0 or ex > 0 else P[T.ravel()]  # what casts the ground shadow: what is drawn
+    view = np.linalg.inv(r._lens) @ r._m3d  # the layer matrix without the lens: into camera space
+    if r._stage is not None and r._stage.casters is not None:  # every triangle drawn casts, facing the camera or not
+        r._stage.cast(P @ view[:3, :3].T + view[:3, 3], T)
     hom = P @ r._m3d[:3, :3].T + r._m3d[:3, 3]
     w = P @ r._m3d[3, :3] + r._m3d[3, 3]
     if len(w) and w.min() < space.NEAR:  # no vertex that near, no triangle crossing
@@ -692,9 +711,7 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
     # From here on, only the vertices of the triangles drawn: about half of them face away.
     used, T = _compact(T, len(P))
     N, M = N[used], M[used]
-    # Normals into camera space: the layer matrix without the lens.
-    view = np.linalg.inv(r._lens) @ r._m3d
-    nv = N @ np.linalg.inv(view[:3, :3])
+    nv = N @ np.linalg.inv(view[:3, :3])  # normals into camera space
     nv /= np.linalg.norm(nv, axis=1, keepdims=True)
     X, Y = X[used] * r.scale, Y[used] * r.scale  # device pixels
     lo, hi = (X.min(), Y.min()), (X.max(), Y.max())
@@ -743,7 +760,7 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
         cv.drawVertices(verts, paint, mode)
     img = surf.makeImageSnapshot()
     if L.raw.get("ground") not in (None, False):
-        _ground(r, c, L.raw["ground"], m.P, foot, fg)
+        _ground(r, c, L.raw["ground"], m.P, foot, fg, lt[0])
     if r._stage is not None and r._stage.child is L:
         r._stage.depth(q, 1.0 / w[used], T)
     c.save()

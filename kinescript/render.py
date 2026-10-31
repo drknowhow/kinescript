@@ -1081,7 +1081,7 @@ class Renderer:
             if self._m3d is not None and L.raw.get("sort") == "depth":
                 kids = sorted(kids, key=lambda k: self._far(k, T))
             if self._m3d is not None and L.raw.get("sort") == "pixel" and self._stage is None:
-                stage.stage(self).draw(self, c, kids, T, parent_alpha * alpha)
+                stage.stage(self).draw(self, c, kids, T, parent_alpha * alpha, L.raw.get("shadows"))
             else:
                 for child in kids:
                     if self._stopped:

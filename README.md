@@ -60,7 +60,8 @@ no depth draw exactly as before.
   `fog` fades far layers into the background colour, or a colour of your own.
 - **Stages.** A group with `"sort": "pixel"` draws each child with an image of its depth and shows the nearest at
   each pixel, so models and cards pass through each other with a clean edge, and a model's `ground` shadow lies
-  on a floor layer.
+  on a floor layer. With `"shadows": true` its models cast shadows from the key light onto the floor, walls and
+  each other.
 - **Model layers.** `"type": "model"` draws a lit `cube`, `sphere`, `cylinder`, `cone`, `torus` or `plane`, or
   several shapes merged as `parts` so their triangles are depth-sorted together. Materials take `fill`, `shine`,
   `metal`, `rim`, `bands` (toon steps) and `glow`. `light`, for the scene or one model, takes `studio`, `soft`,
@@ -71,7 +72,8 @@ no depth draw exactly as before.
 - **Extruded text and SVG paths.** `"shape": "text"` extrudes letters in any font and `"shape": "path"` extrudes
   SVG path data, filled, or stroked with `strokeWidth` for line icons. Both take a `depth` and a 45-degree `bevel`.
 - **Model files.** `src` reads `.glb` and `.gltf` (glTF 2.0) and `.obj` with its `.mtl`: node transforms, base
-  colours, and metallic and roughness as `metal` and `shine`. `ground` puts a soft shadow under any model.
+  colours, and metallic and roughness as `metal` and `shine`. `ground` puts a soft shadow under any model, straight
+  down or, with `"from": "light"`, cast along its key light.
 
 A 3D title that builds in and turns to face the camera:
 
@@ -245,6 +247,8 @@ More scenes in [`examples/`](https://github.com/drknowhow/kinescript/tree/main/e
   and gloss reflecting their environments as the camera turns, 6 s.
 - [`fog.json`](https://github.com/drknowhow/kinescript/blob/main/examples/fog.json): a hall of pillars fading
   into fog as the camera walks in and a ball comes out of it, 6 s.
+- [`shadows.json`](https://github.com/drknowhow/kinescript/blob/main/examples/shadows.json): a cone, a ring and a
+  cube in a stage, their shadows swinging across the floor and up the wall as the key light moves, 6 s.
 - [`voiceover.json`](https://github.com/drknowhow/kinescript/blob/main/examples/voiceover.json): titles cued from
   the words of a voice-over, karaoke captions of it, and a music bed that dips under it, 5.4 s.
 - [`narrated.json`](https://github.com/drknowhow/kinescript/blob/main/examples/narrated.json): the same idea
