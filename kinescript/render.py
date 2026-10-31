@@ -658,9 +658,11 @@ class Renderer:
         c.clear(skia.ColorTRANSPARENT)
         if self.scale != 1:
             c.scale(self.scale, self.scale)
-        self._background(c)
         if self.grade_filter:
+            # The background goes inside the graded layer, so the grade covers the whole frame and a blend mode at
+            # the top level works on the background: in a layer that started empty, a multiply drew as its plain fill.
             c.saveLayer(None, skia.Paint(ColorFilter=self.grade_filter))
+        self._background(c)
         cams = self._cameras(T) if s.is3d else None
         for layer in s.layers:
             if self._stopped:

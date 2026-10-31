@@ -126,6 +126,11 @@
 - A group's opacity no longer changes what a `blend` inside it does. At group opacity 0.999 an orange `multiply`
   child over grey drew (128,64,0); at 0.9989 it drew (255,128,0), blending with nothing, so a fade on such a group
   jumped. The group now fades evenly from the blended picture to what is under it.
+- A top-level `blend` in a scene with a `grade` blends with the background. Under any grade, even
+  `{"contrast": 1.0001}`, a grey `multiply` rect over a `#3080ff` background drew plain grey (128,128,128) instead
+  of (24,64,128), because the layers were graded in a layer of their own that started empty. The background is now
+  graded with them, so `contrast`, `saturate` and the other colour keys change it too: the whole frame, as the docs
+  say. A `#0b0706` background under `"contrast": 1.04` is now `#060201`.
 - With `motionBlur`, a layer's first and last frames are drawn at full strength, and it no longer shows faintly
   one frame after it ends. A red layer on frames 30 to 44 drew (255,127,127) at frames 30 and 45; now red at 30
   and 44 and nothing at 45.

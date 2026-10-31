@@ -1,12 +1,12 @@
-"""Rendering fixes: group fades with blended children, motion blur at a layer's ends, grain under motion blur,
-repeatable GPU models, boxes that hold the ink, check rules (hidden text, flashes, odd sizes, glyphs), and text in
-scripts the layer's font does not have."""
+"""Rendering fixes: group fades with blended children, blends under a scene grade, motion blur at a layer's ends,
+grain under motion blur, repeatable GPU models, boxes that hold the ink, check rules (hidden text, flashes, odd sizes,
+glyphs), and text in scripts the layer's font does not have."""
 import numpy as np
 import pytest
 import skia
 
 import kinescript as k
-from kinescript.render import Renderer, _bidi_order, _fallback, _text_font
+from kinescript.render import Renderer, _bidi_order, _fallback, _text_font, color_matrix
 from kinescript.verify import check, probe
 
 
@@ -40,6 +40,42 @@ def test_group_opacity_fades_blended_children_without_a_jump(backend):
     for op in (0.999, 0.9989, 0.99, 0.5, 0.1):
         # Before: 0.999 drew (128,64,0) and 0.9989 (255,128,0), the child blending with nothing.
         assert np.abs(centre(op) - (bg + op * (full - bg))).max() <= 2, op
+
+
+# ---- S2: a blend at the top level under a scene grade ----------------------------------------------------------
+
+def _through_grade(frame, grade):
+    """A straight-alpha frame put through the grade's colour matrix, as Skia applies it."""
+    m = np.array(color_matrix(grade)).reshape(4, 5)
+    return np.clip(frame / 255 @ m[:, :4].T + m[:, 4], 0, 1) * 255
+
+
+@pytest.mark.parametrize("backend", ["cpu", "gpu"])
+@pytest.mark.parametrize("blend", ["multiply", "screen", "overlay", "difference", "color"])
+def test_a_grade_keeps_top_level_blends_blending_with_the_background(backend, blend):
+    layers = [{"id": "m", "type": "rect", "x": 160, "y": 90, "w": 100, "h": 100, "fill": "#808080", "blend": blend}]
+    plain = _renderer(scene(layers, bg="#3080ff"), backend).frame(0).astype(float)
+    for grade in ({"contrast": 1.0001}, {"contrast": 1.2, "saturate": 0.5}):
+        graded = _through_grade(plain, grade)  # the frame without a grade, then the grade, background and all
+        for blur in (None, {"samples": 4}):
+            spec = dict(scene(layers, bg="#3080ff"), grade=grade, motionBlur=blur)
+            # Before: under any grade the rect drew as its plain grey, (128,128,128) for multiply, not (24,64,128).
+            assert np.abs(_renderer(spec, backend).frame(0) - graded).max() <= 2, (grade, blur)
+
+
+@pytest.mark.parametrize("backend", ["cpu", "gpu"])
+def test_a_grade_with_a_blend_on_a_see_through_canvas(backend):
+    layers = [{"id": "m", "type": "rect", "x": 160, "y": 90, "w": 100, "h": 100, "fill": "#808080",
+               "blend": "multiply"}]
+    tone = {"contrast": 1.2, "saturate": 0.5}
+    for bg in ("transparent", "#ff000080"):
+        plain = _renderer(scene(layers, bg=bg), backend).frame(3).astype(float)
+        got = _renderer(dict(scene(layers, bg=bg), grade=tone), backend).frame(3)
+        seen = plain[..., 3] > 0
+        # Before: over the half-red background the multiply drew grey, not about (128,64,64) graded.
+        assert np.abs(got - _through_grade(plain, tone))[seen].max() <= 3, bg
+        full = _renderer(dict(scene(layers, bg=bg), grade=dict(tone, vignette=0.6, grain=0.2)), backend).frame(3)
+        assert np.array_equal(full[..., 3], plain[..., 3]), bg  # vignette and grain stay out of the alpha channel
 
 
 # ---- B12, B13: motion blur at a layer's first and last frames, and grain ---------------------------------------
