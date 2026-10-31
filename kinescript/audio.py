@@ -113,7 +113,10 @@ def duck_curve(voices: list[tuple[float, float, np.ndarray, float]], duration: f
     per = int(RATE * _WIN)
     for t0, t1, rms, gain in voices:
         on = np.repeat(rms + gain > SPEECH, per)
-        a, b = max(0, int(round(t0 * RATE))), min(n, int(round(t1 * RATE)))
+        a0 = int(round(t0 * RATE))
+        if a0 < 0:  # a voice that started before the scene: the part before 0 s is not in it
+            on, a0 = on[-a0:], 0
+        a, b = a0, min(n, int(round(t1 * RATE)))
         m = min(b - a, len(on))
         if m > 0:
             active[a:a + m] |= on[:m]

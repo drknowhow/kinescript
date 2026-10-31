@@ -123,9 +123,14 @@ LAYER TYPES (defaults in brackets)
             file), w, h (give one and the other keeps the
             aspect), fit [cover] (cover|contain|stretch), zoom [1] (zooms inside the frame),
             focus [[0.5, 0.5]] (the point zoom moves toward), radius, stroke, strokeWidth
-  video     src, trim [start, end] (seconds in the source file), speed [1], volume [1] (0 mutes),
-            loop, w, h [canvas size], fit, zoom, focus, radius. Its sound is mixed in.
-  captions  cues [[start, end, "text"], ...] (seconds from the layer start) or src (.srt/.vtt),
+  video     src, trim [start, end] (seconds in the source file), speed [1] (any number above 0),
+            volume [1] (a number; 0 mutes), loop, w, h [canvas size], fit, zoom, focus, radius.
+            Its sound is mixed in at the clip's speed and stops at the trim end unless loop is true.
+            An enter or exit fades the sound over its dur too; fadeIn and fadeOut (seconds, 0 for
+            none) set the sound's fades instead.
+  captions  cues [[start, end, "text"], ...] (seconds from the layer start) or src (.srt/.vtt, in
+            UTF-8, UTF-16 or Windows-1252; tags are dropped, &amp; reads as &, and cues that
+            overlap show together, the earlier one on top),
             or voice: a sound's id, to caption what it says word by word (see SOUND),
             mode (karaoke|pop: highlight the current word), active (colour of that word), and
             the text keys. Defaults: x "50%", y "86%", size 46, weight 700, a dark box behind.
@@ -140,10 +145,13 @@ LAYER TYPES (defaults in brackets)
             (see 3D MODELS).
   group     children [layers], w, h, clip (true cuts children off at w x h), radius, fill.
             Children are placed from the group's x, y and start at the group's "at".
-  sequence  clips [{"src": "a.mp4", "trim": [0, 4]}, ...] and transition {"type": "fade",
-            "dur": 0.4} (fade|wipe|slide|zoom|blur|cut). Becomes a group of back-to-back video layers
-            named <id>-1, <id>-2, ... that ends with its last clip, so "<id>.out" is a cue. Each
-            transition overlaps the clips it joins, so 3 s + 3 s with a 0.5 s fade lasts 5.5 s.
+  sequence  clips [{"src": "a.mp4", "trim": [0, 4]}, ...] (an image clip needs dur) and transition
+            {"type": "fade", "dur": 0.4} (fade|wipe|slide|zoom|blur|cut; dur defaults to 0.5, cut
+            takes none, and no transition is a cut). Becomes a group of back-to-back layers named
+            <id>-1, <id>-2, ... that ends with its last clip, so "<id>.out" is a cue. Each
+            transition overlaps the clips it joins, so 3 s + 3 s with a 0.5 s fade lasts 5.5 s, and
+            must be shorter than both. Their sound crossfades over it: the clip before fades out
+            as the next fades in.
             fit, volume, w, h, x, y and anchor go to every clip; opacity, blur, fx, enter and the
             other layer keys apply to the whole cut.
 
@@ -292,8 +300,12 @@ SOUND
   trim [start, end] (seconds in the file), gain (dB: 0 = unchanged, -6 = about half as loud) or
   volume (1 = unchanged), fadeIn, fadeOut (seconds), loop (true repeats the trimmed file until the
   sound ends), pan (-1 left .. 1 right), text, speaker and rate (a voice spoken from text, see
-  below). A sound lasts as long as its trimmed file; fadeOut ends
-  where it ends, which is the scene end at the latest.
+  below). A sound lasts as long as its trimmed file; a dur past that is silence unless loop is
+  true. fadeOut ends where it ends, which is the scene end at the latest. A sound with a
+  negative at plays from the part of it that is still going at 0 s. kine check says when a src
+  has no sound in it (no-audio), and warns about a sound nobody will hear: volume 0, a gain
+  that leaves it silent, or one that starts after the scene ends or ends before it starts
+  (audio-unheard).
   A sound is a cue like a layer: "at": "vo1.out+0.3" starts something 0.3 s after the voice ends,
   and a sound can start at "title.in". "prev" is the sound listed before. A voice makes
   "duration": "auto" long enough to finish it; music, ambience and sfx do not.
@@ -399,7 +411,8 @@ COMMANDS
                                   mixed and measured, see SOUND): a voice cut off (audio-cut), two
                                   voices at once (voice-overlap), music under 10 LU below a voice
                                   (voice-masked), an sfx whose first sound is late (sfx-late), a
-                                  silent sound, and the mix's loudness and peaks.
+                                  silent sound, a sound nobody hears (audio-unheard), and the
+                                  mix's loudness and peaks.
                                   info: a name it read for you, e.g. "'color' read as 'fill'".
   kine look scene.json --boxes    one PNG of 12 evenly spaced frames; --boxes outlines layers and
                                   labels the top-level ones; -n 16 frames, --at 1 2.5 4 exact
