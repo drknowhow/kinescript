@@ -26,7 +26,13 @@ NOT_ANIMATABLE = {"points", "trim", "src", "text", "id", "type", "cues", "childr
                   "d", "font", "split", "enter", "exit", "stops", "data", "words", "format",
                   "fit", "align", "anchor", "blend", "clip", "loop", "mode", "cap", "join"}
 
-_LEN = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*(%|vw|vh|vmin|px)?\s*(?:([+-])\s*(\d+(?:\.\d+)?)\s*(px)?)?\s*$")
+_NUM = r"(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"  # 2, 2.5, .5, 1e3
+_LEN = re.compile(rf"^\s*(-?{_NUM})\s*(%|vw|vh|vmin|px)?\s*(?:([+-])\s*({_NUM})\s*(px)?)?\s*$")
+# A keyframe time: seconds ("0.5", "0.5s"), frames ("12f"), "500ms", a share of the layer ("40%"), or "end" with an
+# optional offset ("end-0.2", "end-10f").
+KEY_TIME = re.compile(r"\s*(-?\d+(\.\d+)?(s|f|ms)?|\d+(\.\d+)?%|end([+-]\d+(\.\d+)?(s|f|ms)?)?)\s*")
+KEY_TIMES = ('0.5 (seconds from the layer start; negative counts from its end), "12f", "500ms", "40%", "end" or '
+             '"end-0.2"')
 
 
 def noise(x: float, seed: float = 0.0) -> float:
@@ -94,8 +100,8 @@ def _norm(v):
 
 def _is_time(k) -> bool:
     if isinstance(k, (int, float)):
-        return True
-    return isinstance(k, str) and bool(re.fullmatch(r"\s*(-?\d+(\.\d+)?(s|f)?|\d+(\.\d+)?%|end([+-]\d+(\.\d+)?(s|f)?)?)\s*", k))
+        return not isinstance(k, bool)
+    return isinstance(k, str) and bool(KEY_TIME.fullmatch(k))
 
 
 def is_keyframes(v) -> bool:
@@ -113,6 +119,13 @@ class Prop:
         return self.value if self.static else self.fn(t, d, T, i)
 
 
+def _seconds(s: str, fps: float) -> float:
+    """'0.5', '0.5s', '12f' or '500ms' in seconds."""
+    if s.endswith("ms"):
+        return float(s[:-2]) / 1000
+    return float(s.rstrip("sf")) / (fps if s.endswith("f") else 1)
+
+
 def key_time(k, d: float, fps: float) -> float:
     if isinstance(k, (int, float)):
         return d + k if k < 0 else float(k)
@@ -120,9 +133,8 @@ def key_time(k, d: float, fps: float) -> float:
     if s.endswith("%"):
         return float(s[:-1]) / 100 * d
     if s.startswith("end"):
-        rest = s[3:].strip() or "+0"
-        return d + float(rest.rstrip("sf")) / (fps if rest.endswith("f") else 1)
-    v = float(s.rstrip("sf")) / (fps if s.endswith("f") else 1)
+        return d + _seconds(s[3:].strip() or "+0", fps)
+    v = _seconds(s, fps)
     return d + v if v < 0 else v
 
 
@@ -167,6 +179,14 @@ def compile_expr(src: str, name: str, allowed: set[str]):
     """Compile a scene expression. Only arithmetic, comparisons and calls to the whitelisted
     helpers are accepted (no attributes, subscripts or lambdas), because scene files may come
     from other agents and are evaluated with eval()."""
+    try:
+        return _compile_expr(src, name, allowed)
+    except (RecursionError, MemoryError):  # "-" * 50000 + "1", or a sum of 5000 terms
+        raise ValueError(f"'{name}': the expression is nested too deeply to read ({len(src)} characters); "
+                         "write it shorter, or split it across keyframes") from None
+
+
+def _compile_expr(src: str, name: str, allowed: set[str]):
     tree = ast.parse(src, mode="eval")
     for node in ast.walk(tree):
         if not isinstance(node, _SAFE_NODES):
@@ -182,6 +202,29 @@ def compile_expr(src: str, name: str, allowed: set[str]):
     return compile(tree, f"<{name}>", "eval")
 
 
+def _finite(v) -> bool:
+    try:
+        return math.isfinite(v)
+    except OverflowError:  # an int past the float range
+        return False
+
+
+def _show(v) -> str:
+    try:
+        return f"{float(v):g}"
+    except OverflowError:
+        return f"a number with {len(str(abs(v)))} digits"
+
+
+def _tween_secs(raw: dict, key: str, default: float, name: str) -> float:
+    v = raw.get(key)
+    if v is None:  # left out, or null
+        return float(default)
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not _finite(v):
+        raise ValueError(f"{name} tween: {key} is {v!r}; it takes a number of seconds ({default:g} when left out)")
+    return float(v)
+
+
 def compile_prop(name: str, raw, ctx: Ctx) -> Prop:
     if name in NOT_ANIMATABLE:
         return Prop(True, raw)
@@ -190,14 +233,18 @@ def compile_prop(name: str, raw, ctx: Ctx) -> Prop:
         code = compile_expr(raw[1:], name, set(env) | {"t", "d", "p", "T", "i"})
 
         def fx(t, d, T, i, code=code, env=env):
-            v = eval(code, _GLOBALS, dict(env, t=t, d=d, p=(t / d if d else 0.0), T=T, i=i))
+            try:
+                v = eval(code, _GLOBALS, dict(env, t=t, d=d, p=(t / d if d else 0.0), T=T, i=i))
+            except OverflowError:  # 10.0**400, exp(1000), floor(inf)
+                raise ValueError("gives a number too large for a float, not a finite number") from None
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and not _finite(v):
+                raise ValueError(f"gives {_show(v)}, not a finite number")  # inf blanks a layer; 10**400 is no float
             return _norm(v)
         return Prop(False, raw, fn=fx)  # value keeps the source: Scene.check_expressions finds expressions by it
     if isinstance(raw, dict) and ("to" in raw or "keys" in raw):
         if "keys" in raw:
             return compile_prop(name, raw["keys"], ctx)
-        delay = float(raw.get("delay", 0))
-        dur = float(raw.get("dur", 0.6))
+        delay, dur = (_tween_secs(raw, k, default, name) for k, default in (("delay", 0), ("dur", 0.6)))
         keys = [[delay, raw.get("from", raw["to"])], [delay + dur, raw["to"], raw.get("ease", "outCubic")]]
         return compile_prop(name, keys, ctx)
     if is_keyframes(raw):

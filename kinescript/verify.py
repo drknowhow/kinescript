@@ -210,7 +210,8 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
         except (ValueError, RuntimeError, OSError) as e:
             heard.cancel() or heard.result()
             scene.close()
-            return _result(scene.issues + [{"level": "error", "code": "render", "layer": None, "from": round(T, 2),
+            lid = (getattr(e, "issues", None) or SceneError(str(e)).issues)[0]["layer"]  # from "layer 'x': ..."
+            return _result(scene.issues + [{"level": "error", "code": "render", "layer": lid, "from": round(T, 2),
                                             "to": round(T, 2), "message": f"{type(e).__name__}: {e}", "fix": ""}],
                            duration=scene.duration)
         for lid in r.culled:

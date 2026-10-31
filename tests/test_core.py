@@ -90,7 +90,7 @@ def test_expression_rejects_attribute_access():
 def test_huge_powers_and_repeated_lists_fail_fast():
     # Exact integer power made 9**9**9 run for hours inside check; '**' is a float power now.
     assert compile_prop("x", "=2**3 + 4**0.5", Ctx(10, 10, 30)).at(0, 1) == 10
-    with pytest.raises(k.SceneError, match="OverflowError"):
+    with pytest.raises(k.SceneError, match="too large for a float"):
         k.Scene(scene([{"id": "c", "type": "circle", "r": 10, "x": "=9**9**9"}]))
     with pytest.raises(ValueError, match="not on text or lists"):
         compile_prop("x", "=[0]*999999999", Ctx(10, 10, 30))

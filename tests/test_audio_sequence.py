@@ -365,8 +365,8 @@ def test_a_caption_file_with_no_cues_warns(tmp_path, data):
 
 
 @pytest.mark.parametrize("cues, says", [
-    ([[1, 2]], "cues[0] is [1, 2]"), ([[2, 1, "x"]], "cues[0] ends at 1s"), ([["a", 2, "x"]], "cues[0]: its start"),
-    ([{"at": 1, "text": "x"}], "cues[0]: its start and end are 1 and None"),
+    ([[1, 2]], "cues[0] is [1, 2]"), ([[2, 1, "x"]], "cues[0] ends at 1s"), ([["a", 2, "x"]], 'cues[0] is ["a", 2, "x"]'),
+    ([{"at": 1, "text": "x"}], 'cues[0] is {"at": 1, "text": "x"}'),
 ])
 def test_inline_cues_are_checked(cues, says):
     got = _errors(scene([{"id": "cc", "type": "captions", "cues": cues}]))

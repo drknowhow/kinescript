@@ -12,10 +12,39 @@ Change one duration and everything cued from it moves with it.
 """
 from __future__ import annotations
 
+import math
 import re
 
-_TERM = re.compile(r"\s*([+-])\s*(\d+(?:\.\d+)?)\s*(s|f|ms)?\s*")
-_BASE = re.compile(r"^\s*([A-Za-z_][\w-]*(?::\w+)?)(?:\.(in|out|mid))?")
+_NUM = r"(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"  # 2, 2.5, .5, 1e3
+_TERM = re.compile(rf"\s*([+-])\s*({_NUM})\s*(s|f|ms)?\s*")
+# A cue name: letters (any script), digits, _ and -, as in "1st", "título" or "vo1:render".
+_BASE = re.compile(r"^\s*([^\W][\w-]*(?::\w+)?)(?:\.(in|out|mid))?")
+# Times past this many seconds (11.6 days) are typos: their frame counts lose precision, and 10**400 is no float.
+LIMIT = 1e6
+# Words a cue reads before any id, so a layer or audio id cannot be one of them. ("end" is special only as the
+# whole of "until": "end"; a layer called end is still cued as "end.out".)
+KEYWORDS = ("start", "prev")
+
+
+def finite(v) -> bool:
+    """A number of seconds Kinescript can use: finite and within LIMIT (10**400 is too large for a float)."""
+    return abs(v) <= LIMIT and math.isfinite(v)
+
+
+def show(v) -> str:
+    """A value for a message, short even for 10**400 or 1e308."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return repr(v)
+    try:
+        f = float(v)
+    except OverflowError:
+        return f"a number with {len(str(abs(v)))} digits"
+    return f"{f:.6g}" if math.isfinite(f) else str(f)
+
+
+def secs(t: float) -> str:
+    """A time for a message: '2.500s', or '1e+308 s' rather than 309 digits."""
+    return f"{t:.3f}s" if abs(t) < LIMIT else f"{t:.4g} s"
 
 
 class TimingError(ValueError):
@@ -30,7 +59,7 @@ FORMS = ('a number of seconds (1.5), "45f" (frames), "0:02.5", "title.out+0.2" (
 
 def parse_clock(s: str, fps: float) -> float | None:
     s = s.strip()
-    m = re.fullmatch(r"(-?\d+(?:\.\d+)?)\s*(s|f|ms)?", s)
+    m = re.fullmatch(rf"(-?{_NUM})\s*(s|f|ms)?", s)
     if m:
         v = float(m.group(1))
         return v / fps if m.group(2) == "f" else v / 1000 if m.group(2) == "ms" else v
@@ -69,7 +98,7 @@ class Timeline:
         """`words`: per sound id, {"ids": {word id: (start, end)} in file seconds, or None when it has no words file,
         "trim0" and "trim1" (the part of the file that plays) and "file" (where a words file would go)."""
         self.fps = fps
-        self.markers = {k: float(v) for k, v in (markers or {}).items()}
+        self.markers = {k: self._marker(k, v) for k, v in (markers or {}).items()}
         self.words = words or {}
         self.nodes: dict[str, dict] = {}
         self.order: list[str] = []
@@ -88,10 +117,21 @@ class Timeline:
                                parent=parent, default_end=default_end, span=span, counts=counts)
         self.order.append(lid)
 
+    def _marker(self, name: str, v) -> float:
+        t = parse_clock(v, self.fps) if isinstance(v, str) else v
+        if isinstance(t, bool) or not isinstance(t, (int, float)) or not finite(t):
+            raise TimingError(f"marker '{name}' is {show(v)}; a marker is a time: seconds like 2.5, \"45f\" or "
+                              "\"0:02.5\"")
+        return float(t)
+
     def _time(self, v, owner: str, base: float) -> float:
         if v is None:
             return base
+        if isinstance(v, bool) or (not isinstance(v, (int, float, str))):
+            raise TimingError(f"cannot read the time {v!r}. Write {FORMS}", owner)
         if isinstance(v, (int, float)):
+            if not finite(v):
+                raise TimingError(f"the time {show(v)} is not a finite number of seconds up to {LIMIT:g}", owner)
             return base + float(v)
         s = str(v)
         clk = parse_clock(s, self.fps)
@@ -99,6 +139,7 @@ class Timeline:
             return base + clk
         name, edge, rest = split_ref(s)
         if name is None:
+            self._uncueable(s, owner)
             raise TimingError(f"cannot read the time {s!r}. Write {FORMS}", owner)
         name, _, word = name.partition(":")
         if name == "prev":
@@ -109,6 +150,9 @@ class Timeline:
             t = self._word(name, word, edge, owner)
         elif name in self.markers and not edge:
             t = self.markers[name]
+        elif name in self.markers and name not in self.nodes:
+            raise TimingError(f"'{name}' in {s!r} is a marker, one moment in time, so it has no .{edge}. Write "
+                              f"\"{name}\" or \"{name}+0.5\"", owner)
         elif name == "start":
             t = 0.0
         elif name in self.nodes:
@@ -122,6 +166,7 @@ class Timeline:
                 t = t_out if edge == "out" else (t_in + t_out) / 2
         else:
             from .schema import suggest
+            self._uncueable(s, owner)
             options = list(self.nodes) + list(self.markers)
             close = suggest(name, options)
             known = ", ".join(options[:16])
@@ -133,6 +178,14 @@ class Timeline:
             return t + offset(rest, self.fps)
         except TimingError as e:
             raise TimingError(f"{e} in {s!r}. Write {FORMS}", owner) from None
+
+    def _uncueable(self, s: str, owner: str):
+        """A cue that starts with an id a cue cannot name (one with a space, a dot or other punctuation) says so."""
+        s = s.strip()
+        for lid in sorted(list(self.nodes) + list(self.markers), key=len, reverse=True):
+            if s.startswith(lid) and _BASE.fullmatch(lid) is None and not s[len(lid):len(lid) + 1].isalnum():
+                raise TimingError(f"{s!r} names '{lid}', but a cue cannot name an id with spaces, dots or other "
+                                  "punctuation. Give it an id of letters, digits, - and _ only", owner)
 
     def _word(self, sid: str, word: str, edge: str, owner: str) -> float:
         """When sound `sid` says `word`: its start in the scene, plus the word's time in the part of the file that plays."""
@@ -189,6 +242,8 @@ class Timeline:
                 if clk is None:
                     raise TimingError(f"dur {d!r} is not a length of time; use seconds like 2.5, or \"45f\"", lid)
                 d = clk
+            if isinstance(d, bool) or not isinstance(d, (int, float)) or not finite(d):
+                raise TimingError(f"dur {show(d)} is not a length of time; use seconds like 2.5, or \"45f\"", lid)
             t_out: float | None = t_in + float(d)
         elif until is not None and until != "end":
             t_out = self._time(until, lid, base)
@@ -203,8 +258,11 @@ class Timeline:
             t_out = None if n["default_end"] in self._stack else self.resolve(n["default_end"])[1]
         else:
             t_out = None  # open: runs to the scene end
+        if abs(t_in) > LIMIT or (t_out is not None and abs(t_out) > LIMIT):
+            raise TimingError(f"{'starts' if abs(t_in) > LIMIT else 'ends'} at "
+                              f"{secs(t_in if abs(t_in) > LIMIT else t_out)}, past {LIMIT:g} seconds", lid)
         if t_out is not None and t_out <= t_in:
-            raise TimingError(f"ends at {t_out:.3f}s, which is not after its start at {t_in:.3f}s", lid)
+            raise TimingError(f"ends at {secs(t_out)}, which is not after its start at {secs(t_in)}", lid)
         self._stack.pop()
         self.resolved[lid] = (t_in, t_out)
         return t_in, t_out
@@ -214,9 +272,16 @@ class Timeline:
             self.resolve(lid)
         if duration not in (None, "auto"):
             end = self._time(duration, "canvas", 0.0)
+            if end <= 0 or end > LIMIT:
+                raise TimingError(f"canvas.duration {duration!r} comes to {secs(end)}; the scene must last more than "
+                                  f"0 s (and at most {LIMIT:g} s)", "canvas")
         else:
             ends = [o for lid, (_, o) in self.resolved.items() if o is not None and self.nodes[lid]["counts"]]
             end = max(ends) if ends else 5.0
+            if end <= 0:
+                raise TimingError(f"with canvas.duration \"auto\" the scene would end at {secs(end)}, because every "
+                                  "timed layer ends by then. Give canvas.duration in seconds, or start the layers "
+                                  "at 0 or later", "canvas")
         for lid, (i, o) in list(self.resolved.items()):
             if o is None:
                 self.resolved[lid] = (i, max(end, i + 1 / self.fps))

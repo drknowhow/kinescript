@@ -18,8 +18,14 @@ and n, so any frame can be rendered alone.
 
 RULES
   1. Write strict JSON: double quotes, no comments, no trailing commas.
-  2. Every layer has a "type" and a unique "id".
-  3. Times are in seconds. Sizes are in pixels. Colours are "#rrggbb" or "#rrggbbaa".
+  2. Every layer has a "type" and a unique "id". An id that cues name is letters, digits, _ and -
+     (no spaces or dots), and it cannot be start or prev: cues read those words first.
+  3. Times are in seconds. Sizes are in pixels. Colours are "#rrggbb" or "#rrggbbaa" (aa is
+     opacity), also #rgb, rgb(255, 99, 63) and rgba(255, 99, 63, 0.5). rgb values past 0..255 are
+     clamped, with a warning. The colour names, in any case, are black, white, transparent, gray
+     (grey), and the iOS-style red #ff3b30, green #34c759, blue #0a84ff, yellow #ffd60a, orange
+     #ff9f0a, purple #bf5af2, pink #ff375f, cyan #64d2ff. They are not the CSS colours.
+     null for an optional value means its default.
   4. x and y say where the layer's anchor goes. They default to 0, the TOP-LEFT corner of the
      canvas. For the centre write "x": "50%", "y": "50%". The anchor defaults to "center".
   5. Layers draw in list order: later layers are on top. Put backgrounds first.
@@ -51,7 +57,9 @@ SCENE (top level)
               frame, a half rounding up (2.45 s at 30 fps: 74). Vertical video: "w": 1080, "h": 1920.
   layers      the list of layers.
   theme       {"accent": "#ff633f"}: then "$accent" anywhere means that value.
-  markers     {"drop": 12.5}: named times, usable as "at": "drop".
+  markers     {"drop": 12.5}: named times, usable as "at": "drop". A marker is seconds or a clock
+              ("45f", "0:12.5"); it has no .in or .out. If a marker and a layer share a name, "drop"
+              reads the marker (check warns), "drop.out" the layer.
   grade       whole-frame look: {"contrast": 1.05, "saturate": 1.1, "vignette": 0.35, "grain": 0.05}
   motionBlur  {"samples": 6, "shutter": 0.5}   (slower: renders 6 sub-frames per frame)
   camera      moves and turns the view in depth (see DEPTH AND CAMERA).
@@ -69,13 +77,16 @@ TIME: "at" (start), "dur" (length), "until" (end)
   "prev.out"        when the layer listed just before this one ends
   "drop"            a marker from "markers"
   "until": "end"    runs to the scene end
-  "at" defaults to 0. Inside a group, times count from the group's start.
+  "at" defaults to 0. Inside a group, times count from the group's start. dur is above 0; give dur
+  or until, not both (with both, until is ignored and check warns). Times are at most 1000000 s.
+  check warns about a layer whose time lies wholly outside the scene or its group: it never shows.
   A video without dur lasts as long as its trimmed clip.
 
 KEYS EVERY LAYER HAS
   id, type, at, dur, until
   x, y          position of the anchor. A number (px), "50%" (of the canvas, or of the group's
-                w and h), "50%-120", "10vw", "5vh", or an expression.
+                w and h), "50%-120", "10vw", "5vh", or an expression. "position": [x, y],
+                [x, y, z] or {"x": ..., "y": ...} is read as x and y (and z).
   anchor        center (default) | topleft | top | topright | left | right | bottomleft | bottom |
                 bottomright. Video and shader default to topleft, even with x and y set; an image
                 defaults to topleft without x and to center with it.
@@ -251,11 +262,12 @@ DEPTH AND CAMERA (3D)
 ANIMATING A VALUE (any number or colour key)
   constant     "x": 960
   tween        "opacity": {"from": 0, "to": 1, "dur": 0.6, "delay": 0, "ease": "outCubic"}
-               (those are the defaults; delay counts from the layer start)
+               (those are the defaults, also when given as null; delay counts from the layer start)
   keyframes    "x": [[0, 200], [0.8, 960, "outBack"], ["end", 1700]]
                Each keyframe is [time, value] or [time, value, ease into it]. Time is seconds from
-               the layer start; a negative time counts back from its end; "40%" is a share of its
-               length; "end" is its end. Between keyframes the default ease is inOutCubic.
+               the layer start ("500ms", "12f" also work); a negative time counts back from its
+               end; "40%" is a share of its length; "end" is its end. Between keyframes the default
+               ease is inOutCubic.
                A flat list such as [0, 100] is NOT keyframes.
   expression   "y": "=540 + sin(t * 3) * 40"   (a string starting with "=")
                t = seconds since the layer started   d = the layer's length   p = t / d (0..1)
@@ -283,6 +295,8 @@ ENTER AND EXIT
 
 EASES  {eases}, spring, spring(stiffness, damping), bezier(x1, y1, x2, y2), steps(n)
   in* starts slow, out* ends slow (the most natural for entrances), inOut* does both.
+  spring(stiffness, damping, mass) takes numbers above 0 [170, 26, 1]; bezier takes four numbers
+  with x1 and x2 from 0 to 1, as in CSS; steps takes a whole number, 1 or more.
 
 COMPONENTS  {"use": "<name>", "id": "...", "at": ..., "dur": ..., ...parameters}
   Built in (parameters):
@@ -293,6 +307,8 @@ COMPONENTS  {"use": "<name>", "id": "...", "at": ..., "dur": ..., ...parameters}
               {"type": "text", "text": "{{label}}", "size": 40}]}}
   then a layer {"use": "badge", "label": "BETA", "x": 200, "y": 100}. Its layers' ids, nested ones too,
   get the instance id in front ("b1-title" for "title" in {"use": "badge", "id": "b1"}).
+  params holds the defaults; a parameter given as null takes its default. A {{placeholder}}
+  ({{ label }} with spaces works too) with no value and no default is an error that names it.
 
 SOUND
   Top-level "audio" lists the sounds. Each one:

@@ -17,10 +17,14 @@ from __future__ import annotations
 
 import copy
 import difflib
+import json
 import math
 import re
 
 from . import color as C
+from . import ease as E
+from .props import _LEN, _NUM, KEY_TIMES, _is_time
+from .timing import KEYWORDS, LIMIT, finite as _finite_secs, parse_clock, show
 
 # Keys that are always allowed and ignored: notes to self.
 COMMENT = {"note", "notes", "comment", "comments", "description", "name"}
@@ -193,6 +197,12 @@ SCALAR = {"x", "y", "w", "h", "r", "opacity", "scale", "scaleX", "scaleY", "rota
           "depth", "tube", "shine", "metal", "rim", "bands", "explode", "bevel"}
 REQUIRED = {"text": ("text",), "image": ("src",), "video": ("src",), "path": ("d", "points"), "line": ("points",),
             "captions": ("cues", "src", "voice"), "shader": ("preset", "sksl"), "model": ("shape", "parts", "src")}
+# Keys whose value is an object of their own: never a tween, even with a "from" key (a light's direction).
+OBJECTS = {"light", "ground", "shadow", "box", "fx", "uniforms", "sound", "enter", "exit", "parts", "transition"}
+# Props that cannot be below 0, and the least each may be.
+AT_LEAST = {"radius": 0, "r": 0, "sides": 3, "blur": 0, "strokeWidth": 0, "size": 0}
+COLOUR_FIX = f"write {C.FORMATS}"
+TIME_FORMS = 'seconds like 1.5, "45f" (frames), "0:02.5", "title.out+0.2" or a marker name'
 
 
 class Report:
@@ -228,6 +238,53 @@ def unknown(kind: str, word, options) -> str:
     return f"{head} Known: {', '.join(sorted(options))}"
 
 
+def _show(v) -> str:
+    """A value as the scene wrote it (JSON), shortened, for a message."""
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return show(v)
+    try:
+        s = json.dumps(v, ensure_ascii=False)
+    except (TypeError, ValueError):
+        s = repr(v)
+    return s if len(s) <= 60 else s[:57] + "..."
+
+
+def _finite(v) -> bool:
+    """A number (not a bool) that is finite; 10**400 is not, as no float holds it."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return False
+    try:
+        return math.isfinite(v)
+    except OverflowError:
+        return False
+
+
+def _colour(v, field: str, rep: Report, lid) -> bool:
+    """Report a value that is not a colour (or a $theme name); warn when a channel is clamped. True when it is fine."""
+    if isinstance(v, str) and v.startswith("$"):
+        return True
+    why = C.problem(v)
+    if why:
+        rep.add("error", "bad-colour", lid, f"{field}: {why}" if isinstance(v, str) else
+                f"{field} is {_show(v)}; a colour is text like \"#ff633f\"", COLOUR_FIX)
+        return False
+    if note := C.clamped(v):
+        rep.add("warning", "colour-clamped", lid, f"{field}: {note}", "keep red, green and blue from 0 to 255")
+    return True
+
+
+def _numbers(obj: dict, keys, where: str, rep: Report, lid, least=None):
+    """Each of `keys` set in `obj` must be a finite number (at least `least` when given); null is the default."""
+    for k in keys:
+        v = obj.get(k)
+        if v is None:
+            continue
+        if not _finite(v):
+            rep.add("error", "bad-value", lid, f"{where}{k} is {_show(v)}; it takes a number")
+        elif least is not None and v < least:
+            rep.add("error", "bad-value", lid, f"{where}{k} is {_show(v)}; it must be {least} or more")
+
+
 def _keys(obj: dict, allowed: set, alias: dict, rep: Report, lid, where: str, extra_ok=()):
     """Rename aliases in place and report unknown keys of one object."""
     for k in list(obj):
@@ -253,10 +310,16 @@ def _keys(obj: dict, allowed: set, alias: dict, rep: Report, lid, where: str, ex
 
 
 def _enum(raw: dict, key: str, rep: Report, lid):
-    v = raw.get(key)
-    if not isinstance(v, str):
+    if key not in raw:
         return
+    v = raw[key]
     opts = ENUMS[key]
+    if v is None:
+        del raw[key]  # null is the default
+        return
+    if not isinstance(v, str):
+        rep.add("error", "bad-value", lid, f"{key} is {_show(v)}; it is one of {', '.join(opts)}")
+        return
     if v in opts:
         return
     low = re.sub(r"[-_ ]", "", v.strip().lower())
@@ -313,35 +376,137 @@ def _values(raw: dict, ltype: str, rep: Report, lid):
         raw["italic"] = raw["italic"].lower() != "normal"
     for key in ENUMS:
         _enum(raw, key, rep, lid)
-    for k in ("dur",):
-        v = raw.get(k)
-        if isinstance(v, (int, float)) and not isinstance(v, bool) and v <= 0:
-            rep.add("error", "bad-dur", lid, f"dur must be greater than 0 (got {v})",
-                    "give it a positive number of seconds, or remove dur to run to the end; to hide a layer use \"hidden\": true")
-    for k, v in raw.items():
+    for k, v in list(raw.items()):
+        if k in OBJECTS:
+            continue
+        if v is None and (k in SCALAR or k in COLOR_KEYS):
+            del raw[k]  # null is the default
+            continue
         if k in SCALAR and isinstance(v, list) and v and all(isinstance(x, (int, float)) for x in v):
             rep.add("error", "flat-keyframes", lid,
                     f"{k}: {v} is a flat list. Keyframes are a list of [time, value] pairs",
                     f"\"{k}\": [[0, {v[0]}], [\"end\", {v[-1]}]]")
-        elif k in SCALAR and isinstance(v, str) and not v.startswith(("=", "$")) and not _lengthish(v):
-            rep.add("error", "bad-value", lid, f"{k} is '{v}', which is not a number",
+            continue
+        if k in ("fill", "stroke") and isinstance(v, str) and (g := css_gradient(v)) is not None:
+            raw[k] = v = g
+            rep.add("info", "renamed-value", lid, f"{k}: CSS gradient read as {g}", "write the gradient object")
+        if isinstance(v, dict) and not _tween(v) and k in ("fill", "stroke"):
+            if ltype != "model":  # _model says a model takes no gradient
+                gradient(v, k, rep, lid)
+        elif k in SCALAR or k in COLOR_KEYS or (isinstance(v, dict) and _tween(v)):
+            _prop(k, v, rep, lid)
+
+
+def _tween(v: dict) -> bool:
+    return "to" in v or "keys" in v or "from" in v
+
+
+def _keyframes(v) -> bool:
+    """Shaped like keyframes: a list of [time, value] or [time, value, ease] (the times are checked apart)."""
+    return isinstance(v, list) and bool(v) and all(isinstance(e, (list, tuple)) and 2 <= len(e) <= 3 for e in v)
+
+
+def _prop(k: str, v, rep: Report, lid):
+    """One animatable value: a constant, keyframes or a tween, each value in it checked for what `k` takes."""
+    if isinstance(v, str) and v.startswith(("=", "$")):
+        return
+    if isinstance(v, dict):
+        _keys(v, TWEEN, TWEEN_ALIAS, rep, lid, f"{k} tween: ")
+        if "keys" in v:
+            if not _keyframes(v["keys"]):
+                rep.add("error", "bad-value", lid, f"{k} tween: keys is {_show(v['keys'])}; it is keyframes, a list of "
+                        "[time, value] pairs", f"\"keys\": [[0, 0], [1, 100]]")
+            else:
+                _prop(k, v["keys"], rep, lid)
+            return
+        if "to" not in v:
+            rep.add("error", "bad-value", lid, f"{k} tween has no 'to', the value it ends on",
+                    f"\"{k}\": {{\"from\": 0, \"to\": 1, \"dur\": 0.6}}")
+        for key, default in (("dur", 0.6), ("delay", 0)):
+            d = v.get(key)
+            if d is not None and (not _finite(d) or (key == "dur" and d < 0)):
+                rep.add("error", "bad-value", lid, f"{k} tween: {key} is {_show(d)}; it takes a number of seconds"
+                        + (", 0 or more" if key == "dur" else "") + f" ({default:g} when left out)")
+        if v.get("ease") not in (None, "") and (why := E.problem(v["ease"])):
+            rep.add("error", "bad-ease", lid, f"{k} tween: {why}")
+        values = [(f" as the tween's {e}", v[e]) for e in ("from", "to") if e in v]
+    elif _keyframes(v):
+        values = []
+        for j, key in enumerate(v, 1):
+            t = key[0]
+            if not _is_time(t) or (isinstance(t, (int, float)) and not _finite_secs(t)):
+                rep.add("error", "bad-keyframe", lid, f"{k}: keyframe {j} has time {_show(t)}, which is not a time; "
+                        f"a keyframe time is {KEY_TIMES}", "\"x\": [[0, 200], [\"500ms\", 960], [\"end\", 1700]]")
+            if len(key) == 3 and key[2] not in (None, "") and (why := E.problem(key[2])):
+                rep.add("error", "bad-ease", lid, f"{k}: keyframe {j}: {why}")
+            values.append((f" at keyframe {j}", key[1]))
+    else:
+        values = [("", v)]
+    for where, x in values:
+        _constant(k, x, where, rep, lid)
+
+
+def _constant(k: str, x, where: str, rep: Report, lid):
+    if isinstance(x, str) and x.startswith(("=", "$")):
+        return
+    if k in SCALAR:
+        if isinstance(x, bool):
+            rep.add("error", "bad-value", lid, f"{k}{where} is {str(x).lower()}, which is not a number", "use a number")
+        elif isinstance(x, (int, float)):
+            if not _finite(x):
+                rep.add("error", "bad-value", lid, f"{k}{where} is {show(x)}; it must be a finite number")
+            elif k in AT_LEAST and x < AT_LEAST[k]:
+                rep.add("error", "bad-value", lid, f"{k}{where} is {show(x)}; it must be {AT_LEAST[k]} or more"
+                        + (" (a polygon has at least 3 sides)" if k == "sides" else ""))
+        elif isinstance(x, str) and not _lengthish(x):
+            rep.add("error", "bad-value", lid, f"{k} is '{x}'{where}, which is not a number",
                     f"use a number{', a percentage like 50%' if k in ('x', 'y', 'w', 'h', 'maxWidth') else ''} "
                     "or an expression starting with '='")
-        elif k in SCALAR and isinstance(v, bool):
-            rep.add("error", "bad-value", lid, f"{k} is {str(v).lower()}, which is not a number", "use a number")
-        elif k in ("fill", "stroke") and isinstance(v, str) and (g := css_gradient(v)) is not None:
-            raw[k] = g
-            rep.add("info", "renamed-value", lid, f"{k}: CSS gradient read as {g}", "write the gradient object")
-        elif k in COLOR_KEYS and isinstance(v, str) and not v.startswith(("=", "$")) and not C.is_color(v):
-            rep.add("error", "bad-colour", lid, f"{k} '{v}' is not a colour",
-                    "use #rrggbb, #rrggbbaa, rgb(...), or a CSS colour name such as 'red'")
-        elif isinstance(v, dict) and ("to" in v or "keys" in v or "from" in v):
-            _keys(v, TWEEN, TWEEN_ALIAS, rep, lid, f"{k} tween: ")
-        elif k in ("fill", "stroke") and isinstance(v, dict):
-            _keys(v, GRADIENT, {"colors": "stops", "colours": "stops"}, rep, lid, f"{k} gradient: ")
-            if "stops" not in v:
-                rep.add("error", "bad-value", lid, f"{k}: a gradient needs 'stops'",
-                        '{"linear": [[0, 0], [1, 1]], "stops": ["#ff633f", "#b9f45d"]}')
+    elif k in COLOR_KEYS and x is not None:
+        if isinstance(x, dict) and not where:
+            return  # a gradient, checked by the caller
+        _colour(x, f"{k}{where}", rep, lid)
+
+
+def gradient(g: dict, where: str, rep: Report, lid):
+    """A gradient object: 2 or more stops, and a linear pair of points or a radial centre and radius."""
+    _keys(g, GRADIENT, {"colors": "stops", "colours": "stops"}, rep, lid, f"{where} gradient: ")
+    example = '{"linear": [[0, 0], [1, 1]], "stops": ["#ff633f", "#b9f45d"]}'
+    stops = g.get("stops")
+    if stops is None:
+        rep.add("error", "bad-value", lid, f"{where}: a gradient needs 'stops'", example)
+    elif not isinstance(stops, list) or len(stops) < 2:
+        rep.add("error", "bad-value", lid, f"{where} gradient: stops is {_show(stops)}; it is a list of 2 or more "
+                "colours, or of [position, colour] pairs with positions from 0 to 1", example)
+    else:
+        pairs = [isinstance(s, (list, tuple)) for s in stops]
+        if any(pairs) and not all(pairs):
+            rep.add("error", "bad-value", lid, f"{where} gradient: stops mixes plain colours and [position, colour] "
+                    "pairs; give every stop a position, or none",
+                    '"stops": [[0, "#ff633f"], [0.7, "#7b5cff"], [1, "#b9f45d"]]')
+        for j, s in enumerate(stops, 1):
+            if isinstance(s, (list, tuple)):
+                if len(s) != 2 or not _finite(s[0]):
+                    rep.add("error", "bad-value", lid, f"{where} gradient: stop {j} is {_show(s)}; a stop with a "
+                            "position is [position from 0 to 1, colour]")
+                    continue
+                if not 0 <= s[0] <= 1:  # Skia pins it into 0..1: a CSS "#00f 150%" is drawn at the end
+                    rep.add("warning", "gradient-clamped", lid, f"{where} gradient: stop {j} is at {_show(s[0])}, "
+                            f"outside 0 to 1, so it is drawn at {min(1, max(0, s[0])):g}",
+                            "positions run from 0 (start) to 1 (end)")
+                s = s[1]
+            _colour(s, f"{where} gradient stop {j}", rep, lid)
+    lin, rad = g.get("linear"), g.get("radial")
+    if lin is not None and rad is not None:
+        rep.add("error", "bad-value", lid, f"{where} gradient has both 'linear' and 'radial'; give one")
+    if lin is not None and not (isinstance(lin, list) and len(lin) == 2 and all(
+            isinstance(p, (list, tuple)) and len(p) == 2 and all(map(_finite, p)) for p in lin)):
+        rep.add("error", "bad-value", lid, f"{where} gradient: linear is {_show(lin)}; it is two points [[x1, y1], "
+                "[x2, y2]], each from 0 to 1 of the layer's box", '"linear": [[0, 0], [1, 1]]')
+    if rad is not None and rad is not True and not (
+            isinstance(rad, list) and 2 <= len(rad) <= 3 and all(map(_finite, rad))):
+        rep.add("error", "bad-value", lid, f"{where} gradient: radial is {_show(rad)}; it is [x, y] or [x, y, radius], "
+                "each from 0 to 1 of the layer's box", '"radial": [0.5, 0.5, 0.6]')
 
 
 _CSS_DIR = {"to right": ([0, 0.5], [1, 0.5]), "to left": ([1, 0.5], [0, 0.5]), "to bottom": ([0.5, 0], [0.5, 1]),
@@ -380,11 +545,9 @@ def css_gradient(v: str) -> dict | None:
     return {"radial": [0.5, 0.5, 0.7], "stops": stops} if m.group(1) == "radial" else {"linear": list(pts), "stops": stops}
 
 
-_NUMLIKE = re.compile(r"^\s*-?\d+(\.\d+)?\s*(%|vw|vh|vmin|px)?\s*([+-]\s*\d+(\.\d+)?\s*(px)?)?\s*$")
-
-
 def _lengthish(v: str) -> bool:
-    return bool(_NUMLIKE.match(v))
+    """A number or length written as text that props.length reads: "12", "1e3", "50%", "50%-120", "10vw"."""
+    return bool(_LEN.match(v))
 
 
 def _motion(raw: dict, key: str, rep: Report, lid):
@@ -399,17 +562,118 @@ def _motion(raw: dict, key: str, rep: Report, lid):
         return
     if isinstance(v, dict):
         _keys(v, MOTION, MOTION_ALIAS, rep, lid, f"{key}: ")
+        from .presets import option_problem
+        for k, x in v.items():
+            if why := option_problem(k, x):
+                rep.add("error", "bad-ease" if k == "ease" else "bad-value", lid, f"{key}: {why}")
     for n in str(spec.get("name", "fade")).split("+"):
         n = n.strip()
         if n and canonical(n) is None:
             rep.add("error", "bad-motion", lid, f"{key}: " + unknown("motion", n, PRESETS))
 
 
+def _id(obj: dict, rep: Report, path: str) -> str:
+    """The id issues are reported under: the layer's or audio entry's own id, or its path when it has none."""
+    v = obj.get("id")
+    if v is None or (isinstance(v, (str, int, float)) and not isinstance(v, bool) and not v):
+        return path  # the scene makes one up, as for no id
+    if isinstance(v, bool) or not isinstance(v, (str, int, float)):
+        rep.add("error", "bad-id", path, f"{path}: id is {_show(v)}; an id is a name such as \"title\"")
+        return path
+    s = str(v)
+    if s in KEYWORDS:
+        rep.add("error", "bad-id", s, f"id '{s}' is a word cues read first (\"start\" is 0 s, \"prev\" the layer "
+                "listed before), so no cue could name this one",
+                f"rename it, e.g. '{s}-1'")
+    return s
+
+
+def _timing(obj: dict, rep: Report, lid, where: str = ""):
+    """at, until and dur, so a wrong type or an impossible number is an error that names the field, not a crash."""
+    for k in ("at", "until"):
+        v = obj.get(k)
+        if v is None or isinstance(v, str):
+            continue  # text is read by the timeline, which names the layer when it cannot
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            rep.add("error", "bad-time", lid, f"{where}{k} is {_show(v)}; it is a time: {TIME_FORMS}")
+        elif not _finite_secs(v):
+            rep.add("error", "bad-time", lid, f"{where}{k} is {show(v)}; it must be a finite number of seconds, at "
+                    f"most {LIMIT:g}")
+    d = obj.get("dur")
+    secs = parse_clock(d, 30) if isinstance(d, str) else d
+    if d is None:
+        pass
+    elif isinstance(d, str) and secs is None:
+        rep.add("error", "bad-dur", lid, f"{where}dur is '{d}', which is not a length of time",
+                "use seconds like 2.5, \"45f\" (frames) or \"0:02.5\"; to end with another layer use \"until\"")
+    elif isinstance(secs, bool) or not isinstance(secs, (int, float)):
+        rep.add("error", "bad-dur", lid, f"{where}dur is {_show(d)}; it is a length of time: seconds like 2.5, \"45f\" "
+                "or \"0:02.5\"")
+    elif not _finite_secs(secs):
+        rep.add("error", "bad-dur", lid, f"{where}dur is {show(d)}; it must be a finite number of seconds, at most "
+                f"{LIMIT:g}")
+    elif secs <= 0:
+        rep.add("error", "bad-dur", lid, f"{where}dur must be greater than 0 (got {_show(d)})",
+                "give it a positive number of seconds, or remove dur to run to the end; "
+                "to hide a layer use \"hidden\": true")
+    if d is not None and obj.get("until") is not None:
+        rep.add("warning", "ignored-key", lid, f"{where}dur and until are both set, so until is ignored",
+                "keep one: dur (how long) or until (when it ends)")
+
+
+def _text(obj: dict, rep: Report, lid, where: str = ""):
+    """text is a string Skia can draw; a number is read as its digits."""
+    v = obj.get("text")
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        obj["text"] = s = json.dumps(v)
+        rep.add("info", "renamed-value", lid, f"{where}text {s} read as the text \"{s}\"", f"write \"text\": \"{s}\"")
+    elif v is not None and not isinstance(v, str):
+        rep.add("error", "bad-value", lid, f"{where}text is {_show(v)}; it is the words to show, as a string",
+                "\"text\": \"Hello\" (\\n starts a new line)")
+    elif isinstance(v, str):
+        try:
+            v.encode("utf-8")
+        except UnicodeEncodeError as e:
+            rep.add("error", "bad-text", lid, f"{where}text has {e.object[e.start]!r} at character {e.start + 1}: half "
+                    "of a surrogate pair, which is not a character on its own",
+                    "write the character itself, or both halves of its JSON escape, like \\ud83d\\ude00")
+    f = obj.get("font")
+    if f is not None and not isinstance(f, str):
+        rep.add("error", "bad-value", lid, f"{where}font is {_show(f)}; it is a font family such as \"Space Grotesk\", "
+                "or a .ttf or .otf file")
+
+
+def _box(raw: dict, rep: Report, lid):
+    b = raw.get("box")
+    if b is None or isinstance(b, bool):
+        return
+    if not isinstance(b, dict):
+        rep.add("error", "bad-value", lid, f"box is {_show(b)}; it is true (a dark box behind the text) or an object "
+                "like {\"fill\": \"#000000b0\", \"pad\": [12, 20], \"radius\": 10}")
+        return
+    _keys(b, BOX, BOX_ALIAS, rep, lid, "box: ")
+    if b.get("fill") is not None:
+        _colour(b["fill"], "box fill", rep, lid)
+    pad = b.get("pad")
+    if pad is not None and not (_finite(pad) and pad >= 0) and not (
+            isinstance(pad, list) and len(pad) == 2 and all(_finite(p) and p >= 0 for p in pad)):
+        rep.add("error", "bad-value", lid, f"box pad is {_show(pad)}; it is px of space around the text: one number, "
+                "or [vertical, horizontal] like [12, 20]")
+    _numbers(b, ("radius",), "box ", rep, lid, least=0)
+
+
 def _layer(raw, rep: Report, path: str, comps: dict):
     if not isinstance(raw, dict):
-        rep.add("error", "bad-layer", None, f"{path} must be an object, got {type(raw).__name__}")
+        rep.add("error", "bad-layer", path, f"{path} must be an object, got {type(raw).__name__}")
         return
-    lid = raw.get("id") or path
+    lid = _id(raw, rep, path)
+    for key in ("type", "use"):
+        v = raw.get(key)
+        if (key in raw if key == "use" else v is not None) and not isinstance(v, str):
+            rep.add("error", "bad-type" if key == "type" else "bad-component", lid, f"{key} is {_show(v)}; it is a "
+                    + ("layer type such as \"text\" or \"rect\"" if key == "type" else "component name such as "
+                       "\"lowerThird\""))
+            return
     if "use" not in raw and isinstance(raw.get("type"), str):
         from .components import BUILTIN
         name = suggest(raw["type"], BUILTIN)
@@ -441,6 +705,7 @@ def _layer(raw, rep: Report, path: str, comps: dict):
         for key in ("enter", "exit"):
             _motion(raw, key, rep, lid)
         _layer_sound(raw, rep, lid)
+        _timing(raw, rep, lid)
         return  # parameters are checked when the component expands (components.Params)
     t = raw.get("type")
     if isinstance(t, str) and t.strip().lower() in ENUMS["shape"] and t.strip().lower() not in TYPES \
@@ -466,6 +731,7 @@ def _layer(raw, rep: Report, path: str, comps: dict):
         _volume(raw, rep, lid)
         _effects(raw, rep, lid)
         _layer_sound(raw, rep, lid)
+        _timing(raw, rep, lid)
         return
     if t is None:
         from .scene import _infer_type
@@ -473,16 +739,21 @@ def _layer(raw, rep: Report, path: str, comps: dict):
     lalias = dict(ALIAS, **TYPE_ALIASES.get(t, {}))
     if t == "group":
         lalias.pop("items", None)
-    pos = raw.get("position") or raw.get("pos")
+    key = "position" if "position" in raw else "pos"
+    pos = raw.get(key)
     if pos is not None and "x" not in raw and "y" not in raw:
-        key = "position" if "position" in raw else "pos"
-        if isinstance(pos, (list, tuple)) and len(pos) == 2:
-            raw["x"], raw["y"] = pos
-        elif isinstance(pos, dict):
-            raw["x"], raw["y"] = pos.get("x", 0), pos.get("y", 0)
         del raw[key]
-        rep.add("info", "renamed-key", lid, f"'{key}' read as x and y", "write \"x\" and \"y\"")
+        if isinstance(pos, (list, tuple)) and len(pos) in (2, 3):
+            pos = dict(zip("xyz", pos))
+        if isinstance(pos, dict) and pos and set(pos) <= {"x", "y", "z"} and not ("z" in pos and "z" in raw):
+            raw.update(pos)
+            rep.add("info", "renamed-key", lid, f"'{key}' read as {' and '.join(sorted(pos))}",
+                    " and ".join(f"write \"{k}\"" for k in sorted(pos)))
+        else:
+            rep.add("error", "bad-value", lid, f"{key} is {_show(pos)}; it is read as x and y only when it is "
+                    "[x, y], [x, y, z] or {\"x\": ..., \"y\": ...}", "write \"x\" and \"y\"")
     _keys(raw, COMMON | TYPES[t], lalias, rep, lid, "")
+    _timing(raw, rep, lid)
     shape = raw.get("shape")
     if t == "model" and isinstance(shape, str) and shape.lower().endswith((".glb", ".gltf", ".obj")):
         raw["src"] = raw.pop("shape")
@@ -503,8 +774,9 @@ def _layer(raw, rep: Report, path: str, comps: dict):
     _structure(raw, t, rep, lid)
     _effects(raw, rep, lid)
     _layer_sound(raw, rep, lid)
-    if isinstance(raw.get("box"), dict):
-        _keys(raw["box"], BOX, BOX_ALIAS, rep, lid, "box: ")
+    if "text" in TYPES[t]:
+        _text(raw, rep, lid)
+    _box(raw, rep, lid)
     if t == "shader" and raw.get("preset"):
         from .shaders import PRESETS as SH
         if raw["preset"] not in SH:
@@ -516,6 +788,12 @@ def _layer(raw, rep: Report, path: str, comps: dict):
     if t == "model":
         _model(raw, rep, lid)
     kids = raw.get("children") if raw.get("children") is not None else raw.get("layers")
+    if t == "group" and raw.get("children") is not None and raw.get("layers") is not None:
+        rep.add("error", "duplicate-key", lid, "a group lists its layers under 'children' or 'layers', not both",
+                "put them all under \"children\"")
+    elif t == "group" and kids is not None and not isinstance(kids, list):
+        rep.add("error", "bad-value", lid, f"children is {_show(kids)}; it is a list of layers",
+                "\"children\": [{\"type\": \"text\", \"text\": \"Hi\"}]")
     if t == "group" and isinstance(kids, list):
         for i, k in enumerate(kids):
             _layer(k, rep, f"{lid}.children[{i}]", comps)
@@ -613,6 +891,52 @@ def _structure(raw: dict, t: str, rep: Report, lid):
     u = raw.get("uniforms")
     if u is not None and not isinstance(u, dict):
         rep.add("error", "bad-value", lid, f"uniforms must be an object like {{\"speed\": 2}}, got {type(u).__name__}")
+    for k, v in (u or {}).items() if isinstance(u, dict) else ():
+        if isinstance(v, str) and not v.startswith(("=", "$")):  # text in a uniform is a colour
+            _colour(v, f"uniforms {k}", rep, lid)
+    if t == "shader" and raw.get("sksl") is not None and not isinstance(raw["sksl"], str):
+        rep.add("error", "bad-value", lid, f"sksl is {_show(raw['sksl'])}; it is the shader's source as text, like "
+                "\"half4 main(float2 p) { return half4(1, 0, 0, 1); }\"")
+    fmt = raw.get("format")
+    if t == "counter" and fmt is not None:
+        bad = None if isinstance(fmt, str) else "it is not text"
+        for spec in re.findall(r"\{:([^{}]*)\}", fmt) if bad is None else ():
+            try:
+                format(1.0, spec)
+            except ValueError:
+                bad = f"{{:{spec}}} is not a number format"
+        if bad:
+            rep.add("error", "bad-value", lid, f"format is {_show(fmt)}; {bad}. It is text with {{:...}} where the "
+                    "number goes, like \"{:,.0f}\", \"{:.1f}%\" or \"$ {:,.2f}\"")
+    if t == "path" and isinstance(raw.get("d"), str) and "$" not in raw["d"]:
+        from .svgpath import parse as svg
+        try:
+            svg(raw["d"])
+        except (ValueError, IndexError) as e:
+            m = re.search(r"could not convert string to float: '(.*)'", str(e))
+            why = (f"'{m.group(1)}' is neither a number nor a path command (M, L, H, V, C, S, Q, T, A, Z)" if m
+                   else str(e) if isinstance(e, ValueError) else "it ends in the middle of a command")
+            rep.add("error", "bad-value", lid, f"d: {why}; d is SVG path data like \"M0 0 L100 0 Q150 50 100 100 Z\"")
+    focus = raw.get("focus")
+    if t in ("image", "video") and focus is not None and not isinstance(focus, str) and not (
+            isinstance(focus, list) and len(focus) == 2 and all(map(_finite, focus))):
+        rep.add("error", "bad-value", lid, f"focus is {_show(focus)}; it is [x, y], each from 0 to 1 of the picture, "
+                "the point kept in view when it is cropped", "\"focus\": [0.5, 0.3]")
+    cues = raw.get("cues")
+    if t == "captions" and cues is not None:
+        def secs(v):
+            try:
+                return not isinstance(v, bool) and math.isfinite(float(v))
+            except (TypeError, ValueError, OverflowError):
+                return False
+        for j, c in enumerate(cues if isinstance(cues, list) else [cues], 1):
+            ok = (isinstance(c, dict) and secs(c.get("at", c.get("start", 0))) and secs(c.get("end"))) or (
+                isinstance(c, (list, tuple)) and len(c) == 3 and secs(c[0]) and secs(c[1]))
+            if not ok or not isinstance(cues, list):
+                rep.add("error", "bad-captions", lid, f"cues[{j - 1}] is {_show(c)}; a cue is [start, end, \"text\"] or "
+                        "{\"start\": 0.5, \"end\": 2, \"text\": \"...\"}, in seconds",
+                        "\"cues\": [[0, 1.5, \"Hello\"]]")
+                break
     if t == "path" and raw.get("d") is not None and not isinstance(raw["d"], str):
         rep.add("error", "bad-value", lid, f"d is {raw['d']!r}; it is an SVG path like \"M0 0 L100 0\"")
     pts = raw.get("points")
@@ -627,11 +951,35 @@ def _effects(raw: dict, rep: Report, lid):
     """Motions, shadow and fx, which any layer and a sequence take."""
     for key in ("enter", "exit"):
         _motion(raw, key, rep, lid)
-    if isinstance(raw.get("shadow"), dict):
-        _keys(raw["shadow"], SHADOW, SHADOW_ALIAS, rep, lid, "shadow: ")
-    if isinstance(raw.get("fx"), dict):
-        _keys(raw["fx"], FX, {"saturation": "saturate", "grayscale": "gray", "greyscale": "gray", "hueRotate": "hue",
-                              "warmth": "temperature"}, rep, lid, "fx: ")
+    sh = raw.get("shadow")
+    if isinstance(sh, dict):
+        _keys(sh, SHADOW, SHADOW_ALIAS, rep, lid, "shadow: ")
+        _numbers(sh, ("x", "y"), "shadow ", rep, lid)
+        _numbers(sh, ("blur",), "shadow ", rep, lid, least=0)
+        if sh.get("color") is not None:
+            _colour(sh["color"], "shadow color", rep, lid)
+    elif sh is not None and not isinstance(sh, bool):
+        rep.add("error", "bad-value", lid, f"shadow is {_show(sh)}; it is true (the default shadow) or an object like "
+                "{\"x\": 0, \"y\": 6, \"blur\": 16, \"color\": \"#00000099\"}")
+    _look(raw, "fx", FX, {"saturation": "saturate", "grayscale": "gray", "greyscale": "gray", "hueRotate": "hue",
+                          "warmth": "temperature"}, rep, lid)
+
+
+def _look(obj: dict, key: str, allowed: set, alias: dict, rep: Report, lid):
+    """fx on a layer, or grade on the scene: an object of numbers."""
+    v = obj.get(key)
+    if v is None:
+        return
+    if not isinstance(v, dict):
+        rep.add("error", "bad-value", lid, f"{key} is {_show(v)}; it is an object of numbers like "
+                + ('{"vignette": 0.4}' if key == "grade" else '{"brightness": 0.1, "saturate": 1.2}'))
+        return
+    _keys(v, allowed, alias, rep, lid, f"{key}: ")
+    for k in [k for k, x in v.items() if x is None]:
+        del v[k]  # null is the default
+    for k, x in v.items():
+        if k in allowed and not (_finite(x) or isinstance(x, bool)):
+            rep.add("error", "bad-value", lid, f"{key} {k} is {_show(x)}; it takes a number")
 
 
 def _light(obj: dict, rep: Report, lid):
@@ -653,8 +1001,8 @@ def _light(obj: dict, rep: Report, lid):
         for k in ("key", "fill", "ambient", "rim"):
             if k in v and (isinstance(v[k], bool) or not isinstance(v[k], (int, float))):
                 rep.add("error", "bad-value", lid, f"light {k} is {v[k]!r}; it takes a number (about 0 to 1)")
-        if isinstance(v.get("color"), str) and not C.is_color(v["color"]):
-            rep.add("error", "bad-colour", lid, f"light color '{v['color']}' is not a colour")
+        if v.get("color") is not None:
+            _colour(v["color"], "light color", rep, lid)
     elif v is not None:
         rep.add("error", "bad-value", lid, f"light must be a preset ({', '.join(LIGHTS)}) or an object, got {v!r}")
 
@@ -702,6 +1050,7 @@ def _model(raw: dict, rep: Report, lid):
             continue
         _keys(p, PART, dict(ALIAS, **MODEL_ALIAS), rep, lid, where)
         _values(p, "model", rep, lid)
+        _text(p, rep, lid, where)
         _outline(p, rep, lid, where)
         for k, v in p.items():  # what _values lets through for layers but a part cannot animate or resolve
             if k in SCALAR and (isinstance(v, (list, dict)) or (isinstance(v, str) and (v.startswith("=") or _lengthish(v)))):
@@ -785,6 +1134,57 @@ def _layer_sound(raw: dict, rep: Report, lid):
     _audio_values(s, rep, lid, "sound: ")
 
 
+def _uses(layers) -> list[str]:
+    """The component names a list of layers uses, groups included."""
+    out = []
+    for L in layers if isinstance(layers, list) else []:
+        if isinstance(L, dict):
+            if isinstance(L.get("use"), str):
+                out.append(L["use"])
+            out += _uses(L.get("children") or L.get("layers"))
+    return out
+
+
+def _components(comps: dict, rep: Report):
+    """Each scene component is {"params": {...}, "layers": [...]}, and none may use itself."""
+    example = '{"badge": {"params": {"label": "NEW"}, "layers": [{"type": "text", "text": "{{label}}"}]}}'
+    good = {}
+    for name, c in comps.items():
+        where = f"components.{name}"
+        if not isinstance(c, dict):
+            rep.add("error", "bad-component", "components", f"{where} is {_show(c)}; a component is an object with "
+                    "\"layers\" (and \"params\" for defaults)", example)
+            continue
+        _keys(c, {"params", "layers", "note"}, {"children": "layers", "defaults": "params"}, rep, "components",
+              f"{where}: ")
+        if c.get("params") is not None and not isinstance(c["params"], dict):
+            rep.add("error", "bad-component", "components", f"{where}.params is {_show(c['params'])}; it is an object "
+                    "of default values like {\"label\": \"NEW\"}", example)
+        body = c.get("layers")
+        if not isinstance(body, list) or not all(isinstance(L, dict) for L in body):
+            rep.add("error", "bad-component", "components", f"{where}.layers is {_show(body)}; it is a list of layer "
+                    "objects", example)
+            continue
+        good[name] = _uses(body)
+
+    def cycle(name, path):
+        for u in good.get(name, ()):
+            if u in path:
+                return path[path.index(u):] + [u]
+            if (found := cycle(u, path + [u])) is not None:
+                return found
+        return None
+
+    seen = set()
+    for name in good:
+        loop = cycle(name, [name])
+        if loop and loop[0] not in seen:
+            seen.update(loop)
+            rep.add("error", "bad-component", "components", f"component '{loop[0]}' uses itself ("
+                    + " uses ".join(f"'{n}'" for n in loop) + "), which would never end",
+                    "a component's layers can use other components, but not one that leads back to it")
+
+
 def normalize(spec) -> tuple[dict, Report]:
     """Return a cleaned copy of `spec` and a Report of notes and errors (nothing is raised here)."""
     rep = Report()
@@ -820,26 +1220,44 @@ def normalize(spec) -> tuple[dict, Report]:
         if v is None:
             cv.pop(k, None)  # null is the default
             continue
-        if isinstance(v, str) and _lengthish(v) and not v.strip().endswith("%"):
-            v = cv[k] = float(re.sub(r"[a-z]+", "", v))
+        if isinstance(v, str) and (m := re.fullmatch(rf"\s*(-?{_NUM})\s*(px)?\s*", v)):
+            v = cv[k] = float(m.group(1))
         if isinstance(v, bool) or not isinstance(v, (int, float)):
-            rep.add("error", "bad-canvas", None, f"canvas.{k} must be a number, got {v!r}")
+            rep.add("error", "bad-canvas", "canvas", f"canvas.{k} must be a number, got {_show(v)}")
         elif not lo <= v <= hi:
-            rep.add("error", "bad-canvas", None, f"canvas.{k} is {v:g}; it must be between {lo} and {hi}")
+            rep.add("error", "bad-canvas", "canvas", f"canvas.{k} is {show(v)}; it must be between {lo} and {hi}")
     d = cv.get("duration")
-    if isinstance(d, (int, float)) and not isinstance(d, bool) and not (d > 0 and math.isfinite(d)):
-        rep.add("error", "bad-canvas", None, f"canvas.duration must be a number of seconds greater than 0 (got {d})",
-                "use seconds, or \"auto\" to end with the last layer")
-    if cv.get("bg") is not None and not isinstance(cv["bg"], (str, dict)):
-        rep.add("error", "bad-colour", None, f"canvas.bg is {cv['bg']!r}; it is a colour like \"#0a0c10\" or a "
+    if isinstance(d, (int, float)) and not isinstance(d, bool) and not (_finite_secs(d) and d > 0):
+        rep.add("error", "bad-canvas", "canvas", f"canvas.duration must be a number of seconds greater than 0 and at "
+                f"most {LIMIT:g} (got {show(d)})", "use seconds, or \"auto\" to end with the last layer")
+    elif isinstance(d, bool) or (d is not None and not isinstance(d, (int, float, str))):
+        rep.add("error", "bad-canvas", "canvas", f"canvas.duration is {_show(d)}; it is a number of seconds, a time "
+                "such as \"outro.out\", or \"auto\" to end with the last layer")
+    bg = cv.get("bg")
+    if isinstance(bg, dict):
+        gradient(bg, "canvas.bg", rep, "canvas")
+    elif bg is not None and not isinstance(bg, str):
+        rep.add("error", "bad-colour", "canvas", f"canvas.bg is {_show(bg)}; it is a colour like \"#0a0c10\" or a "
                 "gradient object", "use #rrggbb, or \"transparent\"")
-    if cv.get("bg") is not None and isinstance(cv["bg"], str) and not cv["bg"].startswith("$") \
-            and not C.is_color(cv["bg"]) and cv["bg"] not in ("transparent", "none"):
-        rep.add("error", "bad-colour", None, f"canvas.bg '{cv['bg']}' is not a colour", "use #rrggbb")
+    elif bg is not None and bg.strip().lower() not in ("transparent", "none"):
+        _colour(bg, "canvas.bg", rep, "canvas")
     for k, example in (("theme", '{"accent": "#ff633f"}'), ("markers", '{"drop": 2.5}'),
                        ("grade", '{"vignette": 0.4}'), ("components", '{"card": {"layers": [...]}}')):
         if spec.get(k) is not None and not isinstance(spec[k], dict):
-            rep.add("error", "bad-value", None, f"{k} must be an object like {example}, got {type(spec[k]).__name__}")
+            rep.add("error", "bad-value", k, f"{k} must be an object like {example}, got {type(spec[k]).__name__}")
+    for name, v in (spec.get("markers") or {}).items() if isinstance(spec.get("markers"), dict) else ():
+        t = parse_clock(v, 30) if isinstance(v, str) else v
+        if not (_finite(t) and _finite_secs(t)):
+            rep.add("error", "bad-marker", "markers", f"markers.{name} is {_show(v)}; a marker is one time: seconds "
+                    "like 2.5, \"45f\" or \"0:02.5\"", "to start something when a layer ends, cue it from the layer: "
+                    "\"at\": \"title.out\"")
+    theme = spec.get("theme") if isinstance(spec.get("theme"), dict) else {}
+    for k in ("paper", "accent", "ink", "muted"):  # the colours the renderer and components draw with
+        if theme.get(k) is not None:
+            _colour(theme[k], f"theme.{k}", rep, "theme")
+    if theme.get("font") is not None and not isinstance(theme["font"], str):
+        rep.add("error", "bad-value", "theme", f"theme.font is {_show(theme['font'])}; it is a font family such as "
+                "\"Space Grotesk\"")
     mb = spec.get("motionBlur")
     if isinstance(mb, (int, float)) and not isinstance(mb, bool):
         spec["motionBlur"] = {"samples": int(mb)}
@@ -849,9 +1267,11 @@ def normalize(spec) -> tuple[dict, Report]:
         rep.add("error", "bad-value", None, f"motionBlur must be an object like {{\"samples\": 8, \"shutter\": 0.5}}, "
                 f"got {mb!r}")
     if isinstance(spec.get("grade"), dict):
-        _keys(spec["grade"], GRADE, {"saturation": "saturate"}, rep, None, "grade: ")
+        _look(spec, "grade", GRADE, {"saturation": "saturate"}, rep, "grade")
     if isinstance(spec.get("motionBlur"), dict):
-        _keys(spec["motionBlur"], MOTION_BLUR, {}, rep, None, "motionBlur: ")
+        _keys(spec["motionBlur"], MOTION_BLUR, {}, rep, "motionBlur", "motionBlur: ")
+        _numbers(spec["motionBlur"], ("samples",), "motionBlur.", rep, "motionBlur", least=0)  # under 2 is off
+        _numbers(spec["motionBlur"], ("shutter",), "motionBlur.", rep, "motionBlur", least=0)
     cam = spec.get("camera")
     if isinstance(cam, dict):
         _keys(cam, CAMERA, CAMERA_ALIAS, rep, "camera", "camera: ")
@@ -876,8 +1296,9 @@ def normalize(spec) -> tuple[dict, Report]:
         if isinstance(a, str):
             audio[i] = a = {"src": a}
         if isinstance(a, dict):
-            owner = a.get("id") or f"audio[{i}]"
+            owner = _id(a, rep, f"audio[{i}]")
             _keys(a, AUDIO, AUDIO_ALIAS, rep, owner, "")
+            _timing(a, rep, owner)
             _audio_values(a, rep, owner, "")
         else:
             rep.add("error", "bad-value", f"audio[{i}]", f"an audio entry is a file name or an object with 'src', "
@@ -892,6 +1313,8 @@ def normalize(spec) -> tuple[dict, Report]:
         rep.add("error", "bad-layers", None, f"'layers' must be a list, got {type(layers).__name__}")
         spec["layers"] = []
     comps = spec.get("components") or {}
+    if isinstance(comps, dict):
+        _components(comps, rep)
     for i, raw in enumerate(spec["layers"]):
         _layer(raw, rep, f"layers[{i}]", comps if isinstance(comps, dict) else {})
     return spec, rep

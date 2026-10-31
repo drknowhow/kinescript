@@ -100,9 +100,20 @@ def _progress(p, th):
 
 def _kinetic(p, th):
     """Big words, one after another: {"use": "kinetic", "words": ["Write", "Check", "Render"], "every": 0.6}."""
-    every = float(p.get("every", 0.6))
+    given = p.get("every")
+    try:
+        every = 0.6 if given is None else float(given) if not isinstance(given, bool) else math.nan
+    except (TypeError, ValueError):
+        every = math.nan
+    if not 0 < every < 1e6:  # NaN fails this too
+        raise ValueError(f"layer '{p['id']}': kinetic every is {given!r}; it is seconds per word, a number above 0 "
+                         "(0.6 when left out)")
+    words = p.get("words")
+    if words is not None and not (isinstance(words, list) and all(isinstance(w, (str, int, float)) for w in words)):
+        raise ValueError(f"layer '{p['id']}': kinetic words is {words!r}; it is a list of words like "
+                         "[\"Write\", \"Check\", \"Render\"]")
     kids = []
-    for i, word in enumerate(p.get("words", [])):
+    for i, word in enumerate(words or []):
         kids.append({"id": f"{p['id']}-w{i}", "type": "text", "text": word, "at": round(i * every, 4), "dur": every,
                      "size": p.get("size", 180), "weight": 900, "fill": p.get("color", th["paper"]),
                      "enter": {"name": p.get("motion", "pop"), "dur": min(0.35, every * 0.6)},
@@ -118,6 +129,9 @@ PARAMS = {"lowerThird": ("title", "subtitle", "x", "y", "accent", "size", "plate
           "focus": ("x", "y", "w", "h", "dim", "accent", "radius"),
           "progress": ("color", "h", "y"),
           "kinetic": ("words", "every", "size", "motion", "color", "x", "y")}
+
+# Parameters a builder computes with, so text there would fail inside it.
+NUMBER_PARAMS = {"callout": ("r",), "lowerThird": ("size",)}
 
 BUILTIN = {"lowerThird": _lower_third, "titleCard": _title_card, "callout": _callout, "focus": _focus,
            "progress": _progress, "kinetic": _kinetic}
@@ -168,12 +182,16 @@ def _unused(name: str, raw: dict, known: set[str], scene):
         scene.note("error", "unknown-param", raw.get("id"), msg, f"rename or remove '{k}'")
 
 
+# A placeholder in a scene component: {{title}}, or {{ title }} with spaces inside the braces.
+PLACEHOLDER = re.compile(r"\{\{\s*(\w+)\s*\}\}")
+
+
 def _fill_template(v, params):
     if isinstance(v, str):
-        m = re.fullmatch(r"\{\{(\w+)\}\}", v)
+        m = PLACEHOLDER.fullmatch(v)
         if m:
             return copy.deepcopy(params.get(m.group(1), v))
-        return re.sub(r"\{\{(\w+)\}\}", lambda mm: str(params.get(mm.group(1), mm.group(0))), v)
+        return PLACEHOLDER.sub(lambda mm: str(params.get(mm.group(1), mm.group(0))), v)
     if isinstance(v, list):
         return [_fill_template(x, params) for x in v]
     if isinstance(v, dict):
@@ -195,6 +213,34 @@ def _own(layers, pid: str) -> None:
         _own(k.get("children") or k.get("layers") or [], pid)  # a group may list its layers under either key
 
 
+def _placeholders(v) -> list[str]:
+    """The placeholder names used anywhere in a component's layers, in order of first use."""
+    if isinstance(v, str):
+        return PLACEHOLDER.findall(v)
+    if isinstance(v, dict):
+        v = list(v.values())
+    return list(dict.fromkeys(n for x in v for n in _placeholders(x))) if isinstance(v, list) else []
+
+
+def _unfilled(name: str, raw: dict, holes: list[str], values: dict, defaults: dict, scene):
+    """A placeholder with no value would be drawn as the text "{{titel}}" or "None": report it instead."""
+    from .schema import COMMENT, suggest
+    given = sorted({str(k) for k in raw if k not in _PASS and k not in COMMENT and k not in ("use", "type", "x", "y")}
+                   | set(defaults))
+    for h in holes:
+        if values.get(h) is not None:
+            continue
+        close = suggest(h, [g for g in given if g not in holes])
+        msg = (f"component '{name}' uses {{{{{h}}}}}, but " + (f"'{h}' is null" if h in raw else f"no '{h}' is given")
+               + " and the component's params set no default for it." + (f" Did you mean '{close}'?" if close else "")
+               + f" Parameters given or with a default: {', '.join(given) or 'none'}")
+        fix = (f"rename {{{{{h}}}}} to {{{{{close}}}}} in the component, or give '{h}'" if close else
+               f"give \"{h}\" on the layer, or a default in the component's \"params\"")
+        if scene is None:
+            raise ValueError(msg)
+        scene.note("error", "missing-param", raw.get("id") or name, msg, fix)
+
+
 def expand(raw, user: dict, theme: dict, scene=None):
     if not isinstance(raw, dict):
         return raw
@@ -208,22 +254,36 @@ def expand(raw, user: dict, theme: dict, scene=None):
     params.setdefault("id", f"{name}{_counter[0]}")
     if name in user:
         comp = user[name]
-        merged = dict(comp.get("params", {}), **params)
+        defaults = comp.get("params") if isinstance(comp.get("params"), dict) else {}
+        merged = dict(defaults, **{k: v for k, v in params.items() if v is not None or k not in defaults})
+        holes = _placeholders(comp.get("layers", []))
+        _unfilled(name, raw, holes, merged, defaults, scene)
         body = _fill_template(copy.deepcopy(comp.get("layers", [])), merged)
-        names = set(comp.get("params", {})) | set(re.findall(r"\{\{(\w+)\}\}", repr(comp.get("layers", []))))
+        names = set(defaults) | set(holes)
         _unused(name, raw, names, scene)
         for i, k in enumerate(body):
             k.setdefault("id", f"{params['id']}-{i}")
         _own(body, params["id"])
         out = {"type": "group", "x": raw.get("x", 0), "y": raw.get("y", 0), "children": body}
     elif name in BUILTIN:
-        out = BUILTIN[name](params, theme)
+        for k in NUMBER_PARAMS.get(name, ()):  # the builder does arithmetic on these
+            v = raw.get(k)
+            if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or not -1e9 < v < 1e9):
+                raise ValueError(f"layer '{params['id']}': {name} {k} is {v!r}; it takes a number. "
+                                 f"Its parameters: {COMPONENT_DOCS[name]}")
+        try:
+            out = BUILTIN[name](params, theme)
+        except (TypeError, AttributeError, KeyError, IndexError, ArithmeticError) as e:  # a parameter of a wrong type
+            raise ValueError(f"layer '{params['id']}': component '{name}' cannot use a parameter as given "
+                             f"({type(e).__name__}: {e}). Its parameters: {COMPONENT_DOCS[name]}") from e
         _unused(name, raw, params.read | set(PARAMS.get(name, ())), scene)
     else:
         raise ValueError(f"unknown component '{name}'. Built-in: {', '.join(BUILTIN)}; scene: {', '.join(user) or 'none'}")
     for k in _PASS:
         if k in raw:
             out[k] = raw[k]
+    if "until" in raw and "dur" not in raw:
+        out.pop("dur", None)  # the instance's until sets the end, not the length the builder gave it
     out.setdefault("id", params["id"])
     return out
 
