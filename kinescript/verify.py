@@ -325,12 +325,56 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
 
 
 def _heard(scene: Scene) -> list[dict]:
-    """check's sound issues; an info note when the mix cannot be made."""
+    """check's sound issues. A mix that ffmpeg cannot make is an error, since a render with sound stops on the same
+    mix; a mix that was made but could not be measured is an info note."""
     try:
-        return listen.issues(scene, listen.report(scene))
-    except (RuntimeError, OSError, ValueError) as e:
-        return [{"level": "info", "code": "audio-unmeasured", "layer": None, "from": 0, "to": round(scene.duration, 2),
-                 "message": f"the sound could not be measured: {e}", "fix": ""}]
+        rep = listen.report(scene)
+        return listen.issues(scene, rep) + _unheard(scene, rep)
+    except Exception as e:  # noqa: BLE001 - check reports, it does not crash: a TypeError here took check down
+        failed = str(e).startswith("audio mix failed")
+        return [{"level": "error" if failed else "info", "code": "audio-mix" if failed else "audio-unmeasured",
+                 "layer": None, "from": 0, "to": round(scene.duration, 2),
+                 "message": (f"the sound cannot be mixed, so a render with sound stops too: {e}" if failed else
+                             f"the sound could not be measured: {type(e).__name__}: {e}"), "fix": ""}]
+
+
+def _unheard(scene: Scene, rep: dict | None) -> list[dict]:
+    """Sounds that play nothing anyone hears: one that starts after the scene ends (or ends before it starts), and one
+    whose gain, volume, fades and duck keep it under listen.SILENT the whole time (volume 0, gain -90). A file that is
+    silent itself is audio-silent, from listen.issues."""
+    out, D, timed = [], scene.duration, set()
+
+    def add(sid, t0, t1, msg, fix):
+        out.append({"level": "warning", "code": "audio-unheard", "layer": sid, "from": round(t0, 2),
+                    "to": round(t1, 2), "message": msg, "fix": fix})
+
+    for s in scene.audio:
+        name = f"the sound of '{s.layer}'" if s.layer else f"'{s.id}'"
+        if s.t_in >= D - 1e-6:
+            timed.add(s.id)
+            add(s.layer or s.id, D, D, f"{name} starts at {s.t_in:.2f}s, when the scene ({D:.2f}s) has ended, so it is "
+                "never heard", "start it earlier, or make the scene longer")
+        elif s.t_out <= 1e-6:
+            timed.add(s.id)
+            add(s.layer or s.id, 0, 0, f"{name} ends at {s.t_out:.2f}s, before the scene starts, so it is never heard",
+                "start it later")
+    by_id = {s.id: s for s in scene.audio}
+    boost = max(0.0, (rep or {}).get("correction") or 0.0)  # the managed mix raises a quiet mix by up to 12 dB
+    for s in (rep or {}).get("sounds", []):
+        if s["id"] in timed or not s["info"]["peak"] > listen.SILENT:
+            continue
+        top = float(np.max(s["env"], initial=-np.inf)) + boost
+        if top > listen.SILENT:
+            continue
+        snd = by_id.get(s["id"])
+        raw = snd.raw if snd is not None else {}
+        why = ("its volume is 0" if raw.get("volume") == 0 and raw.get("gain") is None else
+               f"its gain is {raw['gain']:g} dB" if isinstance(raw.get("gain"), (int, float)) else
+               f"with its gain and fades it stays under {listen.SILENT:.0f} dBFS")
+        sid = snd.layer if snd is not None and snd.layer else s["id"]
+        add(sid, s["in"], min(s["out"], D), f"'{sid}' is never heard: {why}",
+            "raise its volume or gain, or remove it")
+    return out
 
 
 _RANK = {"error": 0, "warning": 1, "info": 2}

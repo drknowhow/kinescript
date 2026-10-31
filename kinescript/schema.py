@@ -102,7 +102,7 @@ TYPES: dict[str, set[str]] = {
     "text": TEXT,
     "counter": TEXT | {"value", "format"},
     "image": MEDIA,
-    "video": MEDIA | {"trim", "speed", "volume", "loop"},
+    "video": MEDIA | {"trim", "speed", "volume", "loop", "fadeIn", "fadeOut"},
     "captions": TEXT | {"src", "cues", "mode", "active", "voice"},
     "shader": {"preset", "uniforms", "sksl", "w", "h"},
     "group": {"children", "layers", "w", "h", "clip", "radius", "fill", "sort"},
@@ -110,6 +110,12 @@ TYPES: dict[str, set[str]] = {
                                                                               "draw", "light", "src", "ground"},
 }
 SEQUENCE = COMMON | {"clips", "transition", "fit", "volume", "w", "h"}
+TRANSITION = {"type", "dur"}
+TRANSITION_ALIAS = {"name": "type", "kind": "type", "style": "type", "duration": "dur", "length": "dur"}
+TRANSITIONS = ("fade", "wipe", "slide", "zoom", "blur", "cut")
+TRANSITION_VALUE_ALIAS = {"dissolve": "fade", "crossfade": "fade", "crossdissolve": "fade", "xfade": "fade",
+                          "mix": "fade", "none": "cut", "hard": "cut", "hardcut": "cut", "push": "slide"}
+IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp")  # a sequence clip with one of these is an image
 TYPE_ALIAS = {"rectangle": "rect", "square": "rect", "box": "rect", "shape": "rect", "txt": "text", "label": "text",
               "title": "text", "heading": "text", "string": "text", "img": "image", "picture": "image",
               "photo": "image", "oval": "ellipse", "caption": "captions", "subtitles": "captions",
@@ -183,7 +189,7 @@ WRAPPERS = {"tween", "tweens", "keyframes", "animate", "animation", "animations"
 SCALAR = {"x", "y", "w", "h", "r", "opacity", "scale", "scaleX", "scaleY", "rotate", "blur", "size", "weight",
           "strokeWidth", "draw", "drawStart", "zoom", "value", "radius", "dimOutside", "sides", "inner", "x1", "y1",
           "x2", "y2", "bend", "head", "maxWidth", "lineHeight", "letterSpacing", "focusX", "focusY", "speed",
-          "volume", "unitX", "unitY", "unitRotate", "unitScale", "unitOpacity", "z", "rotateX", "rotateY", "fov",
+          "unitX", "unitY", "unitRotate", "unitScale", "unitOpacity", "z", "rotateX", "rotateY", "fov",
           "depth", "tube", "shine", "metal", "rim", "bands", "explode", "bevel"}
 REQUIRED = {"text": ("text",), "image": ("src",), "video": ("src",), "path": ("d", "points"), "line": ("points",),
             "captions": ("cues", "src", "voice"), "shader": ("preset", "sksl"), "model": ("shape", "parts", "src")}
@@ -455,12 +461,9 @@ def _layer(raw, rep: Report, path: str, comps: dict):
             return
     if t == "sequence":
         _keys(raw, SEQUENCE, {"items": "clips", "videos": "clips", "children": "clips"}, rep, lid, "")
-        if raw.get("clips") is not None and not isinstance(raw["clips"], list):
-            rep.add("error", "bad-value", lid, "clips must be a list of files or objects with 'src'",
-                    "\"clips\": [{\"src\": \"a.mp4\"}, {\"src\": \"b.mp4\"}]")
-        if raw.get("transition") is not None and not isinstance(raw["transition"], dict):
-            rep.add("error", "bad-value", lid, f"transition is {raw['transition']!r}; it is an object",
-                    "\"transition\": {\"type\": \"fade\", \"dur\": 0.4}")
+        _clips(raw, rep, lid, comps)
+        _transition(raw, rep, lid)
+        _volume(raw, rep, lid)
         _effects(raw, rep, lid)
         _layer_sound(raw, rep, lid)
         return
@@ -490,6 +493,12 @@ def _layer(raw, rep: Report, path: str, comps: dict):
             rep.add("error", "missing-key", lid, f"a {t} layer needs " + " or ".join(f"'{k}'" for k in need),
                     {"text": "\"text\": \"Hello\"", "image": "\"src\": \"photo.jpg\"", "video": "\"src\": \"clip.mp4\""}
                     .get(t, ""))
+    if raw.get("src") not in (None, "") and not isinstance(raw["src"], str):
+        rep.add("error", "bad-value", lid, f"src is {raw['src']!r}; it is one file name, as a string",
+                f"\"src\": \"{ {'image': 'photo.jpg', 'captions': 'captions.srt', 'model': 'model.glb'}.get(t, 'clip.mp4')}\" "
+                "(a path relative to the scene file)")
+    if t == "video":
+        _volume(raw, rep, lid)
     _values(raw, t, rep, lid)
     _structure(raw, t, rep, lid)
     _effects(raw, rep, lid)
@@ -514,6 +523,89 @@ def _layer(raw, rep: Report, path: str, comps: dict):
 
 def _number(v) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _volume(raw: dict, rep: Report, lid, where: str = ""):
+    """A video's (or a sequence's) volume, and the seconds its sound fades in and out: numbers, 0 or more. Keyframes
+    for volume reached the mix as a list, -1 flipped the sound's phase and null muted it."""
+    for k in ("volume", "fadeIn", "fadeOut"):
+        if k in raw and not (_number(raw[k]) and math.isfinite(raw[k]) and raw[k] >= 0):
+            rep.add("error", "bad-value", lid, f"{where}{k} is {raw[k]!r}; it must be a number, 0 or more",
+                    "1 keeps the sound as it is, 0.5 halves it and 0 mutes it" if k == "volume" else
+                    "seconds; 0 for no fade")
+
+
+def _clip_type(clip) -> str:
+    src = clip.get("src") if isinstance(clip, dict) else clip
+    return "image" if isinstance(src, str) and src.lower().endswith(IMAGE_EXTS) else "video"
+
+
+def _clips(raw: dict, rep: Report, lid, comps: dict):
+    """A sequence's clips: each a video (or, with a dur, an image), checked as the layer it becomes."""
+    clips = raw.get("clips")
+    example = "\"clips\": [{\"src\": \"a.mp4\"}, {\"src\": \"b.mp4\"}]"
+    if clips is None or clips == []:
+        rep.add("error", "missing-key", lid, "a sequence needs 'clips', a list of at least one clip", example)
+        return
+    if not isinstance(clips, list):
+        rep.add("error", "bad-value", lid, "clips must be a list of files or objects with 'src'", example)
+        return
+    for i, c in enumerate(clips):
+        where = f"clips[{i}]"
+        if isinstance(c, str):
+            if not c.strip():
+                rep.add("error", "missing-key", lid, f"{where} is an empty file name", example)
+            elif _clip_type(c) == "image":
+                rep.add("error", "missing-key", lid, f"{where} '{c}' is an image, which has no length of its own",
+                        f"give it as {{\"src\": \"{c}\", \"dur\": 2}}")
+            continue
+        if not isinstance(c, dict):
+            rep.add("error", "bad-value", lid, f"{where} is {c!r}; a clip is a file name or an object with 'src'", example)
+            continue
+        ctype = c.get("type") or _clip_type(c)
+        if ctype not in ("video", "image"):
+            rep.add("error", "bad-type", lid, f"{where}: a clip is a video or an image, not {ctype!r}",
+                    "leave out type; a clip's src says which it is")
+            continue
+        c["type"] = ctype
+        _layer(c, rep, f"{lid}.{where}", comps)
+        if ctype == "image" and c.get("dur") is None and c.get("until") is None:
+            rep.add("error", "missing-key", lid, f"{where}: an image clip needs 'dur', since an image has no length "
+                    "of its own", f"{{\"src\": \"{c.get('src')}\", \"dur\": 2}}")
+
+
+def _transition(raw: dict, rep: Report, lid):
+    """A sequence's transition: a known type, and a dur in seconds unless it is a cut."""
+    tr = raw.get("transition")
+    example = "\"transition\": {\"type\": \"fade\", \"dur\": 0.4}"
+    if tr is None or tr == {}:
+        return
+    if not isinstance(tr, dict):
+        rep.add("error", "bad-value", lid, f"transition is {tr!r}; it is an object", example)
+        return
+    _keys(tr, TRANSITION, TRANSITION_ALIAS, rep, lid, "transition: ")
+    kind = "fade"
+    if "type" in tr:
+        v = tr["type"]
+        low = re.sub(r"[-_ ]", "", v.strip().lower()) if isinstance(v, str) else None
+        kind = v if v in TRANSITIONS else TRANSITION_VALUE_ALIAS.get(low, low if low in TRANSITIONS else None)
+        if kind is None:
+            rep.add("error", "bad-value", lid, "transition type: " + unknown("value", v, TRANSITIONS)
+                    if isinstance(v, str) and v.strip() else
+                    f"transition type is {v!r}; it is one of {', '.join(TRANSITIONS)}", example)
+            return
+        if kind != v:
+            tr["type"] = kind
+            rep.add("info", "renamed-value", lid, f"transition type '{v}' read as '{kind}'", f"write '{kind}'")
+    d = tr.get("dur")
+    if kind == "cut":
+        if d is not None:
+            del tr["dur"]
+            rep.add("warning", "ignored-key", lid, f"transition: a cut has no dur, so dur {d!r} is ignored and the "
+                    "clips join back to back", "remove dur, or use \"type\": \"fade\" to overlap the clips")
+    elif "dur" in tr and not (_number(d) and math.isfinite(d) and d > 0):
+        rep.add("error", "bad-value", lid, f"transition dur is {d!r}; it is seconds, a number above 0",
+                "\"dur\": 0.5 overlaps the clips by half a second; for no overlap use \"type\": \"cut\"")
 
 
 def _structure(raw: dict, t: str, rep: Report, lid):
@@ -624,9 +716,13 @@ def _audio_values(a: dict, rep: Report, lid, where: str):
         rep.add("error", "bad-value", lid, f"{where}pan is {p!r}; it must be a number from -1 (left) to 1 (right)")
     for k in ("volume", "fadeIn", "fadeOut"):
         v = a.get(k)
-        if v is not None and not (_number(v) and v >= 0):
+        if k in a and not (_number(v) and math.isfinite(v) and v >= 0):  # null too: it reached the mix as None
             rep.add("error", "bad-value", lid, f"{where}{k} is {v!r}; it must be a number, 0 or more",
                     "use \"gain\" in dB for a level that changes over time" if k == "volume" else "use seconds")
+    src = a.get("src")
+    if src not in (None, "") and not isinstance(src, str):
+        rep.add("error", "bad-value", lid, f"{where}src is {src!r}; it is one file name, as a string",
+                "\"src\": \"music.mp3\" (a path relative to the scene file); give each file its own entry")
     g = a.get("gain")
     if g is not None and not (_number(g) or isinstance(g, list) or (isinstance(g, str) and g.startswith("="))
                               or (isinstance(g, dict) and {"to", "keys"} & set(g))):

@@ -2,6 +2,46 @@
 
 ## Unreleased
 
+- A video's sound keeps pace with its picture at any `speed`. ffmpeg's `atempo` takes 0.5 to 2, so at `"speed": 4`
+  the picture showed the file's fourth second while the sound played its second, and at 0.25 the sound ran out
+  halfway and the rest was silent. The tempo is now made of steps within that range. `kine check` also measured
+  such a sound over the wrong stretch of the file.
+- A video's sound stops at its trim end unless `loop` is true. `"trim": [1, 2], "dur": 3` played the file's
+  second second and then read on to the end of the file; it is now silent after 1 s. An `audio` entry whose `dur`
+  runs past its trimmed file is silent after it in the same way.
+- A sequence `fade` crossfades its clips' sound: the clip before fades out over the transition while the next
+  fades in. The outgoing clip played at full level to its last frame and stopped. An `enter` or `exit` still fades
+  a video's sound over its dur; the new video keys `fadeIn` and `fadeOut` set the sound's fades instead (0 for
+  none).
+- A sequence transition must be shorter than both clips it joins. A 1 s fade between two 1 s clips (or a 100 s
+  one) passed `kine check` and then stopped the render with ffmpeg's `Delay must be non negative number`; both
+  now report `bad-transition`, naming the clips and their lengths. A sound with a negative `at`, or a video that
+  starts before 0 s, plays from the part still going at 0 s; it stopped the render with the same ffmpeg error.
+- Sequence `transition` and `clips` are checked. An unknown `type` (`"spin"`), a `type` that is not a string, a
+  `dur` that is not a number above 0, `clips` missing or empty (that was 5 s of nothing), a clip without `src`
+  (it became a one-frame layer) and an image clip without `dur` (a 0.04 s flash) are errors. A transition without
+  `dur` lasts 0.5 s, as the docs said; it was a hard cut. `cut` with a `dur` warns and ignores it; it overlapped
+  the clips by that much. `dissolve` and `crossfade` read as `fade` and `none` as `cut`, with a note. A clip whose
+  `src` is an image is an image layer that holds for its `dur`.
+- `kine check` reports a sound it cannot play. A `src` with no sound in it (a video without a sound track, an
+  image) is a `no-audio` error that says which; check was clean and the render stopped on ffmpeg's `Stream
+  specifier ':a' ... matches no streams`. A video layer whose `src` is only sound is a `no-picture` error; it drew
+  nothing. A `src` that is a folder is a `media-folder` error; it was a PermissionError partway through a render.
+- `kine check` warns about a sound nobody will hear (`audio-unheard`): `volume` 0, a `gain` that keeps its loudest
+  moment under -60 dBFS (`"gain": -90`), or a sound that starts after the scene ends or ends before it starts. A mix that
+  ffmpeg cannot make is an `audio-mix` error in check, since the render would stop on it; any other failure while
+  measuring the sound is an `audio-unmeasured` note instead of a crash.
+- A video's `volume` must be a number from 0: keyframes took `kine check` itself down with a `TypeError`, `-1`
+  flipped the sound's phase and `null` muted it. `null` for an audio `volume`, `fadeIn` or `fadeOut`, an audio
+  `trim` with a `null` start, and a `src` that is not one string (a list of files, a number) are errors too.
+- Caption files: a UTF-16 or Windows-1252 `.srt` loads (both stopped with `'utf-8' codec can't decode byte`; the
+  encoding it used is a note), `&amp;` reads as `&`, `{\an8}` override tags are dropped, and a file with old Mac
+  line ends (`\r`) or a `->` arrow is read. Cues that overlap show together, the earlier one on top, without a
+  blink where one ends; the later cue used to wait until the earlier one ended. A cue with a bad time, no end time
+  or an end before its start is a `bad-captions` error naming the file and line (they were Python errors or were
+  dropped), and a file with no cues is a `captions-empty` warning; nothing was drawn, with no word. Inline `cues`
+  are checked the same way.
+
 - A video clip's decoder is closed once the clip is off screen. Before, every clip a render had played kept its
   ffmpeg process and six prefetched frames to the end: a 60-cut sequence peaked at 1.66 GB and ran 60 decoders at
   once; it now peaks at 270 MB.
