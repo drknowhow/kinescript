@@ -14,8 +14,8 @@ import numpy as np
 import skia
 
 from . import color as C
-from . import listen
-from .render import FONT_DIR, Renderer, _argb, joining
+from . import listen, media, models
+from .render import FONT_DIR, Renderer, _argb, joining, loop_end
 from .scene import Scene, SceneError, load
 
 # Model triangles one frame may draw before check warns. 100,000 took 71 ms a frame at 1080p on
@@ -192,7 +192,7 @@ def _draw_boxes(c, scene: Scene, boxes: dict, ox: float, oy: float, tw: float, t
 def probe(src, at: float | None = None) -> dict:
     """Resolved timeline; with `at`, also every visible layer's screen box at that time."""
     scene = load(src)
-    out = scene.summary()
+    out = {"ok": True, **scene.summary()}  # as a media file's probe says it
     if at is not None:
         try:
             t = float(at)
@@ -214,6 +214,102 @@ def _chars(chars: list[str], most: int = 8) -> str:
     named = [f"'{ch}' (U+{ord(ch):04X})" for ch in chars[:most]]
     more = f" and {len(chars) - most} more" if len(chars) > most else ""
     return (", ".join(named[:-1]) + " and " + named[-1] if len(named) > 1 and not more else ", ".join(named)) + more
+def probe_media(src: str) -> dict:
+    """What `kine probe` says about a file that is not a scene: {"ok", "src", "kind": video|audio|image|model,
+    ...}. A media file gives its duration, displayed w and h, fps, audio, alpha and rotation; a model its triangles,
+    vertices, materials and size. Raises MediaError or ValueError, naming the file, for one it cannot read."""
+    if Path(src).suffix.lower() in models.EXTENSIONS:
+        imp = models.load(src)
+        return {"ok": True, "src": src, "kind": "model", "triangles": int(len(imp.mesh.T)),
+                "vertices": int(len(imp.mesh.P)), "materials": len(imp.materials),
+                "size": [round(float(v), 3) for v in imp.size]}
+    info = media.probe(src)
+    kind = "image" if info["image"] else "video" if info["video"] else "audio" if info["audio"] else "other"
+    out = {"ok": True, "src": src, "kind": kind, **info}
+    if info["codec"] and not info["video"] and not info["image"]:
+        out["note"] = (f"it lists a {info['codec']} video stream but holds no frame of it, so a video layer shows "
+                       "nothing; a cut made with -c copy that starts between key frames does this: cut it again "
+                       "without -c copy")
+    return out
+
+
+def media_issues(scene: Scene, files_only: bool = False) -> list[dict]:
+    """Warnings about the clips the video layers play: a still image, a file whose picture stops before its probed
+    end (cut short or damaged), alpha this ffmpeg cannot decode, and (unless files_only) a dur that runs past the
+    trimmed clip or the file, so its last frame holds. A file with no picture is an error when the scene loads."""
+    out, ends = [], {}
+    layers = [L for L in scene.all_layers() if L.type == "video" and L.src and Path(L.src).is_file()]
+
+    def warn(code, L, T0, T1, msg, fix):
+        out.append({"level": "warning", "code": code, "layer": L.id, "from": round(T0, 2), "to": round(T1, 2),
+                    "message": msg, "fix": fix})
+
+    plays = []
+    for L in layers:
+        try:
+            info = media.probe(L.src)
+        except media.MediaError:
+            continue  # reported when the scene loads
+        name, shown = L.raw.get("src", L.src), min(L.t_out, scene.duration)
+        if shown <= L.t_in:
+            continue
+        if info["image"]:
+            warn("media-still", L, L.t_in, shown, f"video src {name} is a still image, which a video layer plays as "
+                 "a clip one frame long", "use an image layer (\"type\": \"image\") for a still")
+            continue
+        if not info["video"]:
+            continue  # a no-picture error when the scene loads
+        if info["alpha"] and info["codec"] in media.ALPHA_DECODERS and not media.alpha_decoder(info):
+            warn("media-alpha-lost", L, L.t_in, shown, f"this ffmpeg has no {media.ALPHA_DECODERS[info['codec']]} "
+                 f"decoder, so {name} is shown without its transparency",
+                 "install an ffmpeg built with libvpx, or use a .mov (ProRes 4444) with alpha")
+        trim0 = float((L.raw.get("trim") or [0])[0])
+        speed = float(L.raw.get("speed", 1))
+        end = loop_end(L, info["duration"])  # the trim end, or the end of the file
+        loop = bool(L.raw.get("loop"))
+        need = end if loop else min(end, trim0 + (shown - L.t_in) * speed)  # the latest source time it shows
+        plays.append((L, info, name, trim0, speed, end, need, shown))
+        over = (trim0 + (shown - L.t_in) * speed - end) / speed
+        if not files_only and not loop and info["duration"] and end > trim0 and over > 1.5 / scene.fps:
+            T = L.t_in + (end - trim0) / speed
+            clip = (f"the trimmed clip ({trim0:g} s to {end:g} s of {name})" if end < info["duration"] - 1e-3
+                    else f"the end of {name} ({info['duration']:.2f} s long)")
+            warn("clip-hold", L, T, shown, f"the layer runs {over:.2f} s past {clip}, so its last frame holds from "
+                 f"{T:.2f} s", "set \"loop\": true to repeat the clip, shorten dur, or leave dur out to end with "
+                 "the clip")
+    # Where each file's picture really ends: a decode of its last second, files side by side.
+    files = sorted({p[0].src for p in plays})
+    if files:
+        with ThreadPoolExecutor(min(4, len(files))) as pool:
+            ends = dict(zip(files, pool.map(media.decoded_end, files)))
+    for L, info, name, trim0, speed, end, need, shown in plays:
+        got = ends.get(L.src)
+        if got is None or got >= need - max(0.15, 2.5 / (info["fps"] or scene.fps)):
+            continue
+        T = max(L.t_in, min(shown, L.t_in + (got - trim0) / speed))
+        warn("media-truncated", L, T, shown, f"{name} has pictures only up to {got:.2f} s of its "
+             f"{info['duration']:.2f} s, so the layer holds its last frame from {T:.2f} s",
+             f"the file was probably cut short or damaged: export or copy it again; if its picture really ends "
+             f"early, trim it to [{trim0:g}, {got:.2f}]")
+    return out
+
+
+def media_warnings_later(scene: Scene):
+    """Start media_issues(scene, files_only=True) in a thread, so a render reports a cut-short or picture-less clip
+    without waiting for it before its first frame. Returns a function that adds the warnings to a result dict."""
+    pool = ThreadPoolExecutor(1)
+    fut = pool.submit(media_issues, scene, True)
+    pool.shutdown(wait=False)
+
+    def add(res: dict) -> dict:
+        try:
+            found = fut.result()
+        except (RuntimeError, OSError, ValueError):
+            found = []
+        if found:
+            res["warnings"] = found
+        return res
+    return add
 
 
 def _words(text: str) -> int:
@@ -261,8 +357,9 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
                            f"out {W - W % 2}x{H - H % 2}, without the last {'column' if W % 2 else 'row'}"
                            f"{' and row' if W % 2 and H % 2 else ''}. PNG frames, stills and .mov keep {W}x{H}",
                 "fix": f"make canvas w and h even, e.g. {W + W % 2}x{H + H % 2}"}]
-    pool = ThreadPoolExecutor(1)
+    pool = ThreadPoolExecutor(2)
     heard = pool.submit(_heard, scene)  # the mix renders and is measured while the frames are checked
+    clips = pool.submit(media_issues, scene)  # and the clips' last seconds are decoded
     pool.shutdown(wait=False)
     r = Renderer(scene, track=True, scale=1.0)
     found: dict[tuple, dict] = {}
@@ -293,6 +390,7 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
             r.draw(T)
         except (ValueError, RuntimeError, OSError) as e:
             heard.cancel() or heard.result()
+            clips.cancel() or clips.result()
             scene.close()
             lid = (getattr(e, "issues", None) or SceneError(str(e)).issues)[0]["layer"]  # from "layer 'x': ..."
             return _result(scene.issues + [{"level": "error", "code": "render", "layer": lid, "from": round(T, 2),
@@ -454,8 +552,14 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
                         until=layer.t_in + s1)
                     break
     sound = heard.result()
+    try:
+        clip_issues = clips.result()
+    except (RuntimeError, OSError, ValueError) as e:
+        clip_issues = [{"level": "info", "code": "media-unchecked", "layer": None, "from": 0,
+                        "to": round(scene.duration, 2), "message": f"the clips could not be decoded to check them: {e}",
+                        "fix": ""}]
     scene.close()
-    return _result(scene.issues + odd + list(found.values()) + sound, duration=scene.duration)
+    return _result(scene.issues + odd + list(found.values()) + sound + clip_issues, duration=scene.duration)
 
 
 def _heard(scene: Scene) -> list[dict]:

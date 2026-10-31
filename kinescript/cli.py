@@ -199,10 +199,9 @@ def _run(a) -> int:
         _emit(res)
         return OK if res["ok"] else ISSUES
     if a.cmd == "probe":
-        from .verify import probe
+        from .verify import probe, probe_media
         if Path(a.scene).suffix.lower() != ".json" and Path(a.scene).exists():
-            from . import media
-            _emit(dict(ok=True, src=a.scene, **media.probe(a.scene)))
+            _emit(probe_media(a.scene))
             return 0
         _emit(probe(a.scene, a.at))
         return 0

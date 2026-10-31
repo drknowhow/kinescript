@@ -110,11 +110,10 @@ def call(name: str, args: dict) -> list[dict]:
             return [_text(_result(e.issues))]
         return [_text(check(sc))]
     if name == "kine_probe":
-        from .verify import probe
+        from .verify import probe, probe_media
         sc = _need(args, "scene")
         if isinstance(sc, str) and Path(sc).suffix.lower() != ".json" and Path(sc).is_file():
-            from . import media
-            return [_text(dict(ok=True, src=sc, **media.probe(sc)))]
+            return [_text(probe_media(sc))]
         return [_text(probe(_scene(args), args.get("at")))]
     if name == "kine_look":
         from .verify import contact_sheet

@@ -1210,11 +1210,24 @@ class Renderer:
                                         ctx=gpu_context() if self.backend == "gpu" else None)
         trim0 = float((L.raw.get("trim") or [0])[0])
         src_t = trim0 + t * speed
+        end = loop_end(L, L.video.info["duration"])  # the trim end, or the end of the file
+        hold = None
         if L.raw.get("loop"):
-            span = loop_end(L, L.video.info["duration"]) - trim0
-            if span > 0:
-                src_t = trim0 + (t * speed) % span
-        img = L.video.at(src_t)
+            if end - trim0 > 0:
+                src_t = trim0 + (t * speed) % (end - trim0)
+        elif end > trim0:
+            # A dur longer than the trimmed clip holds the frame the clip ends on, the one at the source time of its
+            # last frame on this layer's frame grid, read the same way for every frame of the hold (VideoSource.held).
+            # Before, trim [2, 4] with dur 6 played on to 6.9 s of the file, and a clip that played to its end never
+            # showed its final frame (its time was held 1.5 source frames short of the end). No time asked for lies
+            # within half a source frame of the end: opened there, a clip shows the nearest frame, the one past its end.
+            tick = speed / self.s.fps
+            n = math.ceil((end - trim0) / tick - 1e-6)  # the frames the clip plays for
+            near = max(trim0, end - 0.5 / (L.video.info["fps"] or self.s.fps) - 1e-4)
+            if src_t > trim0 + (n - 0.5) * tick:
+                hold = min(trim0 + max(0, n - 1) * tick, near)
+            src_t = min(src_t, near)
+        img = L.video.at(src_t) if hold is None else L.video.held(hold)
         if img is not None:
             self._content(c, L, g, box, img, img.width(), img.height())
 
