@@ -382,6 +382,7 @@ class Layout:
     baseline0: float
     nchars: int
     nwords: int
+    units: list | None = None  # _draw_text's units, worked out on first use
 
 
 def color_matrix(fx: dict) -> list[float] | None:
@@ -546,7 +547,7 @@ class Renderer:
         self._tf: dict = {}
         self._layouts: dict = {}
         self._fonts: dict = {}
-        self._shaped: dict = {}  # (typeface, size, text, rtl) -> how _draw_str draws it (_pieces)
+        self._shaped: dict = {}  # (typeface, size, text, rtl) -> how _draw_pieces draws it (_pieces)
         self._paths: dict = {}
         self._shaders: dict = {}
         self.stop_at: str | None = None
@@ -1660,9 +1661,10 @@ class Renderer:
         pcs = self._pieces(font, s, rtl, ctx)
         return font.measureText(s) if pcs is None else sum(p.width for p in pcs)
 
-    def _draw_str(self, c: skia.Canvas, s: str, x: float, y: float, font: skia.Font, paint: skia.Paint,
-                  rtl: bool = False, ctx: tuple | None = None):
-        pcs = self._pieces(font, s, rtl, ctx)
+    @staticmethod
+    def _draw_pieces(c: skia.Canvas, pcs: list[Piece] | None, s: str, x: float, y: float, font: skia.Font,
+                     paint: skia.Paint):
+        """s at (x, y), drawn as its pieces say (_pieces(font, s, ...); None: as it is)."""
         if pcs is None:
             c.drawString(s, x, y, font, paint)
             return
@@ -1799,6 +1801,35 @@ class Renderer:
     def _draw_counter(self, c, L, t, T, g, box, reveal, mods):
         self._draw_text(c, L, t, T, g, box, reveal, mods)
 
+    def _blur_bounds(self, c: skia.Canvas, sigma: float, right: float, bottom: float, size: float,
+                     spaint: skia.Paint | None) -> skia.Rect | None:
+        """Bounds for the layer that blurs a text unit whose advances and lines end at (right, bottom), or None.
+        Without bounds the layer is the canvas: on the CPU a blurred 1080p layer took 370 ms, for one letter. It is
+        bounded at the right and bottom only, so it starts where an unbounded layer does: bounded on all sides, the
+        letters in it sat at other coordinates, and those on a subpixel boundary moved a quarter of a pixel (63
+        levels). On the GPU any bounds change the blur itself, by up to 9 levels, so it stays unbounded there."""
+        m = c.getTotalMatrix()
+        if self.backend != "cpu" or not (m.isScaleTranslate() and m.getScaleX() > 0 and m.getScaleY() > 0):
+            return None
+        # Glyphs reach less than an em past their advances and line, a stroke its width, the blur 3 sigma.
+        out = 3 * sigma + size + (spaint.getStrokeWidth() if spaint is not None else 0.0)
+        far = -1e6  # device pixels: left of and above any layer
+        return skia.Rect.MakeLTRB((far - m.getTranslateX()) / m.getScaleX(), (far - m.getTranslateY()) / m.getScaleY(),
+                                  right + out, bottom + out)
+
+    def _units(self, lay: Layout, font: skia.Font, split) -> list:
+        """The runs grouped into the units a split enter moves one by one, in order: (runs, left, right) with each
+        run as (run, its pieces). They are the same on every frame the layout is, so they are kept with it."""
+        if lay.units is None:
+            units: dict[int, list] = {}
+            for r in lay.runs:
+                u = r.char0 if split == "chars" else r.word if split == "words" else r.line if split == "lines" else 0
+                units.setdefault(u, []).append((r, self._pieces(font, r.text, r.rtl, r.ctx)))
+            lay.units = [(runs, min(r.x for r, _ in runs),
+                          max(r.x + self._measure(font, r.text, r.rtl, r.ctx) for r, _ in runs))
+                         for _, runs in sorted(units.items())]
+        return lay.units
+
     def _draw_text(self, c, L, t, T, g, box, reveal, mods, txt=None, layout=None, active=None, cue_t=None):
         txt = txt if txt is not None else self._text_of(L, t, T, g)
         lay = layout or self._text_layout(L, t, T, g, txt)
@@ -1824,14 +1855,11 @@ class Renderer:
         typing = enter is None and L.enter and "type" in L.enter.names and t < L.enter.dur
         visible_chars = lay.nchars * reveal if (reveal < 1 or typing) else None
         track = mods.track
-        unit_keys = [k for k in ("unitX", "unitY", "unitRotate", "unitScale", "unitOpacity") if k in L.props]
-        units: dict[int, list[Run]] = {}
-        for r in lay.runs:
-            u = r.char0 if split == "chars" else r.word if split == "words" else r.line if split == "lines" else 0
-            units.setdefault(u, []).append(r)
-        order = sorted(units)
-        for ui, u in enumerate(order):
-            runs = units[u]
+        c00 = lay.runs[0].char0 if lay.runs else 0
+        unit_keys = {k for k in ("unitX", "unitY", "unitRotate", "unitScale", "unitOpacity") if k in L.props}
+        cols, pop = (fill, emph, act), active is not None and L.raw.get("mode") == "pop"  # captions only
+        painted = None  # (which colour, alpha) fpaint holds
+        for ui, (runs, x0, x1) in enumerate(self._units(lay, font, split)):
             um = IDENT
             if enter is not None:
                 p = (t - ui * stagger) / enter.dur if enter.dur else 1.0
@@ -1844,12 +1872,11 @@ class Renderer:
             ua = um.alpha * (float(L.get("unitOpacity", t, T, ui)) if "unitOpacity" in unit_keys else 1)
             urot = um.rotate + (float(L.get("unitRotate", t, T, ui)) if "unitRotate" in unit_keys else 0)
             usc = um.scale * (float(L.get("unitScale", t, T, ui)) if "unitScale" in unit_keys else 1)
-            x0 = min(r.x for r in runs)
-            x1 = max(r.x + self._measure(font, r.text, r.rtl, r.ctx) for r in runs)
-            ucx, ucy = ox + (x0 + x1) / 2, oy + runs[0].line * lay.lh + lay.lh / 2
-            c.save()
             moved = ux or uy or urot or usc != 1 or um.rx or um.ry or um.dz
-            if moved:
+            blurred = um.blur > 0.1
+            if moved:  # a unit drawn where it lies needs no save and restore: most of them, once they are in
+                c.save()
+                ucx, ucy = ox + (x0 + x1) / 2, oy + runs[0][0].line * lay.lh + lay.lh / 2
                 c.translate(ucx + ux, ucy + uy)
                 if um.rx or um.ry or um.dz:
                     c.concat(space.to_skia(space.tilt(um.dz, um.rx, um.ry)))
@@ -1858,34 +1885,40 @@ class Renderer:
                 if usc != 1:
                     c.scale(usc, usc)
                 c.translate(-ucx, -ucy)
-            if um.blur > 0.1:
-                c.saveLayer(None, skia.Paint(ImageFilter=skia.ImageFilters.Blur(um.blur, um.blur)))
-            for r in runs:
+            if blurred:
+                c.saveLayer(self._blur_bounds(c, um.blur, ox + x1 + max(0.0, track * (runs[-1][0].char0 - c00)),
+                                              oy + (runs[-1][0].line + 1) * lay.lh, size, spaint),
+                            skia.Paint(ImageFilter=skia.ImageFilters.Blur(um.blur, um.blur)))
+            for r, pcs in runs:
                 text = r.text
                 if visible_chars is not None:
                     if r.char0 >= visible_chars:
                         continue
                     text = text[: max(0, int(visible_chars - r.char0))]
-                col = fill
+                k = 0
                 if active is not None:
-                    col = act if r.word <= active else fill
-                    if L.raw.get("mode") == "pop" and r.word > active:
+                    if r.word <= active:
+                        k = 2
+                    elif pop:
                         continue
                 elif r.emph:
-                    col = emph
-                fpaint.setColor(_argb(col, ua))
+                    k = 1
+                if painted != (k, ua):
+                    fpaint.setColor(_argb(cols[k], ua))
+                    painted = (k, ua)
                 y = oy + r.line * lay.lh + lay.baseline0
-                x = ox + r.x + track * (r.char0 - lay.runs[0].char0) if track else ox + r.x
-                if r.rtl and text != r.text:  # typing: a right-to-left word grows from its right edge
-                    x += self._measure(font, r.text, True, r.ctx) - self._measure(font, text, True, r.ctx)
+                x = ox + r.x + track * (r.char0 - c00) if track else ox + r.x
+                if text != r.text:  # typed so far: a right-to-left word grows from its right edge
+                    if r.rtl:
+                        x += self._measure(font, r.text, True, r.ctx) - self._measure(font, text, True, r.ctx)
+                    pcs = self._pieces(font, text, r.rtl, r.ctx)
                 if spaint is not None:
-                    self._draw_str(c, text, x, y, font, spaint, r.rtl, r.ctx)
-                self._draw_str(c, text, x, y, font, fpaint, r.rtl, r.ctx)
-            if typing and L.raw.get("caret", True) and visible_chars is not None and runs and u == order[-1]:
-                pass
-            if um.blur > 0.1:
+                    self._draw_pieces(c, pcs, text, x, y, font, spaint)
+                self._draw_pieces(c, pcs, text, x, y, font, fpaint)
+            if blurred:
                 c.restore()
-            c.restore()
+            if moved:
+                c.restore()
         if visible_chars is not None and L.raw.get("caret") and (int(T * 2) % 2 == 0 or reveal < 1):
             last = None
             for r in lay.runs:
