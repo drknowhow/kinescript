@@ -76,7 +76,8 @@ KEYS EVERY LAYER HAS
   x, y          position of the anchor. A number (px), "50%" (of the canvas, or of the group's
                 w and h), "50%-120", "10vw", "5vh", or an expression.
   anchor        center (default) | topleft | top | topright | left | right | bottomleft | bottom |
-                bottomright. Video, shader, and image without x default to topleft.
+                bottomright. Video and shader default to topleft, even with x and y set; an image
+                defaults to topleft without x and to center with it.
   opacity       0..1 (default 1)
   scale, scaleX, scaleY   1 = normal size
   rotate        degrees, clockwise
@@ -92,7 +93,8 @@ KEYS EVERY LAYER HAS
   enter, exit   a motion (see ENTER AND EXIT)
   hidden        true skips the layer (and its sound)
   sound         a file played when the layer starts, timed by the layer (see SOUND)
-  allowOffscreen  true stops check warning when the layer leaves the canvas
+  allowOffscreen  true stops check warning when the layer leaves the canvas; on a group or
+                  sequence it covers the layers inside
   note          free text, ignored
 
 LAYER TYPES (defaults in brackets)
@@ -387,8 +389,10 @@ COMMANDS
   kine new scene.json             write a starter scene
   kine check scene.json           JSON list of problems. error: must fix. warning: should fix:
                                   text off the canvas or inside the outer 5% (safe-area),
-                                  overlapping text, contrast under 3:1, or text shown for less
-                                  than about 0.4 s + 0.3 s per word (read-time). With sound (it is
+                                  overlapping text, contrast under 3:1, text shown for less
+                                  than about 0.4 s + 0.3 s per word (read-time), or a video,
+                                  image or shader more than half off the canvas for 1 s or more
+                                  (media-offscreen). With sound (it is
                                   mixed and measured, see SOUND): a voice cut off (audio-cut), two
                                   voices at once (voice-overlap), music under 10 LU below a voice
                                   (voice-masked), an sfx whose first sound is late (sfx-late), a

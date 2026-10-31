@@ -19,6 +19,10 @@ from .scene import Scene, SceneError, load
 # Model triangles one frame may draw before check warns. 100,000 took 71 ms a frame at 1080p on
 # the GPU in the 3D spike (2026-10-29), against about 15 ms at 20,000.
 TRIANGLE_BUDGET = 60_000
+# Layers check warns about when more than half of one stays off the canvas for MEDIA_OFF_FOR seconds; a slide or
+# a transition passes through faster.
+MEDIA = ("video", "image", "shader")
+MEDIA_OFF_FOR = 1.0
 
 
 def _times(scene: Scene, count: int, times=None) -> list[float]:
@@ -149,6 +153,7 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
     pool.shutdown(wait=False)
     r = Renderer(scene, track=True, scale=1.0)
     found: dict[tuple, dict] = {}
+    off: dict[str, list] = {}  # media layer (or its sequence) id -> (time, box, share off, layer) when mostly off
 
     def add(level, code, lid, T, msg, fix="", until=None):
         key = (code, lid)
@@ -183,8 +188,10 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
             if b["alpha"] < 0.3:
                 continue
             l, t, rr, bb = b["rect"]
-            layer = scene.by_id.get(lid)
-            allow = layer is not None and layer.raw.get("allowOffscreen")
+            layer = up = scene.by_id.get(lid)
+            allow = False
+            while up is not None and not allow:  # set on a group or sequence, it covers what is inside
+                allow, up = bool(up.raw.get("allowOffscreen")), up.parent
             if b["type"] in ("text", "counter", "captions"):
                 texts.append((lid, b))
                 if b.get("mirrored"):
@@ -200,7 +207,13 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
                 if px < H / 45 and b["alpha"] > 0.9:
                     add("warning", "tiny-text", lid, T, f"text renders at ~{px:.0f}px, small for {H}p video",
                         f"use at least {math.ceil(H / 45)}px")
-            elif b["type"] not in ("video", "group") and not allow:
+            elif b["type"] in MEDIA:
+                area = (rr - l) * (bb - t)
+                seen = max(0.0, min(rr, W) - max(l, 0.0)) * max(0.0, min(bb, H) - max(t, 0.0))
+                if area > 0 and seen < area / 2 and not allow and layer is not None:
+                    seq = layer.parent if layer.parent is not None and layer.parent.raw.get("span") else None
+                    off.setdefault(seq.id if seq else lid, []).append((T, b["rect"], 1 - seen / area, layer))
+            elif b["type"] != "group" and not allow:
                 if rr < 0 or bb < 0 or l > W or t > H:
                     add("info", "offscreen", lid, T, "layer is visible but entirely off canvas", "check x/y")
         for i in range(len(texts)):
@@ -213,6 +226,17 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
                     if ix * iy / area > 0.15:
                         add("warning", "text-overlap", f"{texts[i][0]}+{texts[j][0]}", T,
                             "two text layers overlap", "offset one of them or separate them in time")
+    for lid, seen in off.items():
+        if len({s[0] for s in seen}) * step < MEDIA_OFF_FOR:  # frames, once each where a sequence's clips overlap
+            continue
+        T, rect, share, layer = seen[0]
+        ty = layer.type
+        fix = ("a video or shader is placed by its top-left corner unless anchor says otherwise: set \"anchor\": "
+               "\"center\" to centre it on x and y, or move it inward"
+               if ty in ("video", "shader") and "anchor" not in layer.raw else
+               "move it inward, or set allowOffscreen if it is meant to be cut off")
+        add("warning", "media-offscreen", lid, T, f"{ty} box {rect} is {share:.0%} off the {W}x{H} canvas", fix,
+            until=seen[-1][0])
     # Contrast: render the frame without the text layer and its successors, compare luminance under its box.
     for layer in scene.all_layers():
         if layer.type not in ("text", "counter"):
