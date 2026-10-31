@@ -55,13 +55,17 @@ SCENE (top level)
               w and h 16..16384, fps 1..240. duration: seconds, or "auto" (the default: the
               latest end of any layer). The video has duration x fps frames, to the nearest
               frame, a half rounding up (2.45 s at 30 fps: 74). Vertical video: "w": 1080, "h": 1920.
+              Keep w and h even: .mp4, .webm and .gif need it, so an odd size loses its last
+              column or row there.
   layers      the list of layers.
   theme       {"accent": "#ff633f"}: then "$accent" anywhere means that value.
   markers     {"drop": 12.5}: named times, usable as "at": "drop". A marker is seconds or a clock
               ("45f", "0:12.5"); it has no .in or .out. If a marker and a layer share a name, "drop"
               reads the marker (check warns), "drop.out" the layer.
   grade       whole-frame look: {"contrast": 1.05, "saturate": 1.1, "vignette": 0.35, "grain": 0.05}
-  motionBlur  {"samples": 6, "shutter": 0.5}   (slower: renders 6 sub-frames per frame)
+  motionBlur  {"samples": 6, "shutter": 0.5}   (slower: renders 6 sub-frames per frame). A layer
+              blurs only inside its own time, so its first and last frames are whole; grain is
+              added once, to the blended frame.
   camera      moves and turns the view in depth (see DEPTH AND CAMERA).
   light       how model layers are lit (see 3D MODELS).
   audio       the list of sounds: voice-over, music, effects (see SOUND).
@@ -90,7 +94,8 @@ KEYS EVERY LAYER HAS
   anchor        center (default) | topleft | top | topright | left | right | bottomleft | bottom |
                 bottomright. Video and shader default to topleft, even with x and y set; an image
                 defaults to topleft without x and to center with it.
-  opacity       0..1 (default 1)
+  opacity       0..1 (default 1). A group fades as one picture; layers in it with a blend still
+                blend with what is under the group.
   scale, scaleX, scaleY   1 = normal size
   rotate        degrees, clockwise
   z, rotateX, rotateY, backface, fixed   depth: see DEPTH AND CAMERA
@@ -128,7 +133,12 @@ LAYER TYPES (defaults in brackets)
             text; pad is [vertical, horizontal]), case (upper|lower),
             split (chars|words|lines: animate each unit, see ENTER AND EXIT),
             caret (true shows a cursor while typing),
-            unitX unitY unitRotate unitScale unitOpacity (expressions per unit; i is its index)
+            unitX unitY unitRotate unitScale unitOpacity (expressions per unit; i is its index).
+            A character the font lacks (emoji, CJK, Hebrew, Arabic...) is drawn with an installed
+            font that has it; check names any that no font has (missing-glyph). Arabic letters
+            join and accents sit on their letter. Right-to-left words read right to left, and a
+            line's words are put in order by the Unicode bidi rules applied word by word.
+            split chars and letterSpacing draw each letter alone, so Arabic does not join there.
   counter   value (animate it, e.g. {"from": 0, "to": 1250, "dur": 2}), format ["{:,.0f}"; also
             "${:,.2f}M" or "{:.0f}%"], and every text key
   image     src (every src, for image, video, captions and audio, is relative to the scene
@@ -214,7 +224,9 @@ DEPTH AND CAMERA (3D)
   text      shape "text" pushes letters out in depth: text ("\n" breaks lines), size [120],
             weight [600], font, italic, letterSpacing, lineHeight, depth [size x 0.2], bevel [0]
             (px of 45-degree edge). Centred on x, y. Each new text, size, depth or bevel value
-            rebuilds the solid, so grow it with scale.
+            rebuilds the solid, so grow it with scale. Characters are not shaped: right-to-left
+            letters, accents typed as separate marks and emoji sequences come out wrong (check
+            warns: unshaped-3d-text), so use a text layer for those.
   path      shape "path": d (SVG path data, filled nonzero), w and/or h (fits inside them, keeping
             its shape), depth [a fifth of its larger side], bevel [0], strokeWidth (in d's units:
             extrudes the stroke, with round ends, for line icons).
@@ -421,16 +433,22 @@ COMMANDS
   kine new scene.json             write a starter scene
   kine check scene.json           JSON list of problems. error: must fix. warning: should fix:
                                   text off the canvas or inside the outer 5% (safe-area),
-                                  overlapping text, contrast under 3:1, text shown for less
-                                  than about 0.4 s + 0.3 s per word (read-time), or a video,
-                                  image or shader more than half off the canvas for 1 s or more
-                                  (media-offscreen). With sound (it is
+                                  overlapping text, contrast under 3:1, text a later layer
+                                  covers (text-hidden), text shown for less than about 0.4 s +
+                                  0.3 s per word, or one or two words for under 0.4 s
+                                  (read-time), a character no installed font has
+                                  (missing-glyph), Arabic drawn letter by letter
+                                  (unjoined-letters), 3D text it cannot shape
+                                  (unshaped-3d-text), or a video, image or shader more than
+                                  half off the canvas for 1 s or more (media-offscreen).
+                                  With sound (it is
                                   mixed and measured, see SOUND): a voice cut off (audio-cut), two
                                   voices at once (voice-overlap), music under 10 LU below a voice
                                   (voice-masked), an sfx whose first sound is late (sfx-late), a
                                   silent sound, a sound nobody hears (audio-unheard), and the
                                   mix's loudness and peaks.
-                                  info: a name it read for you, e.g. "'color' read as 'fill'".
+                                  info: a name it read for you, e.g. "'color' read as 'fill'",
+                                  or an odd canvas size (odd-size).
   kine look scene.json --boxes    one PNG of 12 evenly spaced frames; --boxes outlines layers and
                                   labels the top-level ones; -n 16 frames, --at 1 2.5 4 exact
                                   times, read as still reads them (use it to see a transition;
@@ -459,6 +477,11 @@ COMMANDS
                                   -j 4 runs 4 render processes, at most one per frame and one
                                   per CPU (more is cut, with a note); without -j, or -j 0, kine
                                   picks. A GIF's "frames" is the number of frames in the GIF.
+                                  A frame is the same whichever frames come before it, except
+                                  that on the GPU text drawn in depth (a camera, z, rotateX or
+                                  rotateY) can differ by a level or two at a few edge pixels
+                                  (the GPU's glyph cache); KINE_BACKEND=cpu renders the same
+                                  bytes every time.
   kine voice scene.json           speaks each sound's text into its file and times its words; a sound
                                   is spoken again only when its text, speaker, rate, backend or
                                   options changed (--force: all of them, --only vo1: one). Needs a

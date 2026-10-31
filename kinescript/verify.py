@@ -15,7 +15,7 @@ import skia
 
 from . import color as C
 from . import listen
-from .render import FONT_DIR, Renderer, _argb
+from .render import FONT_DIR, Renderer, _argb, joining
 from .scene import Scene, SceneError, load
 
 # Model triangles one frame may draw before check warns. 100,000 took 71 ms a frame at 1080p on
@@ -25,6 +25,9 @@ TRIANGLE_BUDGET = 60_000
 # a transition passes through faster.
 MEDIA = ("video", "image", "shader")
 MEDIA_OFF_FOR = 1.0
+# Seconds a text of one or two words needs on screen; shorter, and it is a flash nobody reads. Quick kinetic type
+# (the kinetic component's default is 0.6 s a word) stays above it.
+FLASH = 0.4
 
 
 def _times(scene: Scene, count: int, times=None) -> list[float]:
@@ -109,6 +112,54 @@ def _behind(boxes: dict, lid: str, a: list, w: int, h: int) -> str | None:
     return best
 
 
+def _pixels(r: Renderer) -> np.ndarray:
+    """What the renderer's surface holds now, premultiplied."""
+    buf = np.empty((r.h, r.w, 4), np.uint8)
+    r.surface.readPixels(r.info, buf, r.w * 4)
+    return buf
+
+
+def _over(boxes: dict, lid: str, a: list) -> str | None:
+    """The layer drawn after `lid` whose box covers most of `lid`'s box, if any covers it at all."""
+    best, area, after = None, 0.0, False
+    for other, b in boxes.items():
+        if other == lid:
+            after = True
+            continue
+        if not after or b["alpha"] < 0.5:
+            continue
+        r = b["rect"]
+        ix, iy = min(a[2], r[2]) - max(a[0], r[0]), min(a[3], r[3]) - max(a[1], r[1])
+        if ix > 0 and iy > 0 and ix * iy > area:
+            best, area = other, ix * iy
+    return best
+
+
+# A text layer's pixels count as shown where the frame with it differs from the frame without it by more than this.
+SHOWS = 8
+
+
+def _covered(r: Renderer, layer, T: float, box, full: np.ndarray, under: np.ndarray) -> bool:
+    """Whether text `layer` draws something of its own at T (the frame up to and including it differs from the frame
+    up to it) and yet none of that is left in the finished frame `full` (the frame without it is the same).
+    `under` is the frame drawn up to the layer; `box` its box as slices."""
+    r.draw(T, stop_after=layer.id)
+    ink = (np.abs(_pixels(r)[box].astype(np.int16) - under[box]).max(axis=2) > SHOWS).sum()
+    if ink < 4:
+        return False  # it does not stand out from what is behind it: contrast reports that
+    was = layer.raw.get("hidden")
+    layer.raw["hidden"] = True
+    try:
+        r.draw(T)
+    finally:
+        if was is None:
+            del layer.raw["hidden"]
+        else:
+            layer.raw["hidden"] = was
+    shown = (np.abs(full[box].astype(np.int16) - _pixels(r)[box]).max(axis=2) > SHOWS).sum()
+    return shown <= ink * 0.02
+
+
 def _draw_boxes(c, scene: Scene, boxes: dict, ox: float, oy: float, tw: float, th: float, font):
     """Outline every visible layer; label only top-level layers, on a dark tab just outside the box,
     so labels neither cover the text they name nor pile up for every child of a component."""
@@ -158,8 +209,31 @@ def probe(src, at: float | None = None) -> dict:
     return out
 
 
+def _chars(chars: list[str], most: int = 8) -> str:
+    """'😀' (U+1F600), 'ש' (U+05E9) and 3 more."""
+    named = [f"'{ch}' (U+{ord(ch):04X})" for ch in chars[:most]]
+    more = f" and {len(chars) - most} more" if len(chars) > most else ""
+    return (", ".join(named[:-1]) + " and " + named[-1] if len(named) > 1 and not more else ", ".join(named)) + more
+
+
 def _words(text: str) -> int:
     return len([w for w in text.replace("**", "").split() if any(ch.isalnum() for ch in w)])
+
+
+def _plain(text) -> str:
+    return " ".join(str(text).replace("**", "").split())
+
+
+def _on_screen(t0: float, t1: float, spans: list[tuple[float, float]], slack: float) -> float:
+    """How long the same words stay on screen around [t0, t1], joining the spans of layers that hand over to
+    each other within `slack` seconds."""
+    grown = True
+    while grown:
+        grown = False
+        for s0, s1 in spans:
+            if s0 <= t1 + slack and s1 >= t0 - slack and (s0 < t0 or s1 > t1):
+                t0, t1, grown = min(t0, s0), max(t1, s1), True
+    return t1 - t0
 
 
 def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
@@ -179,12 +253,22 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
                           "fix": "a key in the scene probably has the wrong type of value (a list for an object, …)"}])
     scene.check_expressions()
     W, H = scene.w, scene.h
+    odd = []
+    if W % 2 or H % 2:
+        # 4:2:0 video needs even sizes: the renderer drops the last column or row rather than invent one.
+        odd = [{"level": "info", "code": "odd-size", "layer": None, "from": 0, "to": round(scene.duration, 2),
+                "message": f"the canvas is {W}x{H}; .mp4, .webm and .gif need an even width and height, so they come "
+                           f"out {W - W % 2}x{H - H % 2}, without the last {'column' if W % 2 else 'row'}"
+                           f"{' and row' if W % 2 and H % 2 else ''}. PNG frames, stills and .mov keep {W}x{H}",
+                "fix": f"make canvas w and h even, e.g. {W + W % 2}x{H + H % 2}"}]
     pool = ThreadPoolExecutor(1)
     heard = pool.submit(_heard, scene)  # the mix renders and is measured while the frames are checked
     pool.shutdown(wait=False)
     r = Renderer(scene, track=True, scale=1.0)
     found: dict[tuple, dict] = {}
     off: dict[str, list] = {}  # media layer (or its sequence) id -> (time, box, share off, layer) when mostly off
+    shown: dict[str, int] = {}  # other layer id -> samples it is visible at
+    gone: dict[str, list] = {}  # other layer id -> times it is visible but entirely off the canvas
 
     def add(level, code, lid, T, msg, fix="", until=None):
         key = (code, lid)
@@ -253,8 +337,9 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
                     seq = layer.parent if layer.parent is not None and layer.parent.raw.get("span") else None
                     off.setdefault(seq.id if seq else lid, []).append((T, b["rect"], 1 - seen / area, layer))
             elif b["type"] != "group" and not allow:
+                shown[lid] = shown.get(lid, 0) + 1
                 if rr < 0 or bb < 0 or l > W or t > H:
-                    add("info", "offscreen", lid, T, "layer is visible but entirely off canvas", "check x/y")
+                    gone.setdefault(lid, []).append(T)
         for i in range(len(texts)):
             for j in range(i + 1, len(texts)):
                 a, b2 = texts[i][1]["rect"], texts[j][1]["rect"]
@@ -265,6 +350,11 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
                     if ix * iy / area > 0.15:
                         add("warning", "text-overlap", f"{texts[i][0]}+{texts[j][0]}", T,
                             "two text layers overlap", "offset one of them or separate them in time")
+    for lid, ts in gone.items():
+        # A shape that sweeps across the canvas starts or ends off it: note one that is off whenever it is on, or
+        # for MEDIA_OFF_FOR seconds.
+        if len(ts) == shown[lid] or len(ts) * step >= MEDIA_OFF_FOR:
+            add("info", "offscreen", lid, ts[0], "layer is visible but entirely off canvas", "check x/y", until=ts[-1])
     for lid, seen in off.items():
         if len({s[0] for s in seen}) * step < MEDIA_OFF_FOR:  # frames, once each where a sequence's clips overlap
             continue
@@ -276,21 +366,31 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
                "move it inward, or set allowOffscreen if it is meant to be cut off")
         add("warning", "media-offscreen", lid, T, f"{ty} box {rect} is {share:.0%} off the {W}x{H} canvas", fix,
             until=seen[-1][0])
-    # Contrast: render the frame without the text layer and its successors, compare luminance under its box.
+    # Text under a later layer, and contrast: render the frame without the text layer and its successors, compare
+    # luminance under its box.
     for layer in scene.all_layers():
         if layer.type not in ("text", "counter"):
             continue
         T = min(layer.t_out - 1e-3, layer.t_in + min(layer.dur * 0.6, 1.5))
         r.draw(T)
-        b = r.boxes.get(layer.id)
-        if not b or b["alpha"] < 0.5 or not b.get("fill") or layer.raw.get("box"):
+        boxes = r.boxes  # draw() makes a new dict each time
+        b = boxes.get(layer.id)
+        if not b or b["alpha"] < 0.5:
             continue
-        r.draw(T, stop_at=layer.id)
-        buf = np.empty((r.h, r.w, 4), np.uint8)
-        r.surface.readPixels(r.info, buf, r.w * 4)
         l, t, rr, bb = (int(max(0, v)) for v in b["rect"])
         rr, bb = min(r.w, rr), min(r.h, bb)
         if rr - l < 2 or bb - t < 2:
+            continue
+        full = _pixels(r)
+        r.draw(T, stop_at=layer.id)
+        buf = _pixels(r)
+        over = _over(boxes, layer.id, b["rect"])
+        if over and _covered(r, layer, T, (slice(t, bb), slice(l, rr)), full, buf):
+            add("warning", "text-hidden", layer.id, T, f"text is covered by '{over}', a later layer drawn on top of "
+                f"it: none of it shows at {T:.2f}s",
+                f"move '{layer.id}' after '{over}' in the layer list (later layers draw on top), or move one of them")
+            continue
+        if not b.get("fill") or layer.raw.get("box"):
             continue
         patch = buf[t:bb, l:rr, :3].reshape(-1, 3).astype(np.float32) / 255
         lin = np.where(patch <= 0.04045, patch / 12.92, ((patch + 0.055) / 1.055) ** 2.4)
@@ -303,14 +403,47 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
                 + (f"; it overlaps '{under}'" if under else ""),
                 f"move it clear of '{under}', or add a box or a shadow" if under
                 else "add a box, a shadow, or change the colour")
-    # Reading time.
+    # Characters that cannot be drawn as written.
+    for layer in scene.all_layers():
+        if not (layer.type in ("text", "counter", "captions") or layer.type == "model" and layer.raw.get("shape") == "text"):
+            continue
+        missing, flat = r.undrawable(layer)
+        if missing:
+            them = "it" if len(missing) == 1 else "them"
+            add("warning", "missing-glyph", layer.id, layer.t_in,
+                f"no installed font has {_chars(missing)}, so "
+                + ("it draws as an empty box" if len(missing) == 1 else "they draw as empty boxes"),
+                f"install a font that has {them} and name it in \"font\", or take {them} out", until=layer.t_out)
+        if flat:
+            add("warning", "unshaped-3d-text", layer.id, layer.t_in,
+                f"3D text draws each character on its own, so {_chars(flat)} "
+                f"{'comes' if len(flat) == 1 else 'come'} out unjoined, in the wrong order or with misplaced marks",
+                "use a text layer for right-to-left text, accents typed as separate marks and emoji sequences",
+                until=layer.t_out)
+        text = str(layer.raw.get("text", ""))
+        spaced = layer.raw.get("letterSpacing") not in (None, 0)
+        if layer.type == "text" and (layer.raw.get("split") == "chars" or spaced) and joining(text):
+            add("warning", "unjoined-letters", layer.id, layer.t_in,
+                f"{'split chars' if layer.raw.get('split') == 'chars' else 'letterSpacing'} draws each letter on its "
+                "own, so the Arabic-script letters of this text do not join",
+                "use split words or lines, and no letterSpacing, for Arabic-script text", until=layer.t_out)
+    # Reading time: about 0.4 s to find the text and 0.3 s a word; one or two words need FLASH. Durations are whole
+    # frames, so a layer within half a frame of the need passes (4 words for 1.6 s were flagged for 12 ms).
+    # A text that takes over from the same words (a chip's highlighted state after its plain one) counts the time
+    # the words were already on screen: site/demos/voices.json's "[laughs]" chip was flagged as a 0.34 s flash.
+    shown: dict[str, list[tuple[float, float]]] = {}
+    for layer in scene.all_layers():
+        if layer.type == "text":
+            shown.setdefault(_plain(layer.raw.get("text", "")), []).append((layer.t_in, layer.t_out))
     for layer in scene.all_layers():
         if layer.type == "text":
             words = _words(str(layer.raw.get("text", "")))
-            need = 0.4 + words / 3.3
-            if words >= 3 and layer.dur < need:
+            need = 0.4 + 0.3 * words if words >= 3 else FLASH
+            on = _on_screen(layer.t_in, layer.t_out, shown[_plain(layer.raw.get("text", ""))], 0.5 / scene.fps)
+            if words and on + 0.5 / scene.fps < need:
                 add("warning", "read-time", layer.id, layer.t_in,
-                    f"{words} words on screen for {layer.dur:.2f}s; viewers need ~{need:.1f}s", "extend dur or cut words",
+                    f"{words} word{'s' if words > 1 else ''} on screen for {on:.2f}s; viewers need ~{need:.1f}s"
+                    + ("" if words >= 3 else ": shorter is a flash nobody reads"), "extend dur or cut words",
                     until=layer.t_out)
         if layer.type == "captions" and not layer.raw.get("voice"):  # a voice's captions keep the pace it speaks at
             for s0, s1, txt, *_ in layer.raw.get("cues", []):
@@ -322,7 +455,7 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
                     break
     sound = heard.result()
     scene.close()
-    return _result(scene.issues + list(found.values()) + sound, duration=scene.duration)
+    return _result(scene.issues + odd + list(found.values()) + sound, duration=scene.duration)
 
 
 def _heard(scene: Scene) -> list[dict]:

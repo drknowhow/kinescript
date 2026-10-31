@@ -115,6 +115,7 @@ def _material(get) -> tuple:
 
 def _text_path(r, num, raw) -> tuple[skia.Path, float]:
     """Outline of the text, centred on the origin (lines on their middle, capitals on theirs), and its size."""
+    from .render import _covers, _fallback, _ignorable  # render imports this module
     size = float(num("size", 120))
     fam = raw.get("font") or r.s.theme.get("font")
     font = skia.Font(r._typeface(fam, int(num("weight", 600)), bool(raw.get("italic"))), size)
@@ -123,10 +124,27 @@ def _text_path(r, num, raw) -> tuple[skia.Path, float]:
     path = skia.Path()
     for i, line in enumerate(lines):
         glyphs = font.textToGlyphs(line)
-        xs = np.array(font.getXPos(glyphs)) + ls * np.arange(len(glyphs))
-        width = font.measureText(line) + ls * max(0, len(glyphs) - 1)
-        for gid, x in zip(glyphs, xs):
-            gp = font.getPath(gid)
+        if all(glyphs):
+            fonts = [font] * len(glyphs)
+            xs = np.array(font.getXPos(glyphs)) + ls * np.arange(len(glyphs))
+            width = font.measureText(line) + ls * max(0, len(glyphs) - 1)
+        else:  # a letter the font lacks comes from the system font that has it (CJK, emoji), unshaped
+            fonts, glyphs, adv = [], [], []
+            for ch in line:
+                if _ignorable(ch):
+                    continue
+                f = font
+                if not _covers(font.getTypeface(), ord(ch)):
+                    fb = _fallback(font.getTypeface().fontStyle(), ord(ch))
+                    f = skia.Font(fb, size) if fb is not None else font
+                gid = f.unicharToGlyph(ord(ch))
+                fonts.append(f)
+                glyphs.append(gid)
+                adv.append(f.getWidths([gid])[0])
+            xs = np.concatenate([[0.0], np.cumsum(adv)[:-1]]) + ls * np.arange(len(glyphs)) if adv else np.zeros(0)
+            width = float(sum(adv)) + ls * max(0, len(glyphs) - 1)
+        for f, gid, x in zip(fonts, glyphs, xs):
+            gp = f.getPath(gid)
             if gp is not None:
                 path.addPath(gp, float(x) - width / 2, i * lh)
     path.offset(0, font.getMetrics().fCapHeight / 2 - (len(lines) - 1) * lh / 2)
