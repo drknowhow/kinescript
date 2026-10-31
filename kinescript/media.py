@@ -268,7 +268,8 @@ class VideoSource:
             self.w, self.h = max(2, self.w - self.w % 2), max(2, self.h - self.h % 2)
             self.yuv_info = skia.YUVAInfo((self.w, self.h), skia.YUVAInfo.kY_U_V, skia.YUVAInfo.k420,
                                           yuv_matrix(self.info))
-        self.proc: subprocess.Popen | None = None
+        # While the pipe is open, a list that holds the ffmpeg process once the reader thread has started it.
+        self.proc: list[subprocess.Popen] | None = None
         self.t0 = 0.0
         self.index = -1
         self.frame: skia.Image | None = None
@@ -281,7 +282,9 @@ class VideoSource:
         # rounds up. Before, the grid started at the first frame decoded (PTS-STARTPTS), up to half a source frame
         # from t0, and fps rounded to the nearest output frame: a 30 fps clip at 24 fps showed frame 8 at 0.25 s
         # played from 0 and frame 7 opened there. eof_action=pass keeps a last frame that ends between output frames.
-        off = (self.info["start"] + self.t0 + self.near) * 1e9
+        # float(): a numpy time (a frame number from np.linspace) printed as np.float64(...), which ffmpeg cannot
+        # parse; the pipe gave no frame, and the clip showed its last frame, found by decoding the file to its end.
+        off = float((self.info["start"] + self.t0 + self.near) * 1e9)
         timing = (f"settb=1/1000000000,setpts=(PTS-({off!r}))/{self.speed!r},"
                   f"fps={self.fps}:start_time=0:round=up:eof_action=pass")
         if self.ctx is not None:  # cover or stretch, kept in YUV and limited range
@@ -310,19 +313,27 @@ class VideoSource:
         dec = ["-c:v", self.decoder] if self.decoder else []
         cmd = [FFMPEG, "-v", "error", *dec, "-copyts", "-ss", f"{ss:.6f}", "-i", self.src, "-an", "-vf", self._vf(),
                "-f", "rawvideo", "-pix_fmt", "yuv420p" if self.ctx is not None else "rgba", "-"]
-        self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                     bufsize=self.nbytes * 2, creationflags=_NOWIN)
         self.index = -1
-        # A reader thread keeps up to PREFETCH decoded frames waiting, so ffmpeg decodes the next
+        # A reader thread starts ffmpeg and keeps up to PREFETCH decoded frames waiting, so ffmpeg decodes the next
         # frames while this process draws the current one instead of both taking turns.
         self.queue = q = queue.Queue(maxsize=self.PREFETCH)
-        self.stopping = stop = threading.Event()
-        threading.Thread(target=self._pump, args=(self.proc, q, stop, self.nbytes), daemon=True).start()
+        self.stopping, self.reading = stop, reading = threading.Event(), threading.Event()
+        self.proc = started = []
+        threading.Thread(target=self._pump, args=(cmd, self.nbytes, q, stop, reading, started), daemon=True).start()
 
     PREFETCH = 6
 
     @staticmethod
-    def _pump(proc, q, stop, nbytes):
+    def _pump(cmd, nbytes, q, stop, reading, started):
+        # Started and ended here, not in _open() and close(): on Windows ffmpeg takes ~6 ms to start and ~9 ms to go
+        # once killed, which held up the frame that opened or closed a clip.
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=nbytes * 2,
+                                    creationflags=_NOWIN)
+        except OSError as e:  # raised where the frame is read (_next)
+            q.put(e)
+            return
+        started.append(proc)
         try:
             while not stop.is_set():
                 buf = proc.stdout.read(nbytes)
@@ -335,14 +346,25 @@ class VideoSource:
                         continue
                 if item is None:
                     return
-        except (OSError, ValueError):  # the pipe was closed by close()
+                # A pipe opened before its clip shows (prime) holds one frame until the clip reads it, not PREFETCH:
+                # cut lists open a few ahead, each up to 50 MB of 1080p RGBA.
+                while not (stop.is_set() or reading.wait(0.1)):
+                    pass
+        except OSError:  # killed by close()
             return
+        finally:
+            proc.kill()
+            proc.stdout.close()  # type: ignore[union-attr]
+            proc.wait()
 
     def _next(self) -> bytes | None:
         """The next frame's bytes, None at the end of the stream."""
+        self.reading.set()
         buf = self.queue.get()
-        if buf is None:
-            self.queue.put(None)  # stay at end of stream for later calls
+        if buf is None or isinstance(buf, OSError):
+            self.queue.put(buf)  # stay at end of stream for later calls
+            if buf is not None:
+                raise buf
         return buf
 
     def _read(self) -> bool:
@@ -354,8 +376,15 @@ class VideoSource:
         return True
 
     def _show(self, buf: bytes):
+        # The image is made when at() returns it: a frame read past on the way to a later one (a contact sheet,
+        # a render that skips frames) cost an upload of its own.
+        self._buf, self.frame = buf, None
+
+    def _image(self):
+        buf = self._buf
+        if self.frame is not None or buf is None:
+            return
         # No copy: the image (or the planes) wrap the bytes object, which self._buf keeps alive.
-        self._buf = buf
         if self.ctx is not None:
             w, h, b = self.w, self.h, np.frombuffer(buf, np.uint8)
             planes = (b[:w * h].reshape(h, w), b[w * h:w * h * 5 // 4].reshape(h // 2, w // 2),
@@ -368,26 +397,40 @@ class VideoSource:
             arr = np.frombuffer(buf, np.uint8).reshape(self.h, self.w, 4)
             self.frame = skia.Image.fromarray(arr, colorType=skia.kRGBA_8888_ColorType, copy=False)
 
-    def at(self, src_t: float) -> skia.Image | None:
-        """Frame showing source time src_t (seconds into the file). Past the last frame, the last frame: what a
-        clip played up to that time holds once its picture runs out."""
+    def _when(self, src_t: float) -> float:
+        """The source time at() shows for src_t: inside the file, and not past a last frame already found."""
         dur = self.info["duration"]
         src_t = max(0.0, min(src_t, dur) if dur else src_t)
-        if self.end is not None:
-            src_t = min(src_t, self.end)
+        return src_t if self.end is None else min(src_t, self.end)
+
+    def _opens(self, src_t: float) -> bool:
+        """Whether showing src_t (from _when) needs the pipe opened there."""
         k = (src_t - self.t0) / self.speed * self.fps
         want = round(k)
         # A time between the pipe's output frames (a held last frame, a loop starting over) opens at that time:
         # read on to the output frame next to it, it would show that frame's picture instead of its own.
-        if (self.proc is None or want < self.index or want > self.index + int(self.fps * 2)
-                or abs(k - want) > 1e-6):
+        return (self.proc is None or want < self.index or want > self.index + int(self.fps * 2)
+                or abs(k - want) > 1e-6)
+
+    def prime(self, src_t: float):
+        """Open the pipe where at(src_t) would, without waiting for a frame. ffmpeg takes about 0.1 s to give a
+        clip's first frame; a decoder opened early starts while other work goes on (Renderer._prime)."""
+        src_t = self._when(src_t)
+        if self._opens(src_t):
             self._open(src_t)
-            if not self._read():
-                self._last(src_t)
-            return self.frame
+
+    def at(self, src_t: float) -> skia.Image | None:
+        """Frame showing source time src_t (seconds into the file). Past the last frame, the last frame: what a
+        clip played up to that time holds once its picture runs out."""
+        self.prime(src_t)
+        src_t = self._when(src_t)
+        want = round((src_t - self.t0) / self.speed * self.fps)
         while self.index < want:
             if not self._read():
+                if self.index < 0:  # opened at src_t, here or by prime(), and there is no picture there
+                    self._last(src_t)
                 break
+        self._image()
         return self.frame
 
     def _last(self, t: float):
@@ -409,14 +452,13 @@ class VideoSource:
                 return
 
     def close(self):
-        if self.proc:
-            self.stopping.set()
-            try:
-                self.proc.stdout.close()  # type: ignore[union-attr]
-                self.proc.kill()
-                self.proc.wait(timeout=2)
-            except (OSError, subprocess.TimeoutExpired):
-                pass
+        if self.proc is not None:
+            self.stopping.set()  # the reader stops after its next read, which the kill ends at once
+            for p in self.proc:
+                try:
+                    p.kill()
+                except OSError:
+                    pass
             self.proc = None
             # The prefetched frames and the last one shown are 3-8 MB each at 1080p; at() reopens and refills.
             self.queue = self.frame = self._buf = None

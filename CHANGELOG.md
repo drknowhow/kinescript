@@ -9,6 +9,19 @@
   instead of 2.9) and `examples/hello.json` at 186 instead of 161; on its default 4 workers long-120s renders at
   454 fps instead of 431, where x264 sets the pace. In `bench/stages.py` a frame of hello takes 2.0 ms instead of
   2.8 and one of the promo 2.3 instead of 3.0. The frames are the same bytes, and so are the files.
+- Footage waits less for ffmpeg. A clip's decoder takes about 0.12 s to give its first frame, and each clip waited
+  for its own as it first drew: the nine clips on the video-grid stress scene's first frame waited 1 s, one after
+  another, and the 60 cuts of sequence-60 6.5 s of an 11 s render. The clips a frame shows now open together before
+  any is waited on, and a render drawing forward opens each clip up to 1 s before it comes on, where it will first
+  read. ffmpeg also starts and is reaped in the decoder's reader thread, which took 6 and 9 ms off the frames that
+  opened and closed a clip, and a clip makes an image (on the GPU, an upload) only of the frame it shows, not of each
+  frame it reads past. On the GPU, sequence-60 renders at 123 fps instead of 65 and video-grid at 164 instead of 87;
+  `examples/edit.json` in `bench/stages.py` draws in 6.8 ms at the median and 11.3 at p95, from 8.6 and 15.9. Frames
+  are the same. sequence-60 peaks at 173 MB instead of 159: the decoders opened ahead hold a frame each.
+- A frame number given as a numpy integer, as `bench/stages.py` gives them, shows a clip's right frame again. Its
+  source time went into ffmpeg's filter as `np.float64(...)`, which ffmpeg cannot read, so a clip opened mid-way
+  showed its last frame, found by decoding the file to its end on every frame: the edit stage in `bench/stages.py`
+  drew a frame in 385 ms at the median and 574 at p95, and now in 8.6 and 15.9.
 - Model layers draw in two thirds of the time, with the same pixels. Of the 2.5 ms a model took each frame,
   1.5 ms went on making two `skia.Point`s per vertex, handing them and the indices to Skia, and freeing them;
   Skia now makes the points while reading back a path numpy writes, indices go as a uint16 memoryview, and a

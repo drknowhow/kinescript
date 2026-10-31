@@ -3,6 +3,7 @@ files cut short, and what `kine probe` says about media, models and scenes. The 
 import json
 import math
 import subprocess
+import time
 
 import numpy as np
 import pytest
@@ -127,6 +128,105 @@ def test_a_resampled_clip_shows_the_same_frame_however_the_render_reaches_it(idx
                       for n in range(len(played))]
     for n in range(1, len(played), 3):
         assert _cold(spec, n) == played[n], n
+
+
+def test_a_numpy_frame_number_shows_the_same_frame(idx):
+    # bench/stages.py draws frame numbers from np.linspace. The source time came out a numpy float, written into
+    # ffmpeg's filter as np.float64(...): the pipe gave no frame, so a clip opened mid-way showed its last frame,
+    # found by decoding the file to its end every frame (the edit stage drew in 390 ms instead of 8).
+    s = k.Scene(_spec(idx))
+    r = Renderer(s, backend="cpu")
+    got = [_shown(r.frame(n)) for n in np.array([17, 23, 40])]
+    s.close()
+    assert got == [17, 23, 40]
+
+
+def test_reading_on_to_a_frame_makes_an_image_of_that_frame_only(idx, monkeypatch):
+    # A render that skips frames (bench/stages.py, contact sheets) reads past them; each was made an image, on the GPU
+    # an upload of its planes, and dropped: 2.4 ms of the edit stage's 8.4 at the median.
+    made, reads = [], []
+    image, read = media.VideoSource._image, media.VideoSource._read
+    monkeypatch.setattr(media.VideoSource, "_image", lambda self: made.append(self.frame is None) or image(self))
+    monkeypatch.setattr(media.VideoSource, "_read", lambda self: reads.append(1) or read(self))
+    v = media.VideoSource(idx, 128, 16, 30)
+    assert _shown(v.at(0.0).toarray()) == 0 and _shown(v.at(40 / 30).toarray()) == 40
+    v.close()
+    assert len(reads) == 41 and made == [True, True]
+
+
+def _cuts(src, trims, duration=None):
+    canvas = {"w": 128, "h": 16, "fps": 30, "bg": "#000000"}
+    if duration:
+        canvas["duration"] = duration
+    return {"canvas": canvas, "layers": [{"id": "cut", "type": "sequence",
+                                          "clips": [{"src": src, "trim": tr} for tr in trims]}]}
+
+
+def test_a_cut_list_opens_each_clip_before_its_first_frame(idx, monkeypatch):
+    # ffmpeg takes ~0.12 s to a clip's first frame, and a render waited that long at every cut (sequence-60: 6.5 s of
+    # 11). Drawing forward, a clip's decoder now opens up to render.AHEAD before it comes on, where it will first read;
+    # the frames are the ones a decoder opened at the cut, or cold, shows.
+    spec = _cuts(idx, [[1.0, 1.5], [0.2, 0.7], [1.4, 1.9]])
+    opened = []
+    real = media.VideoSource._open
+    monkeypatch.setattr(media.VideoSource, "_open", lambda self, t: opened.append(round(t, 3)) or real(self, t))
+    s = k.Scene(spec)
+    r = Renderer(s, backend="cpu")
+    second = s.by_id["cut-2"]
+    shown, procs = [], []
+    for n in range(s.frames):
+        shown.append(_shown(r.frame(n)))
+        if n == 14:  # the frame before cut-2 comes on: its decoder is open and has read nothing
+            assert second.video is None and second.ahead is not None
+            ahead = second.ahead[1]
+            assert ahead.proc is not None and ahead.index == -1 and ahead.t0 == pytest.approx(0.2)
+        if n == 15:
+            assert second.video is ahead and second.ahead is None  # the one opened ahead, not a second one
+        for L in s.all_layers():
+            if L.video is not None and L.video.proc is not None:
+                procs.extend(L.video.proc)
+    assert shown == list(range(30, 45)) + list(range(6, 21)) + list(range(42, 57))
+    assert opened == [1.0, 0.2, 1.4]  # one open a clip, each where the clip starts
+    assert [L.id for L in s.all_layers() if L.video is not None and L.video.proc is not None] == ["cut-3"]
+    assert all(L.ahead is None for L in s.all_layers())
+    s.close()
+    for n in (15, 16, 31):
+        assert _cold(spec, n) == shown[n], n
+    # Closing ends the ffmpeg processes, not only the pipes: their reader threads kill and reap them.
+    deadline = time.monotonic() + 5
+    while any(p.poll() is None for p in procs) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert procs and all(p.poll() is not None for p in procs)
+
+
+def test_the_clips_a_frame_shows_open_before_any_is_waited_on(idx, monkeypatch):
+    # Nine clips on video-grid's first frame each opened and waited for its first frame in turn: 1 s.
+    layers = [{"id": f"v{i}", "type": "video", "src": idx, "x": 64 * i, "y": 0, "anchor": "topleft", "w": 64, "h": 16,
+               "trim": [0.5 * i, 2]} for i in range(2)]
+    s = k.Scene({"canvas": {"w": 128, "h": 16, "fps": 30}, "layers": layers})
+    live = []
+    real = media.VideoSource._next
+
+    def counted(self):
+        decoders = [d for L in s.all_layers() for d in (L.video, L.ahead and L.ahead[1]) if d]
+        live.append(sum(d.proc is not None for d in decoders))
+        return real(self)
+
+    monkeypatch.setattr(media.VideoSource, "_next", counted)
+    Renderer(s, backend="cpu").frame(9)
+    s.close()
+    assert live[0] == 2
+
+
+def test_a_clip_opened_ahead_past_its_picture_holds_its_last_frame(tmp_path):
+    # Picture 2 s, sound 3 s: a clip trimmed to start at 2.5 s has no frame there. Opened ahead, its decoder gives no
+    # frame, and the clip shows the file's last one, as a decoder opened at the cut does.
+    longer = str(tmp_path / "longer.mp4")
+    _ff("-f", "lavfi", "-i", f"color=c=black:s=128x16:r=30:d=2,{INDEX}", "-f", "lavfi", "-i", "sine=d=3",
+        "-pix_fmt", "yuv420p", "-c:v", "libx264", "-qp", 0, longer)
+    spec = _cuts(longer, [[0.5, 1.0], [2.5, 3.0]])
+    assert _played(spec) == list(range(15, 30)) + [59] * 15
+    assert _cold(spec, 20) == 59
 
 
 def test_render_workers_split_a_resampled_clip_without_a_seam(idx, tmp_path):
