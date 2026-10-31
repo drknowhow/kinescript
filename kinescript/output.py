@@ -14,7 +14,7 @@ from pathlib import Path
 
 from . import audio as A
 from . import media
-from .render import Renderer, loop_end
+from .render import Renderer, frame_size, loop_end
 from .scene import Scene, load
 
 QUALITY = {  # crf, x264 preset
@@ -383,28 +383,77 @@ def _mux(video_in: list[str], audio, out: str, seconds: float):
         raise RuntimeError(f"audio mux failed: {res.stderr.strip()[:400]}")
 
 
+VIDEO = {".mp4": "mp4", ".mov": "mov", ".webm": "webm", ".gif": "gif"}
+IMAGE = (".png", ".jpg", ".jpeg")
+
+
+def out_path(scene: Scene, out, exts) -> Path:
+    """`out` as a Path, or ValueError unless it has one of `exts`, is not a folder, and is not a file the scene
+    reads. An unknown extension used to get an MP4 (or JPEG) under that name, a folder got the render's temp
+    name inside it, and a render to the scene's own footage replaced the footage."""
+    s = str(out if out is not None else "").strip()
+    if not s:
+        raise ValueError("no output file given")
+    p = Path(s)
+    if p.is_dir():
+        raise ValueError(f"{s} is a folder; give a file name such as {p / ('out' + exts[0])}")
+    if p.suffix.lower() not in exts:
+        raise ValueError(f"can't write {p.suffix or 'a file with no extension'}: use {', '.join(exts)}")
+    reads = {Path(f).resolve() for f in [L.src for L in scene.all_layers()] + [a.src for a in scene.audio] if f}
+    if p.resolve() in reads:
+        raise ValueError(f"{s} is a file this scene reads; writing there would overwrite it")
+    return p
+
+
+def _seconds(name: str, v) -> float | None:
+    if v is None:
+        return None
+    try:
+        t = float(v)
+    except (TypeError, ValueError):
+        t = math.nan
+    if not math.isfinite(t) or t < 0:
+        raise ValueError(f"{name} must be 0 or more seconds, got {v!r}")
+    return t
+
+
 def render(src, out: str, quality: str = "standard", workers: int | None = None, scale: float = 1.0,
            start: float | None = None, end: float | None = None, transparent: bool = False) -> dict:
     """Render a scene to a file. Format from the extension: .mp4, .mov (ProRes 4444 alpha), .webm (VP9 alpha),
     .gif, or a directory / pattern ending in .png for a frame sequence."""
+    if quality not in QUALITY:
+        raise ValueError(f"quality must be one of {', '.join(QUALITY)}, got {quality!r}")
+    if workers is not None and (isinstance(workers, bool) or not isinstance(workers, int) or workers < 0):
+        raise ValueError(f"workers must be a whole number, 1 or more (0 picks for you), got {workers!r}")
+    start, end = _seconds("from", start), _seconds("to", end)
     scene = load(src)
+    try:
+        frame_size(scene.w, scene.h, scale)
+        out = str(out if out is not None else "")
+        folder = out.endswith(("/", "\\"))  # a folder for a PNG sequence
+        out_p = Path(out) if folder else out_path(scene, out, (*VIDEO, ".png", *AUDIO_ONLY))
+    except ValueError:
+        scene.close()
+        raise
     spec, base = scene.spec, str(scene.base.resolve())  # warm workers keep the directory they started in
     fps = scene.fps
-    f0 = 0 if start is None else max(0, int(round(start * fps)))
+    f0 = 0 if start is None else int(round(start * fps))
     f1 = scene.frames if end is None else min(scene.frames, int(round(end * fps)))
     if f1 <= f0:
-        raise ValueError("nothing to render: end is before start")
-    out_p = Path(out)
+        scene.close()
+        raise ValueError(f"nothing to render: from {f0 / fps:g}s to {f1 / fps:g}s of a {scene.duration:g}s scene"
+                         if start is None or start < scene.duration else
+                         f"from {start:g}s is past the end of the scene ({scene.duration:g}s)")
     ext = out_p.suffix.lower()
     t0 = time.perf_counter()
-    if ext == ".png" or out.endswith(("/", "\\")):
+    if ext == ".png" or folder:
         return _render_pngs(scene, out_p, f0, f1, scale, transparent)
     if ext in AUDIO_ONLY:
         return _render_audio(scene, out_p, f0 / fps, f1 / fps, start is None and end is None, t0)
-    fmt = {".mov": "mov", ".webm": "webm", ".gif": "gif"}.get(ext, "mp4")
+    fmt = VIDEO[ext]
     if transparent and fmt in ("mp4", "gif"):
-        raise ValueError(f"{ext or 'this format'} keeps no alpha; render a transparent video to .mov or .webm, "
-                         "or frames to .png")
+        scene.close()
+        raise ValueError(f"{ext} keeps no alpha; render a transparent video to .mov or .webm, or frames to .png")
     transparent = transparent or fmt in ("mov", "webm") and spec.get("canvas", {}).get("bg") in (None, "transparent")
     if fmt == "gif":  # render no larger than the GIF will be (long side GIF_SIDE), not full size then shrink
         scale = min(scale, GIF_SIDE / max(scene.w, scene.h))
@@ -488,10 +537,25 @@ def _pool(n: int) -> ProcessPoolExecutor:
         if "ex" in _POOL and (_POOL["key"] != key or _POOL["size"] < n):
             _drop()
         if "ex" not in _POOL:
-            _POOL.update(ex=ProcessPoolExecutor(max_workers=n), key=key, size=n)
+            _POOL.update(ex=ProcessPoolExecutor(max_workers=n, initializer=_orphan_exit), key=key, size=n)
         _POOL["busy"] += 1
         _POOL["gen"] += 1
         return _POOL["ex"]
+
+
+def _orphan_exit():
+    """In a render worker: exit when the process that started it is gone. The warm pool's idle timer runs in that
+    process, so a killed MCP server left its workers running until someone killed them."""
+    import multiprocessing
+    from multiprocessing.connection import wait
+    parent = multiprocessing.parent_process()
+    if parent is None:
+        return
+
+    def watch():
+        wait([parent.sentinel])
+        os._exit(0)
+    threading.Thread(target=watch, daemon=True).start()
 
 
 def _rest(failed: bool):
@@ -581,36 +645,64 @@ def _render_audio(scene: Scene, out: Path, start: float, end: float, full: bool,
 
 
 def _render_pngs(scene: Scene, out: Path, f0: int, f1: int, scale: float, transparent: bool) -> dict:
-    import skia
     if transparent:
         scene.bg = None
     folder = out if out.suffix.lower() != ".png" else out.parent
     stem = "frame" if out.suffix.lower() != ".png" else out.stem
-    folder.mkdir(parents=True, exist_ok=True)
-    r = Renderer(scene, scale=scale)
+    try:  # a printf pattern such as seq_%04d.png numbers the files itself
+        stem % 0
+        name = stem.__mod__
+    except (TypeError, ValueError):
+        name = f"{stem}_{{:05d}}".format
     t0 = time.perf_counter()
-    for n in range(f0, f1):
-        r.frame(n)
-        r.snapshot().save(str(folder / f"{stem}_{n:05d}.png"), skia.kPNG)
-    scene.close()
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        r = Renderer(scene, scale=scale)
+        for n in range(f0, f1):
+            r.frame(n)
+            save_image(r.snapshot(), folder / f"{name(n)}.png")
+    finally:
+        scene.close()
     return {"out": str(folder), "frames": f1 - f0, "wall": round(time.perf_counter() - t0, 2)}
 
 
 def still(src, at, out: str, scale: float = 1.0) -> dict:
     """One frame to PNG/JPG. `at` is seconds, negative seconds from the end, or "end" (the last frame)."""
-    import skia
     scene = load(src)
+    try:
+        n = frame_at(scene, at)
+        p = out_path(scene, out, IMAGE)
+        r = Renderer(scene, scale=scale)
+        r.frame(n)
+        save_image(r.snapshot(), p)
+    finally:
+        scene.close()
+    return {"out": str(p), "frame": n, "at": round(n / scene.fps, 3), "w": r.w, "h": r.h}
+
+
+def save_image(img, path: Path):
+    """PNG or JPEG by the extension, parent folders made. Skia's own save returns None whether or not it wrote
+    the file, so a still into a folder that did not exist said ok and left nothing."""
+    import skia
+    data = img.encodeToData(skia.kPNG if path.suffix.lower() == ".png" else skia.kJPEG, 100)
+    if data is None:
+        raise RuntimeError(f"could not encode {path.name}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(bytes(data))
+
+
+def frame_at(scene: Scene, at) -> int:
+    """The frame `at` names: seconds, negative seconds from the end, or "end" (the last frame); clamped to the scene."""
     if str(at).strip().lower() == "end":
-        n = scene.frames - 1
-    else:
+        return scene.frames - 1
+    try:
         t = float(at)
-        n = int(round((scene.duration + t if t < 0 else t) * scene.fps))
-    n = max(0, min(scene.frames - 1, n))
-    r = Renderer(scene, scale=scale)
-    r.frame(n)
-    r.snapshot().save(out, skia.kPNG if out.lower().endswith(".png") else skia.kJPEG)
-    scene.close()
-    return {"out": out, "frame": n, "at": round(n / scene.fps, 3), "w": r.w, "h": r.h}
+    except (TypeError, ValueError):
+        t = math.nan
+    if not math.isfinite(t):
+        raise ValueError(f"at must be seconds, negative seconds from the end, or \"end\"; got {at!r}")
+    n = int(round((scene.duration + t if t < 0 else t) * scene.fps))
+    return max(0, min(scene.frames - 1, n))
 
 
 def dump_json(obj) -> str:

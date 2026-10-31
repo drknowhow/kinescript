@@ -57,6 +57,40 @@
   `trim` of `3` crashed the load and a negative start played the clip's sound early.
 - Media whose tags are not ASCII (a Cyrillic or Japanese title) probes on Windows, where ffprobe's output was
   read in the system code page. A temp folder with `'` in its path no longer breaks joining the workers' chunks.
+- `kine` writes UTF-8 when its output goes to a pipe or a file on Windows. A layer id or text in Chinese, Japanese
+  or emoji could not be written in the console's code page, so a render that had finished was reported as failed
+  (rc 2, a `'charmap'` error), and a name like `café` came out as a byte that is not UTF-8.
+- The MCP server reads its input as UTF-8 (a scene path or text with `é` arrived as `Ã©`) and keeps serving after
+  a line that is valid JSON but not a request, such as `123` or a batch, or an `initialize` with `"params": null`.
+  Each of those ended the server.
+- Bad arguments get an error in the JSON instead of a traceback or a wrong file:
+  - `--scale` must be above 0 and give a frame no larger than 16384 px a side (`0` made a 2x2 video, `100` failed
+    inside Skia).
+  - `--at`, `--from` and `--to` must be finite; `--from` and `--to` must not be negative (`--from -1` rendered
+    everything). `check --step` must be above 0 (`0` divided by zero).
+  - `look` takes `-n` and `--cols` of 1 or more and `--width` from 16 to 4096; `--cols` past the frame count is
+    cut to it (it made a sheet 1000 thumbnails wide). `look --at` reads times as `still` does: negative from the
+    end, `end` for the last frame, clamped to the scene.
+  - A scene path that is a folder or not UTF-8 text says so.
+- Output paths are checked before anything renders. `render`, `still` and `look` refuse an extension they cannot
+  write (`.mkv` got an MP4 inside, `.webp` a JPEG), a folder (a render left its temp name, `final.mp4`, inside
+  it), and a file the scene reads (a render to its own footage replaced it; `-o scene.json` replaced the scene).
+  `still` and `look` make missing folders; before, they said `ok` and wrote nothing. `look -o x.jpg` writes a
+  JPEG.
+- A PNG sequence named with a pattern, such as `-o frames/f_%04d.png`, numbers its files with it instead of
+  writing `f_%04d_00000.png`.
+- `still --at -1` names its file `<scene>_end-1s.png`. It was named like `--at 1`, so one overwrote the other.
+- `check` looks at every layer at least once. A layer shorter than `--step` (a 0.15 s flash of text) could fall
+  between two samples and go unchecked; it is now drawn at its middle.
+- `watch` keeps going when the scene file disappears for a moment or is locked while an editor saves it, and
+  Ctrl+C stops it without a traceback.
+- Over MCP, `kine_check` on a scene that fails to load returns its issues as `kine check` does, not a one-line
+  error. `kine_still` takes `"at": "end"`. `kine_probe` of a media file returns its duration, size and fps, as
+  the command does. A missing argument is named. `kine_render` reports `out` as a full path and rejects an unknown
+  `quality`. The temporary images behind `kine_look` and `kine_still` are deleted after they are sent.
+- Render workers kept warm by the MCP server exit when the server is killed. Before, they ran until someone
+  killed them.
+- `kine doctor` names ffmpeg or ffprobe when one is not on the PATH and exits 1. `kine new` makes missing folders.
 
 ## 1.3.1 (2026-10-31)
 

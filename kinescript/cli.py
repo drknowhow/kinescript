@@ -52,7 +52,7 @@ def main(argv=None) -> int:
     lk.add_argument("-n", "--count", type=int, default=12)
     lk.add_argument("--cols", type=int)
     lk.add_argument("--width", type=int, default=480, help="width of each thumbnail")
-    lk.add_argument("--at", type=float, nargs="*", help="explicit times instead of even spacing")
+    lk.add_argument("--at", nargs="*", help="explicit times instead of even spacing, read as still reads --at")
     lk.add_argument("--boxes", action="store_true", help="outline every layer with its id")
     lk.add_argument("--audio", action="store_true", help="draw the sound under the frames (a lane per role and the "
                     "mix, with levels, the duck and issues) and print its measurements")
@@ -86,9 +86,16 @@ def main(argv=None) -> int:
     sub.add_parser("doctor", help="report ffmpeg, GPU and font availability")
 
     a = ap.parse_args(argv)
+    # UTF-8 even into a Windows pipe: its default code page can't hold a CJK layer id, and the failed write after
+    # a render had succeeded was reported as the render failing.
+    for f in (sys.stdout, sys.stderr):
+        try:
+            f.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):  # replaced by something that is not a text stream
+            pass
     try:
         return _run(a)
-    except (ValueError, RuntimeError, FileNotFoundError) as e:
+    except (ValueError, RuntimeError, OSError) as e:
         _emit({"ok": False, "error": str(e)})
         return 2
 
@@ -107,6 +114,7 @@ def _run(a) -> int:
         p = Path(a.path)
         if p.exists():
             raise ValueError(f"{p} exists; pick another name")
+        p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(STARTER, indent=2), encoding="utf-8")
         _emit({"ok": True, "out": str(p)})
         return 0
@@ -118,11 +126,16 @@ def _run(a) -> int:
         from . import media
         from .render import gpu_context, Renderer
         from .scene import Scene
-        info = {"version": __version__, "ffmpeg": media.FFMPEG, "gpu": gpu_context() is not None}
+        import shutil
+        tools = {name: shutil.which(path) for name, path in (("ffmpeg", media.FFMPEG), ("ffprobe", media.FFPROBE))}
+        info = {"version": __version__, **tools, "gpu": gpu_context() is not None}
         r = Renderer(Scene({"canvas": {"w": 64, "h": 64}, "layers": [{"type": "text", "text": "kine"}]}))
         info["font"] = r._typeface(r.s.theme["font"], 600, False).getFamilyName()
+        missing = [name for name, path in tools.items() if not path]
+        if missing:
+            info["error"] = f"{' and '.join(missing)} not found on PATH; Kinescript needs both to read and write media"
         _emit(info)
-        return 0
+        return 1 if missing else 0
     if a.cmd == "render":
         from . import output
         from .output import render
@@ -132,8 +145,9 @@ def _run(a) -> int:
         return 0
     if a.cmd == "still":
         from .output import still
-        at = str(a.at)
-        out = a.out or _default_out(a.scene, f"_{at.lstrip('-')}{'s' if at != 'end' else ''}.png")
+        at = str(a.at).strip()  # --at -1 is 1 s before the end: its own name, not the same file as --at 1
+        tag = "end" if at.lower() == "end" else f"end{at}s" if at.startswith("-") else f"{at}s"
+        out = a.out or _default_out(a.scene, f"_{tag}.png")
         _emit(dict(ok=True, **still(a.scene, at, out, a.scale)))
         return 0
     if a.cmd == "look":
@@ -161,19 +175,30 @@ def _run(a) -> int:
     if a.cmd == "watch":
         from .verify import contact_sheet
         p = Path(a.scene)
+        if not p.is_file():
+            raise ValueError(f"no scene file at {p}")
         last = 0.0
         out = _default_out(a.scene, "_sheet.png")
         print(f"watching {p} -> {out} (Ctrl+C to stop)", file=sys.stderr)
-        while True:
-            m = p.stat().st_mtime
-            if m != last:
-                last = m
+        try:
+            while True:
                 try:
-                    contact_sheet(a.scene, out, a.count)
-                    print(f"{time.strftime('%H:%M:%S')} updated", file=sys.stderr)
-                except (ValueError, RuntimeError) as e:
-                    print(f"{time.strftime('%H:%M:%S')} error: {e}", file=sys.stderr)
-            time.sleep(0.5)
+                    m = p.stat().st_mtime
+                except OSError:  # gone for a moment: some editors save by deleting and renaming
+                    m = last
+                if m != last:
+                    last = m
+                    try:
+                        contact_sheet(a.scene, out, a.count)
+                        print(f"{time.strftime('%H:%M:%S')} updated", file=sys.stderr)
+                    except PermissionError:  # held open by the editor or a virus scanner: read it again
+                        last = 0.0
+                    except (ValueError, RuntimeError, OSError) as e:
+                        print(f"{time.strftime('%H:%M:%S')} error: {e}", file=sys.stderr)
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            print("stopped", file=sys.stderr)
+            return 0
     return 1
 
 
