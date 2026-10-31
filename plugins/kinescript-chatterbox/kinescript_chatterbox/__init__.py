@@ -14,7 +14,7 @@ from pathlib import Path
 
 from .align import TAG, align
 
-MODELS = ("turbo", "standard")  # turbo acts on tags; standard takes exaggeration and cfg_weight instead
+MODELS = ("turbo", "standard")  # turbo takes tags (acts some); standard takes exaggeration and cfg_weight instead
 TURBO_TAGS: set[str] = set()  # filled from Turbo's tokenizer when it loads
 OPTIONS = {"turbo": {"temperature", "top_p", "top_k", "repetition_penalty"},
            "standard": {"exaggeration", "cfg_weight", "temperature", "min_p", "top_p", "repetition_penalty"}}
