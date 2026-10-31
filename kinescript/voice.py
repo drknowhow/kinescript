@@ -5,13 +5,20 @@ A sound with text is spoken by a backend:
     {"id": "vo1", "role": "voice", "text": "Write a scene. [[check]]Check it.", "speaker": "af_heart"}
 
 writes voice/vo1.wav (or its src) and voice/vo1.words.json. [[name]] gives the next word that id, so a cue can
-say "vo1:check" whatever the word is. A sound is spoken again only when its text, speaker or rate changed since
-its file was made (or with force); `kine check` warns when they changed and the file was not remade.
+say "vo1:check" whatever the word is. A tag such as [laughs] or [whispers] tells a backend that acts on tags how
+to say what follows; it is not a word, and other backends never see it. A sound is spoken again only when its text,
+speaker, rate, backend or options changed since its file was made (or with force); `kine check` warns when they
+changed and the file was not remade.
 
 A backend is a function registered under the entry-point group "kinescript.voice" (kinescript-kokoro is one) that
 takes {"text", "speaker", "rate", "out"}, writes a WAV to out, and returns {"words": [{"word", "start", "end"}],
-"speaker", "version", "seconds"} (seconds, the file's length, is optional). KINE_VOICE_CMD names a command instead, for a backend in another Python: it reads a JSON
-list of those requests on stdin and prints the list of results. Scene text never reaches a shell.
+"speaker", "version", "seconds"} (seconds, the file's length, is optional). The request also carries "tagged" (the
+text with its tags), "options" (the sound's options, as given) and "base" (the scene's folder, for files the options
+or speaker name). A backend that acts on tags returns "tags": true, anything it could not do in "ignored", and
+words it could not time in "note".
+A sound picks its backend with "backend"; KINE_VOICE_CMD_<NAME> runs that backend in another Python, and
+KINE_VOICE_CMD runs the default one (or the backend whose module it runs, python -m kinescript_<name>). A command
+reads a JSON list of those requests on stdin and prints the list of results. Scene text never reaches a shell.
 """
 from __future__ import annotations
 
@@ -29,6 +36,8 @@ from . import words as W
 GROUP = "kinescript.voice"
 KOKORO = "kinescript-kokoro"
 MARK = re.compile(r"\[\[\s*(\w+)\s*\]\]")
+# [laughs], [clears throat]: in single brackets, and neither a mark ([[name]]) nor a pronunciation ([word](/ph/)).
+TAG = re.compile(r"(?<!\[)\[(?!\[)[^\[\]()]+\](?![\](])")
 
 
 def default_src(sid: str) -> str:
@@ -36,17 +45,29 @@ def default_src(sid: str) -> str:
 
 
 def fingerprint(a: dict) -> str:
-    """What the file was made from: text, speaker and rate. A change in any means it must be spoken again."""
+    """What the file was made from: text, speaker, rate, and the backend and options when the sound names them.
+    A change in any means it must be spoken again."""
     spec = {"text": a.get("text"), "speaker": a.get("speaker"), "rate": a.get("rate", 1)}
+    spec.update({k: a[k] for k in ("backend", "options") if a.get(k)})  # absent: the same hash as before they existed
     return hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:16]
 
 
+def tags(text: str) -> list[str]:
+    return TAG.findall(text)
+
+
+def untag(text: str) -> str:
+    """The text without its tags: what a backend that does not act on tags says, and the words marks count."""
+    return re.sub(r"\s+", " ", TAG.sub("", text)).strip()
+
+
 def split_marks(text: str) -> tuple[str, dict[int, str]]:
-    """'Go [[x]]now' -> ('Go now', {1: 'x'}): the text to speak, and the word index each mark names."""
+    """'Go [[x]]now' -> ('Go now', {1: 'x'}): the text to speak, and the word index each mark names. Tags stay in
+    the text and are not counted as words."""
     out, marks = [], {}
     for k, part in enumerate(MARK.split(text)):
         if k % 2:
-            n = len(" ".join(out).split())
+            n = len(untag(" ".join(out)).split())
             if n in marks:
                 raise ValueError(f"two marks, [[{marks[n]}]] and [[{part}]], name the same word")
             marks[n] = part
@@ -124,29 +145,45 @@ def backends() -> dict:
     return {e.name: e for e in entry_points(group=GROUP)}
 
 
-def _command() -> list[str] | None:
-    cmd = os.environ.get("KINE_VOICE_CMD", "").strip()
-    if not cmd:
-        return None
+def _argv(cmd: str) -> list[str]:
     if cmd.startswith("["):
         return [str(x) for x in json.loads(cmd)]
     return [t.strip('"') for t in shlex.split(cmd, posix=os.name != "nt")]
 
 
+def _env_name(name: str) -> str:
+    return "KINE_VOICE_CMD_" + re.sub(r"\W", "_", name).upper()
+
+
+def _command(name: str | None = None) -> tuple[list[str], str] | None:
+    """The command that runs backend `name` in another Python, and the variable it came from: KINE_VOICE_CMD_<NAME>,
+    else KINE_VOICE_CMD when no backend is named or it runs that backend's module (-m kinescript_<name>)."""
+    own = os.environ.get(_env_name(name), "").strip() if name else ""
+    if own:
+        return _argv(own), _env_name(name)
+    cmd = os.environ.get("KINE_VOICE_CMD", "").strip()
+    if cmd and (not name or f"kinescript_{name}" in _argv(cmd)):
+        return _argv(cmd), "KINE_VOICE_CMD"
+    return None
+
+
 def _speaker(name: str | None):
     """The function that speaks a list of requests, and its name."""
-    cmd = _command()
-    if cmd and not name:
-        def run(reqs):
-            res = subprocess.run(cmd, input=json.dumps(reqs), capture_output=True, text=True, encoding="utf-8")
-            if res.returncode:
-                raise RuntimeError(f"KINE_VOICE_CMD failed ({res.returncode}): {res.stderr.strip()[-600:]}")
-            return json.loads(res.stdout)
-        return run, Path(cmd[-1]).name
     found = backends()
+    cmd = _command(name)
+    if cmd and (not name or name not in found or cmd[1] != "KINE_VOICE_CMD"):
+        argv, var = cmd
+
+        def run(reqs):
+            res = subprocess.run(argv, input=json.dumps(reqs), capture_output=True, text=True, encoding="utf-8")
+            if res.returncode:
+                raise RuntimeError(f"{var} failed ({res.returncode}): {res.stderr.strip()[-600:]}")
+            return json.loads(res.stdout)
+        return run, name or Path(argv[-1]).name
     if name:
         if name not in found:
-            raise ValueError(f"no voice backend '{name}'; installed: {', '.join(found) or 'none'}")
+            raise ValueError(f"no voice backend '{name}': pip install kinescript-{name}, or set {_env_name(name)} to a "
+                             f"command that runs it in another Python; installed: {', '.join(found) or 'none'}")
         key = name
     elif len(found) == 1:
         key = next(iter(found))
@@ -181,24 +218,36 @@ def generate(scene, only=None, force: bool = False, backend: str | None = None, 
             continue
         src.parent.mkdir(parents=True, exist_ok=True)
         todo.append((sid, a, src, words_file, text, marks))
-    if todo:
-        speak, name = _speaker(backend)
+    groups: dict = {}  # a sound's own backend, else the one asked for, else the default
+    for job in todo:
+        groups.setdefault(job[1].get("backend") or backend, []).append(job)
+    for want, jobs in groups.items():
+        speak, name = _speaker(want)
         t0 = time.perf_counter()
-        results = speak([{"text": text, "speaker": a.get("speaker"), "rate": a.get("rate", 1), "out": str(src)}
-                         for _, a, src, _, text, _ in todo])
-        took = (time.perf_counter() - t0) / len(todo)
-        for (sid, a, src, words_file, text, marks), res in zip(todo, results):
+        results = speak([{"text": untag(text), "tagged": text, "speaker": a.get("speaker"), "rate": a.get("rate", 1),
+                          "options": a.get("options") or {}, "out": str(src), "base": str(Path(base).resolve())}
+                         for _, a, src, _, text, _ in jobs])
+        took = (time.perf_counter() - t0) / len(jobs)
+        for (sid, a, src, words_file, text, marks), res in zip(jobs, results):
             if not src.exists():
                 raise RuntimeError(f"the voice backend {name} did not write {src} for '{sid}'")
             timed = [{"word": w["word"], "start": w["start"], "end": w["end"]} for w in W.read(res.get("words") or [])]
-            said = place_marks(text, marks, timed)
+            said = place_marks(untag(text), marks, timed)
             W.read(said)  # the ids are valid and unique before the file is written
             rec = {"hash": fingerprint(a), "backend": name, "version": res.get("version"),
                    "speaker": res.get("speaker") or a.get("speaker")}
             words_file.write_text(json.dumps({"words": said, "made": rec}, indent=1, ensure_ascii=False),
                                   encoding="utf-8")
             secs = res.get("seconds") or (said[-1]["end"] if said else 0.0)
-            out.append({"id": sid, "src": str(a.get("src") or default_src(sid)), "status": "made", "words": len(said),
-                        "seconds": round(float(secs), 2), "took": round(took, 2)})
+            item = {"id": sid, "src": str(a.get("src") or default_src(sid)), "status": "made", "words": len(said),
+                    "seconds": round(float(secs), 2), "took": round(took, 2)}
+            ignored = list(res.get("ignored") or []) + ([] if res.get("tags") else tags(text))
+            if ignored:
+                item["ignored"] = ignored  # said without these: the backend cannot do them
+            if res.get("note"):
+                item["note"] = str(res["note"])
+            elif not said and untag(text).strip():
+                item["note"] = f"{name} gave no word times, so word cues and voice captions of '{sid}' do not work"
+            out.append(item)
     order = {sid: k for k, (sid, _) in enumerate(entries)}
     return {"ok": True, "voices": sorted(out, key=lambda v: order[v["id"]])}

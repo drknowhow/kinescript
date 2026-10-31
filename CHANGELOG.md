@@ -9,6 +9,20 @@
 - `kine docs` and the Kokoro plugin's README cover Kokoro's pronunciation fixes: `[word](/phonemes/)` says a word
   with the IPA phonemes given, `[word](-1)` and `[word](+1)` change its stress, and `"speaker": "af_heart,af_bella"`
   blends two voices.
+- Delivery tags. `[whispers]`, `[laughs]` or `[sighs]` in a voice's text tell a backend that acts on tags how to say
+  what follows. Tags are not words: `[[marks]]`, word ids and captions skip them, a backend without tags gets the
+  line without them, and `kine voice` lists what a backend could not do under `ignored`.
+- A sound picks its voice backend with `backend` and passes it settings with `options`; both join what decides
+  whether a line is spoken again, and a sound without them keeps its old fingerprint, so no existing voice turns
+  stale. `KINE_VOICE_CMD_<NAME>` runs one backend in another Python, and `KINE_VOICE_CMD` also answers for the
+  backend whose module it runs. Backends get the scene's folder as `base`, for files their options name.
+- `kinescript-chatterbox`: Resemble AI's Chatterbox on your own machine. Turbo acts on tags such as `[laugh]` and
+  `[sigh]` (`[laughs]` reads as `[laugh]`), the standard model takes `exaggeration`, and either copies the voice of
+  a clip of 5 s or more. Chatterbox gives no word times, so the plugin finds them with a wav2vec2 forced alignment
+  that reads numbers as they are said and lets a tag such as a laugh fill its own place.
+- `kinescript-elevenlabs`: ElevenLabs' API (Eleven v4 by default, with audio tags), any voice in the account by name
+  or id, voice settings through `options`, and word times from ElevenLabs' character times. It has no
+  dependencies and needs `ELEVENLABS_API_KEY`.
 
 ## 1.2.0 (2026-10-30)
 

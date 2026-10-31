@@ -232,8 +232,9 @@ class Scene:
                 continue
             rec = V.made(near) if a.get("text") else None
             if rec and rec.get("hash") != V.fingerprint(a):
-                self.note("warning", "voice-stale", sid, f"the text, speaker or rate of '{sid}' changed after {src} "
-                          "was spoken, so it says the old text", "run kine voice on this scene to speak it again")
+                self.note("warning", "voice-stale", sid, f"the text, speaker, rate, backend or options of '{sid}' "
+                          f"changed after {src} was spoken, so it says the old text",
+                          "run kine voice on this scene to speak it again")
             given = a.get("words")
             if given is None and not near.exists():
                 continue

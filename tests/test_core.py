@@ -886,6 +886,180 @@ def test_marks_find_their_word_when_the_voice_reads_it_differently():
         split_marks("[[a]]x [[a]]y")
 
 
+def test_tags_are_not_words_and_reach_only_backends_that_act_on_them(monkeypatch, tmp_path):
+    from kinescript import voice
+    text, marks = voice.split_marks("Well [sighs] okay, [[go]]go [laughs]now.")
+    assert (text, marks) == ("Well [sighs] okay, go [laughs]now.", {2: "go"})
+    assert voice.untag(text) == "Well okay, go now."
+    # marks and pronunciations are not tags
+    assert voice.tags("Meet [Kinescript](/kˈɪn/) [[a]]now [clears throat] ok") == ["[clears throat]"]
+    got = []
+
+    def entry(acts):
+        def speak(req):
+            got.append((req["text"], req["tagged"]))
+            return {**_fake_speak(req), "tags": acts}
+        return type("E", (), {"load": lambda self: speak})()
+    monkeypatch.delenv("KINE_VOICE_CMD", raising=False)
+    monkeypatch.setattr(voice, "backends", lambda: {"plain": entry(False), "acts": entry(True)})
+    spec = scene([{"type": "rect"}], duration="auto")
+    spec["audio"] = [{"id": "a", "text": "Well [sighs] okay. [[go]]Go.", "backend": "plain"},
+                     {"id": "b", "text": "Well [sighs] okay. [[go]]Go.", "backend": "acts"}]
+    a, b = voice.generate(spec, base=tmp_path)["voices"]
+    assert got == [("Well okay. Go.", "Well [sighs] okay. Go.")] * 2
+    assert a["ignored"] == ["[sighs]"] and "ignored" not in b  # said without it, and said so
+    words = json.loads((tmp_path / "voice" / "b.words.json").read_text())["words"]
+    assert [w["word"] for w in words] == ["Well", "okay.", "Go."] and words[2]["id"] == "go"
+
+
+def test_each_sound_picks_its_backend_and_options(monkeypatch, tmp_path):
+    import hashlib
+    from kinescript import voice
+    seen = []
+
+    def entry(name):
+        def speak(req):
+            seen.append((name, req["options"], req["base"]))
+            return {**_fake_speak(req), **({"note": "half untimed"} if name == "two" else {})}
+        return type("E", (), {"load": lambda self: speak})()
+    monkeypatch.delenv("KINE_VOICE_CMD", raising=False)
+    monkeypatch.setattr(voice, "backends", lambda: {"one": entry("one"), "two": entry("two")})
+    spec = scene([{"type": "rect"}], duration="auto")
+    spec["audio"] = [{"id": "a", "text": "first"},
+                     {"id": "b", "text": "second", "engine": "two", "settings": {"seed": 3}}]  # aliases read
+    with pytest.raises(ValueError, match="several voice backends are installed"):
+        voice.generate(spec, base=tmp_path)
+    got = voice.generate(spec, base=tmp_path, backend="one")
+    assert [v.get("note") for v in got["voices"]] == [None, "half untimed"]  # the backend's own note
+    assert seen == [("one", {}, str(tmp_path.resolve())), ("two", {"seed": 3}, str(tmp_path.resolve()))]
+    assert json.loads((tmp_path / "voice" / "b.words.json").read_text())["made"]["backend"] == "two"
+    # options are part of what the file was made from; a sound without backend or options keeps its old hash
+    f = tmp_path / "s.json"
+    spec["audio"] = [{"id": "b", "text": "second", "backend": "two", "options": {"seed": 4}}]
+    f.write_text(json.dumps(spec))
+    assert [i["code"] for i in k.load(str(f)).issues] == ["voice-stale"]
+    old = {"text": "x", "speaker": None, "rate": 1}
+    assert voice.fingerprint({"text": "x"}) == hashlib.sha256(json.dumps(old, sort_keys=True).encode()).hexdigest()[:16]
+    with pytest.raises(ValueError, match="no voice backend 'three': pip install kinescript-three, or set "
+                                         "KINE_VOICE_CMD_THREE"):
+        voice.generate({**spec, "audio": [{"id": "c", "text": "x", "backend": "three"}]}, base=tmp_path)
+    # a backend in another Python, by name: its own variable, or KINE_VOICE_CMD when it runs that module
+    tool = tmp_path / "speak.py"
+    tool.write_text("import json, sys\nsys.path.insert(0, %r)\nfrom test_core import _fake_speak\n"
+                    "print(json.dumps([_fake_speak(r) for r in json.load(sys.stdin)]))\n" % str(Path(__file__).parent))
+    monkeypatch.setenv("KINE_VOICE_CMD_THREE", json.dumps([sys.executable, str(tool)]))
+    got = voice.generate({**spec, "audio": [{"id": "c", "text": "x y", "backend": "three"}]}, base=tmp_path)
+    assert got["voices"][0]["words"] == 2
+    assert voice._command("kokoro") is None
+    monkeypatch.setenv("KINE_VOICE_CMD", "py -m kinescript_kokoro")
+    assert voice._command("kokoro") == (["py", "-m", "kinescript_kokoro"], "KINE_VOICE_CMD")
+    assert voice._command("other") is None and voice._command(None)[1] == "KINE_VOICE_CMD"
+
+
+def _plugin(monkeypatch, name):
+    monkeypatch.syspath_prepend(str(Path(__file__).parents[1] / "plugins" / f"kinescript-{name}"))
+
+
+def test_forced_alignment_places_words_around_a_laugh_and_a_number(monkeypatch):
+    _plugin(monkeypatch, "chatterbox")
+    from kinescript_chatterbox.align import ctc_path, times, units
+    vocab = {"<pad>": 0, "|": 1, "A": 2, "B": 3, "C": 4, "D": 5}
+    words, seq = units("AB [laugh] C 12.", vocab)
+    assert words == ["AB", "C", "12."] and [s[0] for s in seq] == [2, 3, -2, 4, 1, -1]
+
+    def frames(said):  # what each 20 ms frame sounds like most: a vocabulary id, 0 for nothing
+        lp = np.full((len(said), len(vocab)), np.log(0.02))
+        lp[np.arange(len(said)), said] = np.log(0.9)
+        return lp
+    # silence, A A B, a laugh (heard as D D D), silence, C C, a word gap, "twelve" (D D D), silence
+    said = [0, 0, 2, 2, 3, 5, 5, 5, 0, 4, 4, 1, 5, 5, 5, 0]
+    got = times(ctc_path(frames(said), seq, 0), seq, words, offset=1)
+    assert got == [{"word": "AB", "start": 1.04, "end": 1.1}, {"word": "C", "start": 1.18, "end": 1.22},
+                   {"word": "12.", "start": 1.24, "end": 1.3}]
+    # no laugh at all: the tag takes no time
+    said = [0, 2, 3, 0, 4, 1, 5, 0]
+    assert [w["start"] for w in times(ctc_path(frames(said), seq, 0), seq, words)] == [0.02, 0.08, 0.12]
+    with pytest.raises(ValueError, match="too short"):
+        ctc_path(frames([2, 3]), seq, 0)
+    # a line of more than 127 states (63 letters and gaps) backtracks without overflowing
+    words, seq = units(" ".join(["AB"] * 30), vocab)
+    said = [0] + [2, 3, 1] * 30
+    assert [w["start"] for w in times(ctc_path(frames(said), seq, 0), seq, words)][-1] == 1.76
+
+
+def test_forced_alignment_reads_numbers_as_they_are_said(monkeypatch):
+    _plugin(monkeypatch, "chatterbox")
+    from kinescript_chatterbox.align import spoken, units
+    said = {w: " ".join(spoken(w)) for w in ["250", "2026", "2005", "1,000", "3.5", "v1.2.0", "$5", "40%", "21st",
+                                             "100th", "Render.", "—"]}
+    assert said == {"250": "TWO HUNDRED FIFTY", "2026": "TWENTY TWENTY SIX", "2005": "TWO THOUSAND FIVE",
+                    "1,000": "ONE THOUSAND", "3.5": "THREE POINT FIVE", "v1.2.0": "V ONE POINT TWO POINT ZERO",
+                    "$5": "FIVE DOLLARS", "40%": "FORTY PERCENT", "21st": "TWENTY FIRST", "100th": "ONE HUNDREDTH",
+                    "Render.": "RENDER", "—": ""}
+    vocab = {"<pad>": 0, "|": 1, **{c: 2 + i for i, c in enumerate("ABCDEFGHIJKLMNOPQRSTUVWXYZ'")}}
+    words, seq = units("took 12 — now", vocab)
+    # each word of a number is its own run of letters, a lone dash says nothing
+    assert words == ["took", "12", "now"]
+    assert "".join("|" if s[0] == 1 else "?" if s[0] < 0 else chr(63 + s[0]) for s in seq) == "TOOK|TWELVE|NOW"
+
+
+def test_chatterbox_reads_tags_written_for_other_backends(monkeypatch):
+    _plugin(monkeypatch, "chatterbox")
+    import kinescript_chatterbox as cb
+    monkeypatch.setattr(cb, "TURBO_TAGS", {"[laugh]", "[sigh]", "[chuckle]", "[clear throat]", "[whispering]"})
+    written = ["[laugh]", "[Laughs]", "[laughing]", "[sighs]", "[chuckles]", "[whispers]", "[clears throat]", "[sings]"]
+    assert [cb.turbo_tag(t) for t in written] == ["[laugh]", "[laugh]", "[laugh]", "[sigh]", "[chuckle]",
+                                                  "[whispering]", "[clear throat]", None]
+    long = "One two three. " * 30
+    assert all(len(c) <= 300 for c in cb.chunks(long)) and " ".join(cb.chunks(long)) == long.strip()
+
+
+def test_elevenlabs_times_words_from_its_character_times(monkeypatch, tmp_path):
+    import base64
+    import wave
+    _plugin(monkeypatch, "elevenlabs")
+    import kinescript_elevenlabs as el
+    text = "Hi [laughs] there, all."
+    chars = list(text)
+    starts = [0.1 * k for k in range(len(chars))]
+    words = el.words_from_chars(chars, starts, [s + 0.08 for s in starts])
+    assert [w["word"] for w in words] == ["Hi", "there,", "all."]
+    assert words[1] == {"word": "there,", "start": 1.2, "end": 1.68}  # first to last letter, not the comma
+    calls = []
+
+    def call(path, key, body=None, ctype="application/json"):
+        calls.append((path, json.loads(body) if ctype == "application/json" and body else body))
+        if path == "/v1/voices":
+            return {"voices": [{"voice_id": "a" * 20, "name": "Aria - calm"}]}
+        if path.startswith("/v1/forced-alignment"):
+            return {"words": [{"text": "Hi", "start": 0.0, "end": 0.2}, {"text": " ", "start": 0.2, "end": 0.3},
+                              {"text": "there,", "start": 0.3, "end": 0.6}]}
+        timing = None if "multilingual" in json.loads(body)["model_id"] else {
+            "characters": chars, "character_start_times_seconds": starts,
+            "character_end_times_seconds": [s + 0.08 for s in starts]}
+        return {"audio_base64": base64.b64encode(b"\0\0" * 24000).decode(), "alignment": timing}
+    monkeypatch.setattr(el, "_call", call)
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "k")
+    out = tmp_path / "v.wav"
+    req = {"text": "Hi there, all.", "tagged": text, "speaker": "Aria", "rate": 1.1, "out": str(out),
+           "options": {"stability": 0.3, "model": "eleven_v4", "loud": 1}}
+    res = el.synth(req)
+    assert calls[1] == (f"/v1/text-to-speech/{'a' * 20}/with-timestamps?output_format=pcm_24000",
+                        {"text": text, "model_id": "eleven_v4", "voice_settings": {"stability": 0.3, "speed": 1.1}})
+    assert res["tags"] and res["ignored"] == ["options.loud"] and res["seconds"] == 1.0 and len(res["words"]) == 3
+    with wave.open(str(out)) as f:
+        assert (f.getframerate(), f.getnframes()) == (24000, 24000)
+    # a model without tags gets the text without them; with no character times, forced alignment times the words
+    calls.clear()
+    res = el.synth({**req, "rate": 2, "speaker": "b" * 20, "options": {"model": "eleven_multilingual_v2"}})
+    assert calls[0][1]["text"] == "Hi there, all." and not res["tags"]
+    assert res["ignored"] == ["rate 2: ElevenLabs speaks at 0.7 to 1.2"] and calls[1][0] == "/v1/forced-alignment"
+    assert [w["word"] for w in res["words"]] == ["Hi", "there,"]
+    monkeypatch.delenv("ELEVENLABS_API_KEY")
+    with pytest.raises(RuntimeError, match="set ELEVENLABS_API_KEY"):
+        el.synth(req)
+
+
 def test_kokoro_tokens_become_the_words_of_the_text(monkeypatch):
     from types import SimpleNamespace as T
     monkeypatch.syspath_prepend(str(Path(__file__).parents[1] / "plugins" / "kinescript-kokoro"))

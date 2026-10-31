@@ -48,13 +48,14 @@ TWEEN = {"from", "to", "dur", "delay", "ease", "keys"}
 TWEEN_ALIAS = {"duration": "dur", "easing": "ease", "start": "from", "end": "to", "begin": "from"}
 GRADIENT = {"linear", "radial", "stops"}
 AUDIO = {"src", "at", "trim", "gain", "volume", "fadeIn", "fadeOut", "id", "role", "dur", "until", "loop", "pan",
-         "words", "text", "speaker", "rate"}
+         "words", "text", "speaker", "rate", "backend", "options"}
 AUDIO_ALIAS = {"source": "src", "file": "src", "path": "src", "start": "at", "fade_in": "fadeIn",
                "fade_out": "fadeOut", "fadein": "fadeIn", "fadeout": "fadeOut", "duration": "dur", "length": "dur",
                "end": "until", "type": "role", "kind": "role", "balance": "pan", "repeat": "loop",
-               "script": "text", "say": "text", "tts": "text", "narrator": "speaker", "pace": "rate"}
+               "script": "text", "say": "text", "tts": "text", "narrator": "speaker", "pace": "rate",
+               "engine": "backend", "settings": "options", "voiceSettings": "options"}
 # A layer's "sound": cued from the layer, so it has no id, until, loop, words or text of its own.
-SOUND = AUDIO - {"id", "until", "loop", "words", "text", "speaker", "rate"}
+SOUND = AUDIO - {"id", "until", "loop", "words", "text", "speaker", "rate", "backend", "options"}
 MIX = {"loudness", "peak", "levels", "duck"}
 MIX_ALIAS = {"lufs": "loudness", "target": "loudness", "ceiling": "peak", "truePeak": "peak", "ducking": "duck",
              "level": "levels"}
@@ -598,6 +599,12 @@ def _audio_values(a: dict, rep: Report, lid, where: str):
         rep.add("error", "bad-value", lid, f"{where}text is {t!r}; it is the words to speak, as a string")
     if r is not None and (isinstance(r, bool) or not isinstance(r, (int, float)) or not 0.5 <= r <= 2):
         rep.add("error", "bad-value", lid, f"{where}rate is {r!r}; it is how fast the text is spoken, from 0.5 to 2")
+    b, o = a.get("backend"), a.get("options")
+    if b is not None and not (isinstance(b, str) and b.strip()):
+        rep.add("error", "bad-value", lid, f"{where}backend is {b!r}; it names the voice backend, like \"kokoro\"")
+    if o is not None and not isinstance(o, dict):
+        rep.add("error", "bad-value", lid, f"{where}options is {o!r}; it is an object the backend reads, like "
+                "{\"exaggeration\": 0.7}")
     if not a.get("src") and not a.get("text"):
         rep.add("error", "missing-key", lid, f"{where}an audio entry needs 'src' (or 'text' to speak)",
                 "\"src\": \"music.mp3\"")
