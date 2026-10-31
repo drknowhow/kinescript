@@ -47,7 +47,8 @@ It is 3.3 s long: with canvas duration "auto", the scene ends when the last time
 SCENE (top level)
   canvas      {"w": 1920, "h": 1080, "fps": 30, "bg": "#0a0c10", "duration": "auto"}
               w and h 16..16384, fps 1..240. duration: seconds, or "auto" (the default: the
-              latest end of any layer). Vertical video: "w": 1080, "h": 1920.
+              latest end of any layer). The video has duration x fps frames, to the nearest
+              frame, a half rounding up (2.45 s at 30 fps: 74). Vertical video: "w": 1080, "h": 1920.
   layers      the list of layers.
   theme       {"accent": "#ff633f"}: then "$accent" anywhere means that value.
   markers     {"drop": 12.5}: named times, usable as "at": "drop".
@@ -403,13 +404,16 @@ COMMANDS
                                   info: a name it read for you, e.g. "'color' read as 'fill'".
   kine look scene.json --boxes    one PNG of 12 evenly spaced frames; --boxes outlines layers and
                                   labels the top-level ones; -n 16 frames, --at 1 2.5 4 exact
-                                  times, read as still reads them (use it to see a transition),
-                                  --width 480 (16 to 4096), --cols 4, -o (.png or .jpg).
+                                  times, read as still reads them (use it to see a transition;
+                                  a time outside the scene draws its first or last frame and
+                                  the JSON's "notes" say so), --width 480 (16 to 4096), --cols 4,
+                                  -o (.png or .jpg).
                                   --audio adds the sound under the frames on the same time axis:
                                   a lane per role and one for the mix, the duck, and issues in red;
                                   its JSON gives each sound's loudness and gain and the mix's.
   kine still scene.json --at 2.5  one frame as PNG (-o to name it, .png or .jpg); --at -1 is 1 s
-                                  before the end; --at end is the last frame
+                                  before the end; --at end is the last frame; a time past the end
+                                  draws the last frame, with a note. --scale 0.5 halves the size.
   kine probe scene.json --at 2    every layer's and sound's start and end, and screen boxes at 2 s
   kine probe clip.mp4             a media file's duration, w, h, fps and whether it has audio
   kine render scene.json -o out.mp4 -q draft|standard|high
@@ -418,19 +422,39 @@ COMMANDS
                                   .gif (longest side 720 px, 15 fps), or a folder/ for PNG frames
                                   (frames/f_%04d.png names them). .wav, .m4a, .mp3, .flac or
                                   .opus: the sound alone. Any other extension is an error, and so
-                                  is -o naming a file the scene reads.
-                                  --scale 0.5 halves the size; --from 2 --to 4 renders a part.
+                                  is -o naming a file the scene reads. render, still and look make
+                                  the folders in -o that do not exist yet.
+                                  --scale 0.5 halves the size (each side must stay 2 px or more).
+                                  --from 2 --to 4 renders a part: every frame on screen from 2 s
+                                  until 4 s; a --to past the end stops at the end, with a note.
+                                  -j 4 runs 4 render processes, at most one per frame and one
+                                  per CPU (more is cut, with a note); without -j, or -j 0, kine
+                                  picks. A GIF's "frames" is the number of frames in the GIF.
   kine voice scene.json           speaks each sound's text into its file and times its words; a sound
                                   is spoken again only when its text, speaker, rate, backend or
                                   options changed (--force: all of them, --only vo1: one). Needs a
                                   voice backend plugin (with none installed, kine voice prints the
                                   pip command); --backend picks one for sounds without their own.
                                   KINE_VOICE_CMD (or KINE_VOICE_CMD_CHATTERBOX for one backend) runs
-                                  a backend in another Python, as JSON requests on stdin.
+                                  a backend in another Python: it reads the requests as a JSON list
+                                  on stdin and prints a JSON list of results, one per request.
                                   Rendering never speaks.
   kine watch scene.json           re-makes the contact sheet on every save
-  kine doctor                     checks ffmpeg, the GPU and fonts
+  kine doctor                     checks ffmpeg and ffprobe, the GPU and fonts; exits 1 when
+                                  ffmpeg or ffprobe is missing, and says how to install it
   kine mcp                        the same tools for MCP clients
+  Commands answer in JSON on stdout. "notes" in an answer say where an argument was changed:
+  a time past the end, or more workers than a render can use. Exit status:
+    0    done
+    1    kine check found errors (warnings alone exit 0), or kine doctor found ffmpeg or
+         ffprobe missing
+    2    a bad argument, scene or file, or a tool that failed; "error" says what was wrong
+    3    a bug in Kinescript; "error" says what and where. Please report it with the command
+         and the scene (KINE_DEBUG=1 also prints the traceback)
+    130  stopped with Ctrl+C
+  KINE_BACKEND=cpu draws on the CPU; gpu insists on the GPU (an error when there is none);
+  auto, the default, uses the GPU when there is one. Any other value is an error.
+  ffmpeg and ffprobe must be on the PATH: kine names the one it cannot find.
 
 WORKFLOW FOR AGENTS
   1. Write the scene (if a sound has text, kine voice).   2. kine check: fix every error, read the warnings, run it again.

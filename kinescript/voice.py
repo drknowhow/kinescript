@@ -157,16 +157,57 @@ def _env_name(name: str) -> str:
     return "KINE_VOICE_CMD_" + re.sub(r"\W", "_", name).upper()
 
 
+def _parsed(var: str) -> list[str] | None:
+    """The command in variable `var` as a list of arguments, None when it is not set."""
+    cmd = os.environ.get(var, "").strip()
+    if not cmd:
+        return None
+    try:
+        argv = _argv(cmd)
+    except ValueError as e:  # a JSON list that is not one, or an unclosed quote
+        raise ValueError(f"{var} is not a command: {e}. Give the program and its arguments, such as "
+                         f"python -m kinescript_kokoro, or a JSON list such as [\"python\", \"-m\", "
+                         f"\"kinescript_kokoro\"]") from None
+    if not argv or not all(argv):
+        raise ValueError(f"{var} is not a command: {cmd!r} names no program")
+    return argv
+
+
 def _command(name: str | None = None) -> tuple[list[str], str] | None:
     """The command that runs backend `name` in another Python, and the variable it came from: KINE_VOICE_CMD_<NAME>,
     else KINE_VOICE_CMD when no backend is named or it runs that backend's module (-m kinescript_<name>)."""
-    own = os.environ.get(_env_name(name), "").strip() if name else ""
+    own = _parsed(_env_name(name)) if name else None
     if own:
-        return _argv(own), _env_name(name)
-    cmd = os.environ.get("KINE_VOICE_CMD", "").strip()
-    if cmd and (not name or f"kinescript_{name}" in _argv(cmd)):
-        return _argv(cmd), "KINE_VOICE_CMD"
+        return own, _env_name(name)
+    cmd = _parsed("KINE_VOICE_CMD")
+    if cmd and (not name or f"kinescript_{name}" in cmd):
+        return cmd, "KINE_VOICE_CMD"
     return None
+
+
+def _call(argv: list[str], var: str, reqs: list[dict]) -> list[dict]:
+    """Run the command in `var` on the requests and read its results. A program that was not there said only
+    "[WinError 2] The system cannot find the file specified", and output that was not JSON "Expecting value"."""
+    try:
+        res = subprocess.run(argv, input=json.dumps(reqs), capture_output=True, text=True, encoding="utf-8",
+                             errors="replace")
+    except OSError as e:
+        raise RuntimeError(f"{var} could not start {argv[0]}: {e.strerror or e}. Set {var} to a program that "
+                           f"exists, such as the full path of the Python that has the voice backend, followed by "
+                           f"-m kinescript_<name>") from None
+    if res.returncode:
+        raise RuntimeError(f"{var} failed ({res.returncode}): {res.stderr.strip()[-600:]}")
+    try:
+        got = json.loads(res.stdout)
+    except json.JSONDecodeError:
+        said = res.stdout.strip()
+        raise RuntimeError(f"{var} ({' '.join(argv)}) printed {repr(said[:200]) if said else 'nothing'}, not JSON; "
+                           "it must print a JSON list with one result per request, and nothing else on stdout") \
+            from None
+    if not isinstance(got, list) or len(got) != len(reqs) or not all(isinstance(r, dict) for r in got):
+        raise RuntimeError(f"{var} ({' '.join(argv)}) must print a JSON list of {len(reqs)} result object"
+                           f"{'s' if len(reqs) != 1 else ''}, one per request; it printed {res.stdout.strip()[:200]!r}")
+    return got
 
 
 def _speaker(name: str | None):
@@ -177,10 +218,7 @@ def _speaker(name: str | None):
         argv, var = cmd
 
         def run(reqs):
-            res = subprocess.run(argv, input=json.dumps(reqs), capture_output=True, text=True, encoding="utf-8")
-            if res.returncode:
-                raise RuntimeError(f"{var} failed ({res.returncode}): {res.stderr.strip()[-600:]}")
-            return json.loads(res.stdout)
+            return _call(argv, var, reqs)
         return run, name or Path(argv[-1]).name
     if name:
         if name not in found:

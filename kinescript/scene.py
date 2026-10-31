@@ -140,7 +140,7 @@ class Scene:
             self.camera.t_out = self.duration
         self.depth = {L.id for L in self.layers if uses_depth(L)}
         self.is3d = self.camera is not None or bool(self.depth)
-        self.frames = max(1, round(self.duration * self.fps))
+        self.frames = max(1, math.floor(self.duration * self.fps + 0.5 + 1e-6))  # half a frame up: 2.45 s and 2.55 s
         self._check_values()
         self._raise_errors()
 

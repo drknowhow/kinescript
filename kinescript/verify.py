@@ -42,10 +42,11 @@ def contact_sheet(src, out: str, count: int = 12, cols: int | None = None, width
     """One PNG of `count` evenly spaced frames, each labelled with its time and frame number.
     boxes=True outlines every visible layer with its id. audio=True adds the sound under the frames, one lane per
     role and one for the mix, and returns its measurements."""
-    from .output import IMAGE, out_path, save_image
+    from .output import IMAGE, at_note, out_path, save_image
     scene = load(src)
     try:
         ts = _times(scene, count, times)
+        notes = [m for m in (at_note(scene, t) for t in times or []) if m]  # a time outside the scene, clamped
         if cols is not None and (isinstance(cols, bool) or not isinstance(cols, int) or cols < 1):
             raise ValueError(f"cols must be a whole number, 1 or more, got {cols!r}")
         if isinstance(width, bool) or not isinstance(width, int) or not 16 <= width <= 4096:
@@ -85,6 +86,8 @@ def contact_sheet(src, out: str, count: int = 12, cols: int | None = None, width
     info = {"out": out, "times": [round(t, 3) for t in ts], "grid": [cols, rows], "backend": r.backend}
     if audio:
         info["audio"] = listen.summary(rep)
+    if notes:
+        info["notes"] = notes
     return info
 
 
@@ -169,7 +172,8 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
     except SceneError as e:
         return _result(e.issues)
     except (ValueError, FileNotFoundError, RuntimeError, OSError) as e:
-        return _result([{"level": "error", "code": "load", "layer": None, "message": str(e), "fix": ""}])
+        from .media import explain  # names ffmpeg or ffprobe when one is missing
+        return _result([{"level": "error", "code": "load", "layer": None, "message": explain(e), "fix": ""}])
     except (TypeError, AttributeError, KeyError, IndexError, ArithmeticError) as e:  # a value of a shape not checked
         return _result([{"level": "error", "code": "load", "layer": None, "message": f"{type(e).__name__}: {e}",
                           "fix": "a key in the scene probably has the wrong type of value (a list for an object, …)"}])
