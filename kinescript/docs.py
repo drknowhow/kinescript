@@ -65,7 +65,8 @@ SCENE (top level)
   grade       whole-frame look: {"contrast": 1.05, "saturate": 1.1, "vignette": 0.35, "grain": 0.05}
   motionBlur  {"samples": 6, "shutter": 0.5}   (slower: renders 6 sub-frames per frame). A layer
               blurs only inside its own time, so its first and last frames are whole; grain is
-              added once, to the blended frame.
+              added once, to the blended frame. Still layers below every moving one are drawn once
+              a frame, not once a sub-frame, so list still layers first.
   camera      moves and turns the view in depth (see DEPTH AND CAMERA).
   light       how model layers are lit (see 3D MODELS).
   audio       the list of sounds: voice-over, music, effects (see SOUND).

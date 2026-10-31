@@ -110,13 +110,23 @@ def is_keyframes(v) -> bool:
 
 
 class Prop:
-    __slots__ = ("static", "value", "fn")
+    __slots__ = ("static", "value", "fn", "keys")
 
-    def __init__(self, static: bool, value=None, fn: Callable | None = None):
-        self.static, self.value, self.fn = static, value, fn
+    def __init__(self, static: bool, value=None, fn: Callable | None = None, keys: Callable | None = None):
+        self.static, self.value, self.fn, self.keys = static, value, fn, keys
 
     def at(self, t: float, d: float, T: float = 0.0, i: int = 0):
         return self.value if self.static else self.fn(t, d, T, i)
+
+    def held(self, t0: float, t1: float, d: float) -> bool:
+        """Whether the value is the same at every time in [t0, t1]: a constant, or keyframes before their first key or
+        after their last. An expression may follow anything, so it never holds."""
+        if self.static:
+            return True
+        if self.keys is None:
+            return False
+        pts = self.keys(d)
+        return t1 <= pts[0][0] or t0 > pts[-1][0]
 
 
 def _seconds(s: str, fps: float) -> float:
@@ -252,10 +262,14 @@ def compile_prop(name: str, raw, ctx: Ctx) -> Prop:
         fps = ctx.fps
         cache: dict[float, list] = {}
 
-        def fk(t, d, T, i):
+        def points(d):
             pts = cache.get(d)
             if pts is None:
                 pts = cache[d] = sorted(((key_time(k, d, fps), v, e) for k, v, e in keys), key=lambda x: x[0])
+            return pts
+
+        def fk(t, d, T, i):
+            pts = points(d)
             if t <= pts[0][0]:
                 return pts[0][1]
             for (t0, v0, _), (t1, v1, e1) in zip(pts, pts[1:]):
@@ -263,5 +277,5 @@ def compile_prop(name: str, raw, ctx: Ctx) -> Prop:
                     u = (t - t0) / (t1 - t0) if t1 > t0 else 1.0
                     return lerp(v0, v1, e1(u))
             return pts[-1][1]
-        return Prop(False, fn=fk)
+        return Prop(False, fn=fk, keys=points)
     return Prop(True, _norm(length(raw, name, ctx)))

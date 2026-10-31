@@ -22,6 +22,14 @@
   source time went into ffmpeg's filter as `np.float64(...)`, which ffmpeg cannot read, so a clip opened mid-way
   showed its last frame, found by decoding the file to its end on every frame: the edit stage in `bench/stages.py`
   drew a frame in 385 ms at the median and 574 at p95, and now in 8.6 and 15.9.
+- Motion blur draws the layers that hold still once a frame instead of once a sub-frame. Of the 5.7 ms a blurred
+  `examples/hello.json` frame took on the GPU, 3.1 went on drawing its 8 sub-frames and 0.25 on averaging them, so
+  the background and the bottom layers that do not move while the shutter is open (by their props, enter, exit and
+  children; footage too, since a sub-frame shows its frame's picture) are now drawn into one image that each
+  sub-frame starts from, and a frame where nothing moves is drawn once. The bytes are the same. The blur workload in
+  `bench/stages.py` grabs a frame in 3.8 ms at the median, from 5.5 (on the CPU, 0.97 s from 1.48); the blur-alpha
+  stress scene (16 samples) in 7.2, from 10.2; `examples/edit.json` with 8 samples in 6.9, from 8.9. Frames where
+  the bottom layer moves cost what they did, so put still layers first.
 - Model layers draw in two thirds of the time, with the same pixels. Of the 2.5 ms a model took each frame,
   1.5 ms went on making two `skia.Point`s per vertex, handing them and the indices to Skia, and freeing them;
   Skia now makes the points while reading back a path numpy writes, indices go as a uint16 memoryview, and a
