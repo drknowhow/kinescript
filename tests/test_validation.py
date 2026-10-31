@@ -407,3 +407,14 @@ def test_lights_and_tweening_light_keys_are_checked():
     assert warnings(dict(scene([cube]), lights=[{}, {}, {}, {}]), "ignored-key")
     with pytest.raises(k.SceneError, match="light key"):
         k.Scene(dict(scene([cube]), light={"key": "=0.5 +"}))
+
+
+def test_env_is_checked():
+    cube = {"id": "m", "type": "model", "shape": "cube"}
+    errs, s = errors(dict(scene([dict(cube, env="night")]), env={"preset": "sunset", "top": "#202a50",
+                                                                  "amount": [[0, 0], ["end", 1]]}))
+    assert s is not None and not errs, errs
+    e = one_error(dict(scene([cube]), env="beach"))
+    assert e["message"].startswith("env:") and "studio" in e["message"] + e["fix"], e
+    e = one_error(scene([dict(cube, env={"top": 5})]), "m")
+    assert e["message"].startswith("env top"), e
