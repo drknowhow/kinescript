@@ -1,6 +1,7 @@
 """Footage decoding and probing: which source frame each output frame shows, alpha, rotation, start offsets,
 files cut short, and what `kine probe` says about media, models and scenes. The clips are made here with ffmpeg."""
 import json
+import math
 import subprocess
 
 import numpy as np
@@ -110,6 +111,39 @@ def test_a_resampled_clip_holds_one_frame_however_the_render_reaches_it(idx, tmp
     _ff("-f", "lavfi", "-i", f"color=c=black:s=128x16:r=30:d=2,{INDEX}", "-f", "lavfi", "-i", "sine=d=3",
         "-pix_fmt", "yuv420p", "-c:v", "libx264", "-qp", 0, longer)
     assert [_cold(_spec(longer, fps=24), n) for n in (60, 70)] == [59, 59]
+
+
+@pytest.mark.parametrize("fps, layer", [(24, {}), (25, {}), (60, {}), (30, {"speed": 0.5}), (30, {"speed": 1.5}),
+                                        (30, {"speed": 2}), (24, {"trim": [0.43, 1.9]})])
+def test_a_resampled_clip_shows_the_same_frame_however_the_render_reaches_it(idx, fps, layer):
+    # Each frame shows the source frame nearest its source time, the earlier of two equally near. Opened mid-clip,
+    # the decoder's frame grid started at the first frame it decoded and rounded to the nearest output frame: at
+    # 24 fps frame 6 (0.25 s, halfway between source frames 7 and 8) showed 8 played from 0 and 7 on its own.
+    spec = _spec(idx, fps=fps, **layer)
+    trim0, end = layer.get("trim", [0, 2.0])
+    speed = layer.get("speed", 1)
+    played = _played(spec)
+    assert played == [min(math.ceil((trim0 + n * speed / fps) * 30 - 0.5 - 1e-9), round(end * 30) - 1)
+                      for n in range(len(played))]
+    for n in range(1, len(played), 3):
+        assert _cold(spec, n) == played[n], n
+
+
+def test_render_workers_split_a_resampled_clip_without_a_seam(idx, tmp_path):
+    # The second worker opens the clip at frame 19 and reads on from there. Its decoder's frame grid began at the
+    # first frame it decoded, so at frame 21 it showed source frame 40 where a single worker shows 39.
+    spec = _spec(idx, fps=24, trim=[0.43, 2.0])
+
+    def shown(workers):
+        out = str(tmp_path / f"w{workers}.mp4")
+        assert output.render(spec, out, quality="high", workers=workers)["workers"] == workers
+        raw = subprocess.run([media.FFMPEG, "-v", "error", "-i", out, "-f", "rawvideo", "-pix_fmt", "rgba", "-"],
+                             capture_output=True, check=True).stdout
+        return [_shown(f) for f in np.frombuffer(raw, np.uint8).reshape(-1, 16, 128, 4)]
+
+    one = shown(1)
+    assert one == _played(spec) and len(one) == 38
+    assert shown(2) == one
 
 
 def test_a_dur_longer_than_the_file_holds_its_last_frame_and_check_says_so(idx):
