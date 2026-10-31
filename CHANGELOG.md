@@ -2,6 +2,100 @@
 
 ## Unreleased
 
+- The Kokoro voice plugin is on PyPI: `pip install kinescript-kokoro` (Python 3.10 to 3.12). Pushing a tag such
+  as `kokoro-v0.1.0` publishes it from `plugins/kinescript-kokoro` (`.github/workflows/release-kokoro.yml`), after
+  it has spoken a line on CI. With no voice backend installed, `kine voice` prints that command.
+- The project site's hero is a narrated tour, `marketing/hero.json`.
+- `kine docs` and the Kokoro plugin's README cover Kokoro's pronunciation fixes: `[word](/phonemes/)` says a word
+  with the IPA phonemes given, `[word](-1)` and `[word](+1)` change its stress, and `"speaker": "af_heart,af_bella"`
+  blends two voices.
+- Delivery tags. `[whispers]`, `[laughs]` or `[sighs]` in a voice's text tell a backend that acts on tags how to say
+  what follows. Tags are not words: `[[marks]]`, word ids and captions skip them, a backend without tags gets the
+  line without them, and `kine voice` lists what a backend could not do under `ignored`.
+- A sound picks its voice backend with `backend` and passes it settings with `options`; both join what decides
+  whether a line is spoken again, and a sound without them keeps its old fingerprint, so no existing voice turns
+  stale. `KINE_VOICE_CMD_<NAME>` runs one backend in another Python, and `KINE_VOICE_CMD` also answers for the
+  backend whose module it runs. Backends get the scene's folder as `base`, for files their options name.
+- `kinescript-chatterbox`: Resemble AI's Chatterbox on your own machine. Turbo acts on tags such as `[laugh]` and
+  `[sigh]` (`[laughs]` reads as `[laugh]`), the standard model takes `exaggeration`, and either copies the voice of
+  a clip of 5 s or more. Chatterbox gives no word times, so the plugin finds them with a wav2vec2 forced alignment
+  that reads numbers as they are said and lets a tag such as a laugh fill its own place.
+- `kinescript-elevenlabs`: ElevenLabs' API (Eleven v4 by default, with audio tags), any voice in the account by name
+  or id, voice settings through `options`, and word times from ElevenLabs' character times. It has no
+  dependencies and needs `ELEVENLABS_API_KEY`.
+
+## 1.2.0 (2026-10-30)
+
+Sound. Voice-over, music and effects sit on the same timeline as the picture, are levelled and checked without
+listening, and a voice can be spoken from a line of text in the scene.
+
+- Sounds are timeline cues. An audio entry takes an `id` and a `role` (voice, music, sfx, ambience) and is timed like
+  a layer, with `dur`, `until` and `prev`; layers cue from it (`"at": "vo1.out+0.3"`) and it from layers. A voice
+  stretches `"duration": "auto"` to finish; music, ambience and sfx do not, as before.
+- A layer's `sound` (`"sound": "pop.wav"`, or `{"src", "at": "out-0.1", "gain", ...}`) plays when the layer starts,
+  moves when the layer moves, is skipped when the layer is hidden, and passes through components and sequences.
+- `loop` repeats a sound's trimmed file until it ends; `pan` places it from -1 (left) to 1 (right).
+- `.mov` (PCM), `.webm` (Opus) and `--from/--to` renders carry the mix. `-o mix.wav` (or `.m4a`, `.mp3`, `.flac`)
+  renders the sound alone without drawing frames. `kine probe` lists every sound's start and end.
+- A managed mix for scenes whose sounds have roles. Each sound is measured once (loudness, peak, leading silence)
+  and set to its role's level: voice -18 LUFS, music -16, ambience -30, sfx peaking at -6 dBFS; `gain` on it is a
+  change from that level. Music and ambience dip 14 dB while a voice speaks (0.08 s attack, 0.15 s hold, 0.4 s
+  release), worked out from the voice's levels, so the same scene always mixes the same way. An sfx starts past
+  its leading silence, so its first sound lands on its cue. The mix is measured and brought to -16 LUFS, then
+  limited to -1.5 dBTP. A top-level `mix` changes the targets: `{"loudness", "peak", "levels", "duck"}`, and
+  `"duck": false` turns ducking off. Scenes where no sound has a role mix as before.
+- `gain` changes over time like any property: keyframes (`[[0, -30], [2, 0]]`), tweens or `=` expressions, in dB
+  from the sound's start. `kine check` reports a gain that does not give a number.
+- `kine check` hears the sound. It mixes and measures the scene's audio, without drawing a frame and while the
+  frames are being checked (warm check time is unchanged for `examples/edit.json` and the promo), and reports a
+  voice cut off (`audio-cut`), two voices at once (`voice-overlap`), music and ambience less than 10 LU under a voice
+  (`voice-masked`), an sfx whose first sound comes more than 50 ms after its cue (`sfx-late`), a sound that plays
+  silence (`audio-silent`), and a mix off its loudness target or over its peak ceiling (`audio-loudness`,
+  `audio-peak`). Each issue has the sound's id, a time range and a fix.
+- `kine look --audio` (MCP `kine_look` with `audio`) draws the sound under the contact sheet on the frames' time
+  axis: a lane per role and one for the mix, each sound's span and id, the duck, and the issues in red. Its JSON
+  gives each sound's loudness before and after gain, its leading silence and any shift, and the mix's loudness,
+  true peak, loudness range and loudest 3 s.
+- Cues from words. A sound's word times come from a words file next to it (`vo1.words.json` for `vo1.wav`), from
+  a path or list in its `words` key, or from Whisper's JSON as it is. `"at": "vo1:render"` starts a layer when the
+  voice says "render"; `.in`, `.out`, `.mid` and offsets work as on any cue, and repeats are `render_2`, `render_3`.
+  Times follow the sound's start and trim. `kine probe` lists each sound's word ids and when they are said, and a
+  cue to a word that is not there names the closest one.
+- Captions of a voice: `{"type": "captions", "voice": "vo1"}` makes a cue a line from its words, starting when the
+  voice starts, and karaoke and pop light each word as it is said instead of guessing from its length.
+- `kine look --audio` marks each word a voice says in its lane.
+- `examples/voiceover.json`, with a stand-in voice and its words file from `examples/make_media.py`.
+- Voice-over from text. A sound's `text` (with `speaker` and `rate`) is what a voice says, and `kine voice
+  scene.json` (MCP `kine_voice`) speaks it into its `src`, `voice/<id>.wav` unless it names one, and writes its
+  words file. `[[go]]` in the text gives the next word the id `go`, so `"at": "vo1:go"` stays on that word when
+  the line is rewritten. A sound is spoken again only when its text, speaker or rate changed (`--force` speaks
+  all, `--only vo1` one). `kine check` reports a sound with text that is not spoken yet (`voice-missing`, an
+  error) and one whose text changed since (`voice-stale`). Rendering never speaks.
+- Voice backends are plugins in the `kinescript.voice` entry-point group, or a command named by `KINE_VOICE_CMD`
+  for a backend in another Python, which reads the requests as JSON on stdin; scene text never goes through a
+  shell. `plugins/kinescript-kokoro` is the first backend: Kokoro voices, with the time of each word for English.
+- Captions that follow a voice no longer get `read-time` warnings; they keep the pace the voice speaks at.
+- `examples/narrated.json`: a voice written as text, a marked word and a click on it.
+- The Kokoro plugin installs from this repository:
+  `pip install "kinescript-kokoro @ git+https://github.com/drknowhow/kinescript#subdirectory=plugins/kinescript-kokoro"`.
+  It is not on PyPI, and `kine voice` prints this command when no backend is installed.
+- The project site has a sound section: a demo whose voice Kokoro spoke from the scene's text, next to that scene,
+  and the `kine look --audio` sheet of it. The timelines under the site's videos show their sounds. The README has
+  a Sound section.
+- `kine probe` names the file a voice spoken from text plays (`voice/<id>.wav`) instead of none.
+- Fixed: theme names such as `"$muted"` were not replaced inside a scene's own components.
+- Before a mix, ffmpeg is asked only for its version, not its encoder list as well, so a one-worker render starts
+  drawing about 25 ms sooner. `examples/edit.json` renders in 2.20 s, as 1.1.1 does (2.19 s) on the same machine
+  the same day.
+- Fixed: a scene whose sounds all ended before it did rendered a video cut short at the end of the last sound. The
+  mix is now padded to the scene length. Scenes whose sound already reached the end render the same audio, bit for
+  bit.
+
+## 1.1.1 (2026-10-30)
+
+- A project site with demos, each video beside the scene file it was rendered from:
+  https://drknowhow.github.io/kinescript/. The README, which PyPI shows as the project description, covers 3D,
+  the MCP tools and every example, and its links work from PyPI.
 - Fixed: a model frame could differ depending on which frames the same worker had drawn before it; on the GPU,
   edges moved by up to 49 levels. Models now draw into an offscreen the size of the frame from the start.
 - 3D models draw faster, with the same pixels: work on a mesh that no frame changes is done once, only the
@@ -9,6 +103,17 @@
   points that cannot be on it. On an RTX 5060 Ti with 6 workers, `examples/model.json` exports in 1.5 s instead
   of 1.7 (one frame draws in a median 10 ms instead of 14.8) and `examples/import.json` in 0.84 s instead of
   1.1 (9 ms instead of 12.9).
+
+Fixes from the first outside test, a promo reel built from `kine docs` alone (`examples/gpu-doom`, #11):
+
+- A sequence is a group that ends with its last clip, so its own id is a cue: `"until": "cut.out"` instead of naming
+  the last clip. `opacity`, `blur`, `fx`, `enter` and the other layer keys on a sequence apply to the whole cut, and
+  `kine check` accepts them. Clip times are unchanged. A group can also end relative to one of its children.
+- `**emphasis**` can start and stop inside a word: `g**P**u` colours only the P. Punctuation written outside the
+  stars, as in `**word**,`, is no longer coloured.
+- On Linux, importing Kinescript without the system EGL and GL libraries now names the packages to install, and the
+  README lists them.
+- `kine docs` says that `fx.brightness` adds to each channel and `exposure` is the key that darkens footage.
 
 ## 1.1.0 (2026-10-30)
 

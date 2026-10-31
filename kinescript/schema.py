@@ -25,7 +25,7 @@ from . import color as C
 COMMENT = {"note", "notes", "comment", "comments", "description", "name"}
 
 TOP = {"canvas", "theme", "markers", "grade", "motionBlur", "audio", "components", "layers", "meta", "version",
-       "$schema", "camera", "light"}
+       "$schema", "camera", "light", "mix"}
 TOP_ALIAS = {"layer": "layers", "elements": "layers", "objects": "layers", "items": "layers", "scene": "layers",
              "children": "layers", "tracks": "layers", "motion_blur": "motionBlur", "colorGrade": "grade",
              "music": "audio", "sound": "audio", "marker": "markers"}
@@ -47,9 +47,20 @@ MOTION_ALIAS = {"type": "name", "preset": "name", "duration": "dur", "easing": "
 TWEEN = {"from", "to", "dur", "delay", "ease", "keys"}
 TWEEN_ALIAS = {"duration": "dur", "easing": "ease", "start": "from", "end": "to", "begin": "from"}
 GRADIENT = {"linear", "radial", "stops"}
-AUDIO = {"src", "at", "trim", "gain", "volume", "fadeIn", "fadeOut"}
+AUDIO = {"src", "at", "trim", "gain", "volume", "fadeIn", "fadeOut", "id", "role", "dur", "until", "loop", "pan",
+         "words", "text", "speaker", "rate", "backend", "options"}
 AUDIO_ALIAS = {"source": "src", "file": "src", "path": "src", "start": "at", "fade_in": "fadeIn",
-               "fade_out": "fadeOut", "fadein": "fadeIn", "fadeout": "fadeOut"}
+               "fade_out": "fadeOut", "fadein": "fadeIn", "fadeout": "fadeOut", "duration": "dur", "length": "dur",
+               "end": "until", "type": "role", "kind": "role", "balance": "pan", "repeat": "loop",
+               "script": "text", "say": "text", "tts": "text", "narrator": "speaker", "pace": "rate",
+               "engine": "backend", "settings": "options", "voiceSettings": "options"}
+# A layer's "sound": cued from the layer, so it has no id, until, loop, words or text of its own.
+SOUND = AUDIO - {"id", "until", "loop", "words", "text", "speaker", "rate", "backend", "options"}
+MIX = {"loudness", "peak", "levels", "duck"}
+MIX_ALIAS = {"lufs": "loudness", "target": "loudness", "ceiling": "peak", "truePeak": "peak", "ducking": "duck",
+             "level": "levels"}
+DUCK = {"by", "under", "depth", "attack", "hold", "release"}
+DUCK_ALIAS = {"amount": "depth", "db": "depth", "key": "by", "trigger": "by", "targets": "under", "duck": "under"}
 MOTION_BLUR = {"samples", "shutter"}
 CAMERA = {"x", "y", "z", "rotateX", "rotateY", "rotate", "fov"}
 CAMERA_ALIAS = {"rotationX": "rotateX", "rotationY": "rotateY", "rotateZ": "rotate", "rotationZ": "rotate",
@@ -73,7 +84,7 @@ GROUND_ALIAS = {"alpha": "opacity", "strength": "opacity", "softness": "blur", "
 
 COMMON = {"id", "type", "at", "dur", "until", "x", "y", "anchor", "opacity", "scale", "scaleX", "scaleY", "rotate",
           "blur", "blend", "shadow", "fx", "enter", "exit", "hidden", "allowOffscreen", "z", "rotateX", "rotateY",
-          "backface", "fixed"}
+          "backface", "fixed", "sound"}
 SHAPE = {"fill", "stroke", "strokeWidth", "draw", "drawStart", "cap", "join"}
 TEXT = {"text", "size", "weight", "font", "italic", "fill", "emph", "align", "maxWidth", "lineHeight",
         "letterSpacing", "stroke", "strokeWidth", "box", "case", "textCase", "caret", "split",
@@ -91,13 +102,13 @@ TYPES: dict[str, set[str]] = {
     "counter": TEXT | {"value", "format"},
     "image": MEDIA,
     "video": MEDIA | {"trim", "speed", "volume", "loop"},
-    "captions": TEXT | {"src", "cues", "mode", "active"},
+    "captions": TEXT | {"src", "cues", "mode", "active", "voice"},
     "shader": {"preset", "uniforms", "sksl", "w", "h"},
     "group": {"children", "layers", "w", "h", "clip", "radius", "fill", "sort"},
     "model": PART - {"x", "y", "z", "rotateX", "rotateY", "rotate", "scale"} | {"detail", "parts", "explode",
                                                                               "draw", "light", "src", "ground"},
 }
-SEQUENCE = {"id", "type", "at", "clips", "transition", "fit", "volume", "w", "h", "x", "y", "anchor"}
+SEQUENCE = COMMON | {"clips", "transition", "fit", "volume", "w", "h"}
 TYPE_ALIAS = {"rectangle": "rect", "square": "rect", "box": "rect", "shape": "rect", "txt": "text", "label": "text",
               "title": "text", "heading": "text", "string": "text", "img": "image", "picture": "image",
               "photo": "image", "oval": "ellipse", "caption": "captions", "subtitles": "captions",
@@ -121,7 +132,8 @@ ALIAS = {"color": "fill", "colour": "fill", "fillColor": "fill", "backgroundColo
          "out": "exit", "outro": "exit", "exitAnimation": "exit", "transform": None, "kids": "children",
          "items": "children", "elements": "children", "visible": None, "zIndex": None,
          "rotationX": "rotateX", "rotationY": "rotateY", "rotateZ": "rotate", "rotationZ": "rotate",
-         "translateZ": "z", "backfaceVisibility": "backface"}
+         "translateZ": "z", "backfaceVisibility": "backface", "sfx": "sound", "audio": "sound",
+         "soundEffect": "sound"}
 TYPE_ALIASES = {
     "circle": {"radius": "r", "size": "r"}, "polygon": {"radius": "r", "points": "sides"},
     "line": {"color": "stroke", "colour": "stroke", "fill": "stroke", "width": "strokeWidth"},
@@ -146,6 +158,7 @@ ENUMS = {
     "sort": ("order", "depth"),
     "shape": ("cube", "sphere", "cylinder", "cone", "torus", "plane", "text", "path"),
     "detail": ("low", "medium", "high"),
+    "role": ("voice", "music", "sfx", "ambience"),
 }
 ENUM_ALIAS = {"middle": "center", "centre": "center", "centered": "center", "mid": "center",
               "characters": "chars", "letters": "chars", "char": "chars", "word": "words", "line": "lines",
@@ -154,7 +167,11 @@ ENUM_ALIAS = {"middle": "center", "centre": "center", "centered": "center", "mid
               "box": "cube", "cuboid": "cube", "ball": "sphere", "globe": "sphere", "donut": "torus",
               "doughnut": "torus", "ring": "torus", "tube": "cylinder", "can": "cylinder", "pipe": "cylinder",
               "card": "plane", "quad": "plane", "svg": "path", "string": "text", "med": "medium", "hi": "high",
-              "lo": "low"}
+              "lo": "low", "vo": "voice", "voiceover": "voice", "narration": "voice", "narrator": "voice",
+              "speech": "voice", "dialogue": "voice", "bed": "music", "bgm": "music", "song": "music",
+              "score": "music", "fx": "sfx", "effect": "sfx", "effects": "sfx", "soundeffect": "sfx",
+              "ambient": "ambience", "ambiance": "ambience", "atmos": "ambience", "atmosphere": "ambience",
+              "roomtone": "ambience"}
 WEIGHTS = {"thin": 100, "extralight": 200, "light": 300, "normal": 400, "regular": 400, "book": 400,
            "medium": 500, "semibold": 600, "demibold": 600, "bold": 700, "extrabold": 800, "heavy": 900,
            "black": 900}
@@ -168,7 +185,7 @@ SCALAR = {"x", "y", "w", "h", "r", "opacity", "scale", "scaleX", "scaleY", "rota
           "volume", "unitX", "unitY", "unitRotate", "unitScale", "unitOpacity", "z", "rotateX", "rotateY", "fov",
           "depth", "tube", "shine", "metal", "rim", "bands", "explode", "bevel"}
 REQUIRED = {"text": ("text",), "image": ("src",), "video": ("src",), "path": ("d", "points"), "line": ("points",),
-            "captions": ("cues", "src"), "shader": ("preset", "sksl"), "model": ("shape", "parts", "src")}
+            "captions": ("cues", "src", "voice"), "shader": ("preset", "sksl"), "model": ("shape", "parts", "src")}
 
 
 class Report:
@@ -416,6 +433,7 @@ def _layer(raw, rep: Report, path: str, comps: dict):
                 rep.add("error", "bad-component", lid, unknown("component", name, list(BUILTIN) + list(comps)))
         for key in ("enter", "exit"):
             _motion(raw, key, rep, lid)
+        _layer_sound(raw, rep, lid)
         return  # parameters are checked when the component expands (components.Params)
     t = raw.get("type")
     if isinstance(t, str) and t.strip().lower() in ENUMS["shape"] and t not in TYPES and "shape" not in raw:
@@ -435,6 +453,8 @@ def _layer(raw, rep: Report, path: str, comps: dict):
             return
     if t == "sequence":
         _keys(raw, SEQUENCE, {"items": "clips", "videos": "clips", "children": "clips"}, rep, lid, "")
+        _effects(raw, rep, lid)
+        _layer_sound(raw, rep, lid)
         return
     if t is None:
         from .scene import _infer_type
@@ -463,13 +483,8 @@ def _layer(raw, rep: Report, path: str, comps: dict):
                     {"text": "\"text\": \"Hello\"", "image": "\"src\": \"photo.jpg\"", "video": "\"src\": \"clip.mp4\""}
                     .get(t, ""))
     _values(raw, t, rep, lid)
-    for key in ("enter", "exit"):
-        _motion(raw, key, rep, lid)
-    if isinstance(raw.get("shadow"), dict):
-        _keys(raw["shadow"], SHADOW, SHADOW_ALIAS, rep, lid, "shadow: ")
-    if isinstance(raw.get("fx"), dict):
-        _keys(raw["fx"], FX, {"saturation": "saturate", "grayscale": "gray", "greyscale": "gray", "hueRotate": "hue",
-                              "warmth": "temperature"}, rep, lid, "fx: ")
+    _effects(raw, rep, lid)
+    _layer_sound(raw, rep, lid)
     if isinstance(raw.get("box"), dict):
         _keys(raw["box"], BOX, BOX_ALIAS, rep, lid, "box: ")
     if t == "shader" and raw.get("preset"):
@@ -486,6 +501,17 @@ def _layer(raw, rep: Report, path: str, comps: dict):
     if t == "group" and isinstance(kids, list):
         for i, k in enumerate(kids):
             _layer(k, rep, f"{lid}.children[{i}]", comps)
+
+
+def _effects(raw: dict, rep: Report, lid):
+    """Motions, shadow and fx, which any layer and a sequence take."""
+    for key in ("enter", "exit"):
+        _motion(raw, key, rep, lid)
+    if isinstance(raw.get("shadow"), dict):
+        _keys(raw["shadow"], SHADOW, SHADOW_ALIAS, rep, lid, "shadow: ")
+    if isinstance(raw.get("fx"), dict):
+        _keys(raw["fx"], FX, {"saturation": "saturate", "grayscale": "gray", "greyscale": "gray", "hueRotate": "hue",
+                              "warmth": "temperature"}, rep, lid, "fx: ")
 
 
 def _light(obj: dict, rep: Report, lid):
@@ -563,6 +589,68 @@ def _model(raw: dict, rep: Report, lid):
                         "animate the model layer, or make the part its own model layer")
 
 
+def _audio_values(a: dict, rep: Report, lid, where: str):
+    _enum(a, "role", rep, lid)
+    p = a.get("pan")
+    if p is not None and (isinstance(p, bool) or not isinstance(p, (int, float)) or not -1 <= p <= 1):
+        rep.add("error", "bad-value", lid, f"{where}pan is {p!r}; it must be a number from -1 (left) to 1 (right)")
+    t, r = a.get("text"), a.get("rate")
+    if t is not None and not (isinstance(t, str) and t.strip()):
+        rep.add("error", "bad-value", lid, f"{where}text is {t!r}; it is the words to speak, as a string")
+    if r is not None and (isinstance(r, bool) or not isinstance(r, (int, float)) or not 0.5 <= r <= 2):
+        rep.add("error", "bad-value", lid, f"{where}rate is {r!r}; it is how fast the text is spoken, from 0.5 to 2")
+    b, o = a.get("backend"), a.get("options")
+    if b is not None and not (isinstance(b, str) and b.strip()):
+        rep.add("error", "bad-value", lid, f"{where}backend is {b!r}; it names the voice backend, like \"kokoro\"")
+    if o is not None and not isinstance(o, dict):
+        rep.add("error", "bad-value", lid, f"{where}options is {o!r}; it is an object the backend reads, like "
+                "{\"exaggeration\": 0.7}")
+    if not a.get("src") and not a.get("text"):
+        rep.add("error", "missing-key", lid, f"{where}an audio entry needs 'src' (or 'text' to speak)",
+                "\"src\": \"music.mp3\"")
+
+
+def _mix(m, rep: Report):
+    if not isinstance(m, dict):
+        rep.add("error", "bad-value", "mix", f"mix must be an object like {{\"loudness\": -16}}, got {type(m).__name__}")
+        return
+    _keys(m, MIX, MIX_ALIAS, rep, "mix", "mix: ")
+    nums = [("loudness", m.get("loudness"), -40, -5, "LUFS"), ("peak", m.get("peak"), -12, 0, "dBTP")]
+    levels = m.get("levels")
+    if isinstance(levels, dict):
+        _keys(levels, set(ENUMS["role"]), {}, rep, "mix", "mix.levels: ")
+        nums += [(f"levels.{k}", v, -60, 0, "dB") for k, v in levels.items() if k in ENUMS["role"]]
+    elif levels is not None:
+        rep.add("error", "bad-value", "mix", "mix.levels must be an object like {\"music\": -20}")
+    duck = m.get("duck")
+    if isinstance(duck, dict):
+        _keys(duck, DUCK, DUCK_ALIAS, rep, "mix", "mix.duck: ")
+        nums += [(f"duck.{k}", duck.get(k), lo, hi, unit) for k, lo, hi, unit in
+                 (("depth", 0, 40, "dB"), ("attack", 0, 5, "s"), ("hold", 0, 5, "s"), ("release", 0, 5, "s"))]
+        for k in ("by", "under"):
+            roles = duck.get(k)
+            for r in roles if isinstance(roles, list) else [] if roles is None else [roles]:
+                if r not in ENUMS["role"]:
+                    rep.add("error", "bad-value", "mix", f"mix.duck.{k}: " + unknown("role", r, ENUMS["role"]))
+    elif not (duck is None or isinstance(duck, bool)):
+        rep.add("error", "bad-value", "mix", "mix.duck is an object like {\"depth\": 14}, true or false")
+    for name, v, lo, hi, unit in nums:
+        if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or not lo <= v <= hi):
+            rep.add("error", "bad-value", "mix", f"mix.{name} is {v!r}; it must be a number from {lo} to {hi} ({unit})")
+
+
+def _layer_sound(raw: dict, rep: Report, lid):
+    s = raw.get("sound")
+    if s is None or isinstance(s, str):
+        return
+    if not isinstance(s, dict):
+        rep.add("error", "bad-value", lid, f"sound must be a file name or an object like {{\"src\": \"whoosh.wav\", "
+                f"\"at\": \"out\"}}, got {type(s).__name__}")
+        return
+    _keys(s, SOUND, AUDIO_ALIAS, rep, lid, "sound: ")
+    _audio_values(s, rep, lid, "sound: ")
+
+
 def normalize(spec) -> tuple[dict, Report]:
     """Return a cleaned copy of `spec` and a Report of notes and errors (nothing is raised here)."""
     rep = Report()
@@ -634,9 +722,14 @@ def normalize(spec) -> tuple[dict, Report]:
         if isinstance(a, str):
             audio[i] = a = {"src": a}
         if isinstance(a, dict):
-            _keys(a, AUDIO, AUDIO_ALIAS, rep, f"audio[{i}]", "")
-            if not a.get("src"):
-                rep.add("error", "missing-key", f"audio[{i}]", "an audio entry needs 'src'")
+            owner = a.get("id") or f"audio[{i}]"
+            _keys(a, AUDIO, AUDIO_ALIAS, rep, owner, "")
+            _audio_values(a, rep, owner, "")
+        else:
+            rep.add("error", "bad-value", f"audio[{i}]", f"an audio entry is a file name or an object with 'src', "
+                    f"got {type(a).__name__}")
+    if spec.get("mix") is not None:
+        _mix(spec["mix"], rep)
     layers = spec.get("layers")
     if layers is None or layers == []:
         rep.add("error", "no-layers", None, "the scene has no layers", "add \"layers\": [ ... ] with at least one layer")

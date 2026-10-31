@@ -162,6 +162,38 @@ def test_no_layers():
     assert "no-layers" in codes({"canvas": {}})[0]
 
 
+def test_audio_roles_pan_and_layer_sounds_are_checked():
+    spec = scene([{"type": "rect", "sfx": {"file": "pop.wav", "at": "out", "volum": 2}}])
+    spec["audio"] = [{"src": "vo.wav", "type": "voice-over", "pan": 1.5}, {"src": "x.wav", "role": "drums"}, 7]
+    out, rep = schema.normalize(spec)
+    got = [(i["code"], i["message"]) for i in rep.issues]
+    assert out["audio"][0]["role"] == "voice" and out["layers"][0]["sound"]["src"] == "pop.wav"
+    assert any(c == "bad-value" and m.startswith("pan is 1.5") for c, m in got)
+    assert any(c == "bad-value" and m.startswith("role: unknown value 'drums'") for c, m in got)
+    assert any(c == "unknown-key" and m.startswith("sound: unknown key 'volum'") for c, m in got)
+    assert any(c == "bad-value" and m.startswith("an audio entry is a file name") for c, m in got)
+
+
+def test_the_mix_block_is_checked():
+    spec = dict(scene([{"type": "rect"}]), mix={"lufs": -14, "peak": 3, "levels": {"music": -20, "drums": -3},
+                                               "duck": {"amount": 50, "under": ["music", "pads"]}})
+    out, rep = schema.normalize(spec)
+    got = [(i["code"], i["message"]) for i in rep.issues]
+    assert out["mix"]["loudness"] == -14 and out["mix"]["duck"]["depth"] == 50
+    assert any(c == "bad-value" and m.startswith("mix.peak is 3") for c, m in got)
+    assert any(c == "unknown-key" and m.startswith("mix.levels: unknown key 'drums'") for c, m in got)
+    assert any(c == "bad-value" and m.startswith("mix.duck.depth is 50") for c, m in got)
+    assert any(c == "bad-value" and m.startswith("mix.duck.under: unknown role 'pads'") for c, m in got)
+    for ok in ({"duck": False}, {"duck": True}, {"duck": {"by": "voice", "under": "music"}}):
+        assert not [i for i in schema.normalize(dict(scene([{"type": "rect"}]), mix=ok))[1].issues
+                    if i["level"] == "error"]
+
+
+def test_audio_and_layer_ids_share_one_namespace():
+    with pytest.raises(k.SceneError, match="duplicate id 'title'"):
+        k.Scene(dict(scene([{"id": "title", "type": "rect"}]), audio=[{"id": "title", "src": __file__}]))
+
+
 # ---- guards: the hand-kept key lists in schema.py ---------------------------------------------
 READ = collections.defaultdict(set)
 
@@ -203,7 +235,7 @@ def test_schema_lists_cover_every_key_the_renderer_reads(monkeypatch):
     monkeypatch.setattr(S.Layer, "get", get)
     scenes = [ROOT / "examples" / "hello.json", ROOT / "examples" / "edit.json", ROOT / "examples" / "3d.json",
               ROOT / "examples" / "model.json", ROOT / "examples" / "title3d.json", ROOT / "examples" / "import.json",
-              ROOT / "marketing" / "promo.json"]
+              ROOT / "examples" / "voiceover.json", ROOT / "marketing" / "promo.json"]
     for path in scenes:
         sc = S.load(str(path))
         for layer in sc.all_layers():
@@ -236,7 +268,7 @@ def test_component_param_lists_cover_every_param_a_builder_reads():
 
 def test_examples_and_promo_have_no_unknown_keys():
     for path in ("examples/hello.json", "examples/edit.json", "examples/3d.json", "examples/model.json",
-                 "examples/title3d.json", "examples/import.json", "marketing/promo.json",
+                 "examples/title3d.json", "examples/import.json", "examples/voiceover.json", "marketing/promo.json",
                  "marketing/og.json"):
         sc = k.load(str(ROOT / path))  # loading runs every schema check; a full `check` renders and is slow on CPU
         bad = [i for i in sc.issues if i["level"] == "error" or i["code"] in ("renamed-key", "ignored-key")]

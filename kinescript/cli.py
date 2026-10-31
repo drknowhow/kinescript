@@ -30,7 +30,8 @@ def main(argv=None) -> int:
     ap.add_argument("--version", action="version", version=f"kinescript {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    r = sub.add_parser("render", help="render a scene to .mp4/.mov/.webm/.gif or a .png sequence")
+    r = sub.add_parser("render", help="render a scene to .mp4/.mov/.webm/.gif or a .png sequence, or its sound "
+                                      "alone to .wav/.m4a/.mp3/.flac")
     r.add_argument("scene")
     r.add_argument("-o", "--out")
     r.add_argument("-q", "--quality", choices=["draft", "standard", "high"], default="standard")
@@ -53,9 +54,11 @@ def main(argv=None) -> int:
     lk.add_argument("--width", type=int, default=480, help="width of each thumbnail")
     lk.add_argument("--at", type=float, nargs="*", help="explicit times instead of even spacing")
     lk.add_argument("--boxes", action="store_true", help="outline every layer with its id")
+    lk.add_argument("--audio", action="store_true", help="draw the sound under the frames (a lane per role and the "
+                    "mix, with levels, the duck and issues) and print its measurements")
     lk.add_argument("-o", "--out")
 
-    ck = sub.add_parser("check", help="lint layout, timing, contrast and reading time; prints JSON")
+    ck = sub.add_parser("check", help="lint layout, timing, contrast, reading time and sound; prints JSON")
     ck.add_argument("scene")
     ck.add_argument("--step", type=float, default=0.25)
 
@@ -63,6 +66,13 @@ def main(argv=None) -> int:
                                       "its duration, size, fps and audio")
     pr.add_argument("scene")
     pr.add_argument("--at", type=float)
+
+    v = sub.add_parser("voice", help="speak each sound's text into its file and time its words (only the ones "
+                                     "whose text changed, unless --force)")
+    v.add_argument("scene")
+    v.add_argument("--only", nargs="+", metavar="ID", help="speak just these sounds")
+    v.add_argument("--force", action="store_true", help="speak them again even if their text did not change")
+    v.add_argument("--backend", help="which installed voice backend to use, when there are several")
 
     sub.add_parser("docs", help="print the scene reference")
     nw = sub.add_parser("new", help="write a starter scene")
@@ -129,7 +139,11 @@ def _run(a) -> int:
     if a.cmd == "look":
         from .verify import contact_sheet
         out = a.out or _default_out(a.scene, "_sheet.png")
-        _emit(dict(ok=True, **contact_sheet(a.scene, out, a.count, a.cols, a.width, a.at, a.boxes)))
+        _emit(dict(ok=True, **contact_sheet(a.scene, out, a.count, a.cols, a.width, a.at, a.boxes, a.audio)))
+        return 0
+    if a.cmd == "voice":
+        from .voice import generate
+        _emit(generate(a.scene, a.only, a.force, a.backend))
         return 0
     if a.cmd == "check":
         from .verify import check

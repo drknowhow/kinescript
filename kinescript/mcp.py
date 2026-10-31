@@ -20,14 +20,18 @@ TOOLS = [
     {"name": "kine_docs", "description": "Kinescript scene reference: layer types, properties, timing, motions, "
      "components, eases. Read once before writing a scene.", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "kine_check", "description": "Lint a scene: load errors, text off canvas or in the safe margin, overlapping "
-     "text, low contrast, tiny text, too little reading time. Returns issues with time ranges and fixes.",
+     "text, low contrast, tiny text, too little reading time, and sound (a voice cut off or under the music, voices "
+     "overlapping, an effect late on its cue, silence, loudness and peaks). Returns issues with time ranges and fixes.",
      "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"}}, "required": ["scene"]}},
     {"name": "kine_look", "description": "Contact sheet: `count` frames in one labelled image. boxes=true outlines each "
-     "layer with its id. Use it to review motion and layout without watching video.",
+     "layer with its id. audio=true draws the sound under the frames on the same time axis (a lane per role and the "
+     "mix, with levels, the duck and issues in red) and returns its measurements. Use it to review motion, layout "
+     "and sound without watching video.",
      "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"},
                                                       "count": {"type": "integer", "default": 12},
                                                       "times": {"type": "array", "items": {"type": "number"}},
                                                       "boxes": {"type": "boolean", "default": False},
+                                                      "audio": {"type": "boolean", "default": False},
                                                       "width": {"type": "integer", "default": 400}}, "required": ["scene"]}},
     {"name": "kine_still", "description": "One full-size frame at time `at` (seconds), returned as an image.",
      "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"}, "at": {"type": "number"},
@@ -37,8 +41,18 @@ TOOLS = [
      "layer's screen box, alpha and text at that time.",
      "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"}, "at": {"type": "number"}},
                      "required": ["scene"]}},
+    {"name": "kine_voice", "description": "Speak each sound's `text` into its file (voice/<id>.wav unless it has a "
+     "src) and write its word times, so layers can cue from words (\"vo1:render\") and captions can follow it. Only "
+     "sounds whose text, speaker, rate, backend or options changed are spoken again, unless force. A sound's own "
+     "\"backend\" picks its voice plugin; backend here is the one for sounds without. Tags such as [laughs] are "
+     "acted by backends that can and listed under \"ignored\" by the rest. Run it before check and render.",
+     "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"},
+                                                      "only": {"type": "array", "items": {"type": "string"}},
+                                                      "force": {"type": "boolean", "default": False},
+                                                      "backend": {"type": "string"}}, "required": ["scene"]}},
     {"name": "kine_render", "description": "Render to a file (.mp4, .mov ProRes 4444 alpha, .webm VP9 alpha, .gif, or a "
-     ".png sequence). quality draft|standard|high; scale <1 for previews; from/to (s) for a range.",
+     ".png sequence; .wav/.m4a/.mp3/.flac for the sound alone). quality draft|standard|high; scale <1 for previews; "
+     "from/to (s) for a range.",
      "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"}, "out": {"type": "string"},
                                                       "quality": {"type": "string", "enum": ["draft", "standard", "high"]},
                                                       "scale": {"type": "number"}, "from": {"type": "number"},
@@ -76,13 +90,17 @@ def call(name: str, args: dict) -> list[dict]:
         from .verify import contact_sheet
         out = str(Path(tempfile.gettempdir()) / f"kine_look_{os.getpid()}.png")
         info = contact_sheet(_scene(args), out, int(args.get("count", 12)), None, int(args.get("width", 400)),
-                             args.get("times"), bool(args.get("boxes")))
+                             args.get("times"), bool(args.get("boxes")), bool(args.get("audio")))
         return [_image(out), _text(info)]
     if name == "kine_still":
         from .output import still
         out = str(Path(tempfile.gettempdir()) / f"kine_still_{os.getpid()}.png")
         still(_scene(args), float(args["at"]), out, float(args.get("scale", 0.5)))
         return [_image(out)]
+    if name == "kine_voice":
+        from .voice import generate
+        return [_text(generate(args["scene"], args.get("only"), bool(args.get("force")), args.get("backend"),
+                               args.get("base") or os.getcwd()))]
     if name == "kine_render":
         from .output import render
         sc = args["scene"]
@@ -129,7 +147,8 @@ def _serve():
                          "capabilities": {"tools": {}},
                          "serverInfo": {"name": "kinescript", "version": __version__},
                          "instructions": "Kinescript renders motion graphics and video edits from JSON scenes. "
-                                         "Call kine_docs first, then write a scene, kine_check it, kine_look at it, "
+                                         "Call kine_docs first, then write a scene (kine_voice it if a sound has "
+                                         "text), kine_check it, kine_look at it, "
                                          "and kine_render it."})
         elif method == "tools/list":
             _reply(id_, {"tools": TOOLS})

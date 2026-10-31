@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 .c3/
 examples/media/
+examples/voice/
 out_*
 *.tmp
 .mcp.json

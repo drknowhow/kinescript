@@ -1,0 +1,115 @@
+name: release-kokoro
+
+# Push a tag like kokoro-v0.1.0 to build plugins/kinescript-kokoro and publish it to PyPI as kinescript-kokoro.
+# Run the workflow by hand (Actions > release-kokoro > Run workflow) to publish the same build to TestPyPI instead.
+# Publishing uses trusted publishing (OIDC), as release.yml does. Each index needs a publisher for the project
+# kinescript-kokoro (a pending one before the first upload) that lists this repository, workflow file
+# "release-kokoro.yml" and the environment: "pypi" on pypi.org, "testpypi" on test.pypi.org.
+# The tag must not start with "v": release.yml publishes kinescript itself on those.
+
+on:
+  push:
+    tags: ["kokoro-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/kinescript-kokoro
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"   # Kokoro supports 3.10 to 3.12
+      - name: Check the tag matches the plugin version
+        if: github.event_name == 'push'
+        run: |
+          v=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          test "kokoro-v$v" = "${GITHUB_REF_NAME}" || { echo "tag ${GITHUB_REF_NAME} != kokoro-v$v"; exit 1; }
+      - run: pip install build twine && python -m build && twine check --strict dist/*
+      - name: Check the wheel holds the package and its kine voice entry point
+        run: |
+          python - <<'EOF'
+          import glob, zipfile
+          whl = zipfile.ZipFile(glob.glob("dist/*.whl")[0])
+          names = whl.namelist()
+          stray = [n for n in names if not n.startswith(("kinescript_kokoro/", "kinescript_kokoro-"))]
+          assert not stray, f"stray files in the wheel: {stray}"
+          eps = whl.read(next(n for n in names if n.endswith("entry_points.txt"))).decode()
+          assert "[kinescript.voice]" in eps and "kokoro = kinescript_kokoro:synth" in eps, eps
+          EOF
+      - name: System packages
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg libgl1 libegl1 libfontconfig1
+      - name: Speak a line through kine voice with the wheel (a version cannot be re-uploaded, so prove it works first)
+        env:
+          KINE_BACKEND: cpu
+        run: |
+          whl=$(ls "$PWD"/dist/*.whl)
+          python -m venv "$RUNNER_TEMP/smoke"
+          # PyTorch's CPU build: the default Linux wheel brings gigabytes of CUDA libraries that this run never uses.
+          "$RUNNER_TEMP/smoke/bin/pip" install --quiet --extra-index-url https://download.pytorch.org/whl/cpu "$whl" kinescript
+          cd "$RUNNER_TEMP"   # leave the checkout so the installed packages are the ones that run
+          cat > scene.json <<'EOF'
+          {"canvas": {"w": 640, "h": 360, "fps": 30},
+           "audio": [{"id": "vo", "role": "voice", "text": "Write a scene. [[go]]Render it."}],
+           "layers": [{"id": "go", "type": "text", "text": "Render", "size": 48, "x": "50%", "y": "50%", "at": "vo:go"}]}
+          EOF
+          kine="$RUNNER_TEMP/smoke/bin/kine"
+          "$kine" voice scene.json
+          "$kine" check scene.json
+          "$RUNNER_TEMP/smoke/bin/python" - <<'EOF'
+          import json, subprocess, wave
+          words = [w["word"] for w in json.load(open("voice/vo.words.json"))["words"]]
+          assert words == ["Write", "a", "scene.", "Render", "it."], words
+          with wave.open("voice/vo.wav") as f:
+              assert f.getnframes() / f.getframerate() > 1.0, "the voice is too short"
+          probe = json.loads(subprocess.check_output(["smoke/bin/kine", "probe", "scene.json"]))
+          go = next(l for l in probe["layers"] if l["id"] == "go")
+          vo = next(s for s in probe["audio"] if s["id"] == "vo")
+          assert vo["in"] < go["in"] < vo["out"], (vo, go)
+          print("words:", words, "| go starts at", go["in"])
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: plugins/kinescript-kokoro/dist/
+
+  publish:
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/kinescript-kokoro/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish-testpypi:
+    needs: build
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/kinescript-kokoro/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true

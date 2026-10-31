@@ -1006,26 +1006,25 @@ class Renderer:
             for tok in para.split(" "):
                 if tok == "":
                     continue
-                parts = tok.split("**")
-                clean = "".join(parts)
-                word_emph = emph
-                if len(parts) > 1:
-                    word_emph = True if not emph else emph
-                    if (len(parts) - 1) % 2:
+                # Each ** turns emphasis on or off, inside a word too: g**P**u colours only the P.
+                segs, start = [], 0  # (start in the word, text, emphasised)
+                for j, part in enumerate(tok.split("**")):
+                    if j:
                         emph = not emph
-                    if tok.startswith("**") and tok.endswith("**") and len(parts) == 3:
-                        word_emph = True
-                words.append((clean, word_emph))
+                    if part:
+                        segs.append((start, part, emph))
+                        start += len(part)
+                words.append(("".join(p for _, p, _ in segs), segs or [(0, "", emph)]))
             indent = (len(para) - len(para.lstrip(" "))) * space
             cur, cw = [], indent
-            for w_, e_ in words:
+            for w_, segs in words:
                 ww = meas(w_)
                 if cur and mw and cw + space + ww > float(mw):
                     lines.append(cur)
                     widths.append(cw)
                     cur, cw = [], 0.0
                 x = cw + (space if cur else 0.0)
-                cur.append((w_, e_, x, wi))
+                cur.append((w_, segs, x, wi))
                 wi += 1
                 cw = x + ww
             lines.append(cur)
@@ -1041,15 +1040,20 @@ class Renderer:
         split = L.raw.get("split")
         for li, (ln, lw) in enumerate(zip(lines, widths)):
             off = (W - lw) * k
-            for w_, e_, x, idx in ln:
+            for w_, segs, x, idx in ln:
                 if split == "chars" or ls:
                     cx = x
-                    for ch in w_:
-                        runs.append(Run(ch, off + cx, li, e_, idx, ci))
-                        cx += meas(ch)
-                        ci += 1
-                else:
-                    runs.append(Run(w_, off + x, li, e_, idx, ci))
+                    for _, part, e_ in segs:
+                        for ch in part:
+                            runs.append(Run(ch, off + cx, li, e_, idx, ci))
+                            cx += meas(ch)
+                            ci += 1
+                elif len(segs) == 1:
+                    runs.append(Run(w_, off + x, li, segs[0][2], idx, ci))
+                    ci += len(w_)
+                else:  # one run per emphasis change, placed where it falls in the whole word
+                    for s0, part, e_ in segs:
+                        runs.append(Run(part, off + x + meas(w_[:s0]), li, e_, idx, ci + s0))
                     ci += len(w_)
                 ci += 1  # the space
         lay = Layout(runs, widths, W, lh * len(lines), lh, baseline0, ci, wi)
@@ -1164,7 +1168,7 @@ class Renderer:
         if cue is None:
             self._last_text = ""
             return
-        s0, s1, text = cue
+        s0, s1, text = cue[:3]
         mw = g("maxWidth") or self.s.w * 0.8
         lay = self._text_layout(L, t, T, g, text, max_w=mw)
         pad = self._pad(L) if L.raw.get("box") is not None else (0.0, 0.0)
@@ -1176,7 +1180,10 @@ class Renderer:
         ct = t - s0
         a = min(1.0, ct / 0.12, (s1 - t) / 0.12)
         active = None
-        if L.raw.get("mode") in ("karaoke", "pop"):
+        if L.raw.get("mode") in ("karaoke", "pop") and len(cue) > 3:  # word times from the voice
+            first_word = lay.runs[0].word if lay.runs else 0
+            active = first_word + sum(1 for ws, _ in cue[3] if ws <= t) - 1
+        elif L.raw.get("mode") in ("karaoke", "pop"):
             words = text.replace("**", "").split()
             total = sum(len(wd) for wd in words) or 1
             frac = ct / max(0.05, (s1 - s0) * 0.92)

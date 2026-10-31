@@ -55,9 +55,8 @@ SCENE (top level)
   motionBlur  {"samples": 6, "shutter": 0.5}   (slower: renders 6 sub-frames per frame)
   camera      moves and turns the view in depth (see DEPTH AND CAMERA).
   light       how model layers are lit (see 3D MODELS).
-  audio       [{"src": "music.mp3", "at": 0, "gain": -8, "fadeIn": 1, "fadeOut": 2, "trim": [0, 30]}]
-              gain is in dB (0 = unchanged, -6 = about half as loud). fadeOut ends where the audio
-              ends: the scene end, unless trim makes the audio shorter.
+  audio       the list of sounds: voice-over, music, effects (see SOUND).
+  mix         loudness, role levels and ducking of the sound (see SOUND).
   components  your own reusable layer groups (see COMPONENTS).
 
 TIME: "at" (start), "dur" (length), "until" (end)
@@ -87,9 +86,12 @@ KEYS EVERY LAYER HAS
                 difference | color
   shadow        {"x": 0, "y": 6, "blur": 16, "color": "#00000099"}   (those are the defaults)
   fx            {"brightness": 0, "contrast": 1, "saturate": 1, "hue": 0, "exposure": 0,
-                 "temperature": 0, "tint": 0, "gray": 0, "invert": 0}
+                 "temperature": 0, "tint": 0, "gray": 0, "invert": 0}. brightness adds to every
+                channel (-1..1), so below 0 dark footage turns black; exposure is in stops and
+                multiplies (-1 halves the light), which is the way to darken footage.
   enter, exit   a motion (see ENTER AND EXIT)
-  hidden        true skips the layer
+  hidden        true skips the layer (and its sound)
+  sound         a file played when the layer starts, timed by the layer (see SOUND)
   allowOffscreen  true stops check warning when the layer leaves the canvas
   note          free text, ignored
 
@@ -105,8 +107,9 @@ LAYER TYPES (defaults in brackets)
   arrow     x1 y1 x2 y2 bend [0] head [22] stroke strokeWidth
   text      text (centred on x, y: the anchor is center), size [64], weight [600] (100..900), font ["Space Grotesk"; also "IBM Plex Mono",
             any installed family, or a .ttf path], italic, fill [#f2f0e8], emph (colour of
-            words written **like this**), align [center] (left|center|right), maxWidth (wraps
-            lines), lineHeight [1.18], letterSpacing [0], stroke, strokeWidth,
+            text written **like this**, also inside a word: g**P**u colours the P),
+            align [center] (left|center|right), maxWidth (wraps lines), lineHeight [1.18],
+            letterSpacing [0], stroke, strokeWidth,
             box {"fill": "#000000b0", "pad": [12, 20], "radius": 10} (a background behind the
             text; pad is [vertical, horizontal]), case (upper|lower),
             split (chars|words|lines: animate each unit, see ENTER AND EXIT),
@@ -121,6 +124,7 @@ LAYER TYPES (defaults in brackets)
   video     src, trim [start, end] (seconds in the source file), speed [1], volume [1] (0 mutes),
             loop, w, h [canvas size], fit, zoom, focus, radius. Its sound is mixed in.
   captions  cues [[start, end, "text"], ...] (seconds from the layer start) or src (.srt/.vtt),
+            or voice: a sound's id, to caption what it says word by word (see SOUND),
             mode (karaoke|pop: highlight the current word), active (colour of that word), and
             the text keys. Defaults: x "50%", y "86%", size 46, weight 700, a dark box behind.
   shader    preset ({shaders}) with uniforms {"name": number or colour},
@@ -135,9 +139,11 @@ LAYER TYPES (defaults in brackets)
   group     children [layers], w, h, clip (true cuts children off at w x h), radius, fill.
             Children are placed from the group's x, y and start at the group's "at".
   sequence  clips [{"src": "a.mp4", "trim": [0, 4]}, ...] and transition {"type": "fade",
-            "dur": 0.4} (fade|wipe|slide|zoom|blur|cut). Becomes back-to-back video layers named
-            <id>-1, <id>-2, ... Each transition overlaps the clips it joins, so 3 s + 3 s with a
-            0.5 s fade lasts 5.5 s.
+            "dur": 0.4} (fade|wipe|slide|zoom|blur|cut). Becomes a group of back-to-back video layers
+            named <id>-1, <id>-2, ... that ends with its last clip, so "<id>.out" is a cue. Each
+            transition overlaps the clips it joins, so 3 s + 3 s with a 0.5 s fade lasts 5.5 s.
+            fit, volume, w, h, x, y and anchor go to every clip; opacity, blur, fx, enter and the
+            other layer keys apply to the whole cut.
 
 DEPTH AND CAMERA (3D)
   Any layer can move and turn in depth. x is right, y is down and z is toward the viewer, in px,
@@ -271,10 +277,77 @@ COMPONENTS  {"use": "<name>", "id": "...", "at": ..., "dur": ..., ...parameters}
   Built in (parameters):
 {components}
   x and y place the component as noted above. Components also accept enter, exit, opacity,
-  scale, rotate, hidden.
+  scale, rotate, hidden, sound.
   Your own: "components": {"badge": {"params": {"label": "NEW"}, "layers": [
               {"type": "text", "text": "{{label}}", "size": 40}]}}
   then a layer {"use": "badge", "label": "BETA", "x": 200, "y": 100}.
+
+SOUND
+  Top-level "audio" lists the sounds. Each one:
+    {"id": "vo1", "role": "voice", "src": "vo1.wav", "at": 0.5}
+  src (relative to the scene file), id, role (voice|music|sfx|ambience), at, dur, until,
+  trim [start, end] (seconds in the file), gain (dB: 0 = unchanged, -6 = about half as loud) or
+  volume (1 = unchanged), fadeIn, fadeOut (seconds), loop (true repeats the trimmed file until the
+  sound ends), pan (-1 left .. 1 right), text, speaker and rate (a voice spoken from text, see
+  below). A sound lasts as long as its trimmed file; fadeOut ends
+  where it ends, which is the scene end at the latest.
+  A sound is a cue like a layer: "at": "vo1.out+0.3" starts something 0.3 s after the voice ends,
+  and a sound can start at "title.in". "prev" is the sound listed before. A voice makes
+  "duration": "auto" long enough to finish it; music, ambience and sfx do not.
+  Music under the whole video:
+    {"id": "bed", "role": "music", "src": "music.mp3", "gain": -10, "loop": true, "fadeIn": 1,
+     "fadeOut": 2}
+  A layer's sound moves when the layer moves:
+    "sound": "pop.wav"   plays when the layer starts
+    "sound": {"src": "whoosh.wav", "at": "out-0.1", "gain": -6}
+  Its at is "in", "out" or "mid" with an offset, or seconds after the layer starts; it also takes
+  trim, dur, gain, volume, fadeIn, fadeOut, pan and role (sfx unless you say).
+  gain changes over time like any property, timed from the sound's start: "gain": [[0, -30], [2, 0]]
+  fades a sound up over its first 2 s.
+  Give sounds a role and the mix is levelled for you: voice -18 LUFS, music -16, ambience -30, and an
+  sfx peaks at -6 dBFS; gain on a sound with a role is a change from that level. Music and ambience
+  dip 14 dB while a voice speaks. An sfx starts past the silence at the start of its file, so its
+  first sound lands on its cue. The whole mix ends at -16 LUFS with peaks under -1.5 dBTP. Sounds
+  without a role keep the gain you give them, and a scene where no sound has a role is mixed as
+  given. Change the targets with a top-level "mix", for example
+  "mix": {"loudness": -14, "peak": -1, "levels": {"music": -20}, "duck": {"depth": 10}}.
+  "duck": false turns the dip off; duck also takes by and under (lists of roles), and attack, hold
+  and release in seconds (0.08, 0.15, 0.4).
+  Cue from what a voice says. Its word times come from a words file next to it, vo1.words.json for
+  vo1.wav, in seconds of the file:
+    {"words": [{"word": "Write", "start": 0.12, "end": 0.41}, {"word": "render.", "start": 1.2, "end": 1.5}]}
+  Whisper's JSON reads as it is; "words" on the sound names another file or holds the list. A word's
+  id is the word in lower case without punctuation, with _2, _3 for repeats; kine probe lists the ids
+  and when each is said. "at": "vo1:render" starts a layer as the voice says render, "vo1:render.out"
+  as it finishes the word, and "vo1:render_2.in+0.1" works like any cue. Captions of the voice, each
+  word lit as it is said:
+    {"id": "cc", "type": "captions", "voice": "vo1", "mode": "karaoke"}
+  A voice from text: write what it says and kine voice speaks it (see COMMANDS):
+    {"id": "vo1", "role": "voice", "text": "Write a scene. Check it. [[go]]Render it.", "speaker": "af_heart"}
+  It writes voice/vo1.wav (or the sound's src) and its words file, so cues and captions work as above.
+  [[name]] gives the next word that id: "at": "vo1:go" starts as it says Render, whatever the line
+  says later. speaker is the backend's voice (Kokoro: af_heart, af_bella, am_adam, bf_emma, bm_george),
+  rate (0.5 to 2, default 1) how fast it speaks. With Kokoro, a speaker of "af_heart,af_bella" blends
+  the two voices, [word](/phonemes/) in text says that word with the IPA phonemes you give (for a name it
+  says wrong), and [word](-1) or [word](+1) lowers or raises its stress; captions and word ids keep the
+  word. kine check reports a sound with text that is not spoken yet (voice-missing) and one whose text,
+  speaker, rate, backend or options changed since it was spoken (voice-stale).
+  A tag in the text says how to speak what follows, for a backend that acts on tags: [whispers], [laughs],
+  [sighs]. Tags are not words: marks and word ids skip them, a backend without tags says the line without
+  them, and kine voice lists what a backend could not do under "ignored". A sound picks its backend with
+  backend (kokoro, chatterbox, elevenlabs, each a plugin) and hands it settings with options:
+    {"id": "vo2", "role": "voice", "text": "[whispers] Nobody knows. [laughs] Yet.", "backend": "elevenlabs",
+     "speaker": "George", "options": {"stability": 0.3}}
+  chatterbox acts on [laugh], [chuckle], [sigh], [gasp], [cough], [clear throat], [whispering], [angry],
+  [happy], [sarcastic], [surprised], [crying] and a few more ([laughs] reads as [laugh]); its speaker
+  is a clip of 5 s or more whose voice it copies, and "options": {"model": "standard", "exaggeration": 0.8}
+  trades the tags for stronger emotion. elevenlabs needs an ELEVENLABS_API_KEY and uses the account's
+  quota; its speaker is a voice name or id, its options model (eleven_v4), stability, style and
+  similarity_boost. kokoro has no tags.
+  You cannot hear the mix, so read it: kine check measures it and names each sound problem with its
+  time range, and kine look --audio draws it under the frames, with each sound's loudness in the JSON.
+  Sound is mixed into .mp4, .mov and .webm, and into --from/--to renders. -o mix.wav (or .m4a,
+  .mp3, .flac) renders the sound alone, without drawing frames.
 
 RECIPES (layers to paste into "layers")
   Title that types on:
@@ -307,34 +380,52 @@ RECIPES (layers to paste into "layers")
      "fill": {"linear": [[0, 0], [1, 1]], "stops": ["#1e3a8a", "#6d28d9"]}}
   Progress bar along the bottom for the whole video:
     {"use": "progress", "id": "progress", "color": "#ff633f", "h": 8}
-  Music under everything: top-level "audio": [{"src": "music.mp3", "gain": -10, "fadeIn": 1, "fadeOut": 2}]
+  Music under everything: top-level "audio": [{"role": "music", "src": "music.mp3", "gain": -10,
+    "loop": true, "fadeIn": 1, "fadeOut": 2}]
 
 COMMANDS
   kine new scene.json             write a starter scene
   kine check scene.json           JSON list of problems. error: must fix. warning: should fix:
                                   text off the canvas or inside the outer 5% (safe-area),
                                   overlapping text, contrast under 3:1, or text shown for less
-                                  than about 0.4 s + 0.3 s per word (read-time).
+                                  than about 0.4 s + 0.3 s per word (read-time). With sound (it is
+                                  mixed and measured, see SOUND): a voice cut off (audio-cut), two
+                                  voices at once (voice-overlap), music under 10 LU below a voice
+                                  (voice-masked), an sfx whose first sound is late (sfx-late), a
+                                  silent sound, and the mix's loudness and peaks.
                                   info: a name it read for you, e.g. "'color' read as 'fill'".
   kine look scene.json --boxes    one PNG of 12 evenly spaced frames; --boxes outlines layers and
                                   labels the top-level ones; -n 16 frames, --at 1 2.5 4 exact
-                                  times (use it to see a transition), --width 480, --cols 4, -o
+                                  times (use it to see a transition), --width 480, --cols 4, -o.
+                                  --audio adds the sound under the frames on the same time axis:
+                                  a lane per role and one for the mix, the duck, and issues in red;
+                                  its JSON gives each sound's loudness and gain and the mix's.
   kine still scene.json --at 2.5  one frame as PNG (-o to name it); --at -1 is 1 s before the
                                   end; --at end is the last frame
-  kine probe scene.json --at 2    every layer's start and end, and screen boxes at 2 s
+  kine probe scene.json --at 2    every layer's and sound's start and end, and screen boxes at 2 s
   kine probe clip.mp4             a media file's duration, w, h, fps and whether it has audio
   kine render scene.json -o out.mp4 -q draft|standard|high
                                   standard is the default, draft the fastest, high the best.
                                   Also .mov or .webm (with --transparent for no background),
                                   .gif (longest side 720 px, 15 fps), or a folder/ for PNG frames.
+                                  .wav, .m4a, .mp3 or .flac: the sound alone.
                                   --scale 0.5 halves the size; --from 2 --to 4 renders a part.
+  kine voice scene.json           speaks each sound's text into its file and times its words; a sound
+                                  is spoken again only when its text, speaker, rate, backend or
+                                  options changed (--force: all of them, --only vo1: one). Needs a
+                                  voice backend plugin (with none installed, kine voice prints the
+                                  pip command); --backend picks one for sounds without their own.
+                                  KINE_VOICE_CMD (or KINE_VOICE_CMD_CHATTERBOX for one backend) runs
+                                  a backend in another Python, as JSON requests on stdin.
+                                  Rendering never speaks.
   kine watch scene.json           re-makes the contact sheet on every save
   kine doctor                     checks ffmpeg, the GPU and fonts
   kine mcp                        the same tools for MCP clients
 
 WORKFLOW FOR AGENTS
-  1. Write the scene.   2. kine check: fix every error, read the warnings, run it again.
-  3. kine look --boxes, and look at the image.   4. kine render -q draft, then the final render.
+  1. Write the scene (if a sound has text, kine voice).   2. kine check: fix every error, read the warnings, run it again.
+  3. kine look --boxes, and look at the image (with sound, kine look --audio).
+  4. kine render -q draft, then the final render.
 """
 
 

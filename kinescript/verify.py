@@ -6,11 +6,13 @@ many timestamps, a JSON list of problems with time ranges, and the exact box of 
 from __future__ import annotations
 
 import math
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import skia
 
 from . import color as C
+from . import listen
 from .render import FONT_DIR, Renderer, _argb
 from .scene import Scene, SceneError, load
 
@@ -28,9 +30,10 @@ def _times(scene: Scene, count: int, times=None) -> list[float]:
 
 
 def contact_sheet(src, out: str, count: int = 12, cols: int | None = None, width: int = 480,
-                  times=None, boxes: bool = False) -> dict:
+                  times=None, boxes: bool = False, audio: bool = False) -> dict:
     """One PNG of `count` evenly spaced frames, each labelled with its time and frame number.
-    boxes=True outlines every visible layer with its id."""
+    boxes=True outlines every visible layer with its id. audio=True adds the sound under the frames, one lane per
+    role and one for the mix, and returns its measurements."""
     scene = load(src)
     ts = _times(scene, count, times)
     cols = cols or min(len(ts), 4)
@@ -39,7 +42,9 @@ def contact_sheet(src, out: str, count: int = 12, cols: int | None = None, width
     r = Renderer(scene, track=boxes, scale=scale)
     tw, th = r.w, r.h
     gap, label_h = 8, 26
-    sheet = skia.Surface(cols * (tw + gap) + gap, rows * (th + label_h + gap) + gap)
+    rep = listen.report(scene) if audio else None
+    grid_h = rows * (th + label_h + gap) + gap
+    sheet = skia.Surface(cols * (tw + gap) + gap, grid_h + listen.strip_height(rep))
     c = sheet.getCanvas()
     c.clear(_argb("#0a0c10"))
     mono = skia.Typeface.MakeFromFile(str(FONT_DIR / "IBMPlexMono-Medium.ttf"))
@@ -55,9 +60,14 @@ def contact_sheet(src, out: str, count: int = 12, cols: int | None = None, width
         c.drawString(f"{T:6.2f}s  f{n}", x + 2, y + 18, font, skia.Paint(AntiAlias=True, Color=_argb("#f2f0e8")))
         if boxes:
             _draw_boxes(c, scene, r.boxes, x, y + label_h, tw, th, small)
+    if rep is not None:
+        listen.strip(c, rep, listen.issues(scene, rep), gap, grid_h, cols * (tw + gap) - gap, ts, font, small)
     sheet.makeImageSnapshot().save(out, skia.kPNG)
     scene.close()
-    return {"out": out, "times": [round(t, 3) for t in ts], "grid": [cols, rows], "backend": r.backend}
+    info = {"out": out, "times": [round(t, 3) for t in ts], "grid": [cols, rows], "backend": r.backend}
+    if audio:
+        info["audio"] = listen.summary(rep)
+    return info
 
 
 def _behind(boxes: dict, lid: str, a: list, w: int, h: int) -> str | None:
@@ -134,6 +144,9 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
     except (ValueError, FileNotFoundError, RuntimeError, OSError) as e:
         return _result([{"level": "error", "code": "load", "layer": None, "message": str(e), "fix": ""}])
     W, H = scene.w, scene.h
+    pool = ThreadPoolExecutor(1)
+    heard = pool.submit(_heard, scene)  # the mix renders and is measured while the frames are checked
+    pool.shutdown(wait=False)
     r = Renderer(scene, track=True, scale=1.0)
     found: dict[tuple, dict] = {}
 
@@ -152,6 +165,7 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
         try:
             r.draw(T)
         except (ValueError, RuntimeError, OSError) as e:
+            heard.cancel() or heard.result()
             scene.close()
             return _result(scene.issues + [{"level": "error", "code": "render", "layer": None, "from": round(T, 2),
                                             "to": round(T, 2), "message": f"{type(e).__name__}: {e}", "fix": ""}],
@@ -235,16 +249,26 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
                 add("warning", "read-time", layer.id, layer.t_in,
                     f"{words} words on screen for {layer.dur:.2f}s; viewers need ~{need:.1f}s", "extend dur or cut words",
                     until=layer.t_out)
-        if layer.type == "captions":
-            for s0, s1, txt in layer.raw.get("cues", []):
+        if layer.type == "captions" and not layer.raw.get("voice"):  # a voice's captions keep the pace it speaks at
+            for s0, s1, txt, *_ in layer.raw.get("cues", []):
                 words = _words(txt)
                 if words and (s1 - s0) < 0.25 + words / 4.5:
                     add("warning", "read-time", layer.id, layer.t_in + s0,
                         f"caption '{txt[:30]}' is {s1 - s0:.2f}s for {words} words", "split or lengthen the cue",
                         until=layer.t_in + s1)
                     break
+    sound = heard.result()
     scene.close()
-    return _result(scene.issues + list(found.values()), duration=scene.duration)
+    return _result(scene.issues + list(found.values()) + sound, duration=scene.duration)
+
+
+def _heard(scene: Scene) -> list[dict]:
+    """check's sound issues; an info note when the mix cannot be made."""
+    try:
+        return listen.issues(scene, listen.report(scene))
+    except (RuntimeError, OSError, ValueError) as e:
+        return [{"level": "info", "code": "audio-unmeasured", "layer": None, "from": 0, "to": round(scene.duration, 2),
+                 "message": f"the sound could not be measured: {e}", "fix": ""}]
 
 
 _RANK = {"error": 0, "warning": 1, "info": 2}

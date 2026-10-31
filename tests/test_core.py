@@ -1,6 +1,8 @@
 import json
 import os
 import subprocess
+import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -34,6 +36,15 @@ def test_cue_reference_follows_upstream_duration():
     tl.solve()
     assert tl.resolved["b"] == (2.75, 3.75)
     assert tl.resolved["c"][0] == pytest.approx(3.25)
+
+
+def test_a_group_can_end_with_one_of_its_children():
+    tl = Timeline(30)
+    tl.add("g", 1, until="kid.out")
+    tl.add("kid", 0.5, dur=2, parent="g", default_end="g")
+    tl.add("rest", 0, parent="g", default_end="g")  # no end of its own: it ends with the group
+    tl.solve()
+    assert tl.resolved["g"] == (1, 3.5) and tl.resolved["rest"] == (1, 3.5)
 
 
 def test_timing_cycle_is_reported():
@@ -338,6 +349,16 @@ def test_components_expand_and_resolve():
     assert s.by_id["tc"].t_in == 3
 
 
+def test_theme_names_work_inside_a_scenes_own_components():
+    spec = scene([{"use": "tag", "id": "t1", "word": "Hi"}, {"type": "group", "id": "g", "children": [
+        {"use": "tag", "id": "t2", "word": "Yo"}]}])
+    spec["theme"] = {"brand": "#123456"}
+    spec["components"] = {"tag": {"params": {"word": ""}, "layers": [
+        {"id": "w", "type": "text", "text": "{{word}}", "fill": "$muted", "stroke": "$brand"}]}}
+    s = k.Scene(spec)
+    assert [(s.by_id[i].raw["fill"], s.by_id[i].raw["stroke"]) for i in ("t1-w", "t2-w")] == [("#9299a8", "#123456")] * 2
+
+
 def test_sequence_crossfades_and_video_renders(clip):
     spec = scene([{"type": "sequence", "id": "cut", "clips": [{"src": clip, "trim": [0, 1.5]}, {"src": clip, "trim": [1, 3]}],
                    "transition": {"type": "fade", "dur": 0.5}}])
@@ -346,6 +367,40 @@ def test_sequence_crossfades_and_video_renders(clip):
     f = Renderer(s, backend="cpu").frame(45)
     assert f[..., :3].std() > 20  # test pattern is visible, not a black frame
     s.close()
+
+
+def test_sequence_id_is_a_cue_and_takes_layer_effects(clip):
+    seq = {"type": "sequence", "id": "cut", "at": 0.5,
+           "clips": [{"src": clip, "trim": [0, 1]}, {"src": clip, "trim": [1, 2.5]}]}
+    cap = {"id": "cap", "type": "text", "text": "after", "x": "50%", "y": "50%", "size": 30, "at": "cut.out", "dur": 1}
+    s = k.Scene(scene([seq, cap], bg="#000000"))
+    assert (s.by_id["cut"].t_in, s.by_id["cut"].t_out) == (0.5, pytest.approx(3.0))  # the span of its clips
+    assert s.by_id["cut-1"].t_in == 0.5 and s.by_id["cap"].t_in == pytest.approx(3.0)
+    full = Renderer(s, backend="cpu").frame(30)
+    s.close()
+    assert check(scene([dict(seq, opacity=0.5, blur=2, fx={"exposure": -1}), cap]))["errors"] == 0
+    s = k.Scene(scene([dict(seq, opacity=0.5)], bg="#000000"))
+    half = Renderer(s, backend="cpu").frame(30)
+    s.close()
+    assert half[..., :3].mean() == pytest.approx(full[..., :3].mean() / 2, rel=0.05)
+
+
+def test_missing_system_gl_libraries_name_the_packages(tmp_path):
+    # What a bare Linux container gets from skia-python, standing in for the real library here.
+    (tmp_path / "skia.py").write_text('raise ImportError("libEGL.so.1: cannot open shared object file")')
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(tmp_path), root]))
+    r = subprocess.run([sys.executable, "-c", "import kinescript"], env=env, capture_output=True, text=True)
+    assert "libEGL.so.1" in r.stderr and "sudo apt install libegl1 libgl1 libfontconfig1" in r.stderr
+
+
+def test_emphasis_can_start_and_stop_inside_a_word():
+    s = k.Scene(scene([{"id": "t", "type": "text", "text": "g**P**u(doom) **diff**, done", "size": 30}]))
+    L, r = s.by_id["t"], Renderer(s, backend="cpu")
+    lay = r._text_layout(L, 0, 0, lambda name, default=None: L.get(name, 0, 0, 0, default), L.raw["text"])
+    assert [(u.text, u.emph) for u in lay.runs] == [("g", False), ("P", True), ("u(doom)", False),
+                                                    ("diff", True), (",", False), ("done", False)]
+    assert lay.runs[0].x < lay.runs[1].x < lay.runs[2].x and lay.runs[2].char0 == 2
 
 
 def test_render_mp4_with_audio(clip, tmp_path):
@@ -370,7 +425,8 @@ def test_audio_lands_at_its_time_with_any_worker_count(clip, tmp_path, workers):
     assert np.sqrt(np.mean(pcm[:7200] ** 2)) < 1e-3 < 0.05 < np.sqrt(np.mean(pcm[8800:15200] ** 2))
 
 
-def test_audio_mixes_while_frames_render_and_stops_when_they_fail(clip, tmp_path, monkeypatch):
+@pytest.mark.parametrize("role", [None, "music"])  # one ffmpeg process, or the managed mix's thread
+def test_audio_mixes_while_frames_render_and_stops_when_they_fail(clip, tmp_path, monkeypatch, role):
     from kinescript import output
     started, real_start = [], output._start_audio
 
@@ -385,10 +441,638 @@ def test_audio_mixes_while_frames_render_and_stops_when_they_fail(clip, tmp_path
     monkeypatch.setattr(output, "_start_audio", start)
     monkeypatch.setattr(output, "_render_range", frames)
     spec = scene([{"type": "rect", "w": 320, "h": 180}], duration=60)
-    spec["audio"] = [{"src": clip, "at": t} for t in range(0, 60, 3)]  # a minute of audio takes a while to mix
+    spec["audio"] = [dict({"src": clip, "at": t}, **({"role": role} if role else {}))
+                     for t in range(0, 60, 3)]  # a minute of audio takes a while to mix
     with pytest.raises(RuntimeError, match="frames failed"):
         k.render(spec, str(tmp_path / "o.mp4"), quality="draft", workers=1)
     assert started[0][0].poll() is not None  # stopped, not left running
+
+
+@pytest.fixture(scope="session")
+def tone(tmp_path_factory):
+    p = tmp_path_factory.mktemp("media") / "tone.wav"
+    subprocess.run([media.FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=1000:duration=0.5",
+                    str(p)], check=True)
+    return str(p)
+
+
+def _pcm(path, channels=1):
+    raw = subprocess.run([media.FFMPEG, "-v", "error", "-i", str(path), "-map", "0:a", "-ac", str(channels),
+                          "-ar", "8000", "-f", "f32le", "-"], capture_output=True, check=True).stdout
+    return np.frombuffer(raw, np.float32).reshape(-1, channels)
+
+
+def _rms(pcm, t0, t1):
+    return float(np.sqrt(np.mean(pcm[int(t0 * 8000):int(t1 * 8000)] ** 2)))
+
+
+def test_every_mix_pads_by_samples_so_it_always_ends(tone, tmp_path, monkeypatch):
+    # An endless apad was cut by timestamps; ffmpeg 8 sometimes got those wrong and the mix never ended.
+    import re
+    from kinescript import output
+    graphs, real = [], output._graph
+
+    def record(*a):
+        graphs.append(real(*a))
+        return graphs[-1]
+
+    monkeypatch.setattr(output, "_graph", record)
+    for role in (None, "music"):
+        spec = scene([{"type": "rect"}], duration=1)
+        spec["audio"] = [dict({"src": tone, "at": 0.5}, **({"role": role} if role else {}))]
+        k.render(spec, str(tmp_path / "o.wav"))
+    pads = [m for _, g in graphs for m in re.findall(r"apad[^,;\[]*", g)]
+    assert len(graphs) == 2 and pads and all(m == "apad=whole_dur=1.0000" for m in pads)
+
+
+def test_layers_cue_from_audio_and_only_voice_extends_auto_duration(tone):
+    for role, duration in (("voice", 1.5), ("music", 1.0)):
+        spec = scene([{"id": "a", "type": "rect", "dur": 1}, {"id": "b", "type": "rect", "at": "vo.out"}])
+        spec["audio"] = [{"id": "vo", "role": role, "src": tone, "at": 1}]
+        s = k.Scene(spec)
+        assert s.by_id["b"].t_in == pytest.approx(1.5)
+        assert s.duration == pytest.approx(duration)
+        assert probe(spec)["audio"][0] == {"id": "vo", "role": role, "src": tone, "in": 1.0, "out": 1.5, "layer": None}
+
+
+def test_audio_entries_chain_with_prev(tone):
+    spec = scene([{"type": "rect", "dur": 3}])
+    spec["audio"] = [{"id": "l1", "src": tone, "at": 0.2}, {"id": "l2", "src": tone, "at": "prev.out+0.3"}]
+    assert k.Scene(spec).timeline.resolved["l2"] == pytest.approx((1.0, 1.5))
+
+
+def test_layer_sound_moves_with_its_layer_and_skips_hidden_layers(tone):
+    def sound_in(start, **extra):
+        spec = scene([{"id": "t", "type": "rect", "at": start, "dur": 0.5, "sound": dict({"src": tone, "at": "out-0.1"},
+                                                                                       **extra)}], duration=3)
+        return [(x.id, x.role, x.t_in) for x in k.Scene(spec).audio]
+    assert sound_in(0.8) == [("t-sound", "sfx", pytest.approx(1.2))]
+    assert sound_in(1.4) == [("t-sound", "sfx", pytest.approx(1.8))]
+    assert sound_in(1.4, at=0.25)[0][2] == pytest.approx(1.65)  # a number counts from the layer start
+    spec = scene([{"id": "t", "type": "rect", "hidden": True, "sound": tone}])
+    assert k.Scene(spec).audio == []
+
+
+def test_components_and_sequences_carry_a_sound(tone, clip):
+    spec = scene([{"use": "titleCard", "id": "card", "title": "Hi", "at": 0.5, "dur": 1, "sound": tone},
+                  {"type": "sequence", "id": "cut", "at": 2, "clips": [{"src": clip, "trim": [0, 1]}],
+                   "sound": {"src": tone, "at": "out"}}])
+    assert [(x.id, x.t_in) for x in k.Scene(spec).audio] == [("card-sound", 0.5), ("cut-sound", pytest.approx(3.0))]
+
+
+def test_layer_sound_renders_at_its_cue_and_a_short_mix_keeps_every_frame(tone, tmp_path):
+    spec = scene([{"id": "t", "type": "rect", "at": 1, "dur": 0.5, "sfx": tone}], duration=2.5)
+    out = tmp_path / "o.mp4"
+    k.render(spec, str(out), quality="draft")
+    pcm = _pcm(out)
+    assert _rms(pcm, 0, 0.95) < 1e-3 < 0.05 < _rms(pcm, 1.05, 1.45)
+    frames = subprocess.run([media.FFPROBE, "-v", "error", "-count_frames", "-select_streams", "v", "-show_entries",
+                             "stream=nb_read_frames", "-of", "csv=p=0", str(out)], capture_output=True, text=True).stdout
+    assert int(frames) == 75
+
+
+def test_looped_audio_repeats_to_the_scene_end(tone, tmp_path):
+    spec = scene([{"type": "rect"}], duration=2)
+    spec["audio"] = [{"role": "music", "src": tone, "loop": True}]
+    out = tmp_path / "o.wav"
+    assert k.render(spec, str(out))["seconds"] == 2
+    pcm = _pcm(out)
+    assert len(pcm) == pytest.approx(16000, abs=80) and _rms(pcm, 1.6, 1.95) > 0.05
+
+
+def test_pan_moves_sound_between_channels(tone, tmp_path):
+    spec = scene([{"type": "rect"}], duration=1)
+    spec["audio"] = [{"src": tone, "pan": -1}]
+    out = tmp_path / "o.wav"
+    k.render(spec, str(out))
+    pcm = _pcm(out, 2)
+    left, right = _rms(pcm[:, 0], 0.1, 0.4), _rms(pcm[:, 1], 0.1, 0.4)
+    assert left > 0.05 and right < left / 100
+
+
+def test_audio_only_render_draws_no_frames(tone, tmp_path, monkeypatch):
+    from kinescript import output
+
+    def frames(job):
+        raise AssertionError("no frame should be rendered")
+
+    monkeypatch.setattr(output, "_render_range", frames)
+    spec = scene([{"type": "rect"}], duration=1.5)
+    spec["audio"] = [{"src": tone, "at": 0.5}]
+    res = k.render(spec, str(tmp_path / "mix.m4a"))
+    assert res["seconds"] == 1.5 and media.probe(res["out"])["audio"]
+    with pytest.raises(ValueError, match="no audio"):
+        k.render(scene([{"type": "rect"}], duration=1), str(tmp_path / "none.wav"))
+
+
+@pytest.mark.parametrize("ext,codec", [(".mov", "pcm_s16le"), (".webm", "opus")])
+def test_mov_and_webm_carry_the_mix(tone, tmp_path, ext, codec):
+    spec = scene([{"type": "rect", "w": 100, "h": 60}], duration=1)
+    spec["audio"] = [{"src": tone}]
+    out = tmp_path / f"o{ext}"
+    assert k.render(spec, str(out), quality="draft")["audio"]
+    streams = subprocess.run([media.FFPROBE, "-v", "error", "-select_streams", "a", "-show_entries",
+                              "stream=codec_name", "-of", "csv=p=0", str(out)], capture_output=True, text=True).stdout
+    assert streams.strip() == codec
+
+
+def test_range_render_cuts_the_full_mix(tone, tmp_path):
+    spec = scene([{"type": "rect"}], duration=3)
+    spec["audio"] = [{"src": tone, "at": 1.5, "fadeIn": 0.05}]
+    out = tmp_path / "o.mp4"
+    assert k.render(spec, str(out), quality="draft", start=1.0, end=2.5)["audio"]
+    pcm = _pcm(out)
+    assert len(pcm) == pytest.approx(12000, abs=400)
+    assert _rms(pcm, 0, 0.45) < 1e-3 < 0.05 < _rms(pcm, 0.6, 0.95)
+
+
+@pytest.fixture(scope="session")
+def mix_media(tmp_path_factory):
+    """A 200 Hz bed, a 2 kHz voice, and an effect whose 3 kHz burst starts 0.3 s into its file."""
+    d, out = tmp_path_factory.mktemp("mix"), {}
+    for name, expr, dur in (("bed", "0.5*sin(2*PI*200*t)", 2), ("voice", "0.3*sin(2*PI*2000*t)", 1.5),
+                            ("hit", "if(between(t,0.3,0.4),0.8*sin(2*PI*3000*t),0)", 0.5)):
+        out[name] = str(d / f"{name}.wav")
+        subprocess.run([media.FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i", f"aevalsrc='{expr}':s=48000:d={dur}",
+                        out[name]], check=True)
+    return out
+
+
+def _band(pcm, t0, t1, hz):
+    """Level in dB of one frequency between t0 and t1, so one sound can be measured under another."""
+    seg = pcm[int(t0 * 8000):int(t1 * 8000)]
+    spec = np.abs(np.fft.rfft(seg * np.hanning(len(seg))))
+    return 20 * np.log10(spec[np.argmin(np.abs(np.fft.rfftfreq(len(seg), 1 / 8000) - hz))] + 1e-12)
+
+
+def _measure(path):
+    from kinescript import audio
+    log = subprocess.run([media.FFMPEG, "-hide_banner", "-nostats", "-i", str(path), "-af", "ebur128=peak=true", "-f",
+                          "null", "-"], capture_output=True, text=True).stderr
+    return audio.loudness(log)
+
+
+def test_roles_are_levelled_ducked_and_brought_to_the_loudness_target(mix_media, tmp_path):
+    spec = scene([{"type": "rect"}], duration=6)
+    spec["audio"] = [{"role": "music", "src": mix_media["bed"], "loop": True, "until": "end"},
+                     {"role": "voice", "src": mix_media["voice"], "at": 2}]
+    out = tmp_path / "o.wav"
+    k.render(spec, str(out))
+    got = _measure(out)
+    assert got["lufs"] == pytest.approx(-16, abs=1) and got["true_peak"] <= -1.5
+    pcm = _pcm(out)[:, 0]
+    free = _band(pcm, 0.5, 1.5, 200)
+    assert free - _band(pcm, 2.4, 3.4, 200) == pytest.approx(14, abs=1)  # the bed dips under the voice
+    assert _band(pcm, 4.6, 5.6, 200) == pytest.approx(free, abs=0.5)  # and comes back after it
+    spec["mix"] = {"peak": -6, "duck": False}
+    k.render(spec, str(out))
+    pcm = _pcm(out)[:, 0]
+    assert _measure(out)["true_peak"] <= -6
+    assert _band(pcm, 0.5, 1.5, 200) - _band(pcm, 2.4, 3.4, 200) == pytest.approx(0, abs=1)
+
+
+def test_an_effect_lands_on_its_cue_past_its_leading_silence(mix_media, tmp_path):
+    spec = scene([{"id": "t", "type": "rect", "at": 1, "dur": 0.5, "sound": mix_media["hit"]}], duration=2)
+    out = tmp_path / "o.wav"
+    k.render(spec, str(out))
+    pcm = _pcm(out)[:, 0]
+    assert np.argmax(np.abs(pcm) > 0.01) / 8000 == pytest.approx(1.0, abs=0.01)
+
+
+@pytest.mark.parametrize("role", [None, "music"])
+def test_keyframed_gain_changes_the_level_over_time(tmp_path, role):
+    src = tmp_path / "t44.wav"  # not 48 kHz, so the gain curve has to meet it at another rate
+    subprocess.run([media.FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i",
+                    "sine=frequency=1000:sample_rate=44100:duration=2", str(src)], check=True)
+    spec = scene([{"type": "rect"}], duration=2)
+    spec["audio"] = [dict({"src": str(src), "gain": [[0, -40], [1, 0]]}, **({"role": role} if role else {}))]
+    out = tmp_path / "o.wav"
+    k.render(spec, str(out))
+    pcm = _pcm(out)[:, 0]
+    db = lambda t0, t1: 20 * np.log10(_rms(pcm, t0, t1))  # noqa: E731
+    assert db(1.2, 1.8) - db(0.45, 0.55) == pytest.approx(20, abs=1.5)
+    assert db(1.2, 1.8) - db(0, 0.05) > 35 and len(pcm) == pytest.approx(16000, abs=80)
+
+
+def test_a_changing_gain_must_give_decibels(tone):
+    spec = dict(scene([{"type": "rect"}]), audio=[{"src": tone, "gain": [[0, "loud"], [1, 0]]}])
+    with pytest.raises(k.SceneError, match="is not a number of dB"):
+        k.Scene(spec)
+
+
+def _heard(spec):
+    """check's sound issues by code."""
+    return {i["code"]: i for i in check(spec)["issues"] if i["code"].startswith(("audio", "voice", "sfx"))}
+
+
+def test_check_hears_cut_overlapping_buried_late_and_silent_sounds(mix_media, tmp_path):
+    silent = tmp_path / "silent.wav"
+    subprocess.run([media.FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono", "-t", "1",
+                    str(silent)], check=True)
+    spec = scene([{"type": "rect"}], duration=2.2)
+    spec["audio"] = [{"id": "bed", "role": "music", "src": mix_media["bed"], "loop": True, "until": "end"},
+                     {"id": "vo1", "role": "voice", "src": mix_media["voice"], "at": 0.2},
+                     {"id": "vo2", "role": "voice", "src": mix_media["voice"], "at": 1.0},
+                     {"id": "hit", "role": "sfx", "src": mix_media["hit"], "at": 1.6, "trim": [0, 0.5]},
+                     {"id": "hush", "role": "ambience", "src": str(silent)}]
+    spec["mix"] = {"duck": False}
+    got = _heard(spec)
+    assert (got["audio-cut"]["layer"], got["audio-cut"]["from"], got["audio-cut"]["to"]) == ("vo2", 2.2, 2.5)
+    assert (got["voice-overlap"]["layer"], got["voice-overlap"]["from"], got["voice-overlap"]["to"]) == ("vo1+vo2", 1.0, 1.7)
+    assert got["voice-masked"]["fix"] == "remove \"duck\": false from mix"
+    assert (got["sfx-late"]["layer"], got["sfx-late"]["from"]) == ("hit", 1.6)
+    assert got["sfx-late"]["to"] == pytest.approx(1.9, abs=0.02)
+    assert got["audio-silent"]["layer"] == "hush"
+    spec["audio"], spec["canvas"]["duration"] = spec["audio"][:2], 3
+    del spec["mix"]
+    assert _heard(spec) == {}  # levelled and ducked: nothing to report
+
+
+def test_check_reports_a_mix_without_roles_that_is_quiet_or_at_its_limiter(tone):
+    spec = scene([{"type": "rect"}], duration=1)
+    spec["audio"] = [{"src": tone, "gain": -30}]
+    assert _heard(spec)["audio-loudness"]["level"] == "info"
+    spec["audio"] = [{"src": tone, "gain": 24}]
+    assert _heard(spec)["audio-peak"]["level"] == "warning"
+
+
+def test_look_draws_the_sound_and_returns_its_measurements(mix_media, tmp_path):
+    import skia
+    from kinescript.verify import contact_sheet
+    spec = scene([{"type": "rect"}], duration=4)
+    spec["audio"] = [{"role": "music", "src": mix_media["bed"], "loop": True, "until": "end"},
+                     {"role": "voice", "src": mix_media["voice"], "at": 1}]
+    plain = contact_sheet(spec, str(tmp_path / "a.png"), count=4, width=160)
+    heard = contact_sheet(spec, str(tmp_path / "b.png"), count=4, width=160, audio=True)
+    assert "audio" not in plain
+    a = heard["audio"]
+    assert a["mix"]["lufs"] == pytest.approx(-16, abs=1) and a["mix"]["true_peak"] <= -1.5
+    assert [s["lufs_out"] for s in a["sounds"]] == [pytest.approx(-16, abs=0.5), pytest.approx(-18, abs=0.5)]
+    assert a["duck"]["depth"] == 14 and a["duck"]["spans"][0][0] == pytest.approx(0.94, abs=0.03)
+    # three lanes (voice, music, the mix) of 44 px under a 22 px time axis, and an 8 px margin
+    assert skia.Image.open(str(tmp_path / "b.png")).height() - skia.Image.open(str(tmp_path / "a.png")).height() == 162
+    silent = contact_sheet(scene([{"type": "rect"}], duration=1), str(tmp_path / "c.png"), count=1, audio=True)
+    assert silent["audio"] is None
+
+
+WORDS = [{"word": "Write", "start": 0.3, "end": 0.6}, {"word": "it.", "start": 0.7, "end": 0.9},
+         {"word": "Write", "start": 1.0, "end": 1.3}]
+
+
+def _voice(mix_media, tmp_path, words=WORDS):
+    """The voice copied next to a words file, so the file is found by its name."""
+    import shutil
+    src = tmp_path / "vo.wav"
+    shutil.copy(mix_media["voice"], src)
+    if words is not None:
+        (tmp_path / "vo.words.json").write_text(json.dumps({"words": words}))
+    return str(src)
+
+
+def test_layers_cue_from_the_words_a_voice_says(mix_media, tmp_path):
+    spec = scene([{"id": "a", "type": "rect", "at": "vo:write_2", "dur": 0.2},
+                  {"id": "b", "type": "rect", "at": "vo:it.out+0.1", "dur": 0.2},
+                  {"id": "c", "type": "rect", "at": "vo:write.mid", "until": "vo:write_2.out"}], duration=3)
+    spec["audio"] = [{"id": "vo", "role": "voice", "src": _voice(mix_media, tmp_path), "at": 0.5, "trim": [0.2, 1.4]}]
+    s = k.Scene(spec)
+    # word times are seconds in the file: the voice starts at 0.5 playing from 0.2 s into it
+    assert s.by_id["a"].t_in == pytest.approx(1.3)
+    assert s.by_id["b"].t_in == pytest.approx(1.3)
+    assert (s.by_id["c"].t_in, s.by_id["c"].t_out) == (pytest.approx(0.75), pytest.approx(1.6))
+
+
+@pytest.mark.parametrize("at, says", [
+    ("vo:writ", r"has no word 'writ'\. Did you mean 'write'\?"),
+    ("voo:write", r"'voo', which is not an audio id\. Did you mean 'vo'\?"),
+    ("bed:write", r"'bed' has no word times\. Add \S*bed\.words\.json"),
+    ("vo:write", r"at 0\.30s in the file of 'vo', outside the part its trim plays"),
+])
+def test_a_word_cue_that_cannot_be_found_says_why(mix_media, tmp_path, at, says):
+    spec = scene([{"type": "rect", "at": at}], duration=1)
+    spec["audio"] = [{"id": "vo", "src": _voice(mix_media, tmp_path), "trim": [0.5, None]},
+                     {"id": "bed", "src": mix_media["bed"]}]
+    with pytest.raises(k.SceneError, match=says):
+        k.Scene(spec)
+
+
+def test_words_read_from_a_list_or_whisper_json_and_get_ids(tmp_path):
+    from kinescript import words as W
+    (tmp_path / "w.json").write_text(json.dumps({"segments": [{"words": [
+        {"word": " Don't", "start": 0.0, "end": 0.2}, {"word": " stop,", "start": 0.3, "end": 0.5}]},
+        {"words": [{"word": " stop!", "start": 0.6, "end": 0.8}, {"word": "—", "start": 0.9, "end": 1.0}]}]}))
+    assert [w["id"] for w in W.read(tmp_path / "w.json")] == ["dont", "stop", "stop_2", None]
+    got = W.read([{"word": "go", "start": 0, "end": 0.1}, {"word": "Go", "start": 0.2, "end": 0.3, "id": "go"}])
+    assert [w["id"] for w in got] == ["go_2", "go"]  # an id given in the file keeps its name
+    for bad, says in (([{"word": "go", "start": 0.5, "end": 0.1}], "ends at 0.1s, before"),
+                      ([{"word": "go", "start": "0"}], "word #0"), (tmp_path / "no.json", "words file not found")):
+        with pytest.raises(W.WordsError, match=says):
+            W.read(bad)
+
+
+def test_a_bad_words_file_is_reported_with_its_sound(mix_media, tmp_path):
+    spec = scene([{"type": "rect"}], duration=1)
+    spec["audio"] = [{"id": "vo", "src": _voice(mix_media, tmp_path, [{"word": "x", "start": 1, "end": 0}])}]
+    with pytest.raises(k.SceneError) as e:
+        k.Scene(spec)
+    assert [(i["code"], i["layer"]) for i in e.value.issues if i["level"] == "error"] == [("bad-words", "vo")]
+
+
+def test_caption_lines_break_at_sentences_pauses_and_width():
+    from kinescript import words as W
+    ws = [{"word": w, "start": s, "end": s + 0.2} for w, s in
+          (("One", 0.0), ("two.", 0.3), ("Three", 0.6), ("four", 1.6), ("five", 1.9))]
+    ws += [{"word": "word", "start": 2.2 + 0.3 * i, "end": 2.4 + 0.3 * i} for i in range(10)]
+    got = W.cues(ws, trim0=0.0)
+    assert [c[2] for c in got] == ["One two.", "Three", "four five word word word word word word",
+                                   "word word word word"]
+    assert got[0][:2] == [0.0, 0.5] and got[1][:2] == [0.5, 1.3]  # held 0.5 s, unless the next starts first
+    assert got[0][3] == [[0.0, 0.2], [0.3, 0.5]]
+    assert [c[2] for c in W.cues(ws, trim0=0.3, trim1=1.0)] == ["two.", "Three"]
+
+
+def test_captions_follow_a_voice_and_light_each_word_as_it_is_said(mix_media, tmp_path):
+    spec = scene([{"id": "cc", "type": "captions", "voice": "vo", "mode": "pop", "size": 30}], w=640, h=360,
+                 duration="auto")
+    spec["audio"] = [{"id": "vo", "role": "voice", "src": _voice(mix_media, tmp_path), "at": 1.0}]
+    s = k.Scene(spec)
+    cc = s.by_id["cc"]
+    assert cc.t_in == 1.0 and cc.raw["cues"][0][2] == "Write it." and cc.raw["cues"][1][2] == "Write"
+    r = Renderer(s)
+    lit = [int((r.frame(round(T * 30))[300:340, :, :3].max(axis=2) > 200).sum()) for T in (1.25, 1.45, 1.75)]
+    assert lit[0] == 0 < lit[1] < lit[2]  # pop: nothing before "Write" is said, then one word, then two
+    spec["layers"][0]["voice"] = "bed"
+    spec["audio"].append({"id": "bed", "src": mix_media["bed"]})
+    with pytest.raises(k.SceneError, match="'bed' has no word times for the captions"):
+        k.Scene(spec)
+
+
+def _fake_speak(req):
+    """A voice backend for tests: a 0.3 s tone per word, and those times."""
+    said = req["text"].split()
+    subprocess.run([media.FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i",
+                    f"sine=frequency=300:sample_rate=24000:duration={0.3 * len(said) + 0.2}", req["out"]], check=True)
+    return {"words": [{"word": w, "start": round(0.3 * k, 3), "end": round(0.3 * k + 0.25, 3)}
+                      for k, w in enumerate(said)], "speaker": req["speaker"] or "fake_one", "version": "1"}
+
+
+@pytest.fixture
+def fake_voice(monkeypatch):
+    from kinescript import voice
+    calls = []
+
+    class Entry:
+        name = "fake"
+
+        def load(self):
+            return lambda req: calls.append(req["text"]) or _fake_speak(req)
+    monkeypatch.delenv("KINE_VOICE_CMD", raising=False)
+    monkeypatch.setattr(voice, "backends", lambda: {"fake": Entry()})
+    return calls
+
+
+def test_kine_voice_speaks_text_once_and_names_marked_words(fake_voice, tmp_path):
+    from kinescript.voice import generate
+    f = tmp_path / "s.json"
+    spec = scene([{"id": "go", "type": "rect", "at": "vo1:go", "dur": 0.2},
+                  {"id": "cc", "type": "captions", "voice": "vo1"}], duration="auto")
+    spec["audio"] = [{"id": "vo1", "role": "voice", "text": "Write a scene. [[go]]Check it."}]
+    f.write_text(json.dumps(spec))
+    with pytest.raises(k.SceneError, match="'vo1' has text but is not spoken yet"):
+        k.load(str(f))
+    assert generate(str(f))["voices"] == [{"id": "vo1", "src": "voice/vo1.wav", "status": "made", "words": 5,
+                                           "seconds": 1.45, "took": pytest.approx(0, abs=5)}]
+    kept = json.loads((tmp_path / "voice" / "vo1.words.json").read_text())
+    assert kept["words"][3] == {"word": "Check", "start": 0.9, "end": 1.15, "id": "go"}
+    assert kept["made"]["backend"] == "fake" and kept["made"]["speaker"] == "fake_one"
+    s = k.load(str(f))
+    assert s.by_id["go"].t_in == pytest.approx(0.9) and s.by_id["cc"].raw["cues"][1][2] == "Check it."
+    assert generate(str(f))["voices"][0]["status"] == "fresh" and fake_voice == ["Write a scene. Check it."]
+    spec["audio"][0]["text"] = "Write a scene. [[go]]Check it twice."
+    f.write_text(json.dumps(spec))
+    assert [i["code"] for i in k.load(str(f)).issues] == ["voice-stale"]
+    assert generate(str(f))["voices"][0]["status"] == "made" and len(fake_voice) == 2
+    assert generate(str(f), force=True)["voices"][0]["status"] == "made" and len(fake_voice) == 3
+    with pytest.raises(ValueError, match="no sound with text has id vo2; sounds with text: vo1"):
+        generate(str(f), only=["vo2"])
+
+
+def test_kine_voice_runs_a_command_for_a_backend_in_another_python(tmp_path, monkeypatch):
+    from kinescript import voice
+    tool = tmp_path / "speak.py"
+    tool.write_text("import json, sys\nsys.path.insert(0, %r)\nfrom test_core import _fake_speak\n"
+                    "print(json.dumps([_fake_speak(r) for r in json.load(sys.stdin)]))\n" % str(Path(__file__).parent))
+    monkeypatch.setenv("KINE_VOICE_CMD", json.dumps([sys.executable, str(tool)]))
+    monkeypatch.setattr(voice, "backends", lambda: {})
+    spec = scene([{"type": "rect"}], duration="auto")
+    spec["audio"] = [{"id": "a", "text": "One; two"}, {"id": "b", "text": "three \"quoted\" & $(nothing)"}]
+    got = voice.generate(spec, base=tmp_path)["voices"]
+    assert [(v["id"], v["status"], v["words"]) for v in got] == [("a", "made", 2), ("b", "made", 4)]
+    # the text went to the command as JSON on stdin, untouched by any shell
+    assert json.loads((tmp_path / "voice" / "b.words.json").read_text())["words"][3]["word"] == "$(nothing)"
+    monkeypatch.delenv("KINE_VOICE_CMD")
+    spec["audio"][0]["text"] = "changed"
+    with pytest.raises(ValueError, match="no voice backend is installed"):
+        voice.generate(spec, base=tmp_path)
+
+
+def test_marks_find_their_word_when_the_voice_reads_it_differently():
+    from kinescript.voice import place_marks, split_marks
+    text, marks = split_marks("In 2026 [[ship]]we ship. [[end]]Done")
+    assert (text, marks) == ("In 2026 we ship. Done", {2: "ship", 4: "end"})
+    said = [{"word": w, "start": k, "end": k + 0.5} for k, w in enumerate(["In", "twenty", "twenty-six", "we", "ship.",
+                                                                            "Done"])]
+    assert [w.get("id") for w in place_marks(text, marks, said)] == [None, None, None, "ship", None, "end"]
+    with pytest.raises(ValueError, match=r"\[\[a\]\] is used twice"):
+        split_marks("[[a]]x [[a]]y")
+
+
+def test_tags_are_not_words_and_reach_only_backends_that_act_on_them(monkeypatch, tmp_path):
+    from kinescript import voice
+    text, marks = voice.split_marks("Well [sighs] okay, [[go]]go [laughs]now.")
+    assert (text, marks) == ("Well [sighs] okay, go [laughs]now.", {2: "go"})
+    assert voice.untag(text) == "Well okay, go now."
+    # marks and pronunciations are not tags
+    assert voice.tags("Meet [Kinescript](/kˈɪn/) [[a]]now [clears throat] ok") == ["[clears throat]"]
+    got = []
+
+    def entry(acts):
+        def speak(req):
+            got.append((req["text"], req["tagged"]))
+            return {**_fake_speak(req), "tags": acts}
+        return type("E", (), {"load": lambda self: speak})()
+    monkeypatch.delenv("KINE_VOICE_CMD", raising=False)
+    monkeypatch.setattr(voice, "backends", lambda: {"plain": entry(False), "acts": entry(True)})
+    spec = scene([{"type": "rect"}], duration="auto")
+    spec["audio"] = [{"id": "a", "text": "Well [sighs] okay. [[go]]Go.", "backend": "plain"},
+                     {"id": "b", "text": "Well [sighs] okay. [[go]]Go.", "backend": "acts"}]
+    a, b = voice.generate(spec, base=tmp_path)["voices"]
+    assert got == [("Well okay. Go.", "Well [sighs] okay. Go.")] * 2
+    assert a["ignored"] == ["[sighs]"] and "ignored" not in b  # said without it, and said so
+    words = json.loads((tmp_path / "voice" / "b.words.json").read_text())["words"]
+    assert [w["word"] for w in words] == ["Well", "okay.", "Go."] and words[2]["id"] == "go"
+
+
+def test_each_sound_picks_its_backend_and_options(monkeypatch, tmp_path):
+    import hashlib
+    from kinescript import voice
+    seen = []
+
+    def entry(name):
+        def speak(req):
+            seen.append((name, req["options"], req["base"]))
+            return {**_fake_speak(req), **({"note": "half untimed"} if name == "two" else {})}
+        return type("E", (), {"load": lambda self: speak})()
+    monkeypatch.delenv("KINE_VOICE_CMD", raising=False)
+    monkeypatch.setattr(voice, "backends", lambda: {"one": entry("one"), "two": entry("two")})
+    spec = scene([{"type": "rect"}], duration="auto")
+    spec["audio"] = [{"id": "a", "text": "first"},
+                     {"id": "b", "text": "second", "engine": "two", "settings": {"seed": 3}}]  # aliases read
+    with pytest.raises(ValueError, match="several voice backends are installed"):
+        voice.generate(spec, base=tmp_path)
+    got = voice.generate(spec, base=tmp_path, backend="one")
+    assert [v.get("note") for v in got["voices"]] == [None, "half untimed"]  # the backend's own note
+    assert seen == [("one", {}, str(tmp_path.resolve())), ("two", {"seed": 3}, str(tmp_path.resolve()))]
+    assert json.loads((tmp_path / "voice" / "b.words.json").read_text())["made"]["backend"] == "two"
+    # options are part of what the file was made from; a sound without backend or options keeps its old hash
+    f = tmp_path / "s.json"
+    spec["audio"] = [{"id": "b", "text": "second", "backend": "two", "options": {"seed": 4}}]
+    f.write_text(json.dumps(spec))
+    assert [i["code"] for i in k.load(str(f)).issues] == ["voice-stale"]
+    old = {"text": "x", "speaker": None, "rate": 1}
+    assert voice.fingerprint({"text": "x"}) == hashlib.sha256(json.dumps(old, sort_keys=True).encode()).hexdigest()[:16]
+    with pytest.raises(ValueError, match="no voice backend 'three': pip install kinescript-three, or set "
+                                         "KINE_VOICE_CMD_THREE"):
+        voice.generate({**spec, "audio": [{"id": "c", "text": "x", "backend": "three"}]}, base=tmp_path)
+    # a backend in another Python, by name: its own variable, or KINE_VOICE_CMD when it runs that module
+    tool = tmp_path / "speak.py"
+    tool.write_text("import json, sys\nsys.path.insert(0, %r)\nfrom test_core import _fake_speak\n"
+                    "print(json.dumps([_fake_speak(r) for r in json.load(sys.stdin)]))\n" % str(Path(__file__).parent))
+    monkeypatch.setenv("KINE_VOICE_CMD_THREE", json.dumps([sys.executable, str(tool)]))
+    got = voice.generate({**spec, "audio": [{"id": "c", "text": "x y", "backend": "three"}]}, base=tmp_path)
+    assert got["voices"][0]["words"] == 2
+    assert voice._command("kokoro") is None
+    monkeypatch.setenv("KINE_VOICE_CMD", "py -m kinescript_kokoro")
+    assert voice._command("kokoro") == (["py", "-m", "kinescript_kokoro"], "KINE_VOICE_CMD")
+    assert voice._command("other") is None and voice._command(None)[1] == "KINE_VOICE_CMD"
+
+
+def _plugin(monkeypatch, name):
+    monkeypatch.syspath_prepend(str(Path(__file__).parents[1] / "plugins" / f"kinescript-{name}"))
+
+
+def test_forced_alignment_places_words_around_a_laugh_and_a_number(monkeypatch):
+    _plugin(monkeypatch, "chatterbox")
+    from kinescript_chatterbox.align import ctc_path, times, units
+    vocab = {"<pad>": 0, "|": 1, "A": 2, "B": 3, "C": 4, "D": 5}
+    words, seq = units("AB [laugh] C 12.", vocab)
+    assert words == ["AB", "C", "12."] and [s[0] for s in seq] == [2, 3, -2, 4, 1, -1]
+
+    def frames(said):  # what each 20 ms frame sounds like most: a vocabulary id, 0 for nothing
+        lp = np.full((len(said), len(vocab)), np.log(0.02))
+        lp[np.arange(len(said)), said] = np.log(0.9)
+        return lp
+    # silence, A A B, a laugh (heard as D D D), silence, C C, a word gap, "twelve" (D D D), silence
+    said = [0, 0, 2, 2, 3, 5, 5, 5, 0, 4, 4, 1, 5, 5, 5, 0]
+    got = times(ctc_path(frames(said), seq, 0), seq, words, offset=1)
+    assert got == [{"word": "AB", "start": 1.04, "end": 1.1}, {"word": "C", "start": 1.18, "end": 1.22},
+                   {"word": "12.", "start": 1.24, "end": 1.3}]
+    # no laugh at all: the tag takes no time
+    said = [0, 2, 3, 0, 4, 1, 5, 0]
+    assert [w["start"] for w in times(ctc_path(frames(said), seq, 0), seq, words)] == [0.02, 0.08, 0.12]
+    with pytest.raises(ValueError, match="too short"):
+        ctc_path(frames([2, 3]), seq, 0)
+    # a line of more than 127 states (63 letters and gaps) backtracks without overflowing
+    words, seq = units(" ".join(["AB"] * 30), vocab)
+    said = [0] + [2, 3, 1] * 30
+    assert [w["start"] for w in times(ctc_path(frames(said), seq, 0), seq, words)][-1] == 1.76
+
+
+def test_forced_alignment_reads_numbers_as_they_are_said(monkeypatch):
+    _plugin(monkeypatch, "chatterbox")
+    from kinescript_chatterbox.align import spoken, units
+    said = {w: " ".join(spoken(w)) for w in ["250", "2026", "2005", "1,000", "3.5", "v1.2.0", "$5", "40%", "21st",
+                                             "100th", "Render.", "—"]}
+    assert said == {"250": "TWO HUNDRED FIFTY", "2026": "TWENTY TWENTY SIX", "2005": "TWO THOUSAND FIVE",
+                    "1,000": "ONE THOUSAND", "3.5": "THREE POINT FIVE", "v1.2.0": "V ONE POINT TWO POINT ZERO",
+                    "$5": "FIVE DOLLARS", "40%": "FORTY PERCENT", "21st": "TWENTY FIRST", "100th": "ONE HUNDREDTH",
+                    "Render.": "RENDER", "—": ""}
+    vocab = {"<pad>": 0, "|": 1, **{c: 2 + i for i, c in enumerate("ABCDEFGHIJKLMNOPQRSTUVWXYZ'")}}
+    words, seq = units("took 12 — now", vocab)
+    # each word of a number is its own run of letters, a lone dash says nothing
+    assert words == ["took", "12", "now"]
+    assert "".join("|" if s[0] == 1 else "?" if s[0] < 0 else chr(63 + s[0]) for s in seq) == "TOOK|TWELVE|NOW"
+
+
+def test_chatterbox_reads_tags_written_for_other_backends(monkeypatch):
+    _plugin(monkeypatch, "chatterbox")
+    import kinescript_chatterbox as cb
+    monkeypatch.setattr(cb, "TURBO_TAGS", {"[laugh]", "[sigh]", "[chuckle]", "[clear throat]", "[whispering]"})
+    written = ["[laugh]", "[Laughs]", "[laughing]", "[sighs]", "[chuckles]", "[whispers]", "[clears throat]", "[sings]"]
+    assert [cb.turbo_tag(t) for t in written] == ["[laugh]", "[laugh]", "[laugh]", "[sigh]", "[chuckle]",
+                                                  "[whispering]", "[clear throat]", None]
+    long = "One two three. " * 30
+    assert all(len(c) <= 300 for c in cb.chunks(long)) and " ".join(cb.chunks(long)) == long.strip()
+
+
+def test_elevenlabs_times_words_from_its_character_times(monkeypatch, tmp_path):
+    import base64
+    import wave
+    _plugin(monkeypatch, "elevenlabs")
+    import kinescript_elevenlabs as el
+    text = "Hi [laughs] there, all."
+    chars = list(text)
+    starts = [0.1 * k for k in range(len(chars))]
+    words = el.words_from_chars(chars, starts, [s + 0.08 for s in starts])
+    assert [w["word"] for w in words] == ["Hi", "there,", "all."]
+    assert words[1] == {"word": "there,", "start": 1.2, "end": 1.68}  # first to last letter, not the comma
+    calls = []
+
+    def call(path, key, body=None, ctype="application/json"):
+        calls.append((path, json.loads(body) if ctype == "application/json" and body else body))
+        if path == "/v1/voices":
+            return {"voices": [{"voice_id": "a" * 20, "name": "Aria - calm"}]}
+        if path.startswith("/v1/forced-alignment"):
+            return {"words": [{"text": "Hi", "start": 0.0, "end": 0.2}, {"text": " ", "start": 0.2, "end": 0.3},
+                              {"text": "there,", "start": 0.3, "end": 0.6}]}
+        timing = None if "multilingual" in json.loads(body)["model_id"] else {
+            "characters": chars, "character_start_times_seconds": starts,
+            "character_end_times_seconds": [s + 0.08 for s in starts]}
+        return {"audio_base64": base64.b64encode(b"\0\0" * 24000).decode(), "alignment": timing}
+    monkeypatch.setattr(el, "_call", call)
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "k")
+    out = tmp_path / "v.wav"
+    req = {"text": "Hi there, all.", "tagged": text, "speaker": "Aria", "rate": 1.1, "out": str(out),
+           "options": {"stability": 0.3, "model": "eleven_v4", "loud": 1}}
+    res = el.synth(req)
+    assert calls[1] == (f"/v1/text-to-speech/{'a' * 20}/with-timestamps?output_format=pcm_24000",
+                        {"text": text, "model_id": "eleven_v4", "voice_settings": {"stability": 0.3, "speed": 1.1}})
+    assert res["tags"] and res["ignored"] == ["options.loud"] and res["seconds"] == 1.0 and len(res["words"]) == 3
+    with wave.open(str(out)) as f:
+        assert (f.getframerate(), f.getnframes()) == (24000, 24000)
+    # a model without tags gets the text without them; with no character times, forced alignment times the words
+    calls.clear()
+    res = el.synth({**req, "rate": 2, "speaker": "b" * 20, "options": {"model": "eleven_multilingual_v2"}})
+    assert calls[0][1]["text"] == "Hi there, all." and not res["tags"]
+    assert res["ignored"] == ["rate 2: ElevenLabs speaks at 0.7 to 1.2"] and calls[1][0] == "/v1/forced-alignment"
+    assert [w["word"] for w in res["words"]] == ["Hi", "there,"]
+    monkeypatch.delenv("ELEVENLABS_API_KEY")
+    with pytest.raises(RuntimeError, match="set ELEVENLABS_API_KEY"):
+        el.synth(req)
+
+
+def test_kokoro_tokens_become_the_words_of_the_text(monkeypatch):
+    from types import SimpleNamespace as T
+    monkeypatch.syspath_prepend(str(Path(__file__).parents[1] / "plugins" / "kinescript-kokoro"))
+    from kinescript_kokoro import words_from_tokens
+    # As Kokoro 0.9.4 times "Write a scene. Check it, in 2026!" (punctuation is a token of its own)
+    toks = [("Write", " ", 0.3, 0.5125), ("a", " ", 0.5125, 0.6125), ("scene", "", 0.6125, 1.15), (".", " ", 1.15, 1.2875),
+            ("Check", " ", 1.2875, 1.55), ("it", "", 1.55, 1.65), (",", " ", 1.65, 1.6875), ("—", " ", None, None),
+            ("in", " ", None, None), ("2026", "", 2.35, 3.55), ("!", "", 3.55, 3.65)]
+    words = words_from_tokens([T(text=a, whitespace=b, start_ts=c, end_ts=d) for a, b, c, d in toks], offset=10)
+    assert [w["word"] for w in words] == ["Write", "a", "scene.", "Check", "it,", "in", "2026!"]
+    assert words[2] == {"word": "scene.", "start": 10.6125, "end": 11.15}  # not stretched over the pause after it
+    assert words[5] == {"word": "in", "start": 11.65, "end": 11.65}  # untimed: the end of the word before
+    assert words[6]["end"] == 13.55
 
 
 def test_repeat_renders_reuse_warm_workers_until_idle(tmp_path, monkeypatch):

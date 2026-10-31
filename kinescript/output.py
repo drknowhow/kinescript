@@ -2,15 +2,17 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 import subprocess
 import tempfile
 import threading
 import time
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
+from . import audio as A
 from . import media
 from .render import Renderer
 from .scene import Scene, load
@@ -100,18 +102,43 @@ def _audio_inputs(scene: Scene) -> list[dict]:
         fi = layer.enter.dur if layer.enter else 0
         fo = layer.exit.dur if layer.exit else 0
         out.append(dict(src=layer.src, at=layer.t_in, trim0=float(trim[0]), dur=layer.dur * speed, gain=float(vol),
-                        fade_in=fi, fade_out=fo, speed=speed))
-    for a in scene.audio:
-        src = scene.path(a["src"])
-        at = scene.timeline._time(a.get("at", 0), "audio", 0.0)
+                        fade_in=fi, fade_out=fo, speed=speed, loop=None, pan=0.0, role=None, curve=None,
+                        onset=False, id=layer.id))
+    for s in scene.audio:
+        a = s.raw
         trim = a.get("trim") or [0, None]
-        total = media.probe(src)["duration"]
-        end = trim[1] if len(trim) > 1 and trim[1] is not None else total
-        dur = min(end - trim[0], scene.duration - at)
-        gain = 10 ** (float(a.get("gain", 0)) / 20) if "gain" in a else float(a.get("volume", 1))
-        out.append(dict(src=src, at=at, trim0=float(trim[0]), dur=max(0.01, dur), gain=gain,
-                        fade_in=float(a.get("fadeIn", 0)), fade_out=float(a.get("fadeOut", 0)), speed=1.0))
+        loop = None
+        if a.get("loop"):  # the trimmed segment repeats
+            total = media.probe(s.src)["duration"]
+            end = trim[1] if len(trim) > 1 and trim[1] is not None else total
+            loop = max(0.01, min(float(end), total) - float(trim[0]))
+        g = a.get("gain")
+        curve = g if g is not None and not isinstance(g, (int, float)) else None  # keyframes or an expression
+        gain = 10 ** (float(g) / 20) if curve is None and g is not None else float(a.get("volume", 1))
+        out.append(dict(src=s.src, at=s.t_in, trim0=float(trim[0]), dur=max(0.01, min(s.t_out, scene.duration) - s.t_in),
+                        gain=gain, fade_in=float(a.get("fadeIn", 0)), fade_out=float(a.get("fadeOut", 0)), speed=1.0,
+                        loop=loop, pan=float(a.get("pan", 0)), role=s.role, curve=curve,
+                        onset=s.role == "sfx" and not a.get("trim") and not loop, id=s.id))
     return out
+
+
+def _codec(ext: str) -> list[str] | None:
+    """Audio encoder arguments for a file extension; None when this ffmpeg cannot write it."""
+    if ext in (".opus", ".ogg", ".webm"):
+        enc = media.capabilities()["encoders"]
+        if "libopus" in enc:
+            return ["-c:a", "libopus", "-b:a", "160k", "-ar", "48000"]
+        if "opus" in enc:  # ffmpeg's own Opus encoder is marked experimental
+            return ["-c:a", "opus", "-strict", "-2", "-b:a", "160k", "-ar", "48000"]
+        return None
+    return {".wav": ["-c:a", "pcm_s16le"], ".flac": ["-c:a", "flac"],
+            ".mp3": ["-c:a", "libmp3lame", "-b:a", "192k"]}.get(ext, ["-c:a", "aac", "-b:a", "192k"])
+
+
+def _pan(p: float) -> str:
+    """Constant-power pan: -1 left, 0 unchanged, 1 right."""
+    th = (p + 1) * math.pi / 4
+    return f"aformat=channel_layouts=stereo,pan=stereo|c0={math.sqrt(2) * math.cos(th):.4f}*c0|c1={math.sqrt(2) * math.sin(th):.4f}*c1"
 
 
 def _copy(video_in: list[str], out: str):
@@ -125,17 +152,41 @@ def _copy(video_in: list[str], out: str):
         raise RuntimeError(f"concat failed: {res.stderr.strip()[:400]}")
 
 
-def _start_audio(scene: Scene, out: str):
-    """Start mixing the scene's audio to an AAC file `out`, in its own ffmpeg process so it runs while the
-    frames render; it took 0.7 s of the launch video's 3.8 s when it ran after them. None if silent."""
-    ins = _audio_inputs(scene)
-    if not ins:
-        return None
-    cmd = [media.FFMPEG, "-y", "-v", "error"]
+_CURVE_IN = ["-f", "f32le", "-ar", str(A.RATE), "-ac", "1", "-i"]
+_CURVE = "aresample=48000,aformat=channel_layouts=stereo"
+
+
+def _pad(duration: float) -> str:
+    """Silence after the mix up to `duration`. Counted in samples: with an endless apad, the atrim after it judged
+    the end by timestamps, and when ffmpeg 8 started the inputs in an unlucky order those were wrong and the mix
+    never ended, filling the disk."""
+    return f"asetpts=N/SR/TB,apad=whole_dur={duration:.4f}"
+
+
+def _graph(ins: list[dict], managed: bool, curves: dict[int, str], duck: str | None, tail: str,
+           pad: str) -> tuple[list[str], str]:
+    """ffmpeg inputs and the filter graph that mixes `ins` into [aout]. curves: sound index -> its gain curve file;
+    duck: the curve file the sounds marked "duck" are multiplied by after they are mixed; tail: filters after the
+    mix; pad: what makes the ducked bus last the whole scene. managed: every sound is converted to 48 kHz stereo
+    first, so curves and buses line up."""
+    args = [x for a in ins for x in ("-i", a["src"])]
+    n = len(ins)
     chains = []
+
+    def curve(path: str, label: str):
+        nonlocal n
+        args.extend([*_CURVE_IN, path])
+        chains.append(f"[{n}:a]{_CURVE}[{label}]")
+        n += 1
+
     for k, a in enumerate(ins):
-        cmd += ["-i", a["src"]]
-        f = [f"atrim=start={a['trim0']:.4f}:duration={a['dur']:.4f}", "asetpts=PTS-STARTPTS"]
+        if a["loop"]:  # 48 kHz first, so aloop's size in samples is known
+            f = [f"atrim=start={a['trim0']:.4f}:duration={a['loop']:.4f}", "asetpts=PTS-STARTPTS", "aresample=48000",
+                 f"aloop=loop=-1:size={round(a['loop'] * 48000)}", f"atrim=duration={a['dur']:.4f}"]
+        else:
+            f = [f"atrim=start={a['trim0']:.4f}:duration={a['dur']:.4f}", "asetpts=PTS-STARTPTS"]
+        if managed:
+            f.append("aformat=sample_rates=48000:channel_layouts=stereo")
         if a["speed"] != 1:
             f.append(f"atempo={max(0.5, min(2.0, a['speed'])):.4f}")
         if a["fade_in"]:
@@ -143,19 +194,167 @@ def _start_audio(scene: Scene, out: str):
         if a["fade_out"]:
             f.append(f"afade=t=out:st={max(0, a['dur'] / a['speed'] - a['fade_out']):.3f}:d={a['fade_out']:.3f}")
         f.append(f"volume={a['gain']:.4f}")
+        head = f"[{k}:a]"
+        if k in curves:
+            chains.append(head + ",".join(f) + f"[p{k}]")
+            curve(curves[k], f"c{k}")
+            head, f = f"[p{k}][c{k}]amultiply", []
+        if a["pan"]:
+            f.append(_pan(a["pan"]))
         ms = int(round(a["at"] * 1000))
-        f.append(f"adelay={ms}|{ms}")
-        chains.append(f"[{k}:a]{','.join(f)}[a{k}]")
-    mix = "".join(f"[a{k}]" for k in range(len(ins)))
-    graph = ";".join(chains) + f";{mix}amix=inputs={len(ins)}:normalize=0:dropout_transition=0,alimiter=limit=0.95,atrim=duration={scene.duration:.4f}[aout]"
-    cmd += ["-filter_complex", graph, "-map", "[aout]", "-c:a", "aac", "-b:a", "192k", out]
+        f.extend([f"adelay={ms}|{ms}", "asetpts=N/SR/TB"])  # adelay's leading silence has no timestamps
+        chains.append(head + ("," if head.endswith("amultiply") else "") + ",".join(f) + f"[a{k}]")
+    ducked = [f"[a{k}]" for k, a in enumerate(ins) if duck and a.get("duck")]
+    mix = [f"[a{k}]" for k, a in enumerate(ins) if f"[a{k}]" not in ducked]
+    if ducked:
+        chains.append(f"{''.join(ducked)}amix=inputs={len(ducked)}:normalize=0:dropout_transition=0,{pad}[bus]")
+        curve(duck, "dk")
+        chains.append("[bus][dk]amultiply[ducked]")
+        mix.append("[ducked]")
+    return args, ";".join(chains) + f";{''.join(mix)}amix=inputs={len(mix)}:normalize=0:dropout_transition=0,{tail}[aout]"
+
+
+def _cut(start: float, end: float | None, duration: float) -> str:
+    return "" if not start and end is None else \
+        f"atrim=start={start:.4f}:end={duration if end is None else end:.4f},asetpts=PTS-STARTPTS"
+
+
+def _start_audio(scene: Scene, out: str, start: float = 0.0, end: float | None = None):
+    """Start mixing the scene's audio to `out` (encoder from its extension) so it runs while the frames render;
+    it took 0.7 s of the launch video's 3.8 s when it ran after them. start/end cut a range out of the full mix,
+    so fades crossing them stay as they are. Returns (process, log, out), or None if the scene is silent. A scene
+    with roles gets the managed mix (audio.py), in a thread; any other mix is one ffmpeg process."""
+    ins = _audio_inputs(scene)
+    if not ins:
+        return None
     log = tempfile.TemporaryFile()  # as in _encoder: an unread stderr pipe can stall ffmpeg
+    if any(a["role"] for a in ins):
+        return _Mix(lambda job: _managed(scene, ins, out, start, end, job), log), log, out
+    curves = {}
+    for k, a in enumerate(ins):
+        if a["curve"] is not None:
+            curves[k] = f"{out}.gain{k}.f32"
+            A.gain_curve(a["curve"], a["dur"], a["at"], scene.fps).astype("<f4").tofile(curves[k])
+    # Padded to the full length: the mux keeps the shorter stream, so a mix that ends early would cut the video.
+    cut = _cut(start, end, scene.duration) or f"atrim=duration={scene.duration:.4f}"
+    pad = _pad(scene.duration)
+    args, graph = _graph(ins, False, curves, None, f"alimiter=limit=0.95,{pad},{cut}", pad)
+    script = out + ".graph"
+    Path(script).write_text(graph, encoding="utf-8")
+    cmd = [media.FFMPEG, "-y", "-v", "error", *args, *media.filter_script(script), "-map", "[aout]",
+           *_codec(Path(out).suffix.lower()), out]
     return subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stderr=log, creationflags=media._NOWIN), log, out
 
 
-def _mux(video_in: list[str], audio, out: str):
-    """Put the mixed audio under the video, both copied; the segments are joined on the way when video_in
-    is a concat list."""
+def measure(ins: list[dict]) -> list[dict]:
+    """audio.analyze for the part of each source a sound plays, each file and span once, a few at a time."""
+    spans = [(a["src"], a["trim0"], a["trim0"] + (a["loop"] or a["dur"] * a["speed"])) for a in ins]
+    todo = list(dict.fromkeys(spans))
+    with ThreadPoolExecutor(max(1, min(4, len(todo)))) as ex:
+        infos = dict(zip(todo, ex.map(lambda s: A.analyze(*s), todo)))
+    return [infos[s] for s in spans]
+
+
+def plan(scene: Scene, ins: list[dict]) -> dict:
+    """The managed mix worked out before ffmpeg runs, changing `ins` in place: each sound with a role set to its
+    level (gain), an effect moved past its leading silence (trim0, and shift in seconds) and the sounds under the
+    duck marked. Returns the settings, each source's measurements and the duck curve (None without ducking)."""
+    cfg = A.settings(scene.spec)
+    duck_cfg, voices = cfg["duck"], []
+    infos = measure(ins)
+    for a, info in zip(ins, infos):
+        a["shift"] = 0.0
+        if a["role"]:
+            if a["onset"] and info["lead"] > 0.005:  # the effect's first sound lands on its cue
+                a["trim0"] += info["lead"]
+                a["shift"] = info["lead"]
+            a["gain"] *= 10 ** (A.level(a["role"], info, cfg["levels"]) / 20)
+            if duck_cfg and a["role"] in duck_cfg["by"]:
+                voices.append((a["at"], a["at"] + a["dur"] / a["speed"], info["rms"], 20 * math.log10(max(a["gain"], 1e-6))))
+        a["duck"] = bool(duck_cfg) and a["role"] in duck_cfg["under"]
+    duck = A.duck_curve(voices, scene.duration, duck_cfg) if voices and any(a["duck"] for a in ins) else None
+    return {"cfg": cfg, "info": infos, "duck": duck, "ins": ins}
+
+
+def _managed(scene: Scene, ins: list[dict], out: str, start: float, end: float | None, job: "_Mix") -> dict:
+    """Level each sound for its role, duck, mix to a float master, measure it, then correct its loudness, limit
+    its peaks and encode. Returns the plan, with the master's measurements and its correction in dB."""
+    p = plan(scene, ins)
+    cfg, tmp, curves = p["cfg"], Path(out).parent, {}
+    for k, a in enumerate(ins):
+        if a["curve"] is not None:
+            curves[k] = str(tmp / f"gain{k}.f32")
+            A.gain_curve(a["curve"], a["dur"], a["at"], scene.fps).astype("<f4").tofile(curves[k])
+    duck = None
+    if p["duck"] is not None:
+        duck = str(tmp / "duck.f32")
+        p["duck"].astype("<f4").tofile(duck)
+    master, script = str(tmp / "master.wav"), tmp / "master.graph"
+    pad = _pad(scene.duration)
+    args, graph = _graph(ins, True, curves, duck, f"{pad},atrim=duration={scene.duration:.4f}", pad)
+    script.write_text(graph, encoding="utf-8")
+    job.run([media.FFMPEG, "-y", "-v", "error", *args, *media.filter_script(str(script)), "-map", "[aout]",
+             "-c:a", "pcm_f32le", master])
+    measured = A.loudness(job.run([media.FFMPEG, "-hide_banner", "-nostats", "-i", master, "-af", "ebur128=peak=true",
+                                   "-f", "null", "-"]))
+    # alimiter limits sample peaks; half a dB under the ceiling leaves room for peaks between samples.
+    limit = max(0.0625, 10 ** ((cfg["peak"] - 0.5) / 20))
+    p["master"], p["correction"] = measured, A.correction(measured, cfg["loudness"])
+    af = f"volume={p['correction']:.2f}dB,alimiter=limit={limit:.4f}:level=0:latency=1"
+    cut = _cut(start, end, scene.duration)
+    job.run([media.FFMPEG, "-y", "-v", "error", "-i", master, "-af", af + ("," + cut if cut else ""),
+             *_codec(Path(out).suffix.lower()), out])
+    return p
+
+
+class _Mix:
+    """The managed mix's ffmpeg steps, run in a thread so the frames render meanwhile. It answers poll, wait and
+    kill like the Popen of the one-process mix, so render() waits for it and stops it the same way."""
+
+    def __init__(self, steps, log):
+        self.returncode = self.result = None
+        self._log, self._proc, self._stop = log, None, threading.Event()
+        self._lock = threading.Lock()
+        self._thread = threading.Thread(target=self._run, args=(steps,), daemon=True)
+        self._thread.start()
+
+    def _run(self, steps):
+        try:
+            self.result = steps(self)
+            code = 0
+        except Exception as e:  # noqa: BLE001 - any failure is reported like a failed ffmpeg, never as success
+            self._log.write((str(e) if isinstance(e, RuntimeError) else f"{type(e).__name__}: {e}").encode())
+            code = 1
+        self.returncode = code
+
+    def run(self, cmd: list[str]) -> str:
+        """Run one ffmpeg step and return its log; raises once kill() has been called."""
+        with self._lock:
+            if self._stop.is_set():
+                raise RuntimeError("stopped")
+            self._proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                          stderr=subprocess.PIPE, creationflags=media._NOWIN)
+        err = self._proc.communicate()[1].decode(errors="replace")
+        if self._proc.returncode:
+            raise RuntimeError(err.strip()[-400:] or f"ffmpeg exited with {self._proc.returncode}")
+        return err
+
+    def poll(self):
+        return self.returncode
+
+    def wait(self):
+        self._thread.join()
+        return self.returncode
+
+    def kill(self):
+        with self._lock:
+            self._stop.set()
+            if self._proc is not None and self._proc.poll() is None:
+                self._proc.kill()
+
+
+def _wait_audio(audio) -> str:
+    """Wait for a mix started by _start_audio and return its file."""
     proc, log, path = audio
     proc.wait()
     log.seek(0)
@@ -163,6 +362,13 @@ def _mux(video_in: list[str], audio, out: str):
     log.close()
     if proc.returncode:
         raise RuntimeError(f"audio mix failed: {err.strip()[:400]}")
+    return path
+
+
+def _mux(video_in: list[str], audio, out: str):
+    """Put the mixed audio under the video, both copied; the segments are joined on the way when video_in
+    is a concat list."""
+    path = _wait_audio(audio)
     res = subprocess.run([media.FFMPEG, "-y", "-v", "error", *video_in, "-i", path, "-map", "0:v", "-map", "1:a",
                           "-c", "copy", "-shortest", out], capture_output=True, text=True, creationflags=media._NOWIN)
     if res.returncode:
@@ -185,6 +391,8 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
     t0 = time.perf_counter()
     if ext == ".png" or out.endswith(("/", "\\")):
         return _render_pngs(scene, out_p, f0, f1, scale, transparent)
+    if ext in AUDIO_ONLY:
+        return _render_audio(scene, out_p, f0 / fps, f1 / fps, start is None and end is None, t0)
     fmt = {".mov": "mov", ".webm": "webm", ".gif": "gif"}.get(ext, "mp4")
     transparent = transparent or fmt in ("mov", "webm") and spec.get("canvas", {}).get("bg") in (None, "transparent")
     if fmt == "gif":  # render no larger than the GIF will be (long side GIF_SIDE), not full size then shrink
@@ -195,7 +403,10 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
     threads = max(1, cpu // workers)
     tmp = Path(tempfile.mkdtemp(prefix="kine-"))
     audio = None
-    mix = fmt == "mp4" and start is None and end is None
+    a_ext = {"mp4": ".m4a", "mov": ".wav", "webm": ".opus"}.get(fmt)
+    mix = a_ext is not None and _codec(a_ext) is not None
+    a_args = (str(tmp / f"audio{a_ext}"), 0.0, None) if start is None and end is None else \
+        (str(tmp / f"audio{a_ext}"), f0 / fps, f1 / fps)
     try:
         seg_ext = ".mov" if fmt == "mov" else ".webm" if fmt == "webm" else ".mp4"
         bounds = [f0 + n * k // workers for k in range(workers + 1)]
@@ -203,13 +414,13 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
                  transparent, threads)
                 for k in range(workers) if bounds[k + 1] > bounds[k]]
         if len(jobs) == 1:
-            audio = _start_audio(scene, str(tmp / "audio.m4a")) if mix else None
+            audio = _start_audio(scene, *a_args) if mix else None
             stats = [_render_range(jobs[0])]
         else:
             ex, failed = _pool(len(jobs)), True
             try:
                 pending = ex.map(_render_range, jobs)  # submitted now; the audio mix starts behind them
-                audio = _start_audio(scene, str(tmp / "audio.m4a")) if mix else None
+                audio = _start_audio(scene, *a_args) if mix else None
                 stats = list(pending)
                 failed = False
             finally:
@@ -244,7 +455,8 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
         w, h = w - w % 2, h - h % 2
     return {"out": str(out_p), "w": w, "h": h, "fps": min(fps, GIF_FPS) if fmt == "gif" else fps, "frames": n,
             "seconds": round(n / fps, 3), "wall": round(wall, 2), "fps_rendered": round(n / wall, 1),
-            "workers": len(jobs), "size_mb": round(out_p.stat().st_size / 1e6, 2) if out_p.exists() else None}
+            "workers": len(jobs), "size_mb": round(out_p.stat().st_size / 1e6, 2) if out_p.exists() else None,
+            "audio": bool(audio)}
 
 
 # Render processes stay up for WARM seconds after a render, so the next one in the same process (the MCP
@@ -331,6 +543,29 @@ def _to_gif(video_in: list[str], out: str, fps: float):
                          creationflags=media._NOWIN)
     if res.returncode:
         raise RuntimeError(f"gif failed: {res.stderr.strip()[:400]}")
+
+
+AUDIO_ONLY = (".wav", ".m4a", ".mp3", ".flac", ".opus")
+
+
+def _render_audio(scene: Scene, out: Path, start: float, end: float, full: bool, t0: float) -> dict:
+    """The mix alone, without rendering a frame."""
+    if _codec(out.suffix.lower()) is None:
+        scene.close()
+        raise RuntimeError(f"this ffmpeg has no encoder for {out.suffix} files; use .wav or .m4a")
+    tmp = Path(tempfile.mkdtemp(prefix="kine-"))
+    try:
+        audio = _start_audio(scene, str(tmp / f"mix{out.suffix.lower()}"), *((0.0, None) if full else (start, end)))
+        if audio is None:
+            raise ValueError("the scene has no audio")
+        path = _wait_audio(audio)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(path, str(out))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+        scene.close()
+    return {"out": str(out), "seconds": round(end - start, 3), "wall": round(time.perf_counter() - t0, 2),
+            "size_mb": round(out.stat().st_size / 1e6, 2)}
 
 
 def _render_pngs(scene: Scene, out: Path, f0: int, f1: int, scale: float, transparent: bool) -> dict:

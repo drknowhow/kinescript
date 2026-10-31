@@ -8,8 +8,10 @@ from pathlib import Path
 
 from . import components, media, models, schema
 from . import presets as P
+from . import voice as V
+from . import words as W
 from .props import Ctx, Prop, compile_prop
-from .timing import Timeline
+from .timing import Timeline, parse_clock
 
 LAYER_TYPES = {"rect", "circle", "ellipse", "path", "line", "arrow", "polygon", "text", "counter",
                "image", "video", "group", "captions", "shader", "model"}
@@ -18,7 +20,7 @@ STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "children", "laye
           "blend", "clip", "mode", "volume", "hidden", "note", "words", "stops", "cap", "join", "loop",
           "allowOffscreen", "style", "audio", "shadow", "box", "fx", "fill", "stroke", "emph", "active",
           "sksl", "preset", "uniforms", "caret", "case", "italic", "smooth", "closed", "focus", "use",
-          "backface", "fixed", "sort", "shape", "detail", "parts", "light"}
+          "backface", "fixed", "sort", "shape", "detail", "parts", "light", "span", "sound", "voice"}
 # Property defaults by name; everything not listed defaults to None.
 DEFAULTS = {"x": 0.0, "y": 0.0, "opacity": 1.0, "scale": 1.0, "scaleX": 1.0, "scaleY": 1.0, "rotate": 0.0,
             "blur": 0.0, "draw": 1.0, "zoom": 1.0, "z": 0.0, "rotateX": 0.0, "rotateY": 0.0}
@@ -71,6 +73,16 @@ class Layer:
         return f"<{self.type} {self.id} {self.t_in:.2f}-{self.t_out:.2f}>"
 
 
+class Sound:
+    """An audio entry, or a layer's sound, placed on the timeline like a layer."""
+
+    def __init__(self, sid: str, raw: dict, src: str | None, layer: str | None = None, natural: float | None = None):
+        self.id, self.raw, self.src, self.layer = sid, raw, src, layer
+        self.natural = natural  # seconds of trimmed file; None when it loops or can't be read
+        self.role = raw.get("role")
+        self.t_in = self.t_out = 0.0
+
+
 class Scene:
     def __init__(self, spec: dict, base_dir: str | Path = ".", notes: list[dict] | None = None):
         spec, report = schema.normalize(spec)
@@ -89,22 +101,25 @@ class Scene:
         self.markers = spec.get("markers", {})
         self.grade = spec.get("grade") or {}
         self.motion_blur = spec.get("motionBlur") or {}
-        self.audio = spec.get("audio", [])
+        self._sounding: list[Layer] = []
         raw_layers = _subst(copy.deepcopy(spec.get("layers", [])), theme)
         self.bg = _subst(self.bg, theme)
-        user_comps = spec.get("components", {})
+        self._components = user_comps = _subst(copy.deepcopy(spec.get("components", {})), theme)
         try:
             raw_layers = [components.expand(l, user_comps, theme, self) for l in raw_layers]
         except ValueError as e:
             raise SceneError(str(e)) from e
         raw_layers = [x for l in raw_layers for x in (l if isinstance(l, list) else [l])]
+        self.words = self._read_words()
         self._raise_errors()
-        self.timeline = Timeline(self.fps, self.markers)
+        self.timeline = Timeline(self.fps, self.markers, {sid: dict(w, ids=None if w["words"] is None else {
+            x["id"]: (x["start"], x["end"]) for x in w["words"] if x["id"]}) for sid, w in self.words.items()})
         self.layers: list[Layer] = []
         self.by_id: dict[str, Layer] = {}
         self._build(raw_layers, None, self.layers)
         self.camera = self._camera(_subst(spec.get("camera"), theme))
         self.light = _subst(spec.get("light"), theme)
+        self.audio = self._build_audio()
         self._check_media()
         self._raise_errors()
         try:
@@ -114,6 +129,8 @@ class Scene:
             raise SceneError((f"layer '{lid}': " if lid else "") + str(e), layer=lid) from e
         for layer in self.by_id.values():
             layer.t_in, layer.t_out = self.timeline.resolved[layer.id]
+        for s in self.audio:
+            s.t_in, s.t_out = self.timeline.resolved[s.id]
         if self.camera is not None:
             self.camera.t_out = self.duration
         self.depth = {L.id for L in self.layers if uses_depth(L)}
@@ -150,9 +167,18 @@ class Scene:
                 except ValueError as e:
                     self.note("error", "bad-model", layer.id, f"model src {e}",
                               "export it again as glTF 2.0 (.glb) or .obj")
-        for i, a in enumerate(self.audio):
-            if isinstance(a, dict) and a.get("src") and not missing(self.path(a["src"]), f"audio[{i}]", "audio src"):
-                _check_trim(self, f"audio[{i}]", a.get("trim") or [0, None], media.probe(self.path(a["src"]))["duration"])
+        for s in self.audio:
+            owner = s.layer or s.id
+            if s.raw.get("text") and s.src and not Path(s.src).exists():
+                continue  # not spoken yet: reported by _read_words
+            if not s.src or missing(s.src, owner, "sound src" if s.layer else "audio src"):
+                continue
+            try:
+                length = media.probe(s.src)["duration"]
+            except media.MediaError as e:
+                self.note("error", "bad-media", owner, str(e), "export it again as .wav, .mp3, .m4a or .flac")
+                continue
+            _check_trim(self, owner, s.raw.get("trim") or [0, None], length)
 
     def _check_values(self):
         """Evaluate every property at the start, middle and end of its layer, so a bad value is reported
@@ -182,6 +208,110 @@ class Scene:
         p = Path(src)
         return str(p if p.is_absolute() else (self.base / p))
 
+    def _read_words(self) -> dict[str, dict]:
+        """Each audio entry's word times, read before the layers so cues and captions can use them:
+        {id: {"words": [...] or None, "trim0", "trim1" (the part of the file that plays), "file"}}."""
+        out = {}
+        for i, a in enumerate(self.spec.get("audio") or []):
+            sid = str(a.get("id") or f"audio{i + 1}")
+            trim = a.get("trim") if isinstance(a.get("trim"), (list, tuple)) and a.get("trim") else [0, None]
+            try:
+                t0 = float(trim[0])
+                t1 = float(trim[1]) if len(trim) > 1 and trim[1] is not None else None
+            except (TypeError, ValueError):
+                t0, t1 = 0.0, None  # reported by _check_media
+            src = a.get("src") or (V.default_src(sid) if a.get("text") else None)
+            out[sid] = {"words": None, "trim0": t0, "trim1": t1,
+                        "file": Path(src).with_suffix(".words.json").as_posix() if src else "a words file"}
+            if src is None:
+                continue
+            path, near = V.paths(sid, a, self.base)
+            if a.get("text") and not path.exists():
+                self.note("error", "voice-missing", sid, f"'{sid}' has text but is not spoken yet: {src} does not exist",
+                          "run kine voice on this scene; it writes the file and its word times")
+                continue
+            rec = V.made(near) if a.get("text") else None
+            if rec and rec.get("hash") != V.fingerprint(a):
+                self.note("warning", "voice-stale", sid, f"the text, speaker, rate, backend or options of '{sid}' "
+                          f"changed after {src} was spoken, so it says the old text",
+                          "run kine voice on this scene to speak it again")
+            given = a.get("words")
+            if given is None and not near.exists():
+                continue
+            try:
+                out[sid]["words"] = W.read(near if given is None else self.path(given) if isinstance(given, str)
+                                           else given)
+            except W.WordsError as e:
+                self.note("error", "bad-words", sid, str(e), "a words file is {\"words\": [{\"word\": \"Hello\", "
+                          "\"start\": 0.1, \"end\": 0.4}]}, in seconds of the sound file")
+        return out
+
+    def _voice_cues(self, lid: str, raw: dict) -> dict:
+        """Captions that follow a voice: a cue a line, each word lit when it is said, starting when the voice starts."""
+        v = str(raw["voice"])
+        w = self.words.get(v)
+        if w is None:
+            close = schema.suggest(v, self.words)
+            raise SceneError(f"layer '{lid}': voice '{v}' is not an audio id." + (f" Did you mean '{close}'?" if close else "")
+                             + (f" Audio ids: {', '.join(list(self.words)[:16])}" if self.words else ""), layer=lid)
+        if w["words"] is None:
+            raise SceneError(f"layer '{lid}': '{v}' has no word times for the captions to follow. Add {w['file']} "
+                             "(kine voice writes it for a sound with text; for a recording, a speech-to-text tool that "
+                             "times words, such as Whisper, writes one), or give the captions cues", layer=lid)
+        return dict(raw, cues=W.cues(w["words"], w["trim0"], w["trim1"]), at=raw.get("at", v))
+
+    def _build_audio(self) -> list[Sound]:
+        """Audio entries and layer sounds as timeline nodes, so a layer can cue from a sound and a sound from a layer.
+        Only voice sets an "auto" duration: a sentence cut off at the end is never wanted, a long music bed is."""
+        entries: list[tuple[dict, str | None]] = [(a, None) for a in self.spec.get("audio") or []]
+        for L in self._sounding:
+            if not any(x.raw.get("hidden") for x in _lineage(L)):
+                entries.append((self._layer_sound(L), L.id))
+        out, prev = [], None
+        for i, (a, layer) in enumerate(entries):
+            sid = str(a.get("id") or (f"{layer}-sound" if layer else f"audio{i + 1}"))
+            src = self.path(a.get("src") or V.default_src(sid)) if a.get("src") or a.get("text") else None
+            natural = _natural(a, src)
+            try:
+                self.timeline.add(sid, a.get("at", 0), a.get("dur"), a.get("until"), natural,
+                                  prev=None if layer else prev, counts=a.get("role") == "voice")
+            except ValueError as e:
+                raise SceneError(f"audio '{sid}': {e}", layer=sid) from e
+            if not layer:
+                prev = sid
+            g = a.get("gain")
+            if g is not None and (isinstance(g, bool) or not isinstance(g, (int, float))):
+                self._check_gain(layer or sid, g)
+            out.append(Sound(sid, a, src, layer, natural))
+        return out
+
+    def _check_gain(self, owner: str, g):
+        """A gain that changes over time (keyframes, a tween or an expression) must give a number of dB."""
+        try:
+            prop = compile_prop("gain", g, self.ctx)
+            for t in (0.0, 0.5, 1.0):
+                v = prop.at(t, 1.0, t, 0)
+                if isinstance(v, bool) or not isinstance(v, (int, float)):
+                    raise ValueError(f"gives {v!r}")
+        except Exception as e:  # noqa: BLE001 - any failure inside a user expression
+            self.note("error", "bad-value", owner, f"gain {g!r} is not a number of dB: {e}",
+                      "use a number, keyframes like [[0, -20], [1, 0]], or an expression starting with '='")
+
+    def _layer_sound(self, L: Layer) -> dict:
+        """A layer's sound as an audio entry: "at" counts from the layer ("in", "out-0.1", 0.2)."""
+        s = L.raw["sound"]
+        s = {"src": s} if isinstance(s, str) else dict(s)
+        at = s.get("at", "in")
+        if isinstance(at, str) and parse_clock(at, self.fps) is not None:
+            at = parse_clock(at, self.fps)
+        if isinstance(at, (int, float)) and not isinstance(at, bool):
+            at = f"{L.id}.in{'-' if at < 0 else '+'}{abs(at):.6f}"
+        elif isinstance(at, str) and re.match(r"\s*(in|out|mid)\b", at):
+            at = f"{L.id}.{at.strip()}"
+        s["at"] = at
+        s.setdefault("role", "sfx")
+        return s
+
     def _build(self, raws: list, parent: Layer | None, out: list):
         prev = None
         for idx, raw in enumerate(raws):
@@ -198,6 +328,8 @@ class Scene:
                 raw = dict({"x": "50%", "y": "86%", "size": 46, "weight": 700}, **raw)
             layer = Layer(lid, ltype, raw, parent, len(self.by_id))
             self.by_id[lid] = layer
+            if raw.get("sound") is not None:
+                self._sounding.append(layer)
             natural = None
             if ltype in ("video", "image", "model") or (ltype == "captions" and raw.get("src")):
                 layer.src = self.path(raw["src"]) if raw.get("src") else None
@@ -208,14 +340,17 @@ class Scene:
                 end = trim[1] if len(trim) > 1 and trim[1] is not None else info["duration"]
                 end = min(float(end), info["duration"]) if info["duration"] else end
                 natural = max(0.04, (end - trim[0]) / float(raw.get("speed", 1)))
-            if ltype == "captions" and (raw.get("cues") or (layer.src and Path(layer.src).exists())):
+            if ltype == "captions" and raw.get("voice") is not None:
+                raw = layer.raw = self._voice_cues(lid, raw)
+            elif ltype == "captions" and (raw.get("cues") or (layer.src and Path(layer.src).exists())):
                 raw = layer.raw = dict(raw, cues=components.load_cues(raw, layer.src))
-                if raw["cues"] and "dur" not in raw and "until" not in raw:
-                    natural = max(c[1] for c in raw["cues"])
+            if ltype == "captions" and raw.get("cues") and "dur" not in raw and "until" not in raw:
+                natural = max(c[1] for c in raw["cues"])
             try:
                 self.timeline.add(lid, raw.get("at", 0), raw.get("dur"), raw.get("until"), natural,
                                   prev=prev, parent=parent.id if parent else None,
-                                  default_end=parent.id if parent else None)
+                                  default_end=parent.id if parent else None,
+                                  span=ltype == "group" and bool(raw.get("span")))
             except ValueError as e:
                 raise SceneError(f"layer '{lid}': {e}", layer=lid) from e
             ctx = self.ctx
@@ -239,7 +374,7 @@ class Scene:
             out.append(layer)
             kids = raw.get("children") or raw.get("layers")
             if ltype == "group" and kids:
-                kids = [components.expand(k, self.spec.get("components", {}), self.theme, self) for k in kids]
+                kids = [components.expand(k, self._components, self.theme, self) for k in kids]
                 kids = [x for k in kids for x in (k if isinstance(k, list) else [k])]
                 self._build(kids, layer, layer.children)
             prev = lid
@@ -263,10 +398,28 @@ class Scene:
         return walk(self.layers)
 
     def summary(self) -> dict:
+        audio = []
+        for s in self.audio:
+            src = s.raw.get("src") or (V.default_src(s.id) if s.raw.get("text") else None)
+            audio.append({"id": s.id, "role": s.role, "src": src, "in": round(s.t_in, 3),
+                          "out": round(s.t_out, 3), "layer": s.layer})
+            if said := self.said(s.id):  # the ids a cue can name, and when each is said
+                audio[-1]["words"] = [[wid, round(a, 3), round(b, 3)] for wid, _, a, b in said]
         return {"canvas": {"w": self.w, "h": self.h, "fps": self.fps, "duration": round(self.duration, 3),
                            "frames": self.frames},
                 "layers": [{"id": l.id, "type": l.type, "in": round(l.t_in, 3), "out": round(l.t_out, 3),
-                            "parent": l.parent.id if l.parent else None} for l in self.all_layers()]}
+                            "parent": l.parent.id if l.parent else None} for l in self.all_layers()],
+                "audio": audio}
+
+    def said(self, sid: str) -> list[tuple[str | None, str, float, float]]:
+        """The words sound `sid` plays, as (id, word, start, end) in scene seconds; [] when it has no words."""
+        w, s = self.words.get(sid), next((s for s in self.audio if s.id == sid), None)
+        if not w or not w["words"] or s is None:
+            return []
+        lag = s.t_in - w["trim0"]
+        return [(x["id"], x["word"], lag + x["start"], lag + x["end"]) for x in w["words"]
+                if x["start"] >= w["trim0"] and (w["trim1"] is None or x["start"] < w["trim1"])
+                and lag + x["start"] < min(s.t_out, self.duration)]
 
     def close(self):
         for layer in self.all_layers():
@@ -279,6 +432,25 @@ def uses_depth(L: Layer) -> bool:
     motions = [m for m in (L.enter, L.exit) if m]
     return (L.type == "model" or any(k in L.props for k in DEPTH_PROPS) or any(P.DEPTH & set(m.names) for m in motions)
             or any(uses_depth(c) for c in L.children))
+
+
+def _lineage(L: Layer):
+    while L is not None:
+        yield L
+        L = L.parent
+
+
+def _natural(a: dict, src: str | None) -> float | None:
+    """An audio entry's length from its trimmed source; None (runs to the scene end) when it loops or can't be read."""
+    trim = a.get("trim") or [0, None]
+    if a.get("loop") or not src or not Path(src).exists() or not isinstance(trim, (list, tuple)):
+        return None
+    try:
+        total = media.probe(src)["duration"]
+    except media.MediaError:
+        return None  # reported by _check_media
+    end = trim[1] if len(trim) > 1 and trim[1] is not None else total
+    return max(0.01, float(end) - float(trim[0]))
 
 
 def _check_trim(scene: "Scene", owner, trim, length: float):

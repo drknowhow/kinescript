@@ -1,0 +1,98 @@
+{
+ "words": [
+  {
+   "word": "Then",
+   "start": 0.275,
+   "end": 0.4125
+  },
+  {
+   "word": "it",
+   "start": 0.4125,
+   "end": 0.5
+  },
+  {
+   "word": "renders",
+   "start": 0.5,
+   "end": 0.8875
+  },
+  {
+   "word": "on",
+   "start": 0.8875,
+   "end": 0.9875
+  },
+  {
+   "word": "the",
+   "start": 0.9875,
+   "end": 1.075
+  },
+  {
+   "word": "GPU,",
+   "start": 1.075,
+   "end": 1.675
+  },
+  {
+   "word": "with",
+   "start": 1.75,
+   "end": 1.8625
+  },
+  {
+   "word": "the",
+   "start": 1.8625,
+   "end": 1.9625
+  },
+  {
+   "word": "sound",
+   "start": 1.9625,
+   "end": 2.3
+  },
+  {
+   "word": "mixed",
+   "start": 2.3,
+   "end": 2.5625
+  },
+  {
+   "word": "in.",
+   "start": 2.5625,
+   "end": 3.075
+  },
+  {
+   "word": "Write",
+   "start": 3.2375,
+   "end": 3.5,
+   "id": "write"
+  },
+  {
+   "word": "it.",
+   "start": 3.5,
+   "end": 3.75
+  },
+  {
+   "word": "Check",
+   "start": 3.8375,
+   "end": 4.1,
+   "id": "check"
+  },
+  {
+   "word": "it.",
+   "start": 4.1,
+   "end": 4.375
+  },
+  {
+   "word": "Render",
+   "start": 4.4875,
+   "end": 4.85,
+   "id": "render"
+  },
+  {
+   "word": "it.",
+   "start": 4.85,
+   "end": 5.25
+  }
+ ],
+ "made": {
+  "hash": "cecc2ccd80ea056b",
+  "backend": "kinescript_kokoro",
+  "version": "kokoro 0.9.4, kinescript-kokoro 0.1.0",
+  "speaker": "af_heart"
+ }
+}

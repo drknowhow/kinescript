@@ -1,0 +1,51 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 9, "bg": "#0a0c10"},
+  "grade": {"vignette": 0.3},
+  "camera": {"z": [[0, 500], [1, 0, "outCubic"], [2, 0], [3, -1600], [4, -1600], [5, -3200], [6, -3200], [7, -4800]],
+             "x": [[0, -50], ["end", 50, "linear"]], "y": [[0, 20], ["end", -20, "linear"]]},
+  "layers": [
+    {"id": "bg", "type": "shader", "preset": "score", "opacity": 0.45, "fixed": true},
+    {"id": "render", "type": "group", "x": "50%", "y": "50%", "z": -4800, "allowOffscreen": true,
+     "children": [
+       {"id": "render-frame", "type": "rect", "w": 1500, "h": 820, "radius": 28, "stroke": "#f2f0e84d", "strokeWidth": 4,
+        "opacity": [[4, 0.4], [5, 1]]},
+       {"id": "render-z", "type": "text", "text": "\"z\": -4800", "font": "IBM Plex Mono", "x": -700, "y": -360,
+        "anchor": "topleft", "size": 34, "weight": 500, "fill": "$muted", "opacity": [[6.5, 0], [7, 1]]},
+       {"id": "render-verb", "type": "text", "text": "Render.", "y": -40, "size": 230, "weight": 700,
+        "opacity": [[6.5, 0], [7, 1]]},
+       {"id": "render-cmd", "type": "text", "text": "kine render scene.json", "font": "IBM Plex Mono", "y": 150,
+        "size": 48, "weight": 500, "fill": "$accent2", "opacity": [[6.5, 0], [7, 1]]}
+     ]},
+    {"id": "look", "type": "group", "x": "50%", "y": "50%", "z": -3200, "until": 6.5, "allowOffscreen": true,
+     "children": [
+       {"id": "look-frame", "type": "rect", "w": 1500, "h": 820, "radius": 28, "stroke": "#f2f0e84d", "strokeWidth": 4,
+        "opacity": [[2, 0.4], [3, 1]]},
+       {"id": "look-z", "type": "text", "text": "\"z\": -3200", "font": "IBM Plex Mono", "x": -700, "y": -360,
+        "anchor": "topleft", "size": 34, "weight": 500, "fill": "$muted", "opacity": [[4.5, 0], [5, 1], [6, 1], [6.25, 0]]},
+       {"id": "look-verb", "type": "text", "text": "Look.", "y": -40, "size": 230, "weight": 700,
+        "opacity": [[4.5, 0], [5, 1], [6, 1], [6.25, 0]]},
+       {"id": "look-cmd", "type": "text", "text": "kine look scene.json --boxes", "font": "IBM Plex Mono", "y": 150,
+        "size": 48, "weight": 500, "fill": "$accent2", "opacity": [[4.5, 0], [5, 1], [6, 1], [6.25, 0]]}
+     ]},
+    {"id": "check", "type": "group", "x": "50%", "y": "50%", "z": -1600, "until": 4.5, "allowOffscreen": true,
+     "children": [
+       {"id": "check-frame", "type": "rect", "w": 1500, "h": 820, "radius": 28, "stroke": "#f2f0e84d", "strokeWidth": 4},
+       {"id": "check-z", "type": "text", "text": "\"z\": -1600", "font": "IBM Plex Mono", "x": -700, "y": -360,
+        "anchor": "topleft", "size": 34, "weight": 500, "fill": "$muted", "opacity": [[2.5, 0], [3, 1], [4, 1], [4.25, 0]]},
+       {"id": "check-verb", "type": "text", "text": "Check.", "y": -40, "size": 230, "weight": 700,
+        "opacity": [[2.5, 0], [3, 1], [4, 1], [4.25, 0]]},
+       {"id": "check-cmd", "type": "text", "text": "kine check scene.json", "font": "IBM Plex Mono", "y": 150,
+        "size": 48, "weight": 500, "fill": "$accent2", "opacity": [[2.5, 0], [3, 1], [4, 1], [4.25, 0]]}
+     ]},
+    {"id": "write", "type": "group", "x": "50%", "y": "50%", "z": 0, "until": 2.5, "allowOffscreen": true,
+     "children": [
+       {"id": "write-frame", "type": "rect", "w": 1500, "h": 820, "radius": 28, "stroke": "#f2f0e84d", "strokeWidth": 4},
+       {"id": "write-z", "type": "text", "text": "\"z\": 0", "font": "IBM Plex Mono", "x": -700, "y": -360,
+        "anchor": "topleft", "size": 34, "weight": 500, "fill": "$muted", "opacity": [[0.2, 0], [0.6, 1], [2, 1], [2.25, 0]]},
+       {"id": "write-verb", "type": "text", "text": "Write.", "y": -40, "size": 230, "weight": 700,
+        "opacity": [[0.2, 0], [0.6, 1], [2, 1], [2.25, 0]]},
+       {"id": "write-cmd", "type": "text", "text": "scene.json", "font": "IBM Plex Mono", "y": 150,
+        "size": 48, "weight": 500, "fill": "$accent2", "opacity": [[0.2, 0], [0.6, 1], [2, 1], [2.25, 0]]}
+     ]}
+  ]
+}
