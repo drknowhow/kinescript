@@ -22,12 +22,14 @@ reads a JSON list of those requests on stdin and prints the list of results. Sce
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
 import re
 import shlex
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -192,8 +194,14 @@ def _speaker(name: str | None):
     else:
         raise ValueError(f"no voice backend is installed: pip install {KOKORO} (Python 3.10 to 3.12), "
                          "or set KINE_VOICE_CMD to a command that speaks")
-    fn = found[key].load()
-    return (lambda reqs: [fn(r) for r in reqs]), key
+    # What a backend prints goes to stderr: kine voice answers in JSON on stdout, and kine mcp speaks JSON-RPC there.
+    with contextlib.redirect_stdout(sys.stderr):
+        fn = found[key].load()
+
+    def run(reqs):
+        with contextlib.redirect_stdout(sys.stderr):
+            return [fn(r) for r in reqs]
+    return run, key
 
 
 def generate(scene, only=None, force: bool = False, backend: str | None = None, base=None) -> dict:

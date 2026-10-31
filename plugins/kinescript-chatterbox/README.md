@@ -17,7 +17,7 @@ kine check scene.json
 
 ## Install
 
-Chatterbox needs PyTorch. Into the same environment as Kinescript:
+It needs Kinescript 1.3 or newer, and Chatterbox needs PyTorch. Into the same environment as Kinescript:
 
 ```bash
 pip install kinescript-chatterbox
