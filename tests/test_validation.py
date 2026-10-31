@@ -352,7 +352,7 @@ def test_check_issues_name_their_layer():
     ({"id": "s", "type": "shader", "sksl": 5}, "sksl"),
     ({"id": "s", "type": "counter", "value": 5, "format": "{:s}"}, "format"),
     ({"id": "s", "type": "path", "d": "M0 0 A 1 2"}, "d: "),
-    ({"id": "s", "type": "captions", "cues": [[0, 1]]}, "cue 1"),
+    ({"id": "s", "type": "captions", "cues": [[0, 1]]}, "cues[0]"),
     ({"id": "s", "type": "text", "text": "x", "fill": "=0.5"}, "fill"),
 ])
 def test_values_that_failed_while_drawing_are_found_by_check(layer, words):

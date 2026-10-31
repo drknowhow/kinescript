@@ -933,7 +933,7 @@ def _structure(raw: dict, t: str, rep: Report, lid):
             ok = (isinstance(c, dict) and secs(c.get("at", c.get("start", 0))) and secs(c.get("end"))) or (
                 isinstance(c, (list, tuple)) and len(c) == 3 and secs(c[0]) and secs(c[1]))
             if not ok or not isinstance(cues, list):
-                rep.add("error", "bad-value", lid, f"cues: cue {j} is {_show(c)}; a cue is [start, end, \"text\"] or "
+                rep.add("error", "bad-captions", lid, f"cues[{j - 1}] is {_show(c)}; a cue is [start, end, \"text\"] or "
                         "{\"start\": 0.5, \"end\": 2, \"text\": \"...\"}, in seconds",
                         "\"cues\": [[0, 1.5, \"Hello\"]]")
                 break
