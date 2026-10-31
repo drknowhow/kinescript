@@ -21,7 +21,8 @@ STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "children", "laye
           "blend", "clip", "mode", "volume", "hidden", "note", "words", "stops", "cap", "join", "loop",
           "allowOffscreen", "style", "audio", "shadow", "box", "fx", "fill", "stroke", "emph", "active",
           "sksl", "preset", "uniforms", "caret", "case", "italic", "smooth", "closed", "focus", "use",
-          "backface", "fixed", "sort", "shape", "detail", "parts", "light", "span", "sound", "voice"}
+          "backface", "fixed", "sort", "shape", "detail", "parts", "light", "span", "sound", "voice",
+          "fadeIn", "fadeOut", "sequence"}
 # Property defaults by name; everything not listed defaults to None.
 DEFAULTS = {"x": 0.0, "y": 0.0, "opacity": 1.0, "scale": 1.0, "scaleX": 1.0, "scaleY": 1.0, "rotate": 0.0,
             "blur": 0.0, "draw": 1.0, "zoom": 1.0, "z": 0.0, "rotateX": 0.0, "rotateY": 0.0}
@@ -142,6 +143,7 @@ class Scene:
         self.is3d = self.camera is not None or bool(self.depth)
         self.frames = max(1, round(self.duration * self.fps))
         self._check_values()
+        self._check_sequences()
         self._raise_errors()
 
     def note(self, level: str, code: str, layer, message: str, fix: str = ""):
@@ -155,6 +157,11 @@ class Scene:
         """Missing files fail here, before any frame is rendered, with the path that was tried."""
         def missing(src: str, owner, what: str) -> bool:
             p = Path(src)
+            if p.is_dir():  # an image drawn from a folder was a PermissionError in the middle of the render
+                inside = sorted(x.name for x in p.iterdir() if x.is_file())[:12]
+                self.note("error", "media-folder", owner, f"{what} is a folder, not a file: {p}",
+                          "name a file" + (f"; in it are {', '.join(inside)}" if inside else ""))
+                return True
             if p.exists():
                 return False
             near = sorted(x.name for x in p.parent.iterdir()) if p.parent.is_dir() else []
@@ -179,11 +186,37 @@ class Scene:
             if not s.src or missing(s.src, owner, "sound src" if s.layer else "audio src"):
                 continue
             try:
-                length = media.probe(s.src)["duration"]
+                info = media.probe(s.src)
             except media.MediaError as e:
                 self.note("error", "bad-media", owner, str(e), "export it again as .wav, .mp3, .m4a or .flac")
                 continue
-            _check_trim(self, owner, s.raw.get("trim") or [0, None], length)
+            if not info["audio"]:  # the mix failed on it with ffmpeg's "Stream specifier ':a' ... matches no streams"
+                still = info["image"] or Path(s.src).suffix.lower() in schema.IMAGE_EXTS or info["duration"] < 0.05
+                what = "an image" if info["w"] and still else "a video with no sound track" if info["w"] else "not sound"
+                self.note("error", "no-audio", owner, f"{'sound' if s.layer else 'audio'} src {Path(s.src).name} has "
+                          f"no sound in it: it is {what}", "use a sound file (.wav, .mp3, .m4a, .flac) or a video "
+                          "with a sound track; a video layer plays its own sound")
+                continue
+            _check_trim(self, owner, s.raw.get("trim") or [0, None], info["duration"])
+
+    def _check_sequences(self):
+        """Each transition must be shorter than both clips it joins. One as long as a clip started the next clip at
+        or before the start of the one it follows: two 1 s clips with a 2 s fade put the second at -1 s, unseen, and
+        stopped the mix with ffmpeg's "Delay must be non negative number"."""
+        for L in self.all_layers():
+            seq = L.raw.get("sequence") if L.type == "group" else None
+            if not isinstance(seq, dict):
+                continue
+            ov = seq["overlap"]
+            for a, b in seq["joins"]:
+                A, B = self.by_id.get(a), self.by_id.get(b)
+                if A is None or B is None or ov < min(A.dur, B.dur) - 1e-6:
+                    continue
+                short = min(A.dur, B.dur)
+                self.note("error", "bad-transition", L.id,
+                          f"the {ov:g}s {seq['type']} between '{a}' ({A.dur:.2f}s) and '{b}' ({B.dur:.2f}s) is not "
+                          f"shorter than both clips, so '{b}' would start before '{a}' has played",
+                          f"use a transition dur under {short:.2f}s, or longer clips")
 
     def _check_values(self):
         """Evaluate every property at the start, middle and end of its layer, so a bad value is reported
@@ -358,8 +391,17 @@ class Scene:
             natural = None
             if ltype in ("video", "image", "model") or (ltype == "captions" and raw.get("src")):
                 layer.src = self.path(raw["src"]) if raw.get("src") else None
-            if ltype == "video" and layer.src and Path(layer.src).exists():
-                info = media.probe(layer.src)
+            info = None
+            if ltype == "video" and layer.src and Path(layer.src).is_file():  # a folder or missing file: _check_media
+                try:
+                    info = media.probe(layer.src)
+                except media.MediaError as e:
+                    self.note("error", "bad-media", lid, f"video src {e}", "export it again as .mp4, .mov or .webm")
+                if info is not None and not info["w"]:  # it drew nothing, and check said nothing
+                    self.note("error", "no-picture", lid, f"video src {Path(layer.src).name} has no picture: it is "
+                              "sound only", "put it in \"audio\" (or a layer's \"sound\") to hear it")
+                    info = None
+            if info is not None:
                 trim = _check_trim(self, lid, raw.get("trim") or [0, None], info["duration"])
                 end = trim[1] if trim[1] is not None else info["duration"]
                 end = min(float(end), info["duration"]) if info["duration"] else end
@@ -371,8 +413,21 @@ class Scene:
                 natural = max(0.04, (end - trim[0]) / float(speed))
             if ltype == "captions" and raw.get("voice") is not None:
                 raw = layer.raw = self._voice_cues(lid, raw)
-            elif ltype == "captions" and (raw.get("cues") or (layer.src and Path(layer.src).exists())):
-                raw = layer.raw = dict(raw, cues=components.load_cues(raw, layer.src))
+            elif ltype == "captions" and (raw.get("cues") or (layer.src and Path(layer.src).is_file())):
+                notes: list = []
+                try:
+                    cues = components.load_cues(raw, layer.src, notes)
+                except ValueError as e:
+                    self.note("error", "bad-captions", lid, str(e))
+                    cues = []
+                else:
+                    if not cues and not raw.get("cues"):
+                        self.note("warning", "captions-empty", lid, f"captions src {Path(layer.src).name} has no "
+                                  "cues, so nothing is drawn", "a cue is a time line such as 00:00:01,000 --> "
+                                  "00:00:02,500 with its text on the lines after it, and a blank line after the text")
+                for level, code, msg, fix in notes:
+                    self.note(level, code, lid, msg, fix)
+                raw = layer.raw = dict(raw, cues=cues)
             if ltype == "captions" and raw.get("cues") and "dur" not in raw and "until" not in raw:
                 natural = max(c[1] for c in raw["cues"])
             try:
@@ -472,8 +527,9 @@ def _lineage(L: Layer):
 def _natural(a: dict, src: str | None) -> float | None:
     """An audio entry's length from its trimmed source; None (runs to the scene end) when it loops or can't be read."""
     trim = a.get("trim") or [0, None]
-    if a.get("loop") or not src or not Path(src).exists() or not isinstance(trim, (list, tuple)):
-        return None
+    if a.get("loop") or not src or not Path(src).is_file() or not isinstance(trim, (list, tuple)) or not trim \
+            or not _number(trim[0]) or (len(trim) > 1 and trim[1] is not None and not _number(trim[1])):
+        return None  # a bad trim is reported by _check_media
     try:
         total = media.probe(src)["duration"]
     except media.MediaError:
