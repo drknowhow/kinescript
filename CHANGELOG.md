@@ -15,6 +15,11 @@
   4.76 s, and a sheet in 0.11 s instead of 0.32 s. Files are within a few percent of their old size (1080p frames
   4% larger, 4K 6% smaller), still 8-bit RGBA, and decode to the same pixels; the one exception is a transparent
   frame with motion blur, whose colours are now the ones its `.mov` and `.webm` get, a level apart in a few pixels.
+- `kine check` places clips without decoding them. Its samples need where layers are, not what they show, yet each
+  one decoded the clips on screen, nearly always in a new ffmpeg: the 60-cut stress scene started 169 ffmpeg
+  processes and took 17.5 s on the GPU, and `examples/edit.json` took 6.9 s. Only the contrast and covered-text
+  checks, which read pixels, decode now: 2.8 s with 36 processes (most of them the sound check's), and 1.2 s. The
+  results are the same. `kine probe --at` no longer decodes either.
 - An output that can't be written (a read-only file, one another program holds, or a folder this account can't
   write in) is an error before the first frame. A 30 s 1080p render to a read-only `.mp4` drew every frame and
   failed after 2.4 s with `[Errno 13] Permission denied`; it now stops at once and says why.
