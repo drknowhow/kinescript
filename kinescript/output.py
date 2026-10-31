@@ -89,7 +89,10 @@ def _render_range(args) -> dict:
 
 
 def _audio_inputs(scene: Scene) -> list[dict]:
-    """Every audible source as {src, at, trim0, trim1, gain_db, fade_in, fade_out, speed}."""
+    """Every audible source as {src, at, trim0, dur, play, gain, fade_in, fade_out, speed, loop, ...}. dur is the
+    source seconds the sound spans (its time in the scene times its speed); play is how much of that the source has
+    up to its trim end, so a clip trimmed to [2, 4] and given 6 s is silent after its 2 s, unless it loops. A sound
+    that ends before the scene starts is left out."""
     out = []
     for layer in scene.all_layers():
         if layer.type != "video" or not layer.src:
@@ -98,34 +101,61 @@ def _audio_inputs(scene: Scene) -> list[dict]:
         up, hidden = layer, False
         while up is not None and not hidden:  # hidden, or inside a hidden group: no picture and no sound
             hidden, up = bool(up.raw.get("hidden")), up.parent
-        if hidden or not vol or not media.probe(layer.src)["audio"]:
+        if hidden or not vol or not media.probe(layer.src)["audio"] or layer.t_out <= 0:
             continue
-        trim = layer.raw.get("trim") or [0, None]
+        trim0 = float((layer.raw.get("trim") or [0])[0])
         speed = float(layer.raw.get("speed", 1))
-        fi = layer.enter.dur if layer.enter else 0
-        fo = layer.exit.dur if layer.exit else 0
+        # Its sound fades in over its enter and out over its exit, unless fadeIn or fadeOut says otherwise; a
+        # sequence sets both, so the sound of two clips crossfades with the picture.
+        fi = float(layer.raw.get("fadeIn", layer.enter.dur if layer.enter else 0))
+        fo = float(layer.raw.get("fadeOut", layer.exit.dur if layer.exit else 0))
+        end = loop_end(layer, media.probe(layer.src)["duration"]) or None  # the trim end, or the end of the file
         loop = None
         if layer.raw.get("loop"):  # the trimmed part repeats, as the picture does (render._draw_video)
-            loop = max(0.01, loop_end(layer, media.probe(layer.src)["duration"]) - float(trim[0]))
-        out.append(dict(src=layer.src, at=layer.t_in, trim0=float(trim[0]), dur=layer.dur * speed, gain=float(vol),
-                        fade_in=fi, fade_out=fo, speed=speed, loop=loop, pan=0.0, role=None, curve=None,
-                        onset=False, id=layer.id))
+            loop = max(0.01, (end or 0) - trim0)
+        out.append(_sound(src=layer.src, at=layer.t_in, trim0=trim0, end=end, dur=layer.dur * speed, gain=float(vol),
+                          fade_in=fi, fade_out=fo, speed=speed, loop=loop, pan=0.0, role=None, curve=None,
+                          onset=False, id=layer.id))
     for s in scene.audio:
         a = s.raw
+        if s.t_out <= 0:
+            continue
         trim = a.get("trim") or [0, None]
-        loop = None
-        if a.get("loop"):  # the trimmed segment repeats
-            total = media.probe(s.src)["duration"]
-            end = trim[1] if len(trim) > 1 and trim[1] is not None else total
-            loop = max(0.01, min(float(end), total) - float(trim[0]))
+        total = media.probe(s.src)["duration"]
+        end = min(float(trim[1]), total or math.inf) if len(trim) > 1 and trim[1] is not None else total or None
+        loop = max(0.01, (end or 0) - float(trim[0])) if a.get("loop") else None  # the trimmed segment repeats
         g = a.get("gain")
         curve = g if g is not None and not isinstance(g, (int, float)) else None  # keyframes or an expression
         gain = 10 ** (float(g) / 20) if curve is None and g is not None else float(a.get("volume", 1))
-        out.append(dict(src=s.src, at=s.t_in, trim0=float(trim[0]), dur=max(0.01, min(s.t_out, scene.duration) - s.t_in),
-                        gain=gain, fade_in=float(a.get("fadeIn", 0)), fade_out=float(a.get("fadeOut", 0)), speed=1.0,
-                        loop=loop, pan=float(a.get("pan", 0)), role=s.role, curve=curve,
-                        onset=s.role == "sfx" and not a.get("trim") and not loop, id=s.id))
+        out.append(_sound(src=s.src, at=s.t_in, trim0=float(trim[0]), end=end,
+                          dur=max(0.01, min(s.t_out, scene.duration) - s.t_in), gain=gain,
+                          fade_in=float(a.get("fadeIn", 0)), fade_out=float(a.get("fadeOut", 0)), speed=1.0,
+                          loop=loop, pan=float(a.get("pan", 0)), role=s.role, curve=curve,
+                          onset=s.role == "sfx" and not a.get("trim") and not loop, id=s.id))
     return out
+
+
+def _sound(end: float | None, **a) -> dict:
+    """One mix input: `a` plus play, the source seconds read from trim0, which stop at `end` (the trim end, or the
+    end of the file) unless the sound loops. It played on past the trim end before: [2, 4] given 6 s read to 8 s."""
+    a["play"] = a["dur"] if a["loop"] or end is None else max(0.0, min(a["dur"], end - a["trim0"]))
+    return a
+
+
+def _tempo(speed: float) -> list[str]:
+    """atempo steps whose product is `speed`. One atempo goes from 0.5 to 2, and the mix clamped to that, so a clip
+    at speed 4 sounded at twice its speed and fell behind its picture; 4 is now 2 x 2 and 0.1 is 0.5 x 0.5 x 0.5 x
+    0.8, and the sound keeps pace at any speed."""
+    steps, s = [], float(speed)
+    while s > 2.0 + 1e-9:
+        steps.append(2.0)
+        s /= 2.0
+    while s < 0.5 - 1e-9:
+        steps.append(0.5)
+        s /= 0.5
+    if abs(s - 1.0) > 1e-9:
+        steps.append(s)
+    return [f"atempo={x:.6f}" for x in steps]
 
 
 def _codec(ext: str) -> list[str] | None:
@@ -190,11 +220,10 @@ def _graph(ins: list[dict], managed: bool, curves: dict[int, str], duck: str | N
             f = [f"atrim=start={a['trim0']:.4f}:duration={a['loop']:.4f}", "asetpts=PTS-STARTPTS", "aresample=48000",
                  f"aloop=loop=-1:size={round(a['loop'] * 48000)}", f"atrim=duration={a['dur']:.4f}"]
         else:
-            f = [f"atrim=start={a['trim0']:.4f}:duration={a['dur']:.4f}", "asetpts=PTS-STARTPTS"]
+            f = [f"atrim=start={a['trim0']:.4f}:duration={a.get('play', a['dur']):.4f}", "asetpts=PTS-STARTPTS"]
         if managed:
             f.append("aformat=sample_rates=48000:channel_layouts=stereo")
-        if a["speed"] != 1:
-            f.append(f"atempo={max(0.5, min(2.0, a['speed'])):.4f}")
+        f.extend(_tempo(a["speed"]))
         if a["fade_in"]:
             f.append(f"afade=t=in:d={a['fade_in']:.3f}")
         if a["fade_out"]:
@@ -205,9 +234,11 @@ def _graph(ins: list[dict], managed: bool, curves: dict[int, str], duck: str | N
             chains.append(head + ",".join(f) + f"[p{k}]")
             curve(curves[k], f"c{k}")
             head, f = f"[p{k}][c{k}]amultiply", []
+        if a["at"] < 0:  # it started before the scene: the scene hears it from there (adelay takes no negative delay)
+            f.extend([f"atrim=start={-a['at']:.4f}", "asetpts=PTS-STARTPTS"])
         if a["pan"]:
             f.append(_pan(a["pan"]))
-        ms = int(round(a["at"] * 1000))
+        ms = int(round(max(0.0, a["at"]) * 1000))
         f.extend([f"adelay={ms}|{ms}", "asetpts=N/SR/TB"])  # adelay's leading silence has no timestamps
         chains.append(head + ("," if head.endswith("amultiply") else "") + ",".join(f) + f"[a{k}]")
     ducked = [f"[a{k}]" for k, a in enumerate(ins) if duck and a.get("duck")]
@@ -254,7 +285,8 @@ def _start_audio(scene: Scene, out: str, start: float = 0.0, end: float | None =
 
 def measure(ins: list[dict]) -> list[dict]:
     """audio.analyze for the part of each source a sound plays, each file and span once, a few at a time."""
-    spans = [(a["src"], a["trim0"], a["trim0"] + (a["loop"] or a["dur"] * a["speed"])) for a in ins]
+    # The source seconds that play: dur is already in source seconds (it was multiplied by speed a second time).
+    spans = [(a["src"], a["trim0"], a["trim0"] + (a["loop"] or a.get("play", a["dur"]))) for a in ins]
     todo = list(dict.fromkeys(spans))
     with ThreadPoolExecutor(max(1, min(4, len(todo)))) as ex:
         infos = dict(zip(todo, ex.map(lambda s: A.analyze(*s), todo)))

@@ -1256,7 +1256,12 @@ class Renderer:
         w, h = lay.w + pad[1] * 2, lay.h + pad[0] * 2
         cbox = (-w / 2, -h / 2, w, h)
         ct = t - s0
-        a = min(1.0, ct / 0.12, (s1 - t) / 0.12)
+        lines = set(text.split("\n"))
+        # Cues that overlap are stacked into segments (components._stack); a line that goes on into the next
+        # segment does not fade out and back in where they meet.
+        goes_on = [any(abs(q[k] - edge) < 1e-6 and lines & set(q[2].split("\n")) for q in cues)
+                   for k, edge in ((1, s0), (0, s1))]
+        a = min(1.0, 1.0 if goes_on[0] else ct / 0.12, 1.0 if goes_on[1] else (s1 - t) / 0.12)
         active = None
         if L.raw.get("mode") in ("karaoke", "pop") and len(cue) > 3:  # word times from the voice
             first_word = lay.runs[0].word if lay.runs else 0
