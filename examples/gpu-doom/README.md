@@ -1,6 +1,6 @@
 # gPu(doom) promo
 
-A 36-second reel for [gPu(doom)](https://austegard.com/fun-and-games/doom/), the DOOM engine rewritten as WebGPU
+A 36-second reel for [gPu(doom)](https://austegard.com/games/doom/), the DOOM engine rewritten as WebGPU
 compute shaders. It is the first outside test of Kinescript: a scene written by an agent against `kine docs`, checked
 with `kine check` and `kine look --boxes`, and rendered on the CPU backend in a Linux container with no GPU.
 
@@ -18,5 +18,5 @@ kine render examples/gpu-doom/promo.json -o gpu-doom-promo.mp4 -q high
 ```
 
 The footage is the bot playing with its BFS planner, not the TRM model; the last caption says it is a bot.
-The faces and footage are Freedoom art, © 2001-2024 Contributors to the Freedoom project, under the BSD-style
-licence in [`fun-and-games/doom/FREEDOOM-COPYING.txt`](https://github.com/oaustegard/oaustegard.github.io/blob/main/fun-and-games/doom/FREEDOOM-COPYING.txt).
+The faces and footage are Freedoom art, © 2001-2024 Contributors to the Freedoom project. Its licence, with the
+notice, conditions and disclaimer that go with every copy, is in [`FREEDOOM-COPYING.txt`](FREEDOOM-COPYING.txt).
