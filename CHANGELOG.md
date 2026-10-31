@@ -172,7 +172,8 @@
   2 played from the start and frame 2 rendered on its own (one frame in four differed; at `speed` 1.5, every other
   one), and a worker starting at frame 11 showed source frame 17 at frame 13 where one render showed 16. Each frame
   now shows the source frame nearest its time, the earlier of two equally near, from any start, and footage shows
-  its frame's picture on every motion-blur sub-frame.
+  its frame's picture on every motion-blur sub-frame. `kine probe` of a media file also gives its `start`, the
+  file's own time of its first frame, which source seconds count from.
 - `kine probe` of a PNG says `image: true` with fps 0; ffprobe gives a still 25 fps, so it said `image: false`. A
   model file (`.glb`, `.gltf`, `.obj`) gives its triangles, vertices, materials and size instead of an ffprobe
   error. A media probe names its `kind` (video, audio, image or model), and a scene's probe has `ok` as a media
