@@ -135,7 +135,8 @@
   anchored path's box was also shifted from where it drew.
 - `kine check` warns when text is covered by a later opaque layer (`text-hidden`, naming the layer on top), and
   when one or two words are on screen for under 0.4 s (`read-time`): a 0.2 s one-word flash passed. A text
-  within half a frame of its reading time passes (4 words for 1.6 s were flagged for 12 ms).
+  within half a frame of its reading time passes (4 words for 1.6 s were flagged for 12 ms), and a text that
+  takes over from the same words, such as a chip's highlighted state, counts the time they were already shown.
 - `kine check` no longer notes a shape that sweeps across the canvas as `offscreen` because it starts or ends off
   it; it notes one that is off whenever it is on, or for 1 s or more.
 - `kine check` notes an odd canvas size (`odd-size`): `.mp4`, `.webm` and `.gif` need even sizes, so a 321x181

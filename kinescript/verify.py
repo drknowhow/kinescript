@@ -220,6 +220,22 @@ def _words(text: str) -> int:
     return len([w for w in text.replace("**", "").split() if any(ch.isalnum() for ch in w)])
 
 
+def _plain(text) -> str:
+    return " ".join(str(text).replace("**", "").split())
+
+
+def _on_screen(t0: float, t1: float, spans: list[tuple[float, float]], slack: float) -> float:
+    """How long the same words stay on screen around [t0, t1], joining the spans of layers that hand over to
+    each other within `slack` seconds."""
+    grown = True
+    while grown:
+        grown = False
+        for s0, s1 in spans:
+            if s0 <= t1 + slack and s1 >= t0 - slack and (s0 < t0 or s1 > t1):
+                t0, t1, grown = min(t0, s0), max(t1, s1), True
+    return t1 - t0
+
+
 def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
     """Lint a scene. Returns {"ok", "errors", "warnings", "issues": [...]} where each issue names
     the layer, the time range it was seen in, and a suggested fix."""
@@ -413,13 +429,20 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
                 "use split words or lines, and no letterSpacing, for Arabic-script text", until=layer.t_out)
     # Reading time: about 0.4 s to find the text and 0.3 s a word; one or two words need FLASH. Durations are whole
     # frames, so a layer within half a frame of the need passes (4 words for 1.6 s were flagged for 12 ms).
+    # A text that takes over from the same words (a chip's highlighted state after its plain one) counts the time
+    # the words were already on screen: site/demos/voices.json's "[laughs]" chip was flagged as a 0.34 s flash.
+    shown: dict[str, list[tuple[float, float]]] = {}
+    for layer in scene.all_layers():
+        if layer.type == "text":
+            shown.setdefault(_plain(layer.raw.get("text", "")), []).append((layer.t_in, layer.t_out))
     for layer in scene.all_layers():
         if layer.type == "text":
             words = _words(str(layer.raw.get("text", "")))
             need = 0.4 + 0.3 * words if words >= 3 else FLASH
-            if words and layer.dur + 0.5 / scene.fps < need:
+            on = _on_screen(layer.t_in, layer.t_out, shown[_plain(layer.raw.get("text", ""))], 0.5 / scene.fps)
+            if words and on + 0.5 / scene.fps < need:
                 add("warning", "read-time", layer.id, layer.t_in,
-                    f"{words} word{'s' if words > 1 else ''} on screen for {layer.dur:.2f}s; viewers need ~{need:.1f}s"
+                    f"{words} word{'s' if words > 1 else ''} on screen for {on:.2f}s; viewers need ~{need:.1f}s"
                     + ("" if words >= 3 else ": shorter is a flash nobody reads"), "extend dur or cut words",
                     until=layer.t_out)
         if layer.type == "captions" and not layer.raw.get("voice"):  # a voice's captions keep the pace it speaks at

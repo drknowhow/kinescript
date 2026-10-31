@@ -131,6 +131,12 @@ def test_check_flags_a_one_word_flash_but_not_a_readable_line():
     assert not _codes(four, "read-time")  # 1.6 s was flagged for being 12 ms short of 0.4 + 4 x 0.3
     two = check(scene([{"id": "t", "type": "text", "text": "Two words", "x": 160, "y": 90, "size": 30, "dur": 0.5}]))
     assert not _codes(two, "read-time")
+    # A chip's highlighted state takes over from its plain one: the word was on screen all along.
+    chip = {"type": "text", "text": "[laughs]", "x": 160, "y": 90, "size": 30}
+    handover = check(scene([dict(chip, id="plain", dur=1.0), dict(chip, id="lit", at=1.0, dur=0.3)]))
+    assert not _codes(handover, "read-time")
+    alone = check(scene([dict(chip, id="lit", at=1.0, dur=0.3)]))
+    assert _codes(alone, "read-time")
 
 
 def test_check_does_not_note_a_shape_that_sweeps_across_the_canvas():
