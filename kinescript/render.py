@@ -138,6 +138,10 @@ def _read_back(job: list, rows: int, res) -> None:
     job[1] = True
 
 
+# Layer types drawn from their props, enter and exit alone, which Renderer._holds reads. Footage is one: a sub-frame
+# shows its frame's picture (_draw_video). Shaders, captions and models follow the clock in other ways.
+HOLDS = {"rect", "circle", "ellipse", "polygon", "path", "line", "arrow", "image", "video", "text", "counter", "group"}
+
 BACKENDS = ("auto", "gpu", "cpu")
 
 
@@ -557,6 +561,7 @@ class Renderer:
         self._msurf = None  # offscreen that models draw into, antialiased, before compositing
         self.tris = 0  # model triangles drawn this frame
         self._subframes = None  # motion blur on the GPU: (count, averaging effect, a surface per sub-frame)
+        self._under = None  # motion blur on the GPU: the layers every sub-frame shares (_held)
         self._straight = None  # (effect, surface) straightening blurred transparent frames on the GPU
         self._frame_t: float | None = None  # while drawing a motion-blur sub-frame, the time of its frame
         self._blended: dict[str, bool] = {}  # group id -> whether a layer inside it has a blend mode
@@ -594,10 +599,13 @@ class Renderer:
         # Each layer also keeps its sub-frames inside its own time (see _layer).
         last = (self.s.frames - 1) / self.s.fps
         times = [min(last, max(0.0, T + (k / (samples - 1) - 0.5) * shutter)) for k in range(samples)]
-        if self.backend == "gpu" and samples <= BLUR_GPU:
-            self._blur_gpu(times, T)
+        held = self._held(times, T)
+        if held == len(self.s.layers):  # nothing moves while the shutter is open: every sub-frame is the mean
+            self.draw(times[0], frame_t=T)
+        elif self.backend == "gpu" and samples <= BLUR_GPU:
+            self._blur_gpu(times, T, held)
         else:
-            self._blur_cpu(times, T)
+            self._blur_cpu(times, T, held)
         # Grain and vignette go on once, on the blurred frame: grain drawn on every sub-frame was averaged
         # down to about 70% of its strength.
         c = self.surface.getCanvas()
@@ -607,20 +615,27 @@ class Renderer:
         self._finish(c, T)
         return samples
 
-    def _blur_gpu(self, times: list[float], T: float):
+    def _blur_gpu(self, times: list[float], T: float, held: int):
         n = len(times)
+        ctx = self.surface.recordingContext()
         if self._subframes is None or self._subframes[0] != n:
-            ctx = self.surface.recordingContext()
             self._subframes = (n, skia.RuntimeEffect.MakeForShader(_blur_sksl(n)),
                                [skia.Surface.MakeRenderTarget(ctx, skia.Budgeted.kNo, self.info) for _ in range(n)])
         _, eff, surfs = self._subframes
-        main = self.surface
+        main, under = self.surface, None
         try:
+            if held:  # the layers every sub-frame shares, drawn once in a surface of their own
+                if self._under is None:
+                    self._under = skia.Surface.MakeRenderTarget(ctx, skia.Budgeted.kNo, self.info)
+                self.surface = self._under  # draw() draws into self.surface
+                self.draw(times[0], frame_t=T, held=held)
+                under = self._under.makeImageSnapshot()
             for t, surf in zip(times, surfs):
-                self.surface = surf  # draw() draws into self.surface
-                self.draw(t, frame_t=T)
+                self.surface = surf
+                self.draw(t, frame_t=T, held=held, under=under)
         finally:
             self.surface = main
+        del under
         imgs = [s.makeImageSnapshot() for s in surfs]
         b = skia.RuntimeEffectBuilder(eff)
         for k, img in enumerate(imgs):
@@ -643,16 +658,58 @@ class Renderer:
         del img, b
         return surf
 
-    def _blur_cpu(self, times: list[float], T: float):
+    def _blur_cpu(self, times: list[float], T: float, held: int):
         # 257 sub-frames of 255 still fit in 16 bits: half the memory traffic of 32-bit sums, same mean.
         acc = np.zeros((self.h, self.w, 4), np.uint16 if len(times) <= 257 else np.uint32)
+        under = None
+        if held:
+            self.draw(times[0], frame_t=T, held=held)
+            under = self.surface.makeImageSnapshot()
         for t in times:
-            self.draw(t, frame_t=T)
+            self.draw(t, frame_t=T, held=held, under=under)
             self.surface.readPixels(self.info, self.buf, self.w * 4)
             np.add(acc, self.buf, out=acc)
+        del under
         np.floor_divide(acc, len(times), out=acc)
         np.copyto(self.buf, acc, casting="unsafe")
         self.surface.writePixels(skia.Pixmap(self.info, self.buf, self.w * 4))  # stills save the surface
+
+    def _held(self, times: list[float], F: float) -> int:
+        """How many of the scene's layers, from the bottom, draw the same on every sub-frame of the frame at F. They
+        are drawn once and the sub-frames start from them: a title that has landed is not drawn again for each sample
+        of a dot moving over it. Layers above a moving one stay in the sub-frames, which blend over it."""
+        if self.track or self.s.is3d:  # boxes come from each draw; a camera moves everything
+            return 0
+        lo, hi = min(times), max(times)
+        k = 0
+        for L in self.s.layers:
+            if not self._holds(L, lo, hi, F):
+                break
+            k += 1
+        return k
+
+    def _holds(self, L: Layer, lo: float, hi: float, F: float) -> bool:
+        """Whether L draws the same at every sub-frame time in [lo, hi] of the frame at F, by what _layer reads: its
+        props, its enter and exit, and its children's."""
+        if not L.visible(F):
+            return True
+        if L.type not in HOLDS:
+            return False
+        end = math.nextafter(L.t_out, -math.inf)
+        lo, hi = min(max(lo, L.t_in), end), min(max(hi, L.t_in), end)  # as _layer clamps a sub-frame
+        a, b, d = lo - L.t_in, hi - L.t_in, L.dur
+        if L.enter:
+            done = L.enter.dur
+            if L.type in ("text", "counter") and L.raw.get("split"):
+                if L.type == "counter":  # its units come from a value that may change
+                    return False
+                # Units enter `stagger` apart (0.04 s unless set, as _draw_text has it); a unit is at least a character.
+                done += (L.enter.stagger or 0.04) * len(self._text_of(L, a, lo, None))
+            if a < done:
+                return False
+        if L.exit and d - b < L.exit.dur:
+            return False
+        return all(p.held(a, b, d) for p in L.props.values()) and all(self._holds(k, lo, hi, F) for k in L.children)
 
     @property
     def yuv(self) -> bool:
@@ -725,10 +782,13 @@ class Renderer:
     def snapshot(self) -> skia.Image:
         return self.surface.makeImageSnapshot()
 
-    def draw(self, T: float, stop_at: str | None = None, frame_t: float | None = None, stop_after: str | None = None):
+    def draw(self, T: float, stop_at: str | None = None, frame_t: float | None = None, stop_after: str | None = None,
+             held: int = 0, under: skia.Image | None = None):
         """Draw the scene at T. stop_at / stop_after: stop before / after drawing that layer (no grade finish).
         frame_t: T is a motion-blur sub-frame of the frame at frame_t, so only the layers on at frame_t draw, each at
-        a time inside its own range, and grain and vignette are left to the caller."""
+        a time inside its own range, and grain and vignette are left to the caller.
+        held: the background and the first `held` layers draw the same on every sub-frame (_held). Without `under`,
+        only they draw, ungraded; `under` is an image of that, which the sub-frame starts from in their place."""
         s = self.s
         self.boxes = {}
         self.culled = set()
@@ -740,17 +800,26 @@ class Renderer:
         c.clear(skia.ColorTRANSPARENT)
         if self.scale != 1:
             c.scale(self.scale, self.scale)
+        layers = s.layers if not held else s.layers[held:] if under is not None else s.layers[:held]
         if self.grade_filter:
             # The background goes inside the graded layer, so the grade covers the whole frame and a blend mode at
             # the top level works on the background: in a layer that started empty, a multiply drew as its plain fill.
-            c.saveLayer(None, skia.Paint(ColorFilter=self.grade_filter))
-        self._background(c)
+            # The held layers draw ungraded, but in a layer all the same: a draw comes out a level apart in a few
+            # pixels in a layer and straight on a surface (an upscaled clip did).
+            c.saveLayer(None, skia.Paint(ColorFilter=self.grade_filter) if not held or under is not None else None)
+        if under is None:
+            self._background(c)
+        else:  # pixel for pixel, into the graded layer, as if the held layers had been drawn here
+            c.save()
+            c.resetMatrix()
+            c.drawImage(under, 0, 0, skia.SamplingOptions(), skia.Paint(BlendMode=skia.BlendMode.kSrc))
+            c.restore()
         on = T if frame_t is None else frame_t
         if self.footage and self._videos:
             last, self._on = self._on, on
             self._prime(on, AHEAD if last is not None and 0 < on - last <= AHEAD else 0.0)
         cams = self._cameras(T) if s.is3d else None
-        for layer in s.layers:
+        for layer in layers:
             if self._stopped:
                 break
             m = None
