@@ -190,7 +190,7 @@ def _own(layers, pid: str) -> None:
             continue
         if "id" in k and not str(k["id"]).startswith(f"{pid}-"):
             k["id"] = f"{pid}-{k['id']}"
-        _own(k.get("children") or [], pid)
+        _own(k.get("children") or k.get("layers") or [], pid)  # a group may list its layers under either key
 
 
 def expand(raw, user: dict, theme: dict, scene=None):

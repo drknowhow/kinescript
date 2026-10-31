@@ -131,6 +131,38 @@ _SAFE_NODES = (ast.Expression, ast.BinOp, ast.UnaryOp, ast.BoolOp, ast.Compare, 
                ast.boolop, ast.cmpop)
 
 
+def _sequence(node) -> bool:
+    """A string, list or tuple, or arithmetic on one: '[0] * 10**9' would build it in memory."""
+    if isinstance(node, ast.Constant):
+        return isinstance(node.value, (str, bytes))
+    if isinstance(node, (ast.List, ast.Tuple)):
+        return True
+    if isinstance(node, ast.IfExp):
+        return _sequence(node.body) or _sequence(node.orelse)
+    if isinstance(node, ast.BoolOp):
+        return any(_sequence(v) for v in node.values)
+    if isinstance(node, ast.BinOp):
+        return _sequence(node.left) or _sequence(node.right)
+    return False
+
+
+def _pow(a, b):
+    """'**' in expressions. Python's integer power is exact, so 9**9**9 would run for hours; as floats it
+    overflows at once."""
+    return float(a) ** b
+
+
+class _FloatPow(ast.NodeTransformer):
+    def visit_BinOp(self, node):
+        self.generic_visit(node)
+        if isinstance(node.op, ast.Pow):
+            return ast.copy_location(ast.Call(ast.Name("_pow", ast.Load()), [node.left, node.right], []), node)
+        return node
+
+
+_GLOBALS = {"__builtins__": {}, "_pow": _pow}
+
+
 def compile_expr(src: str, name: str, allowed: set[str]):
     """Compile a scene expression. Only arithmetic, comparisons and calls to the whitelisted
     helpers are accepted (no attributes, subscripts or lambdas), because scene files may come
@@ -144,6 +176,9 @@ def compile_expr(src: str, name: str, allowed: set[str]):
                              f"Available: {', '.join(sorted(allowed))}")
         if isinstance(node, ast.Call) and not isinstance(node.func, ast.Name):
             raise ValueError(f"'{name}': only direct helper calls are allowed")
+        if isinstance(node, ast.BinOp) and (_sequence(node.left) or _sequence(node.right)):
+            raise ValueError(f"'{name}': arithmetic works on numbers, not on text or lists")
+    tree = ast.fix_missing_locations(_FloatPow().visit(tree))
     return compile(tree, f"<{name}>", "eval")
 
 
@@ -155,9 +190,9 @@ def compile_prop(name: str, raw, ctx: Ctx) -> Prop:
         code = compile_expr(raw[1:], name, set(env) | {"t", "d", "p", "T", "i"})
 
         def fx(t, d, T, i, code=code, env=env):
-            v = eval(code, {"__builtins__": {}}, dict(env, t=t, d=d, p=(t / d if d else 0.0), T=T, i=i))
+            v = eval(code, _GLOBALS, dict(env, t=t, d=d, p=(t / d if d else 0.0), T=T, i=i))
             return _norm(v)
-        return Prop(False, fn=fx)
+        return Prop(False, raw, fn=fx)  # value keeps the source: Scene.check_expressions finds expressions by it
     if isinstance(raw, dict) and ("to" in raw or "keys" in raw):
         if "keys" in raw:
             return compile_prop(name, raw["keys"], ctx)

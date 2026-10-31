@@ -147,6 +147,10 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
         return _result(e.issues)
     except (ValueError, FileNotFoundError, RuntimeError, OSError) as e:
         return _result([{"level": "error", "code": "load", "layer": None, "message": str(e), "fix": ""}])
+    except (TypeError, AttributeError, KeyError, IndexError, ArithmeticError) as e:  # a value of a shape not checked
+        return _result([{"level": "error", "code": "load", "layer": None, "message": f"{type(e).__name__}: {e}",
+                          "fix": "a key in the scene probably has the wrong type of value (a list for an object, …)"}])
+    scene.check_expressions()
     W, H = scene.w, scene.h
     pool = ThreadPoolExecutor(1)
     heard = pool.submit(_heard, scene)  # the mix renders and is measured while the frames are checked
