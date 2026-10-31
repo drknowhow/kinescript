@@ -28,7 +28,8 @@ half4 main(float2 p) {
   for (int i = 0; i < 3; i++) {
     float fi = float(i);
     float y = 0.35 + 0.12 * fi + 0.08 * sin(uv.x * (3.0 + fi) + t * (0.6 + 0.2 * fi));
-    band += exp(-pow((uv.y - y) * (9.0 - fi * 2.0), 2.0)) * (0.7 - 0.15 * fi);
+    float k = (uv.y - y) * (9.0 - fi * 2.0);  // k*k: pow() of a negative base is undefined, NaN on the CPU
+    band += exp(-k * k) * (0.7 - 0.15 * fi);
   }
   float4 g = mix(glow, glow2, 0.5 + 0.5 * sin(uv.x * 2.0 + t * 0.3));
   float4 col = mix(base, g, clamp(band * 0.75, 0.0, 0.85));

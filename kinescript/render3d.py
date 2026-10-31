@@ -158,9 +158,15 @@ def _extruded(r, shape: str, num, raw, detail: str) -> mesh.Mesh:
     so a changing counter or an animated depth costs one rebuild per distinct value."""
     k = mesh.DETAIL.get(detail, 1.0)
     if shape == "text":
+        # Built from the rounded values in the key, not from whichever exact value was drawn first: otherwise a
+        # frame depended on the frames drawn before it (renders split across workers differed).
+        snap = {n: round(float(num(n, d)), 2) for n, d in (("size", 120), ("letterSpacing", 0), ("lineHeight", 1.18))}
         key = (shape, str(raw.get("text", "")), raw.get("font") or r.s.theme.get("font"), int(num("weight", 600)),
-               bool(raw.get("italic")), *(round(float(num(n, d)), 2) for n, d in
-                                          (("size", 120), ("letterSpacing", 0), ("lineHeight", 1.18))), k)
+               bool(raw.get("italic")), *snap.values(), k)
+        exact = num
+
+        def num(n, d=None):
+            return snap[n] if n in snap else exact(n, d)
     else:
         key = (shape, str(raw.get("d", "")), num("w", None), num("h", None), num("strokeWidth", 0), k)
     if len(r._solids) > 64:
@@ -171,8 +177,8 @@ def _extruded(r, shape: str, num, raw, detail: str) -> mesh.Mesh:
         seg = max(1.0, min(10.0, extent * 0.04)) / k  # length of the pieces curves are cut into, in px
         flat = r._solids[key] = (*mesh.shape2d(mesh.contours(path, seg)), seg, extent)
     Q, starts, caps, seg, extent = flat
-    depth, bevel = float(num("depth", round(extent * 0.2))), float(num("bevel", 0))
-    full = key + (round(depth, 2), round(bevel, 2))
+    depth, bevel = round(float(num("depth", round(extent * 0.2))), 2), round(float(num("bevel", 0)), 2)
+    full = key + (depth, bevel)
     m = r._solids.get(full)
     if m is None:
         rows = max(1, min(4, round(depth / (3 * seg))))

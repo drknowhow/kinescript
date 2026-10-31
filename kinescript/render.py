@@ -202,6 +202,24 @@ def color_matrix(fx: dict) -> list[float] | None:
     return [float(v) for v in m[:4, :].flatten()]
 
 
+def loop_end(L: Layer, duration: float) -> float:
+    """Where a looping clip goes back to its trim start: the trim end, or the end of the file. Before, a trim end
+    was ignored and [1, 3] looped 1 s to the end of the file."""
+    trim = L.raw.get("trim") or [0]
+    return min(duration, float(trim[1])) if len(trim) > 1 and trim[1] is not None else duration
+
+
+def _see_through(bg) -> bool:
+    """Whether the canvas can end up less than opaque: no background, or a partly transparent colour or gradient."""
+    if bg in (None, "transparent", "none"):
+        return True
+    cols = [s if isinstance(s, str) else s[1] for s in bg.get("stops", [])] if isinstance(bg, dict) else [bg]
+    try:
+        return any(C.parse(c)[3] < 1 for c in cols if isinstance(c, str))
+    except ValueError:
+        return False
+
+
 def _argb(c, alpha: float = 1.0) -> int:
     if c is None:
         return 0
@@ -247,7 +265,9 @@ def glsl_to_sksl(src: str) -> str:
 
 class Renderer:
     def __init__(self, scene: Scene, track: bool = False, scale: float = 1.0, backend: str = "auto",
-                 even: bool = False):
+                 even: bool = False, alpha: bool = True):
+        """alpha=False: the output keeps no alpha (.mp4, .gif), so frames come premultiplied, which is what is
+        see-through shown over black."""
         self.s = scene
         self.scale = scale
         self.w, self.h = max(2, round(scene.w * scale)), max(2, round(scene.h * scale))
@@ -264,7 +284,7 @@ class Renderer:
         self.buf = np.empty((self.h, self.w, 4), np.uint8)
         # Encoders take straight (unpremultiplied) RGBA; reading premultiplied pixels into a transparent
         # .mov/.webm darkens every soft edge. Opaque frames are identical either way.
-        self.transparent = scene.bg in (None, "transparent", "none")
+        self.transparent = alpha and _see_through(scene.bg)
         self.read_info = self.info.makeAlphaType(skia.kUnpremul_AlphaType) if self.transparent else self.info
         self.track = track
         self.boxes: dict[str, dict] = {}
@@ -312,7 +332,9 @@ class Renderer:
             self.draw(T)
             return 1
         shutter = float(mb.get("shutter", 0.5)) / self.s.fps
-        times = [T + (k / (samples - 1) - 0.5) * shutter for k in range(samples)]
+        # Inside the scene: half of frame 0's samples fell before 0 s, where nothing is drawn, so it came out half dark.
+        last = (self.s.frames - 1) / self.s.fps
+        times = [min(last, max(0.0, T + (k / (samples - 1) - 0.5) * shutter)) for k in range(samples)]
         if self.backend == "gpu" and samples <= BLUR_GPU:
             self._blur_gpu(times)
         else:
@@ -881,7 +903,7 @@ class Renderer:
         trim0 = float((L.raw.get("trim") or [0])[0])
         src_t = trim0 + t * speed
         if L.raw.get("loop"):
-            span = L.video.info["duration"] - trim0
+            span = loop_end(L, L.video.info["duration"]) - trim0
             if span > 0:
                 src_t = trim0 + (t * speed) % span
         img = L.video.at(src_t)

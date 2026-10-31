@@ -14,7 +14,7 @@ from pathlib import Path
 
 from . import audio as A
 from . import media
-from .render import Renderer
+from .render import Renderer, loop_end
 from .scene import Scene, load
 
 QUALITY = {  # crf, x264 preset
@@ -63,7 +63,7 @@ def _render_range(args) -> dict:
     scene = Scene(spec, base)
     if transparent:
         scene.bg = None
-    r = Renderer(scene, scale=scale, even=fmt in ("mp4", "webm", "gif"))
+    r = Renderer(scene, scale=scale, even=fmt in ("mp4", "webm", "gif"), alpha=fmt not in ("mp4", "gif"))
     yuv = r.yuv and fmt in ("mp4", "gif")
     enc, log = _encoder(path, r.w, r.h, scene.fps, fmt, quality, threads, yuv)
     grab = r.frame_i420 if yuv else r.frame
@@ -95,14 +95,20 @@ def _audio_inputs(scene: Scene) -> list[dict]:
         if layer.type != "video" or not layer.src:
             continue
         vol = layer.raw.get("volume", 1)
-        if not vol or not media.probe(layer.src)["audio"]:
+        up, hidden = layer, False
+        while up is not None and not hidden:  # hidden, or inside a hidden group: no picture and no sound
+            hidden, up = bool(up.raw.get("hidden")), up.parent
+        if hidden or not vol or not media.probe(layer.src)["audio"]:
             continue
         trim = layer.raw.get("trim") or [0, None]
         speed = float(layer.raw.get("speed", 1))
         fi = layer.enter.dur if layer.enter else 0
         fo = layer.exit.dur if layer.exit else 0
+        loop = None
+        if layer.raw.get("loop"):  # the trimmed part repeats, as the picture does (render._draw_video)
+            loop = max(0.01, loop_end(layer, media.probe(layer.src)["duration"]) - float(trim[0]))
         out.append(dict(src=layer.src, at=layer.t_in, trim0=float(trim[0]), dur=layer.dur * speed, gain=float(vol),
-                        fade_in=fi, fade_out=fo, speed=speed, loop=None, pan=0.0, role=None, curve=None,
+                        fade_in=fi, fade_out=fo, speed=speed, loop=loop, pan=0.0, role=None, curve=None,
                         onset=False, id=layer.id))
     for s in scene.audio:
         a = s.raw
@@ -147,7 +153,7 @@ def _copy(video_in: list[str], out: str):
         shutil.move(video_in[1], out)
         return
     res = subprocess.run([media.FFMPEG, "-y", "-v", "error", *video_in, "-c", "copy", out], capture_output=True,
-                         text=True, creationflags=media._NOWIN)
+                         text=True, encoding="utf-8", errors="replace", creationflags=media._NOWIN)
     if res.returncode:
         raise RuntimeError(f"concat failed: {res.stderr.strip()[:400]}")
 
@@ -365,12 +371,14 @@ def _wait_audio(audio) -> str:
     return path
 
 
-def _mux(video_in: list[str], audio, out: str):
+def _mux(video_in: list[str], audio, out: str, seconds: float):
     """Put the mixed audio under the video, both copied; the segments are joined on the way when video_in
-    is a concat list."""
+    is a concat list. The file ends with the video (`seconds` long): -shortest dropped the last frame whenever the
+    audio came out a few samples shorter, as it does when the frame count rounds the duration up."""
     path = _wait_audio(audio)
     res = subprocess.run([media.FFMPEG, "-y", "-v", "error", *video_in, "-i", path, "-map", "0:v", "-map", "1:a",
-                          "-c", "copy", "-shortest", out], capture_output=True, text=True, creationflags=media._NOWIN)
+                          "-c", "copy", "-t", f"{seconds:.6f}", out], capture_output=True, text=True,
+                         encoding="utf-8", errors="replace", creationflags=media._NOWIN)
     if res.returncode:
         raise RuntimeError(f"audio mux failed: {res.stderr.strip()[:400]}")
 
@@ -394,6 +402,9 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
     if ext in AUDIO_ONLY:
         return _render_audio(scene, out_p, f0 / fps, f1 / fps, start is None and end is None, t0)
     fmt = {".mov": "mov", ".webm": "webm", ".gif": "gif"}.get(ext, "mp4")
+    if transparent and fmt in ("mp4", "gif"):
+        raise ValueError(f"{ext or 'this format'} keeps no alpha; render a transparent video to .mov or .webm, "
+                         "or frames to .png")
     transparent = transparent or fmt in ("mov", "webm") and spec.get("canvas", {}).get("bg") in (None, "transparent")
     if fmt == "gif":  # render no larger than the GIF will be (long side GIF_SIDE), not full size then shrink
         scale = min(scale, GIF_SIDE / max(scene.w, scene.h))
@@ -429,14 +440,15 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
             video_in = ["-i", jobs[0][4]]
         else:
             listing = tmp / "list.txt"
-            listing.write_text("".join(f"file '{j[4]}'\n" for j in jobs))
+            q = "'\\''"  # a quote inside a quoted concat path, as when the temp dir is under C:\Users\O'Brien
+            listing.write_text("".join(f"file '{j[4].replace(chr(39), q)}'\n" for j in jobs), encoding="utf-8")
             video_in = ["-f", "concat", "-safe", "0", "-i", str(listing)]
         out_p.parent.mkdir(parents=True, exist_ok=True)
         final = str(tmp / f"final{seg_ext}")
         if ext == ".gif":
             _to_gif(video_in, str(out_p), fps)
         elif audio:
-            _mux(video_in, audio, final)
+            _mux(video_in, audio, final, n / fps)
         else:
             _copy(video_in, final)
         if ext != ".gif":
@@ -539,8 +551,8 @@ def _to_gif(video_in: list[str], out: str, fps: float):
     # diffusion on moving gradients (6.6 -> 3.5 MB on a 6 s portrait clip) with no visible loss.
     vf = (f"scale=in_color_matrix=bt709:in_range=tv,format=rgb24,fps={gfps},split[a][b];[a]palettegen=stats_mode=diff:max_colors=128[p];"
           "[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle")
-    res = subprocess.run([media.FFMPEG, "-y", "-v", "error", *video_in, "-vf", vf, out], capture_output=True, text=True,
-                         creationflags=media._NOWIN)
+    res = subprocess.run([media.FFMPEG, "-y", "-v", "error", *video_in, "-vf", vf, out], capture_output=True,
+                         text=True, encoding="utf-8", errors="replace", creationflags=media._NOWIN)
     if res.returncode:
         raise RuntimeError(f"gif failed: {res.stderr.strip()[:400]}")
 

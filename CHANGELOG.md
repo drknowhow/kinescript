@@ -28,6 +28,35 @@
   that is not a list or object, shader `uniforms` that are not an object, a path `d` that is not a string and
   `points` that are not `[x, y]` pairs. `null` for `canvas.w`, `h` or `fps` means the default. Anything left that
   fails while loading is a `load` issue in `kine check`, not a traceback.
+- A video clip opened partway through (a still, `kine look`, the start of each render worker's chunk) shows the
+  same frame as one played through to that point. Its seek time was rounded up past the frame's own time, so
+  ffmpeg could skip that frame and the whole chunk ran one source frame ahead.
+- A render with sound keeps its last frame. The mux stopped with the shorter stream, and the sound ends at the
+  scene's duration, which can come before the last frame ends: a 0.49 s scene at 30 fps has 15 frames and lost
+  the 15th. The mux now cuts at the video's own length.
+- A layer that starts or ends within a millionth of a frame of a frame boundary starts or ends on it. `"at": 2.2,
+  "dur": 8.9` ends at 11.100000000000001 s, so at 30 fps it also showed on frame 333, and a layer placed at its
+  `out` started a frame late, on 334.
+- The `aurora` shader draws correctly on the CPU backend. It raised a negative number to a power, which SkSL
+  leaves undefined, and Skia's raster backend drew the bands wrong.
+- An mp4 or GIF of a scene with a transparent background shows it over black. The frames kept straight colour
+  and lost the alpha, so a 50% red layer over nothing came out at full red; it is now half red. Asking for
+  `transparent` with mp4 or GIF is an error, since neither keeps alpha.
+- A `.mov` or `.webm` whose background colour is partly transparent (`#ff000080`) is written with straight
+  alpha. Only a fully transparent background switched to straight alpha before, so the background's red read back
+  as 128 instead of 255.
+- Frame 0 with `motionBlur` is no longer dimmed. Half its samples came from before the scene starts, where
+  nothing is drawn, so a white layer was 127 on frame 0; samples now stay inside the scene.
+- 3D text with an animated `size`, `depth` or `bevel` draws the same whichever frames came before it. The outline
+  was cached under the size rounded to 0.01 but built from the exact size of the first frame that used that
+  key, so a render split across workers could differ by a few pixels.
+- A hidden video layer, or a video in a hidden group, is silent. A looped video with a `trim` end loops only the
+  trimmed part, picture and sound; it used to play on to the end of the file before looping.
+- `trim` and `speed` are checked when the scene loads: a negative start, a start that is not a number, a `trim`
+  that is not a list, and a `speed` of 0 or less are errors (`bad-trim`, `bad-value`). Before, a speed of 0 or a
+  `trim` of `3` crashed the load and a negative start played the clip's sound early.
+- Media whose tags are not ASCII (a Cyrillic or Japanese title) probes on Windows, where ffprobe's output was
+  read in the system code page. A temp folder with `'` in its path no longer breaks joining the workers' chunks.
 
 ## 1.3.1 (2026-10-31)
 
