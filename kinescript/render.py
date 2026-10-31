@@ -4,6 +4,8 @@ from __future__ import annotations
 import math
 import os
 import re
+import sys
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -150,6 +152,182 @@ def _make_gl():
         return None
 
 
+# ---- text the font cannot draw alone ----------------------------------------------------------------
+# A character the layer's font lacks is drawn with the system font that has it (emoji, CJK, Hebrew, Arabic...).
+# Runs that need shaping (another font, right-to-left letters, combining marks, emoji sequences) go through
+# HarfBuzz (TextBlob.MakeFromShapedText), which joins Arabic letters, places marks and puts right-to-left letters
+# in reading order. Plain text keeps drawString, so it draws exactly as before. Words are then ordered by a
+# simplified Unicode bidi algorithm (_bidi_order), word by word.
+_FALLBACK: dict = {}  # (weight, width, slant, code point) -> typeface or None
+_MIRROR = str.maketrans("()[]{}<>«»‹›", ")(][}{><»«›‹")
+_COVERS: dict = {}  # (typeface id, code point) -> whether it has a glyph
+
+
+def _fallback(style: skia.FontStyle, cp: int, emoji: bool = False):
+    """The system's choice of typeface for code point cp in this style (a colour emoji font when `emoji`), or None
+    when no installed font has it."""
+    key = (style.weight(), style.width(), int(style.slant()), cp, emoji)
+    if key not in _FALLBACK:
+        try:
+            _FALLBACK[key] = skia.FontMgr.RefDefault().matchFamilyStyleCharacter(
+                "", style, ["und-Zsye"] if emoji else [], cp)
+        except (TypeError, AttributeError, RuntimeError):  # a skia-python without system fallback
+            _FALLBACK[key] = None
+    return _FALLBACK[key]
+
+
+def _emoji(cluster: str) -> bool:
+    """Whether a cluster asks for emoji presentation: emoji code points, or the emoji variation selector."""
+    return "\ufe0f" in cluster or "\u200d" in cluster or any(ord(ch) >= 0x1F000 for ch in cluster)
+
+
+def _covers(tf: skia.Typeface, cp: int) -> bool:
+    key = (tf.uniqueID(), cp)
+    hit = _COVERS.get(key)
+    if hit is None:
+        hit = _COVERS[key] = bool(tf.unicharToGlyph(cp))
+    return hit
+
+
+def _ignorable(ch: str) -> bool:
+    """Drawn as nothing (joiners, variation selectors, direction marks), so it needs no glyph of its own."""
+    cp = ord(ch)
+    return unicodedata.category(ch) == "Cf" or 0xFE00 <= cp <= 0xFE0F or 0xE0100 <= cp <= 0xE01EF
+
+
+def _extends(ch: str, prev: str) -> bool:
+    """Whether ch belongs to the cluster `prev` (a base letter or emoji and what modifies it)."""
+    cp = ord(ch)
+    if unicodedata.category(ch) in ("Mn", "Me", "Mc") or _ignorable(ch) or prev.endswith("\u200d"):
+        return True
+    if 0x1F3FB <= cp <= 0x1F3FF:  # skin tone
+        return True
+    return 0x1F1E6 <= cp <= 0x1F1FF and len(prev) == 1 and 0x1F1E6 <= ord(prev) <= 0x1F1FF  # flag pair
+
+
+def clusters(s: str) -> list[str]:
+    """s cut into what a reader sees as one character: é written as e + accent, a flag, a family emoji."""
+    out: list[str] = []
+    for ch in s:
+        if out and _extends(ch, out[-1]):
+            out[-1] += ch
+        else:
+            out.append(ch)
+    return out
+
+
+def _shapes(ch: str) -> bool:
+    """Whether ch needs shaping even in a font that has it: marks, right-to-left letters, joiners, emoji parts."""
+    cp = ord(ch)
+    return (unicodedata.category(ch) in ("Mn", "Me", "Mc") or unicodedata.bidirectional(ch) in ("R", "AL", "AN")
+            or _ignorable(ch) or 0x1F3FB <= cp <= 0x1F3FF or 0x1F1E6 <= cp <= 0x1F1FF)
+
+
+def _strong(s: str) -> str | None:
+    """'R' or 'L' for the first letter with a direction in s; None when s has none (digits, punctuation)."""
+    for ch in s:
+        b = unicodedata.bidirectional(ch)
+        if b in ("R", "AL"):
+            return "R"
+        if b == "L":
+            return "L"
+    return None
+
+
+def joining(s: str) -> bool:
+    """Whether s has letters that join their neighbours (Arabic, Syriac, N'Ko, Mongolian...)."""
+    return any(unicodedata.bidirectional(ch) == "AL" or 0x1800 <= ord(ch) <= 0x18AF for ch in s)
+
+
+def _bidi_order(words: list[str], rtl: bool) -> tuple[list[int], list[bool], list[tuple]]:
+    """The left-to-right order of a line's words, whether each reads right to left, and what is around each (rtl,
+    direction before it, direction after it: see _lay_pieces), by the Unicode bidi algorithm applied to whole
+    words: numbers after left-to-right text take its direction, neutral words take the direction around them, and
+    runs at a higher level are reversed (rules W7, N1-N2, I1-I2, L2)."""
+    n = len(words)
+    edge = "R" if rtl else "L"
+    types, prev = [], edge
+    for w in words:
+        s = _strong(w)
+        if s is None and any(unicodedata.bidirectional(ch) in ("EN", "AN") for ch in w):
+            types.append("L" if prev == "L" else "EN")
+        else:
+            types.append(s or "N")
+            prev = s or prev
+    for i, t in enumerate(types):
+        if t == "N":
+            before = next((types[j] for j in range(i - 1, -1, -1) if types[j] != "N"), edge)
+            after = next((types[j] for j in range(i + 1, n) if types[j] != "N"), edge)
+            b, a = ("R" if x in ("R", "EN") else "L" for x in (before, after))
+            types[i] = b if a == b else edge
+    side = ["R" if t in ("R", "EN") else "L" for t in types]
+    last = [_strong(w[::-1]) or d for w, d in zip(words, side)]
+    ctx = [(rtl, last[i - 1] if i else edge, side[i + 1] if i + 1 < n else edge) for i in range(n)]
+    return (*_visual(types, rtl), ctx)
+
+
+def _visual(types: list[str], rtl: bool) -> tuple[list[int], list[bool]]:
+    """Left-to-right order of items resolved to L, R or EN, in a right-to-left context or not, and whether each
+    reads right to left: their levels (I1, I2), then each run at a level or higher reversed (L2)."""
+    n = len(types)
+    base = 1 if rtl else 0
+    levels = [base + {"L": base, "R": 1 - base, "EN": 2 - base}[t] for t in types]
+    order = list(range(n))
+    for lv in range(max(levels, default=0), 0, -1):
+        i = 0
+        while i < n:
+            if levels[order[i]] >= lv:
+                j = i
+                while j < n and levels[order[j]] >= lv:
+                    j += 1
+                order[i:j] = order[i:j][::-1]
+                i = j
+            else:
+                i += 1
+    return order, [lv % 2 == 1 for lv in levels]
+
+
+_ICU = {"tried": False}
+
+
+def _shape(text: str, font: skia.Font, ltr: bool):
+    """text shaped by HarfBuzz into a blob whose origin is the top of the line. The first call makes Skia look for
+    ICU data beside the Python executable, which a venv on Windows does not have, and print a line about it to
+    stderr; the shaping used here does not need ICU, so that line is kept off the console."""
+    if _ICU["tried"]:
+        return skia.TextBlob.MakeFromShapedText(text, font, ltr)
+    _ICU["tried"] = True
+    try:
+        saved, null = os.dup(2), os.open(os.devnull, os.O_WRONLY)
+    except OSError:
+        return skia.TextBlob.MakeFromShapedText(text, font, ltr)
+    try:
+        sys.stderr.flush()
+        os.dup2(null, 2)
+        return skia.TextBlob.MakeFromShapedText(text, font, ltr)
+    finally:
+        os.dup2(saved, 2)
+        os.close(saved)
+        os.close(null)
+
+
+def _text_font(tf: skia.Typeface, size: float) -> skia.Font:
+    f = skia.Font(tf, size)
+    f.setSubpixel(True)
+    f.setEdging(skia.Font.Edging.kAntiAlias)
+    return f
+
+
+@dataclass
+class Piece:
+    """Part of a run drawn with one font: by drawString (blob None) or as a shaped blob."""
+    text: str
+    font: skia.Font
+    blob: object
+    width: float
+    drop: float  # a shaped blob's origin is the top of its line: draw it this far above the baseline
+
+
 @dataclass
 class Run:
     text: str
@@ -158,6 +336,8 @@ class Run:
     emph: bool
     word: int
     char0: int
+    rtl: bool = False  # reads right to left: its pieces go right to left
+    ctx: tuple | None = None  # (paragraph reads right to left, direction before, after): see _lay_pieces
 
 
 @dataclass
@@ -324,9 +504,11 @@ class Renderer:
         self._tf: dict = {}
         self._layouts: dict = {}
         self._fonts: dict = {}
+        self._shaped: dict = {}  # (typeface, size, text, rtl) -> how _draw_str draws it (_pieces)
         self._paths: dict = {}
         self._shaders: dict = {}
         self.stop_at: str | None = None
+        self.stop_after: str | None = None
         self._stopped = False
         self._m3d: np.ndarray | None = None  # world-to-canvas matrix of the layer being drawn, in 3D scenes
         self.culled: set[str] = set()  # layers skipped this frame because they cross the camera plane
@@ -338,6 +520,9 @@ class Renderer:
         self.tris = 0  # model triangles drawn this frame
         self._subframes = None  # motion blur on the GPU: (count, averaging effect, a surface per sub-frame)
         self._straight = None  # (effect, surface) straightening blurred transparent frames on the GPU
+        self._frame_t: float | None = None  # while drawing a motion-blur sub-frame, the time of its frame
+        self._blended: dict[str, bool] = {}  # group id -> whether a layer inside it has a blend mode
+        self._ink: skia.Rect | None = None  # track: device bounds of the strokes the layer being drawn made
         cm = color_matrix({k: v for k, v in scene.grade.items() if k not in ("vignette", "grain")})
         self.grade_filter = skia.ColorFilters.Matrix(cm) if cm else None
         self._videos = [L for L in scene.all_layers() if L.type == "video"]
@@ -366,15 +551,23 @@ class Renderer:
             return 1
         shutter = float(mb.get("shutter", 0.5)) / self.s.fps
         # Inside the scene: half of frame 0's samples fell before 0 s, where nothing is drawn, so it came out half dark.
+        # Each layer also keeps its sub-frames inside its own time (see _layer).
         last = (self.s.frames - 1) / self.s.fps
         times = [min(last, max(0.0, T + (k / (samples - 1) - 0.5) * shutter)) for k in range(samples)]
         if self.backend == "gpu" and samples <= BLUR_GPU:
-            self._blur_gpu(times)
+            self._blur_gpu(times, T)
         else:
-            self._blur_cpu(times)
+            self._blur_cpu(times, T)
+        # Grain and vignette go on once, on the blurred frame: grain drawn on every sub-frame was averaged
+        # down to about 70% of its strength.
+        c = self.surface.getCanvas()
+        c.resetMatrix()
+        if self.scale != 1:
+            c.scale(self.scale, self.scale)
+        self._finish(c, T)
         return samples
 
-    def _blur_gpu(self, times: list[float]):
+    def _blur_gpu(self, times: list[float], T: float):
         n = len(times)
         if self._subframes is None or self._subframes[0] != n:
             ctx = self.surface.recordingContext()
@@ -385,7 +578,7 @@ class Renderer:
         try:
             for t, surf in zip(times, surfs):
                 self.surface = surf  # draw() draws into self.surface
-                self.draw(t)
+                self.draw(t, frame_t=T)
         finally:
             self.surface = main
         imgs = [s.makeImageSnapshot() for s in surfs]
@@ -410,11 +603,11 @@ class Renderer:
         del img, b
         return surf
 
-    def _blur_cpu(self, times: list[float]):
+    def _blur_cpu(self, times: list[float], T: float):
         # 257 sub-frames of 255 still fit in 16 bits: half the memory traffic of 32-bit sums, same mean.
         acc = np.zeros((self.h, self.w, 4), np.uint16 if len(times) <= 257 else np.uint32)
         for t in times:
-            self.draw(t)
+            self.draw(t, frame_t=T)
             self.surface.readPixels(self.info, self.buf, self.w * 4)
             np.add(acc, self.buf, out=acc)
         np.floor_divide(acc, len(times), out=acc)
@@ -450,12 +643,16 @@ class Renderer:
     def snapshot(self) -> skia.Image:
         return self.surface.makeImageSnapshot()
 
-    def draw(self, T: float, stop_at: str | None = None):
+    def draw(self, T: float, stop_at: str | None = None, frame_t: float | None = None, stop_after: str | None = None):
+        """Draw the scene at T. stop_at / stop_after: stop before / after drawing that layer (no grade finish).
+        frame_t: T is a motion-blur sub-frame of the frame at frame_t, so only the layers on at frame_t draw, each at
+        a time inside its own range, and grain and vignette are left to the caller."""
         s = self.s
         self.boxes = {}
         self.culled = set()
         self.tris = 0
-        self.stop_at, self._stopped = stop_at, False
+        self.stop_at, self.stop_after, self._stopped = stop_at, stop_after, False
+        self._frame_t = frame_t
         c = self.surface.getCanvas()
         c.resetMatrix()
         c.clear(skia.ColorTRANSPARENT)
@@ -486,12 +683,13 @@ class Renderer:
         self._m3d = None
         if self.grade_filter:
             c.restore()
-        if not stop_at:
+        if not (stop_at or stop_after) and frame_t is None:
             self._finish(c, T)
         # A clip's decoder holds an ffmpeg process and its prefetched frames; once the clip is off screen,
         # free them, or a cut list keeps every clip it has played open to the end (60 cuts: 1.6 GB).
+        on = T if frame_t is None else frame_t
         for L in self._videos:
-            if L.video is not None and L.video.proc is not None and not L.t_in <= T < L.t_out:
+            if L.video is not None and L.video.proc is not None and not L.t_in <= on < L.t_out:
                 L.video.close()
 
     # ---- scene-level ---------------------------------------------------------------------
@@ -557,8 +755,14 @@ class Renderer:
         if self.stop_at == L.id:
             self._stopped = True
             return
-        if not L.visible(T):
+        F = self._frame_t
+        if not L.visible(T if F is None else F):
             return
+        if F is not None:
+            # A motion-blur sub-frame: the layer is drawn on the frames it is on and nowhere else, and its
+            # sub-frames stay inside its own time. Sub-frames straddling its first frame fell before it starts,
+            # so that frame came out at half strength, and its sub-frames reached into the frame after it ends.
+            T = min(max(T, L.t_in), math.nextafter(L.t_out, -math.inf))
         t = T - L.t_in
         d = L.dur
         g = lambda name, default=None: L.get(name, t, T, 0, default)  # noqa: E731
@@ -606,7 +810,14 @@ class Renderer:
         fx = L.raw.get("fx")
         blend = L.raw.get("blend")
         layered = alpha < 0.999 or blur > 0.05 or shadow or fx or (blend and blend != "normal")
-        if layered:
+        if layered and L.children and not (blur > 0.05 or shadow or fx or (blend and blend != "normal")) \
+                and self._blends_inside(L):
+            # A fading group whose children blend: they keep blending with what is behind the group, and the
+            # group mixes from that backdrop to its full result, so blend does not turn into normal (and the
+            # frame jump) as opacity drops below 1.
+            layered = 2
+            self._fade_layers(c, alpha)
+        elif layered:
             paint = skia.Paint(Alphaf=alpha)
             filt = None
             if blur > 0.05:
@@ -634,10 +845,13 @@ class Renderer:
                 c.clipRect(skia.Rect(*clip), doAntiAlias=True)
         reveal = mods.reveal if not mods.wipe else 1.0
         draw = getattr(self, "_draw_" + L.type)
+        self._ink = None
         drawn = draw(c, L, t, T, g, box, reveal, mods)  # a model returns its projected bounds
         if self.track and (box is not None or drawn):
             m = c.getTotalMatrix()
             r = skia.Rect(*drawn) if drawn else m.mapRect(skia.Rect.MakeXYWH(*box))
+            if self._ink is not None:  # a stroke reaches half its width past the shape, an arrow's head further
+                r.join(self._ink)
             sc = 1.0 if drawn else math.sqrt(abs(m.getScaleX() * m.getScaleY())) or abs(m.getSkewX())
             info = {"rect": [round(r.left(), 1), round(r.top(), 1), round(r.right(), 1), round(r.bottom(), 1)],
                     "alpha": round(alpha * parent_alpha, 3), "type": L.type, "scale": round(sc, 4)}
@@ -657,10 +871,39 @@ class Renderer:
                 if self._stopped:
                     break
                 self._layer(c, child, T, parent_alpha * alpha)
+        if layered == 2:
+            c.restore()
         if layered:
             c.restore()
         c.restore()
         self._m3d = outer
+        if self.stop_after == L.id:
+            self._stopped = True
+
+    def _blends_inside(self, L: Layer) -> bool:
+        hit = self._blended.get(L.id)
+        if hit is None:
+            hit = self._blended[L.id] = any(k.raw.get("blend") not in (None, "normal") or self._blends_inside(k)
+                                            for k in L.children)
+        return hit
+
+    @staticmethod
+    def _fade_layers(c: skia.Canvas, alpha: float):
+        """Push the two layers that draw a group at `alpha` as backdrop * (1 - alpha) + composite * alpha, where
+        composite is the group drawn over the backdrop at full opacity. The outer layer holds the backdrop scaled
+        by 1 - alpha and replaces the backdrop when it is restored; the inner one starts as the backdrop again, the
+        children draw into it, and it adds itself at alpha. Both are half-float, so scaling the backdrop down and
+        back up loses less than half a level. When the children blend normally this is exactly what an isolated
+        group at alpha gives, over any backdrop; restore both layers when the children are drawn."""
+        def scale_alpha(k):
+            return skia.ImageFilters.ColorFilter(skia.ColorFilters.Matrix(
+                [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, k, 0]))
+        k = 1.0 - alpha
+        # The records hold bare pointers to the paints and filters: keep them in names until saveLayer has read them.
+        keep, down = skia.Paint(BlendMode=skia.BlendMode.kSrc), scale_alpha(k)
+        c.saveLayer(skia.Canvas.SaveLayerRec(None, keep, down, skia.Canvas.kF16ColorType))
+        add, up = skia.Paint(BlendMode=skia.BlendMode.kPlus, Alphaf=alpha), scale_alpha(1.0 / k)
+        c.saveLayer(skia.Canvas.SaveLayerRec(None, add, up, skia.Canvas.kF16ColorType))
 
     def _box(self, L: Layer, t, T, g):
         """Local content rect (x, y, w, h) after anchoring, or None for unbounded layers."""
@@ -756,6 +999,18 @@ class Renderer:
                 break
         return out
 
+    def _note_ink(self, c, path: skia.Path, paint: skia.Paint):
+        """For boxes (track): add the device bounds of `path` stroked with `paint` to the layer's box."""
+        if not self.track:
+            return
+        out = skia.Path()
+        paint.getFillPath(path, out)
+        r = c.getTotalMatrix().mapRect(out.computeTightBounds())
+        if self._ink is None:
+            self._ink = r
+        else:
+            self._ink.join(r)
+
     def _shape(self, c, L, g, path: skia.Path, box, reveal):
         """Fill then stroke. 'draw' (0..1) trims the stroke and fades the fill with it."""
         amt = max(0.0, min(1.0, float(g("draw")) * reveal))
@@ -764,8 +1019,10 @@ class Renderer:
         if fp is not None and amt > 0:
             c.drawPath(path, fp)
         sp = self._stroke_paint(L, g, box)
-        if sp is not None and amt > 0.0005:
-            c.drawPath(self._trim(path, amt, float(g("drawStart", 0.0))), sp)
+        if sp is not None:
+            self._note_ink(c, path, sp)  # the whole stroke, as the box is the whole shape while it draws on
+            if amt > 0.0005:
+                c.drawPath(self._trim(path, amt, float(g("drawStart", 0.0))), sp)
 
     # ---- layer types ----------------------------------------------------------------------
     def _draw_group(self, c, L, t, T, g, box, reveal, mods):
@@ -851,10 +1108,12 @@ class Renderer:
 
     def _draw_path(self, c, L, t, T, g, box, reveal, mods):
         path = self._path(L, t, T, g)
+        c.save()  # the box is in the layer's space: an anchored path's shift stays in here
         if "anchor" in L.raw:
             b = path.computeTightBounds()
             c.translate(box[0] - b.left(), box[1] - b.top())
         self._shape(c, L, g, path, box, reveal)
+        c.restore()
 
     _draw_polygon = _draw_path
 
@@ -869,20 +1128,31 @@ class Renderer:
         path = self._path(L, t, T, g)
         amt = float(g("draw")) * reveal
         sp = self._stroke_paint(L, g, box)
-        if amt <= 0.0005:
-            return
-        c.drawPath(self._trim(path, amt), sp)
-        meas = skia.PathMeasure(path, False)
-        pt = meas.getPosTan(meas.getLength() * min(1.0, amt))
-        if pt:
+        head = float(g("head", 22))
+
+        def head_at(k):
+            meas = skia.PathMeasure(path, False)
+            pt = meas.getPosTan(meas.getLength() * min(1.0, k))
+            if not pt:
+                return None
             pos, tan = pt
-            head = float(g("head", 22))
             ang = math.atan2(tan.y(), tan.x())
             hp = skia.Path()
             hp.moveTo(pos.x(), pos.y())
             for s in (2.6, -2.6):
                 hp.moveTo(pos.x(), pos.y())
                 hp.lineTo(pos.x() + head * math.cos(ang + s), pos.y() + head * math.sin(ang + s))
+            return hp
+        if self.track:  # the whole arrow and its head at the tip, as for any shape that draws on
+            self._note_ink(c, path, sp)
+            full = head_at(1.0)
+            if full is not None:
+                self._note_ink(c, full, sp)
+        if amt <= 0.0005:
+            return
+        c.drawPath(self._trim(path, amt), sp)
+        hp = head_at(amt)
+        if hp is not None:
             c.drawPath(hp, sp)
 
     def _draw_image(self, c, L, t, T, g, box, reveal, mods):
@@ -915,7 +1185,12 @@ class Renderer:
         c.restore()
         sp = self._stroke_paint(L, g, box)
         if sp:
-            c.drawRRect(skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(*box), r, r), sp)
+            rr = skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(*box), r, r)
+            if self.track:
+                edge = skia.Path()
+                edge.addRRect(rr)
+                self._note_ink(c, edge, sp)
+            c.drawRRect(rr, sp)
 
     def _draw_video(self, c, L, t, T, g, box, reveal, mods):
         bx, by, bw, bh = box
@@ -969,18 +1244,18 @@ class Renderer:
         return render3d.draw(self, c, L, g, reveal)
 
     def _model_surface(self):
-        """The offscreen models are drawn in at their place in the frame, and its supersampling factor:
-        4x MSAA on the GPU (no measurable cost), else 2x supersampling, which `check` and `--boxes` skip.
+        """The offscreen models are drawn in at their place in the frame, and its supersampling factor: 2x, which
+        `check` and `--boxes` skip (they take 4x MSAA on the GPU instead, else none).
         It is the size of the frame from the start. One that grew to fit the largest model so far made a
-        frame depend on the frames before it: on the GPU, edges moved by up to 49 levels."""
+        frame depend on the frames before it: on the GPU, edges moved by up to 49 levels.
+        Rendering does not use MSAA on the GPU, although it costs no more: the same frame drawn twice came out
+        different by one level at a few hundred edge pixels. Supersampling is repeatable and took the same time
+        (examples/model.json 19 ms a frame against 20 at 1920x1080)."""
         if self._msurf is None:
             ctx = self.surface.recordingContext()
-            ss = 1 if self.backend == "gpu" or self.track else 2
+            ss = 1 if self.track else 2
             info = skia.ImageInfo.Make(self.w * ss, self.h * ss, skia.kRGBA_8888_ColorType, skia.kPremul_AlphaType)
-            surf = skia.Surface.MakeRenderTarget(ctx, skia.Budgeted.kNo, info, 4) if ctx else None
-            if surf is None and ctx:  # no MSAA here: supersample on the GPU instead
-                ss, info = 2, info.makeWH(self.w * 2, self.h * 2)
-                surf = skia.Surface.MakeRenderTarget(ctx, skia.Budgeted.kNo, info)
+            surf = skia.Surface.MakeRenderTarget(ctx, skia.Budgeted.kNo, info, 4 if self.track else 0) if ctx else None
             self._msurf = surf or skia.Surface.MakeRaster(info), ss
         return self._msurf
 
@@ -1057,10 +1332,136 @@ class Renderer:
         key = (fam, int(g("weight", 600)), bool(L.raw.get("italic")), size)
         f = self._fonts.get(key)
         if f is None:
-            f = self._fonts[key] = skia.Font(self._typeface(*key[:3]), size)
-            f.setSubpixel(True)
-            f.setEdging(skia.Font.Edging.kAntiAlias)
+            f = self._fonts[key] = _text_font(self._typeface(*key[:3]), size)
         return f
+
+    def _pieces(self, font: skia.Font, s: str, rtl: bool = False, ctx: tuple | None = None) -> list[Piece] | None:
+        """How to draw s in `font`: None when drawString draws it as it is (every character in the font, nothing
+        to shape or reorder), else its pieces from left to right. rtl: s is (part of) a right-to-left word; ctx: s
+        is a whole word, with what is around it (from _bidi_order)."""
+        tf = font.getTypeface()
+        key = (tf.uniqueID(), font.getSize(), s, rtl, ctx)
+        if key in self._shaped:
+            return self._shaped[key]
+        base, before, after = ctx or (rtl, None, None)
+        turns = (base or "R" in (before, after)) and any(unicodedata.bidirectional(ch) != "L" for ch in s)
+        out = None
+        if turns or not all(font.textToGlyphs(s)) or any(map(_shapes, s)):
+            out = self._lay_pieces(font, s, base, before, after)
+        if len(self._shaped) > 4000:
+            self._shaped.clear()
+        self._shaped[key] = out
+        return out
+
+    def _lay_pieces(self, font: skia.Font, s: str, rtl: bool, before: str | None = None,
+                    after: str | None = None) -> list[Piece]:
+        """s as pieces from left to right. Each cluster takes the layer's font, or the system font that has it. Only
+        what needs it is shaped: a cluster of several code points (a letter and its marks, an emoji sequence, a
+        flag) and a run of joining letters (an Arabic word); neither holds a place to break a line, so the shaper
+        never wraps one. Right-to-left letters are put in reading order here, word direction from _bidi_order.
+        rtl: the text around reads right to left; before, after: the direction of the text on either side, 'R' or
+        'L' (default: rtl's), which punctuation at the ends of s takes when both agree."""
+        tf, size = font.getTypeface(), font.getSize()
+        style = tf.fontStyle()
+        units: list[list] = []  # [text, typeface, shaped, direction (R, L or N)]
+        for cl in clusters(s):
+            use = tf
+            missing = next((ch for ch in cl if not _ignorable(ch) and not _covers(tf, ord(ch))), None)
+            if missing is not None:
+                use = _fallback(style, ord(missing), _emoji(cl)) or _fallback(style, ord(missing)) or tf
+            d = _strong(cl) or "N"
+            joins = joining(cl)
+            if joins and units and units[-1][1] is use and units[-1][2] == "join":
+                units[-1][0] += cl
+                continue
+            units.append([cl, use, "join" if joins else "shape" if len(cl) > 1 else "plain", d])
+        # Reading order to left-to-right order: digits read left to right; a neutral (punctuation, emoji) takes the
+        # direction of the letters or digits on both sides when they agree (past the ends of s, `before` and
+        # `after`), else the direction around (rtl). Then runs at a higher level are reversed (_visual).
+        bidi = [{unicodedata.bidirectional(ch) for ch in u[0]} for u in units]
+        kinds = [u[3] if u[3] != "N" or not b & {"EN", "AN"} else "EN" for u, b in zip(units, bidi)]
+        edge = "R" if rtl else "L"
+        before, after = before or edge, after or edge
+        for i, k in enumerate(kinds):  # 1,5 and 12% and $3 are one number (rules W4, W5)
+            near = {kinds[i - 1] if i else None, kinds[i + 1] if i + 1 < len(kinds) else None}
+            if k == "N" and bidi[i] <= {"ES", "CS", "ET"} and "EN" in near and (
+                    bidi[i] <= {"ET"} or kinds[i - 1:i] == ["EN"] == kinds[i + 1:i + 2]):
+                kinds[i] = "EN"
+        strong = before
+        for i, k in enumerate(kinds):  # digits after left-to-right letters are left to right (W7)
+            if k in ("R", "L"):
+                strong = k
+            elif k == "EN" and strong == "L":
+                kinds[i] = "L"
+        for i, k in enumerate(kinds):  # neutrals (N1, N2): digits count as right to left here
+            if k == "N":
+                b = next((kinds[j] for j in range(i - 1, -1, -1) if kinds[j] != "N"), before)
+                a = next((kinds[j] for j in range(i + 1, len(kinds)) if kinds[j] != "N"), after)
+                b, a = ("R" if x in ("R", "EN") else "L" for x in (b, a))
+                kinds[i] = b if a == b else edge
+        order, odd = _visual(kinds, rtl)
+        out: list[Piece] = []
+        for i in order:
+            text, use, kind, _ = units[i]
+            f = font if use is tf else self._fallback_font(use, size)
+            if kind == "plain":
+                if odd[i]:  # a bracket in right-to-left text opens the other way: ( is drawn as )
+                    text = text.translate(_MIRROR)
+                if out and out[-1].blob is None and out[-1].font is f:
+                    out[-1].text += text
+                    out[-1].width = f.measureText(out[-1].text)
+                else:
+                    out.append(Piece(text, f, None, f.measureText(text), 0.0))
+                continue
+            blob = _shape(text, f, _strong(text) != "R")
+            width = sum(sum(f.getWidths(list(run.fGlyphIndices))) for run in blob) if blob is not None else 0.0
+            out.append(Piece(text, f, blob, width, f.getMetrics().fAscent))
+        return out
+
+    def _fallback_font(self, tf: skia.Typeface, size: float) -> skia.Font:
+        key = (tf.uniqueID(), size)
+        f = self._fonts.get(key)
+        if f is None:
+            f = self._fonts[key] = _text_font(tf, size)
+        return f
+
+    def _measure(self, font: skia.Font, s: str, rtl: bool = False, ctx: tuple | None = None) -> float:
+        pcs = self._pieces(font, s, rtl, ctx)
+        return font.measureText(s) if pcs is None else sum(p.width for p in pcs)
+
+    def _draw_str(self, c: skia.Canvas, s: str, x: float, y: float, font: skia.Font, paint: skia.Paint,
+                  rtl: bool = False, ctx: tuple | None = None):
+        pcs = self._pieces(font, s, rtl, ctx)
+        if pcs is None:
+            c.drawString(s, x, y, font, paint)
+            return
+        for p in pcs:
+            if p.blob is None:
+                c.drawString(p.text, x, y, p.font, paint)
+            else:
+                c.drawTextBlob(p.blob, x, y + p.drop, paint)
+            x += p.width
+
+    def undrawable(self, L: Layer) -> tuple[list[str], list[str]]:
+        """Characters of a text, counter, captions or 3D text layer that no installed font has (they draw as empty
+        boxes), and those its font draws but cannot shape (3D text only: marks and right-to-left letters)."""
+        fam = L.raw.get("font") or self.s.theme.get("font")
+        tf = self._typeface(fam, int(L.get("weight", 0.0, 0.0, 0, 600) or 600), bool(L.raw.get("italic")))
+        if L.type == "captions":
+            text = " ".join(str(q[2]) for q in L.raw.get("cues") or [] if len(q) > 2)
+        elif L.type == "counter":
+            text = _FMT.sub("0123456789,.-", str(L.raw.get("format", "{:,.0f}")))
+        else:
+            text = str(L.raw.get("text", ""))
+        missing, flat = [], []
+        for ch in dict.fromkeys(text.replace("**", "")):
+            if ch in "\n" or _ignorable(ch):
+                continue
+            if not _covers(tf, ord(ch)) and _fallback(tf.fontStyle(), ord(ch)) is None:
+                missing.append(ch)
+            elif L.type == "model" and _shapes(ch):
+                flat.append(ch)
+        return missing, flat
 
     def _text_layout(self, L: Layer, t, T, g, txt: str, size: float | None = None, max_w=None) -> Layout:
         size = float(size if size is not None else g("size", 64))
@@ -1073,12 +1474,23 @@ class Renderer:
         if lay:
             return lay
         font = self._font(L, g, size)
-        meas = lambda s: font.measureText(s) + ls * len(s)  # noqa: E731
+        meas = lambda s, rtl=False: self._measure(font, s, rtl) + ls * len(s)  # noqa: E731
+        split = L.raw.get("split")
+        apart = split == "chars" or ls  # each letter drawn on its own
+
+        def wmeas(w: str) -> float:
+            """A word's width as drawn: letter by letter when they are drawn apart and the word needs more than
+            drawString (Arabic letters unjoined are wider)."""
+            if apart and self._pieces(font, w) is not None:
+                return sum(meas(ch) for ch in clusters(w))
+            return meas(w)
         space = meas(" ")
         lines: list[list] = []
         widths: list[float] = []
         wi = 0
         for para in txt.split("\n"):
+            rtl_para = _strong(para.replace("**", "")) == "R"
+            first = len(lines)
             emph = False
             words = []
             for tok in para.split(" "):
@@ -1096,17 +1508,27 @@ class Renderer:
             indent = (len(para) - len(para.lstrip(" "))) * space
             cur, cw = [], indent
             for w_, segs in words:
-                ww = meas(w_)
+                ww = wmeas(w_)
                 if cur and mw and cw + space + ww > float(mw):
                     lines.append(cur)
                     widths.append(cw)
                     cur, cw = [], 0.0
                 x = cw + (space if cur else 0.0)
-                cur.append((w_, segs, x, wi))
+                cur.append((w_, segs, x, wi, False, None))
                 wi += 1
                 cw = x + ww
             lines.append(cur)
             widths.append(cw)
+            for li in range(first, len(lines)):  # words in reading order, placed in the order they are seen
+                ln = lines[li]
+                if ln and (rtl_para or any(_strong(e[0]) == "R" for e in ln)):
+                    order, rtls, around = _bidi_order([e[0] for e in ln], rtl_para)
+                    pos, placed = ln[0][2], list(ln)
+                    for k in order:
+                        w_, segs, _, idx, _, _ = ln[k]
+                        placed[k] = (w_, segs, pos, idx, rtls[k], around[k])
+                        pos += wmeas(w_) + space
+                    lines[li] = placed
         m = font.getMetrics()
         lh = size * lhm
         baseline0 = (lh - (m.fDescent - m.fAscent)) / 2 - m.fAscent
@@ -1115,23 +1537,26 @@ class Renderer:
         k = {"left": 0.0, "center": 0.5, "right": 1.0}.get(align, 0.5)
         runs = []
         ci = 0
-        split = L.raw.get("split")
         for li, (ln, lw) in enumerate(zip(lines, widths)):
             off = (W - lw) * k
-            for w_, segs, x, idx in ln:
-                if split == "chars" or ls:
-                    cx = x
+            for w_, segs, x, idx, rtl, ctx in ln:
+                # A right-to-left word's letters and emphasis runs go from its right edge leftwards.
+                ww = wmeas(w_) if rtl else 0.0
+                if apart:
+                    cx = 0.0
                     for _, part, e_ in segs:
-                        for ch in part:
-                            runs.append(Run(ch, off + cx, li, e_, idx, ci))
-                            cx += meas(ch)
-                            ci += 1
+                        for ch in clusters(part):  # an accent or an emoji sequence stays with its letter
+                            wc = meas(ch)
+                            runs.append(Run(ch, off + x + (ww - cx - wc if rtl else cx), li, e_, idx, ci, rtl))
+                            cx += wc
+                            ci += len(ch)
                 elif len(segs) == 1:
-                    runs.append(Run(w_, off + x, li, segs[0][2], idx, ci))
+                    runs.append(Run(w_, off + x, li, segs[0][2], idx, ci, rtl, ctx))
                     ci += len(w_)
                 else:  # one run per emphasis change, placed where it falls in the whole word
                     for s0, part, e_ in segs:
-                        runs.append(Run(part, off + x + meas(w_[:s0]), li, e_, idx, ci + s0))
+                        px = ww - meas(w_[:s0]) - meas(part) if rtl else meas(w_[:s0])
+                        runs.append(Run(part, off + x + px, li, e_, idx, ci + s0, rtl))
                     ci += len(w_)
                 ci += 1  # the space
         lay = Layout(runs, widths, W, lh * len(lines), lh, baseline0, ci, wi)
@@ -1189,7 +1614,7 @@ class Renderer:
             urot = um.rotate + (float(L.get("unitRotate", t, T, ui)) if "unitRotate" in unit_keys else 0)
             usc = um.scale * (float(L.get("unitScale", t, T, ui)) if "unitScale" in unit_keys else 1)
             x0 = min(r.x for r in runs)
-            x1 = max(r.x + font.measureText(r.text) for r in runs)
+            x1 = max(r.x + self._measure(font, r.text, r.rtl, r.ctx) for r in runs)
             ucx, ucy = ox + (x0 + x1) / 2, oy + runs[0].line * lay.lh + lay.lh / 2
             c.save()
             moved = ux or uy or urot or usc != 1 or um.rx or um.ry or um.dz
@@ -1220,9 +1645,11 @@ class Renderer:
                 fpaint.setColor(_argb(col, ua))
                 y = oy + r.line * lay.lh + lay.baseline0
                 x = ox + r.x + track * (r.char0 - lay.runs[0].char0) if track else ox + r.x
+                if r.rtl and text != r.text:  # typing: a right-to-left word grows from its right edge
+                    x += self._measure(font, r.text, True, r.ctx) - self._measure(font, text, True, r.ctx)
                 if spaint is not None:
-                    c.drawString(text, x, y, font, spaint)
-                c.drawString(text, x, y, font, fpaint)
+                    self._draw_str(c, text, x, y, font, spaint, r.rtl, r.ctx)
+                self._draw_str(c, text, x, y, font, fpaint, r.rtl, r.ctx)
             if typing and L.raw.get("caret", True) and visible_chars is not None and runs and u == order[-1]:
                 pass
             if um.blur > 0.1:
@@ -1235,9 +1662,14 @@ class Renderer:
                     last = r
             if last is not None:
                 vis = last.text[: max(0, int(visible_chars - last.char0))]
-                cx = ox + last.x + font.measureText(vis) + 4
+                cw = max(3, size * 0.06)
+                if last.rtl:  # left of what is typed so far
+                    cx = (ox + last.x + self._measure(font, last.text, True, last.ctx)
+                          - self._measure(font, vis, True, last.ctx) - 4 - cw)
+                else:
+                    cx = ox + last.x + self._measure(font, vis) + 4
                 cy = oy + last.line * lay.lh
-                c.drawRect(skia.Rect.MakeXYWH(cx, cy + lay.lh * 0.15, max(3, size * 0.06), lay.lh * 0.7),
+                c.drawRect(skia.Rect.MakeXYWH(cx, cy + lay.lh * 0.15, cw, lay.lh * 0.7),
                            skia.Paint(Color=_argb(emph)))
 
     def _draw_captions(self, c, L, t, T, g, box, reveal, mods):

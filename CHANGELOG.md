@@ -110,6 +110,36 @@
 - Check issues name their layer: issues raised while expanding a component, a duplicate id, a layer that is not an
   object (`layers[2]`) and errors while drawing had `layer: null`; issues outside layers read `canvas.bg: ...` or
   `markers: ...` instead of `layer 'canvas': ...`.
+- Text draws characters its font lacks with an installed font that has them. Emoji, Chinese, Japanese, Korean,
+  Hebrew and Arabic in a `text`, `counter` or `captions` layer drew as empty boxes in the default font; they now
+  draw, Arabic letters join, accents typed as separate marks sit on their letter, emoji sequences (a family, a
+  skin tone) are one picture, and right-to-left words read right to left, put in order on the line by the Unicode
+  bidi rules applied word by word (`"مرحبا بالعالم 2026!"` reads as a browser shows it). 3D text also falls back
+  to an installed font for each character, unshaped.
+- `kine check` warns about text it cannot draw as written: a character no installed font has (`missing-glyph`,
+  naming the layer and each character), Arabic letters drawn one by one by `split: "chars"` or `letterSpacing`
+  (`unjoined-letters`), and right-to-left letters, separate accents or emoji sequences in 3D text
+  (`unshaped-3d-text`).
+- A group's opacity no longer changes what a `blend` inside it does. At group opacity 0.999 an orange `multiply`
+  child over grey drew (128,64,0); at 0.9989 it drew (255,128,0), blending with nothing, so a fade on such a group
+  jumped. The group now fades evenly from the blended picture to what is under it.
+- With `motionBlur`, a layer's first and last frames are drawn at full strength, and it no longer shows faintly
+  one frame after it ends. A red layer on frames 30 to 44 drew (255,127,127) at frames 30 and 45; now red at 30
+  and 44 and nothing at 45.
+- `grade` grain is as strong with `motionBlur` as without. It was added to every sub-frame and partly averaged
+  away (pixel spread 5.86 instead of 8.35 with 8 samples); it is now added once to the blended frame.
+- Model layers on the GPU are repeatable: the same frame drawn twice differed by one level at a few hundred edge
+  pixels (4x MSAA). Models are now supersampled 2x on the GPU too, at the same speed.
+- Screen boxes (`kine probe`, `look --boxes`, `check`) include the stroke: a rect, circle, line, path, polygon or
+  arrow with a stroke had a box half a stroke short on every side, and an arrow's box missed its head. An
+  anchored path's box was also shifted from where it drew.
+- `kine check` warns when text is covered by a later opaque layer (`text-hidden`, naming the layer on top), and
+  when one or two words are on screen for under 0.4 s (`read-time`): a 0.2 s one-word flash passed. A text
+  within half a frame of its reading time passes (4 words for 1.6 s were flagged for 12 ms).
+- `kine check` no longer notes a shape that sweeps across the canvas as `offscreen` because it starts or ends off
+  it; it notes one that is off whenever it is on, or for 1 s or more.
+- `kine check` notes an odd canvas size (`odd-size`): `.mp4`, `.webm` and `.gif` need even sizes, so a 321x181
+  scene comes out 320x180 there, without its last column and row. PNG frames, stills and `.mov` keep 321x181.
 
 - A video clip's decoder is closed once the clip is off screen. Before, every clip a render had played kept its
   ffmpeg process and six prefetched frames to the end: a 60-cut sequence peaked at 1.66 GB and ran 60 decoders at
