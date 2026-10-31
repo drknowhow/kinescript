@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- `fog` at the top level fades far layers into a colour: `true`, or `{"color", "near", "far", "amount"}` with `near`
+  and `far` in px from the camera, all of which animate. By default the colour is the canvas background and the fog
+  starts at z 0, so a layer at z 0 is clear. A model is fogged at each vertex, any other layer by the depth of its
+  middle, and a stage at each pixel from its depth image. A fill or picture drawn in one call carries the fog in its
+  paint, as it does opacity: an offscreen layer for one fogged card cost 84 ms of a 230 ms CPU frame at 1080p.
+  `kine check` warns (`fog-hides`) when a layer lies wholly past `far`. `examples/fog.json` renders in 2.8 s on the
+  GPU with or without `fog`, and in 11.7 s on the CPU against 11.4 s. `examples/stage.json` with fog renders in
+  25.4 s on the CPU against 22.7 s, and its GPU frames take 18 to 20 ms either way. Scenes without `fog` draw the
+  same bytes: `bench/same.py` finds no difference against main on either backend.
 - `env`, for the scene or one model, is what shiny and metal models reflect: `studio`, `sunset`, `night`, `chrome`,
   or `top`, `horizon` and `bottom` colours with an `amount`, all of which animate. The environment is fixed in the
   world, so tilting the camera moves a chrome ball's horizon. Metal reflects it tinted by its fill; other materials

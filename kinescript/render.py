@@ -556,6 +556,7 @@ class Renderer:
         self._m3d: np.ndarray | None = None  # world-to-canvas matrix of the layer being drawn, in 3D scenes
         self.culled: set[str] = set()  # layers skipped this frame because they cross the camera plane
         self.unlit: set[str] = set()  # models drawn this frame with the key light behind them
+        self.fogged: set[str] = set()  # layers drawn this frame wholly hidden by fog
         self._lit: dict = {}  # light objects with their tweening keys compiled (render3d.at)
         self._cam: np.ndarray | None = None  # the camera matrix of the top-level layer being drawn
         self._lens: np.ndarray | None = None  # camera space to canvas, for lighting models
@@ -574,6 +575,7 @@ class Renderer:
         self._blended: dict[str, bool] = {}  # group id -> whether a layer inside it has a blend mode
         self._ink: skia.Rect | None = None  # track: device bounds of the strokes the layer being drawn made
         self._alpha = 1.0  # the opacity of the layer being drawn when its paint carries it (_one_draw), else 1
+        self._cf: skia.ColorFilter | None = None  # likewise its fog
         cm = color_matrix({k: v for k, v in scene.grade.items() if k not in ("vignette", "grain")})
         self.grade_filter = skia.ColorFilters.Matrix(cm) if cm else None
         self._videos = [L for L in scene.all_layers() if L.type == "video"]
@@ -798,7 +800,7 @@ class Renderer:
         only they draw, ungraded; `under` is an image of that, which the sub-frame starts from in their place."""
         s = self.s
         self.boxes = {}
-        self.culled, self.unlit = set(), set()
+        self.culled, self.unlit, self.fogged = set(), set(), set()
         self.tris = 0
         self.stop_at, self.stop_after, self._stopped = stop_at, stop_after, False
         self._frame_t = frame_t
@@ -968,6 +970,7 @@ class Renderer:
         sc = float(g("scale")) * mods.scale
         sx, sy = sc * float(g("scaleX")), sc * float(g("scaleY"))
         outer, tilt, facing = self._m3d, None, True
+        fg, fogf = None, 0.0  # the fog, and how much of it covers this layer
         if outer is not None:
             z, rx, ry = float(g("z")) + mods.dz, float(g("rotateX")) + mods.rx, float(g("rotateY")) + mods.ry
             m = outer @ space.translate(x, y)
@@ -983,6 +986,12 @@ class Renderer:
                 facing = space.facing(xy)
                 if not facing and L.raw.get("backface") == "hidden":
                     return
+                if self.s.fog is not None and self._stage is None and not L.children and L.type != "model":
+                    # A flat layer is fogged as a whole, by the depth of its middle; a model by each vertex's.
+                    fg = render3d.fog(self, T)
+                    fogf = 0.0 if fg is None else float(render3d.fogged(fg, w.mean()))
+                    if fogf >= 0.999:
+                        self.fogged.add(L.id)
             self._m3d, self._outer = m, outer
             if self._stage is not None and self._stage.child is L:
                 self._stage.m = m
@@ -999,6 +1008,12 @@ class Renderer:
         fx = L.raw.get("fx")
         blend = L.raw.get("blend")
         effects = blur > 0.05 or shadow or fx or (blend and blend != "normal")
+        cf = None
+        if fogf > 0.002:
+            if not effects and self._one_draw(L):
+                cf = render3d.fog_filter(fg, fogf)  # in the paint of its one draw, like its opacity
+            else:
+                effects = True
         layered = alpha < 0.999 or effects
         paint_alpha = 1.0
         if layered and L.children and not effects and self._blends_inside(L):
@@ -1028,6 +1043,9 @@ class Renderer:
                 cm = color_matrix(fx)
                 if cm:
                     paint.setColorFilter(skia.ColorFilters.Matrix(cm))
+            if fogf > 0.002:
+                mist, inner = render3d.fog_filter(fg, fogf), paint.getColorFilter()
+                paint.setColorFilter(skia.ColorFilters.Compose(mist, inner) if inner else mist)
             if blend:
                 paint.setBlendMode(BLENDS.get(blend, skia.BlendMode.kSrcOver))
             c.saveLayer(None, paint)
@@ -1040,7 +1058,7 @@ class Renderer:
                 c.clipRect(skia.Rect(*clip), doAntiAlias=True)
         reveal = mods.reveal if not mods.wipe else 1.0
         draw = getattr(self, "_draw_" + L.type)
-        self._ink, self._alpha = None, paint_alpha
+        self._ink, self._alpha, self._cf = None, paint_alpha, cf
         drawn = draw(c, L, t, T, g, box, reveal, mods)  # a model returns its projected bounds
         if self.track and (box is not None or drawn):
             m = c.getTotalMatrix()
@@ -1231,6 +1249,8 @@ class Renderer:
         has_stroke = L.raw.get("stroke") is not None
         fp = self._fill_paint(L, g, box, alpha=amt * self._alpha,
                               default=None if has_stroke else self.s.theme.get("paper", "#f2f0e8"))
+        if fp is not None and self._cf is not None:
+            fp.setColorFilter(self._cf)
         if fp is not None and amt > 0:
             c.drawPath(path, fp)
         sp = self._stroke_paint(L, g, box)
@@ -1398,7 +1418,7 @@ class Renderer:
         dst = skia.Rect.MakeXYWH(px + (cx0 - px) * zoom, py + (cy0 - py) * zoom, cw * zoom, ch * zoom)
         if img is not None:
             c.drawImageRect(img, dst, CUBIC if L.type == "video" else SAMPLING,
-                            skia.Paint(AntiAlias=True, Alphaf=self._alpha))
+                            skia.Paint(AntiAlias=True, Alphaf=self._alpha, ColorFilter=self._cf))
         c.restore()
         sp = self._stroke_paint(L, g, box)
         if sp:

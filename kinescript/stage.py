@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 import skia
 
-from . import space
+from . import render3d, space
 
 QMAX = 1.0 / space.NEAR  # the largest 1/w a drawn point has
 CHILDREN = 16  # check warns past this many children: each one is drawn and merged on its own
@@ -38,6 +38,24 @@ half4 main(float2 p) {
 }
 """
 _KID = "uniform shader kid;"
+# The merged stage at 1x, each pixel mixed toward the fog by how far away its depth puts it: dist = k / depth.
+_FOG = _DEP + """
+uniform shader acc;
+uniform shader accd;
+uniform half3 fogCol;
+uniform float4 fog;  // near, far - near, amount, k
+half4 main(float2 p) {
+    half4 c = acc.eval(p);
+    // the nearest of the frame pixel's samples, so its edges are fogged with it
+    float d = max(max(dep(accd.eval(p + float2(-0.25, -0.25))), dep(accd.eval(p + float2(0.25, -0.25)))),
+                  max(dep(accd.eval(p + float2(-0.25, 0.25))), dep(accd.eval(p + float2(0.25, 0.25)))));
+    if (d <= 0.0) {
+        return c;
+    }
+    half f = half(clamp((fog.w / d - fog.x) / fog.y, 0.0, 1.0) * fog.z);
+    return half4(c.rgb * (1.0 - f) + fogCol * (f * c.a), c.a);
+}
+"""
 _SKSL = {
     "pack": _PACK,
     # the child's depth, kept only where it drew (drawn with kDstIn)
@@ -46,6 +64,7 @@ _SKSL = {
     "over": _KID + _NEAR.replace("RESULT", "return near ? kid.eval(p) : half4(0.0);"),
     "under": _KID + _NEAR.replace("RESULT", "return near ? half4(0.0) : kid.eval(p);"),
     "depth": _NEAR.replace("RESULT", "return near ? d : accd.eval(p);"),
+    "fog": _FOG,
 }
 _EFFECTS: dict[str, skia.RuntimeEffect] = {}
 
@@ -120,7 +139,7 @@ class Stage:
                 self._clear(box)
         finally:
             r._stage, r._dev, self.child = None, 1.0, None
-        self._finish(c)
+        self._finish(c, render3d.fog(r, T))
 
     def depth(self, xy: np.ndarray, q: np.ndarray, tris: np.ndarray):
         """Draw the depth of triangles tris, whose corners are at xy (stage px) with 1/w q, in order: each one
@@ -227,8 +246,8 @@ class Stage:
             for a in arrays:
                 a[y0:y1, x0:x1] = 0
 
-    def _finish(self, c: skia.Canvas):
-        """Lay the merged children on c at the frame's resolution."""
+    def _finish(self, c: skia.Canvas, fg=None):
+        """Lay the merged children on c at the frame's resolution, through fog fg if there is one."""
         sampling = skia.SamplingOptions(skia.FilterMode.kLinear) if self.ss > 1 else skia.SamplingOptions()
         ss = self.ss
         if self.gpu:
@@ -242,12 +261,44 @@ class Stage:
             y0, x0 = y0 - y0 % ss, x0 - x0 % ss
             y1, x1 = min(self.h, y1 + -y1 % ss), min(self.w, x1 + -x1 % ss)
             px = np.ascontiguousarray(self.out[y0:y1, x0:x1]).view(np.uint8).reshape(y1 - y0, x1 - x0, 4)
+            if fg is not None:
+                self._fog_cpu(px, self.outd[y0:y1, x0:x1], fg)
             img = skia.Image.fromarray(px, skia.kRGBA_8888_ColorType, skia.kPremul_AlphaType)
             src = skia.Rect(0, 0, x1 - x0, y1 - y0)
         c.save()
         c.resetMatrix()
-        c.drawImageRect(img, src, skia.Rect(x0 / ss, y0 / ss, x1 / ss, y1 / ss), sampling)
+        dst = skia.Rect(x0 / ss, y0 / ss, x1 / ss, y1 / ss)
+        if self.gpu and fg is not None:
+            to = skia.Matrix.Scale(1 / ss, 1 / ss)
+            b = skia.RuntimeShaderBuilder(_effect("fog"))
+            b.setChild("acc", img.makeShader(skia.TileMode.kClamp, skia.TileMode.kClamp, sampling, to))
+            b.setChild("accd", self.accd.makeImageSnapshot().makeShader(skia.TileMode.kClamp, skia.TileMode.kClamp,
+                                                                       skia.SamplingOptions(), to))
+            col, near, far, amt, focus = fg
+            b.setUniform("fogCol", col)
+            b.setUniform("fog", [near, max(far - near, 1e-6), amt, focus * 16777215.0 / QMAX])
+            c.drawRect(dst, skia.Paint(Shader=b.makeShader()))
+        else:
+            c.drawImageRect(img, src, dst, sampling)
         c.restore()
+
+    @staticmethod
+    def _fog_cpu(px: np.ndarray, depth: np.ndarray, fg: tuple):
+        """Mix premultiplied RGBA pixels px toward the fog by their depths (q / QMAX, 0 where nothing is). In float32
+        and only where something is: over a whole stage at 1080p, float64 took 455 ms a frame and this 95."""
+        hit = np.flatnonzero(depth > 0)
+        if not len(hit):
+            return
+        col, near, far, amt, focus = fg
+        f = np.clip((np.float32(focus / QMAX) / depth.ravel()[hit] - near) / max(far - near, 1e-6), 0, 1) * amt
+        some = f > 0.002
+        if not some.any():
+            return
+        idx, f = hit[some], f[some][:, None]
+        flat = px.reshape(-1, 4)
+        p = flat[idx]
+        a = p[:, 3:] * np.float32(1 / 255)
+        flat[idx, :3] = np.rint(p[:, :3] * (1 - f) + np.asarray(col, np.float32) * 255 * f * a).astype(np.uint8)
 
 
 def _rgba(px: np.ndarray) -> np.ndarray:

@@ -68,6 +68,7 @@ SCENE (top level)
               added once, to the blended frame. Still layers below every moving one are drawn once
               a frame, not once a sub-frame, so list still layers first.
   camera      moves and turns the view in depth (see DEPTH AND CAMERA).
+  fog         far layers fade into a colour (see DEPTH AND CAMERA).
   light       how model layers are lit (see 3D MODELS).
   audio       the list of sounds: voice-over, music, effects (see SOUND).
   mix         loudness, role levels and ducking of the sound (see SOUND).
@@ -203,6 +204,13 @@ DEPTH AND CAMERA (3D)
               x and y pan (px). z moves the camera back; negative moves it in. rotateY orbits it
               right around the canvas centre, rotateX up over it (looking down), rotate rolls it.
               fov (5..150) sets how strong perspective looks; it does not change size at z 0.
+  fog         top level: true, or {"color": "#0a0c10", "near": 1500, "far": 6000, "amount": 1}.
+              Up to near px from the camera is clear; from there to far px everything mixes into
+              color, up to amount. z 0 is (h / 2) / tan(fov / 2) px from the camera: 1484 at 1080p
+              and fov 40. Defaults: color is the canvas bg (a gradient's first stop), near is z 0's
+              distance and far 4 times it. A model mixes at each vertex, any other layer by the
+              depth of its middle, and a stage at each pixel. All four keys animate. check warns
+              (fog-hides) when a layer lies wholly past far.
   Motions: flip turns in on the vertical axis (deg [90]), flip-up on the horizontal axis, tumble
   spins in from depth, push comes forward from depth (dist [600]). With "split" each unit flips.
   Layers still draw in list order, so put far layers first, or use a group with "sort": "depth".

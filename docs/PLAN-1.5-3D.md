@@ -132,7 +132,11 @@ the bullets above:
 - glTF `emissiveFactor` is not read yet.
 `env` (branch `env-reflections`): built. The reflected view assumes the camera looks straight down -z at every
 pixel (the shader has no position), and roughness is a blend toward the environment's mean colour as shine falls.
-Still to come, each its own PR: `fog`, and shadows (`ground` `"from": "light"`, stage `shadows`).
+`fog` (branch `fog`): built, with `amount` and defaults (the canvas bg colour, near at z 0's distance, far 4
+times it). Changes from the bullet above: on the GPU a model's fog is per vertex too, carried in vertex colours and
+blended with `kDstATop` over the shading, since the shader has no position. A stage fogs at 1x on the GPU (one pass
+reading the merged colour and depth) and at 2x on the CPU, in float32 over the pixels that hold something.
+Still to come: shadows (`ground` `"from": "light"`, stage `shadows`).
 
 ### Phase 3: camera
 
