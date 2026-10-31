@@ -5,8 +5,10 @@ many timestamps, a JSON list of problems with time ranges, and the exact box of 
 """
 from __future__ import annotations
 
+import bisect
 import math
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import numpy as np
 import skia
@@ -26,9 +28,11 @@ MEDIA_OFF_FOR = 1.0
 
 
 def _times(scene: Scene, count: int, times=None) -> list[float]:
-    if times:
-        return [float(t) for t in times]
-    count = max(1, count)
+    if times:  # as still reads them: negative counts from the end, and the scene's ends clamp
+        from .output import frame_at
+        return [frame_at(scene, t) / scene.fps for t in times]
+    if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+        raise ValueError(f"count must be a whole number of frames, 1 or more, got {count!r}")
     step = scene.duration / count
     return [min(scene.duration - 1 / scene.fps, step * (k + 0.5)) for k in range(count)]
 
@@ -38,9 +42,19 @@ def contact_sheet(src, out: str, count: int = 12, cols: int | None = None, width
     """One PNG of `count` evenly spaced frames, each labelled with its time and frame number.
     boxes=True outlines every visible layer with its id. audio=True adds the sound under the frames, one lane per
     role and one for the mix, and returns its measurements."""
+    from .output import IMAGE, out_path, save_image
     scene = load(src)
-    ts = _times(scene, count, times)
-    cols = cols or min(len(ts), 4)
+    try:
+        ts = _times(scene, count, times)
+        if cols is not None and (isinstance(cols, bool) or not isinstance(cols, int) or cols < 1):
+            raise ValueError(f"cols must be a whole number, 1 or more, got {cols!r}")
+        if isinstance(width, bool) or not isinstance(width, int) or not 16 <= width <= 4096:
+            raise ValueError(f"width must be a whole number of pixels from 16 to 4096, got {width!r}")
+        cols = min(cols or 4, len(ts))
+        out = str(out_path(scene, out, IMAGE))
+    except ValueError:
+        scene.close()
+        raise
     rows = math.ceil(len(ts) / cols)
     scale = width / scene.w
     r = Renderer(scene, track=boxes, scale=scale)
@@ -66,8 +80,8 @@ def contact_sheet(src, out: str, count: int = 12, cols: int | None = None, width
             _draw_boxes(c, scene, r.boxes, x, y + label_h, tw, th, small)
     if rep is not None:
         listen.strip(c, rep, listen.issues(scene, rep), gap, grid_h, cols * (tw + gap) - gap, ts, font, small)
-    sheet.makeImageSnapshot().save(out, skia.kPNG)
     scene.close()
+    save_image(sheet.makeImageSnapshot(), Path(out))
     info = {"out": out, "times": [round(t, 3) for t in ts], "grid": [cols, rows], "backend": r.backend}
     if audio:
         info["audio"] = listen.summary(rep)
@@ -126,9 +140,16 @@ def probe(src, at: float | None = None) -> dict:
     scene = load(src)
     out = scene.summary()
     if at is not None:
+        try:
+            t = float(at)
+        except (TypeError, ValueError):
+            t = math.nan
+        if not math.isfinite(t):
+            scene.close()
+            raise ValueError(f"at must be a time in seconds, got {at!r}")
         r = Renderer(scene, track=True)
-        r.draw(float(at))
-        out["at"] = float(at)
+        r.draw(t)
+        out["at"] = t
         out["visible"] = r.boxes
     scene.close()
     return out
@@ -141,6 +162,8 @@ def _words(text: str) -> int:
 def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
     """Lint a scene. Returns {"ok", "errors", "warnings", "issues": [...]} where each issue names
     the layer, the time range it was seen in, and a suggested fix."""
+    if isinstance(step, bool) or not isinstance(step, (int, float)) or not math.isfinite(step) or step <= 0:
+        raise ValueError(f"step must be a number of seconds above 0, got {step!r}")
     try:
         scene = load(src)
     except SceneError as e:
@@ -168,9 +191,16 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
         else:
             it["to"] = round(T, 2)
 
+    step = max(step, 1 / scene.fps)  # finer than a frame draws the same frames again
     n = max(1, int(scene.duration / step))
-    for k in range(n + 1):
-        T = min(scene.duration - 1e-3, k * step)
+    grid = [min(scene.duration - 1e-3, k * step) for k in range(n + 1)]
+    # A layer on screen for less than a step can fall between two samples and go unchecked: look at its middle.
+    extra = set()
+    for L in scene.all_layers():
+        end, k = min(L.t_out, scene.duration), bisect.bisect_left(grid, L.t_in)
+        if L.t_in < end and not (k < len(grid) and grid[k] < end):
+            extra.add((L.t_in + end) / 2)
+    for T in sorted(set(grid) | extra):
         try:
             r.draw(T)
         except (ValueError, RuntimeError, OSError) as e:
@@ -214,7 +244,7 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
             elif b["type"] in MEDIA:
                 area = (rr - l) * (bb - t)
                 seen = max(0.0, min(rr, W) - max(l, 0.0)) * max(0.0, min(bb, H) - max(t, 0.0))
-                if area > 0 and seen < area / 2 and not allow and layer is not None:
+                if area > 0 and seen < area / 2 and not allow and layer is not None and T not in extra:
                     seq = layer.parent if layer.parent is not None and layer.parent.raw.get("span") else None
                     off.setdefault(seq.id if seq else lid, []).append((T, b["rect"], 1 - seen / area, layer))
             elif b["type"] != "group" and not allow:

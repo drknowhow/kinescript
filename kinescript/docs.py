@@ -403,19 +403,22 @@ COMMANDS
                                   info: a name it read for you, e.g. "'color' read as 'fill'".
   kine look scene.json --boxes    one PNG of 12 evenly spaced frames; --boxes outlines layers and
                                   labels the top-level ones; -n 16 frames, --at 1 2.5 4 exact
-                                  times (use it to see a transition), --width 480, --cols 4, -o.
+                                  times, read as still reads them (use it to see a transition),
+                                  --width 480 (16 to 4096), --cols 4, -o (.png or .jpg).
                                   --audio adds the sound under the frames on the same time axis:
                                   a lane per role and one for the mix, the duck, and issues in red;
                                   its JSON gives each sound's loudness and gain and the mix's.
-  kine still scene.json --at 2.5  one frame as PNG (-o to name it); --at -1 is 1 s before the
-                                  end; --at end is the last frame
+  kine still scene.json --at 2.5  one frame as PNG (-o to name it, .png or .jpg); --at -1 is 1 s
+                                  before the end; --at end is the last frame
   kine probe scene.json --at 2    every layer's and sound's start and end, and screen boxes at 2 s
   kine probe clip.mp4             a media file's duration, w, h, fps and whether it has audio
   kine render scene.json -o out.mp4 -q draft|standard|high
                                   standard is the default, draft the fastest, high the best.
                                   Also .mov or .webm (with --transparent for no background),
-                                  .gif (longest side 720 px, 15 fps), or a folder/ for PNG frames.
-                                  .wav, .m4a, .mp3 or .flac: the sound alone.
+                                  .gif (longest side 720 px, 15 fps), or a folder/ for PNG frames
+                                  (frames/f_%04d.png names them). .wav, .m4a, .mp3, .flac or
+                                  .opus: the sound alone. Any other extension is an error, and so
+                                  is -o naming a file the scene reads.
                                   --scale 0.5 halves the size; --from 2 --to 4 renders a part.
   kine voice scene.json           speaks each sound's text into its file and times its words; a sound
                                   is spoken again only when its text, speaker, rate, backend or

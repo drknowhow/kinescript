@@ -263,6 +263,21 @@ def glsl_to_sksl(src: str) -> str:
     return src[:m.start()] + "half4 main(float2 _kpos) {" + body + "}" + src[end:]
 
 
+# Largest frame side. 16384 is the biggest texture most GPUs take, and a 16384-pixel square is 1 GB of RGBA;
+# --scale 100 on 1080p asked for 192000x108000 and failed inside Skia.
+MAX_SIDE = 16384
+
+
+def frame_size(w: int, h: int, scale) -> tuple[int, int]:
+    """The size a w x h canvas renders at `scale`; ValueError when that is not a frame that can be drawn."""
+    if isinstance(scale, bool) or not isinstance(scale, (int, float)) or not math.isfinite(scale) or scale <= 0:
+        raise ValueError(f"scale must be a number above 0, got {scale!r}")
+    fw, fh = max(2, round(w * scale)), max(2, round(h * scale))
+    if max(fw, fh) > MAX_SIDE:
+        raise ValueError(f"scale {scale:g} makes a {fw}x{fh} frame; the largest side is {MAX_SIDE} px")
+    return fw, fh
+
+
 class Renderer:
     def __init__(self, scene: Scene, track: bool = False, scale: float = 1.0, backend: str = "auto",
                  even: bool = False, alpha: bool = True):
@@ -270,7 +285,7 @@ class Renderer:
         see-through shown over black."""
         self.s = scene
         self.scale = scale
-        self.w, self.h = max(2, round(scene.w * scale)), max(2, round(scene.h * scale))
+        self.w, self.h = frame_size(scene.w, scene.h, scale)
         if even:  # 4:2:0 video needs even sizes
             self.w, self.h = self.w - self.w % 2, self.h - self.h % 2
         self.info = skia.ImageInfo.Make(self.w, self.h, skia.kRGBA_8888_ColorType, skia.kPremul_AlphaType)

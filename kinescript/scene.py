@@ -572,7 +572,13 @@ def load(src) -> Scene:
         p = Path(s)
         if not p.exists():
             raise SceneError(f"scene file not found: {p}")
-        text, base, name = p.read_text(encoding="utf-8-sig"), p.parent, p.name
+        if p.is_dir():
+            raise SceneError(f"{p} is a folder; give the scene's .json file")
+        try:
+            text, base, name = p.read_text(encoding="utf-8-sig"), p.parent, p.name
+        except UnicodeDecodeError as e:
+            raise SceneError(f"{p.name} is not UTF-8 text (byte {e.object[e.start]:#04x} at {e.start}); a scene is "
+                             "a .json file saved as UTF-8") from e
     try:
         spec, fixed = schema.loads(text)
     except json.JSONDecodeError as e:

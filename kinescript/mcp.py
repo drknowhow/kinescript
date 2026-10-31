@@ -34,11 +34,15 @@ TOOLS = [
                                                       "audio": {"type": "boolean", "default": False},
                                                       "width": {"type": "integer", "default": 400}}, "required": ["scene"]}},
     {"name": "kine_still", "description": "One full-size frame at time `at` (seconds), returned as an image.",
-     "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"}, "at": {"type": "number"},
+     "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"},
+                                                      "at": {"type": ["number", "string"], "description":
+                                                             "seconds; negative counts from the end; \"end\" is "
+                                                             "the last frame"},
                                                       "scale": {"type": "number", "default": 0.5}},
                      "required": ["scene", "at"]}},
     {"name": "kine_probe", "description": "Resolved timeline (every layer's in/out) and, with `at`, every visible "
-     "layer's screen box, alpha and text at that time.",
+     "layer's screen box, alpha and text at that time. Given a media file instead of a scene, its duration, size, "
+     "fps and audio.",
      "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"}, "at": {"type": "number"}},
                      "required": ["scene"]}},
     {"name": "kine_voice", "description": "Speak each sound's `text` into its file (voice/<id>.wav unless it has a "
@@ -60,16 +64,30 @@ TOOLS = [
 ]
 
 
+def _need(args: dict, key: str):
+    if args.get(key) is None:
+        raise ValueError(f"missing argument \"{key}\"")
+    return args[key]
+
+
 def _scene(args: dict):
     from .scene import Scene, load
-    sc = args["scene"]
+    sc = _need(args, "scene")
     if isinstance(sc, dict):
         return Scene(sc, args.get("base") or os.getcwd())
+    if not isinstance(sc, str):
+        raise ValueError("scene must be a path to a .json file or the scene object itself")
     return load(sc)
 
 
 def _image(path: str) -> dict:
-    return {"type": "image", "mimeType": "image/png", "data": base64.b64encode(Path(path).read_bytes()).decode()}
+    """The image inline; the temporary file is removed."""
+    p = Path(path)
+    try:
+        data = p.read_bytes()
+    finally:
+        p.unlink(missing_ok=True)
+    return {"type": "image", "mimeType": "image/png", "data": base64.b64encode(data).decode()}
 
 
 def _text(obj) -> dict:
@@ -81,32 +99,45 @@ def call(name: str, args: dict) -> list[dict]:
         from .docs import reference
         return [_text(reference())]
     if name == "kine_check":
-        from .verify import check
-        return [_text(check(_scene(args)))]
+        from .scene import SceneError
+        from .verify import _result, check
+        try:
+            sc = _scene(args)
+        except SceneError as e:  # the issues, as `kine check` gives them, not a one-line error
+            return [_text(_result(e.issues))]
+        return [_text(check(sc))]
     if name == "kine_probe":
         from .verify import probe
+        sc = _need(args, "scene")
+        if isinstance(sc, str) and Path(sc).suffix.lower() != ".json" and Path(sc).is_file():
+            from . import media
+            return [_text(dict(ok=True, src=sc, **media.probe(sc)))]
         return [_text(probe(_scene(args), args.get("at")))]
     if name == "kine_look":
         from .verify import contact_sheet
         out = str(Path(tempfile.gettempdir()) / f"kine_look_{os.getpid()}.png")
         info = contact_sheet(_scene(args), out, int(args.get("count", 12)), None, int(args.get("width", 400)),
                              args.get("times"), bool(args.get("boxes")), bool(args.get("audio")))
+        del info["out"]  # a temporary file, gone once read
         return [_image(out), _text(info)]
     if name == "kine_still":
         from .output import still
         out = str(Path(tempfile.gettempdir()) / f"kine_still_{os.getpid()}.png")
-        still(_scene(args), float(args["at"]), out, float(args.get("scale", 0.5)))
+        still(_scene(args), _need(args, "at"), out, float(args.get("scale", 0.5)))
         return [_image(out)]
     if name == "kine_voice":
         from .voice import generate
-        return [_text(generate(args["scene"], args.get("only"), bool(args.get("force")), args.get("backend"),
+        return [_text(generate(_need(args, "scene"), args.get("only"), bool(args.get("force")), args.get("backend"),
                                args.get("base") or os.getcwd()))]
     if name == "kine_render":
         from .output import render
-        sc = args["scene"]
+        sc, out = _need(args, "scene"), _need(args, "out")
         if isinstance(sc, dict):
             sc = _scene(args)
-        res = render(sc, args["out"], args.get("quality", "standard"), None, float(args.get("scale", 1.0)),
+        if not isinstance(out, str) or not out.strip():
+            raise ValueError("out must be a file path")
+        out = os.path.join(os.getcwd(), out)  # the result says where a relative out landed: the server's folder
+        res = render(sc, out, args.get("quality", "standard"), None, float(args.get("scale", 1.0)),
                      args.get("from"), args.get("to"))
         return [_text(res)]
     raise ValueError(f"unknown tool {name}")
@@ -130,6 +161,10 @@ def serve():
 
 
 def _serve():
+    try:  # clients send UTF-8; Windows read stdin in its code page, so "café" arrived as "cafÃ©"
+        sys.stdin.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -139,29 +174,44 @@ def _serve():
         except json.JSONDecodeError:
             _reply(None, error={"code": -32700, "message": "parse error"})
             continue
-        method, id_ = req.get("method"), req.get("id")
-        if id_ is None:
-            continue  # notification
-        if method == "initialize":
-            _reply(id_, {"protocolVersion": req.get("params", {}).get("protocolVersion", "2024-11-05"),
-                         "capabilities": {"tools": {}},
-                         "serverInfo": {"name": "kinescript", "version": __version__},
-                         "instructions": "Kinescript renders motion graphics and video edits from JSON scenes. "
-                                         "Call kine_docs first, then write a scene (kine_voice it if a sound has "
-                                         "text), kine_check it, kine_look at it, "
-                                         "and kine_render it."})
-        elif method == "tools/list":
-            _reply(id_, {"tools": TOOLS})
-        elif method == "tools/call":
-            p = req.get("params", {})
-            try:
-                _reply(id_, {"content": call(p.get("name"), p.get("arguments") or {})})
-            except (ValueError, RuntimeError, FileNotFoundError, KeyError) as e:
-                _reply(id_, {"content": [_text(f"error: {e}")], "isError": True})
-            except Exception as e:  # noqa: BLE001 - report unexpected failures to the client instead of dying
-                _reply(id_, {"content": [_text(f"internal error: {e}\n{traceback.format_exc()[-1500:]}")],
-                             "isError": True})
-        elif method == "ping":
-            _reply(id_, {})
-        else:
-            _reply(id_, error={"code": -32601, "message": f"method not found: {method}"})
+        if not isinstance(req, dict):  # a number, a string or a batch: each of these ended the server
+            _reply(None, error={"code": -32600, "message": "invalid request: send one JSON-RPC object per line"})
+            continue
+        try:
+            _handle(req)
+        except Exception as e:  # noqa: BLE001 - one bad request must not end the server
+            if req.get("id") is not None:
+                _reply(req["id"], error={"code": -32603, "message": f"internal error: {e}"})
+
+
+def _handle(req: dict):
+    method, id_ = req.get("method"), req.get("id")
+    params = req.get("params") if isinstance(req.get("params"), dict) else {}
+    if id_ is None:
+        return  # notification
+    if method == "initialize":
+        _reply(id_, {"protocolVersion": params.get("protocolVersion", "2024-11-05"),
+                     "capabilities": {"tools": {}},
+                     "serverInfo": {"name": "kinescript", "version": __version__},
+                     "instructions": "Kinescript renders motion graphics and video edits from JSON scenes. "
+                                     "Call kine_docs first, then write a scene (kine_voice it if a sound has "
+                                     "text), kine_check it, kine_look at it, "
+                                     "and kine_render it."})
+    elif method == "tools/list":
+        _reply(id_, {"tools": TOOLS})
+    elif method == "tools/call":
+        args = params.get("arguments") or {}
+        if not isinstance(args, dict):
+            _reply(id_, error={"code": -32602, "message": "arguments must be an object"})
+            return
+        try:
+            _reply(id_, {"content": call(params.get("name"), args)})
+        except (ValueError, RuntimeError, OSError, KeyError) as e:
+            _reply(id_, {"content": [_text(f"error: {e}")], "isError": True})
+        except Exception as e:  # noqa: BLE001 - report unexpected failures to the client instead of dying
+            _reply(id_, {"content": [_text(f"internal error: {e}\n{traceback.format_exc()[-1500:]}")],
+                         "isError": True})
+    elif method == "ping":
+        _reply(id_, {})
+    else:
+        _reply(id_, error={"code": -32601, "message": f"method not found: {method}"})
