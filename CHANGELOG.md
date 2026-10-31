@@ -8,6 +8,13 @@
   primitive's mesh and the GPU's shading paint are kept while they hold. The models-30 stress scene drew a frame
   in 79 ms on the GPU and now in 52 (224 and 186 on the CPU), and rendered at 36 fps on 4 workers and now at 50;
   `examples/model.json` in `bench/stages.py` draws in 7.8 ms at the median and 31.5 at p95, from 10.7 and 41.6.
+- PNG sequences, PNG stills and `kine look` sheets are written by Kinescript instead of Skia's PNG encoder, which
+  took 337 ms on a 1080p frame: rows take the Sub filter and deflate at zlib level 5 in bands that every core
+  compresses at once, while the next frame draws. One second of `examples/hello.json` as PNG frames renders in
+  0.49 s instead of 11.7 s, a 3840x2160 still in 0.11 s instead of 1.59 s, a 7680x4320 one in 0.31 s instead of
+  4.76 s, and a sheet in 0.11 s instead of 0.32 s. Files are within a few percent of their old size (1080p frames
+  4% larger, 4K 6% smaller), still 8-bit RGBA, and decode to the same pixels; the one exception is a transparent
+  frame with motion blur, whose colours are now the ones its `.mov` and `.webm` get, a level apart in a few pixels.
 - An output that can't be written (a read-only file, one another program holds, or a folder this account can't
   write in) is an error before the first frame. A 30 s 1080p render to a read-only `.mp4` drew every frame and
   failed after 2.4 s with `[Errno 13] Permission denied`; it now stops at once and says why.

@@ -1369,6 +1369,34 @@ def test_a_half_transparent_background_is_straight_alpha_in_a_mov(tmp_path):
     assert r >= 250 and 120 <= a <= 136, (r, g, b, a)  # was (128, 0, 0, 129): premultiplied read as straight
 
 
+@pytest.mark.parametrize("w,h", [(1, 1), (300, 7), (37, 300)])
+def test_a_png_decodes_to_exactly_the_pixels_written(tmp_path, monkeypatch, w, h):
+    import skia
+    from kinescript import output
+    monkeypatch.setattr(output, "PNG_BAND", 1000)  # many bands: one row each at 300 wide, 6 rows at 37
+    px = np.random.default_rng(w * h).integers(0, 256, (h, w, 4), np.uint8)  # alpha 0 to 255, any colour
+    p = tmp_path / "a.png"
+    output.save_png(px, p)
+    data = p.read_bytes()
+    assert data[24:26] == bytes([8, 6])  # 8-bit RGBA, as Skia wrote them
+    codec = skia.Codec.MakeFromData(data)
+    got = np.empty_like(px)
+    info = skia.ImageInfo.Make(w, h, skia.kRGBA_8888_ColorType, skia.kUnpremul_AlphaType)
+    assert codec.getPixels(info, got, w * 4) == skia.Codec.kSuccess
+    assert np.array_equal(got, px)
+    raw = subprocess.run([media.FFMPEG, "-v", "error", "-i", str(p), "-f", "rawvideo", "-pix_fmt", "rgba", "-"],
+                         capture_output=True, check=True).stdout  # a second decoder, ffmpeg's own
+    assert np.array_equal(np.frombuffer(raw, np.uint8).reshape(h, w, 4), px)
+
+
+def test_an_opaque_scenes_png_keeps_straight_colour_where_a_pixel_is_not_opaque():
+    from types import SimpleNamespace
+    from kinescript import output
+    px = np.array([[[64, 32, 0, 128], [9, 8, 7, 255]]], np.uint8)  # read premultiplied, as an opaque scene reads
+    got = output._straight(SimpleNamespace(transparent=False), px)
+    assert got.tolist() == [[[128, 64, 0, 128], [9, 8, 7, 255]]]  # as Skia's encoder wrote it
+
+
 def test_3d_text_frames_do_not_depend_on_the_frames_drawn_before():
     # Early in a slow eased tween, frame 3's size rounds to frame 0's cache key; the outline was built from
     # whichever exact size was drawn first, so a worker starting at frame 3 drew different pixels.
