@@ -1,0 +1,11 @@
+# chatterbox-v0.1.1-5-g1a36ada · Intel64 Family 6 Model 198 Stepping 2, GenuineIntel · Python 3.14.4 · skia 144.1 · numpy 2.4.4
+ms per frame, median / p95, one process. draw = drawing until the GPU finishes; frame = draw +
+conversion + readback, as an export grabs it; pipe = blocked writing to ffmpeg. export = wall seconds.
+workload    backend   load s               draw              frame               pipe   export s frames workers
+hello       gpu/i420    0.00     1.40 /    6.99     2.74 /    4.89     0.46 /    0.51       0.57    126       1
+promo       gpu/i420    0.04     1.83 /    6.27     2.98 /    3.99     0.47 /    0.56       2.27   1038       4
+edit        gpu/i420    0.16     9.46 /   23.56     3.33 /    7.92     0.42 /    0.71       2.15    312       1
+model       gpu/i420    0.00    10.17 /   43.23    11.11 /   48.31     0.49 /    0.63       1.93    180       6
+import      gpu/i420    0.06     9.63 /   14.61    10.75 /   15.47     0.49 /    0.62       0.76    180       6
+blur        gpu/i420    0.00     8.64 /   24.78     8.27 /   20.77     0.48 /    0.55       1.49    126       1
+blur-alpha  gpu         0.00     9.68 /   25.57    12.01 /   25.35     1.46 /    2.59       1.73    126       2
