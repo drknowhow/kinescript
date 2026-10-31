@@ -5,7 +5,7 @@
 - `.mp4` and `.gif` exports on the GPU read a frame back while the next one draws. Each frame waited in a blocking
   `readPixels` while the GPU finished drawing it and copied it out, the copy alone 1.6 ms of the 2.8 ms a simple
   1080p frame took; the readback is now queued with Skia's async readback and collected after the next frame is
-  drawn. With one render process the long-120s stress scene renders at 418 fps instead of 341 (2.4 ms a frame
+  drawn. With one render process the long-120s stress scene renders at 425 fps instead of 351 (2.4 ms a frame
   instead of 2.9) and `examples/hello.json` at 186 instead of 161; on its default 4 workers long-120s renders at
   454 fps instead of 431, where x264 sets the pace. In `bench/stages.py` a frame of hello takes 2.0 ms instead of
   2.8 and one of the promo 2.3 instead of 3.0. The frames are the same bytes, and so are the files.
