@@ -129,6 +129,17 @@ def test_a_resampled_clip_shows_the_same_frame_however_the_render_reaches_it(idx
         assert _cold(spec, n) == played[n], n
 
 
+def test_a_numpy_frame_number_shows_the_same_frame(idx):
+    # bench/stages.py draws frame numbers from np.linspace. The source time came out a numpy float, written into
+    # ffmpeg's filter as np.float64(...): the pipe gave no frame, so a clip opened mid-way showed its last frame,
+    # found by decoding the file to its end every frame (the edit stage drew in 390 ms instead of 8).
+    s = k.Scene(_spec(idx))
+    r = Renderer(s, backend="cpu")
+    got = [_shown(r.frame(n)) for n in np.array([17, 23, 40])]
+    s.close()
+    assert got == [17, 23, 40]
+
+
 def test_render_workers_split_a_resampled_clip_without_a_seam(idx, tmp_path):
     # The second worker opens the clip at frame 19 and reads on from there. Its decoder's frame grid began at the
     # first frame it decoded, so at frame 21 it showed source frame 40 where a single worker shows 39.

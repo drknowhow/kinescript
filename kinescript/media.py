@@ -281,7 +281,9 @@ class VideoSource:
         # rounds up. Before, the grid started at the first frame decoded (PTS-STARTPTS), up to half a source frame
         # from t0, and fps rounded to the nearest output frame: a 30 fps clip at 24 fps showed frame 8 at 0.25 s
         # played from 0 and frame 7 opened there. eof_action=pass keeps a last frame that ends between output frames.
-        off = (self.info["start"] + self.t0 + self.near) * 1e9
+        # float(): a numpy time (a frame number from np.linspace) printed as np.float64(...), which ffmpeg cannot
+        # parse; the pipe gave no frame, and the clip showed its last frame, found by decoding the file to its end.
+        off = float((self.info["start"] + self.t0 + self.near) * 1e9)
         timing = (f"settb=1/1000000000,setpts=(PTS-({off!r}))/{self.speed!r},"
                   f"fps={self.fps}:start_time=0:round=up:eof_action=pass")
         if self.ctx is not None:  # cover or stretch, kept in YUV and limited range

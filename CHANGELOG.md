@@ -9,6 +9,10 @@
   instead of 2.9) and `examples/hello.json` at 186 instead of 161; on its default 4 workers long-120s renders at
   454 fps instead of 431, where x264 sets the pace. In `bench/stages.py` a frame of hello takes 2.0 ms instead of
   2.8 and one of the promo 2.3 instead of 3.0. The frames are the same bytes, and so are the files.
+- A frame number given as a numpy integer, as `bench/stages.py` gives them, shows a clip's right frame again. Its
+  source time went into ffmpeg's filter as `np.float64(...)`, which ffmpeg cannot read, so a clip opened mid-way
+  showed its last frame, found by decoding the file to its end on every frame: the edit stage in `bench/stages.py`
+  drew a frame in 390 ms at the median and 585 at p95, and now in 8.5 and 14.7.
 - Model layers draw in two thirds of the time, with the same pixels. Of the 2.5 ms a model took each frame,
   1.5 ms went on making two `skia.Point`s per vertex, handing them and the indices to Skia, and freeing them;
   Skia now makes the points while reading back a path numpy writes, indices go as a uint16 memoryview, and a
