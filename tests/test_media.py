@@ -82,7 +82,7 @@ def test_a_dur_longer_than_the_trim_holds_the_last_frame_of_the_trim(idx, tmp_pa
     _ff("-f", "lavfi", "-i", "testsrc2=s=64x36:r=30:d=2", "-f", "lavfi", "-i", "sine=d=2", "-pix_fmt", "yuv420p",
         "-shortest", sound)
     s = k.Scene(_spec(sound, trim=[0.5, 1.0], dur=1.0))
-    assert output._audio_inputs(s)[0]["dur"] == pytest.approx(0.5)  # was 1.0: the sound played on past the trim
+    assert output._audio_inputs(s)[0]["play"] == pytest.approx(0.5)  # was 1.0: the sound played on past the trim
     s.close()
     issues = [i for i in check(spec)["issues"] if i["code"] == "clip-hold"]
     assert len(issues) == 1 and issues[0]["level"] == "warning" and issues[0]["from"] == 0.5, issues
@@ -216,8 +216,9 @@ def test_a_ts_cut_with_copy_and_no_key_frame_has_no_picture(tmp_path):
     cut = str(tmp_path / "cut.ts")
     _ff("-i", src, "-ss", 1.4, "-t", 2, "-c", "copy", cut)  # no key frame inside: the video stream stays empty
     spec = {"canvas": {"w": 64, "h": 36, "fps": 30, "duration": 1}, "layers": [{"id": "v", "type": "video", "src": cut}]}
-    none = [i for i in check(spec)["issues"] if i["code"] == "media-no-picture"]  # it drew nothing, unremarked
-    assert len(none) == 1 and none[0]["layer"] == "v" and "cut.ts" in none[0]["message"], none
+    none = [i for i in check(spec)["issues"] if i["code"] == "no-picture"]  # it said the file was sound only
+    assert len(none) == 1 and none[0]["level"] == "error" and none[0]["layer"] == "v", none
+    assert "cut.ts" in none[0]["message"] and "-c copy" in none[0]["fix"], none
     info = probe_media(cut)  # was w 0, h 0, fps 0 and nothing else
     assert info["video"] is False and info["kind"] == "audio" and "-c copy" in info["note"], info
 

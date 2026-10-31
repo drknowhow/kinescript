@@ -234,9 +234,9 @@ def probe_media(src: str) -> dict:
 
 
 def media_issues(scene: Scene, files_only: bool = False) -> list[dict]:
-    """Warnings about the clips the video layers play: a file with no picture, a file whose picture stops before
-    its probed end (cut short or damaged), alpha this ffmpeg cannot decode, and (unless files_only) a dur that runs
-    past the trimmed clip or the file, so its last frame holds."""
+    """Warnings about the clips the video layers play: a still image, a file whose picture stops before its probed
+    end (cut short or damaged), alpha this ffmpeg cannot decode, and (unless files_only) a dur that runs past the
+    trimmed clip or the file, so its last frame holds. A file with no picture is an error when the scene loads."""
     out, ends = [], {}
     layers = [L for L in scene.all_layers() if L.type == "video" and L.src and Path(L.src).is_file()]
 
@@ -258,12 +258,7 @@ def media_issues(scene: Scene, files_only: bool = False) -> list[dict]:
                  "a clip one frame long", "use an image layer (\"type\": \"image\") for a still")
             continue
         if not info["video"]:
-            what = (f"lists a {info['codec']} video stream but holds no frame of it" if info["codec"]
-                    else "has no picture")
-            warn("media-no-picture", L, L.t_in, shown, f"video src {name} {what}, so the layer shows nothing",
-                 "a clip cut with -c copy between key frames loses its picture: cut it again without -c copy"
-                 if info["codec"] else "point src at a file with video in it, or play a sound file from \"audio\"")
-            continue
+            continue  # a no-picture error when the scene loads
         if info["alpha"] and info["codec"] in media.ALPHA_DECODERS and not media.alpha_decoder(info):
             warn("media-alpha-lost", L, L.t_in, shown, f"this ffmpeg has no {media.ALPHA_DECODERS[info['codec']]} "
                  f"decoder, so {name} is shown without its transparency",

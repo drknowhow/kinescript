@@ -521,7 +521,12 @@ class Scene:
                     info = media.probe(layer.src)
                 except media.MediaError as e:
                     self.note("error", "bad-media", lid, f"video src {e}", "export it again as .mp4, .mov or .webm")
-                if info is not None and not info["w"]:  # it drew nothing, and check said nothing
+                if info is not None and not info["w"] and info.get("codec"):  # a .ts cut with -c copy, say
+                    self.note("error", "no-picture", lid, f"video src {Path(layer.src).name} lists a {info['codec']} "
+                              "video stream but holds no frame of it",
+                              "a clip cut with -c copy between key frames loses its picture: cut it again without "
+                              "-c copy")
+                elif info is not None and not info["w"]:  # it drew nothing, and check said nothing
                     self.note("error", "no-picture", lid, f"video src {Path(layer.src).name} has no picture: it is "
                               "sound only", "put it in \"audio\" (or a layer's \"sound\") to hear it")
                     info = None

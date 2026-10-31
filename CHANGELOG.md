@@ -164,9 +164,9 @@
   error. A media probe names its `kind` (video, audio, image or model), and a scene's probe has `ok` as a media
   file's does.
 - A file that lists a video stream with no frames in it, such as a `.ts` cut with `-c copy` between key frames:
-  `kine probe` says so in a `note` (it gave w 0, h 0 and fps 0 and nothing more) and `kine check` warns
-  (`media-no-picture`) for a video layer that plays it. A still image as a video layer is a warning
-  (`media-still`).
+  `kine probe` says so in a `note` (it gave w 0, h 0 and fps 0 and nothing more), and the `no-picture` error for a
+  video layer that plays it says to cut it again without `-c copy` instead of calling the file sound only. A still
+  image as a video layer is a warning (`media-still`).
 - A video clip's decoder is closed once the clip is off screen. Before, every clip a render had played kept its
   ffmpeg process and six prefetched frames to the end: a 60-cut sequence peaked at 1.66 GB and ran 60 decoders at
   once; it now peaks at 270 MB.

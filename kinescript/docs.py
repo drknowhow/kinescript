@@ -454,9 +454,8 @@ COMMANDS
                                   mix's loudness and peaks. With footage: a dur past the end of
                                   its clip, so the last frame holds (clip-hold), a file whose
                                   picture stops before its length, cut short or damaged
-                                  (media-truncated), a file with no picture (media-no-picture) or a
-                                  still image (media-still) as a video, and a .webm whose alpha this
-                                  ffmpeg cannot read (media-alpha-lost).
+                                  (media-truncated), a still image as a video (media-still), and
+                                  a .webm whose alpha this ffmpeg cannot read (media-alpha-lost).
                                   info: a name it read for you, e.g. "'color' read as 'fill'",
                                   or an odd canvas size (odd-size).
   kine look scene.json --boxes    one PNG of 12 evenly spaced frames; --boxes outlines layers and
