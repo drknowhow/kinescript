@@ -276,6 +276,51 @@ def test_examples_and_promo_have_no_unknown_keys():
         assert not bad, (path, bad)
 
 
+RECT = [{"id": "r", "type": "rect", "w": 10, "h": 10}]
+
+
+@pytest.mark.parametrize("top, layers", [
+    ({"motionBlur": "yes"}, RECT), ({"audio": 5}, RECT), ({"audio": [{"src": "a.wav", "volume": [1]}]}, RECT),
+    ({"audio": [{"src": "a.wav", "gain": "loud"}]}, RECT), ({"canvas": {"duration": float("inf")}}, RECT),
+    ({"canvas": {"bg": 5}}, RECT), ({"theme": [1]}, RECT), ({"markers": "drop"}, RECT), ({"grade": "warm"}, RECT),
+    ({"components": [1]}, RECT),
+    ({}, [{"type": "sequence", "clips": [{"src": "a.png"}], "transition": 5}]),
+    ({}, [{"type": "sequence", "clips": {"src": "a.png"}}]),
+    ({}, [{"id": "s", "type": "shader", "preset": "aurora", "uniforms": [1]}]),
+    ({}, [{"id": "p", "type": "path", "points": [[1], [2, 3]]}]), ({}, [{"id": "p", "type": "path", "d": 5}]),
+])
+def test_wrong_shapes_are_errors_not_crashes(top, layers):
+    # Each of these used to pass the schema and then raise TypeError or AttributeError while loading or drawing.
+    spec = dict(scene(layers), **top)
+    spec["canvas"] = dict(spec["canvas"], **top.get("canvas", {}))
+    got, s = codes(spec)
+    assert s is None and {"bad-value", "bad-colour", "bad-canvas"} & set(got), got
+
+
+def test_null_canvas_values_and_a_motion_blur_number_read_as_defaults():
+    got, s = codes(dict(scene(RECT, fps=None, w=None), motionBlur=6))
+    assert s is not None and (s.fps, s.w, s.motion_blur) == (30, 1920, {"samples": 6}), got
+    assert schema.normalize(dict(scene(RECT), audio="a.wav"))[0]["audio"] == [{"src": "a.wav"}]
+
+
+def test_capitalised_text_type_is_a_text_layer_not_a_model():
+    _, s = codes(scene([{"id": "t", "type": "Text", "text": "Hi"}]))
+    assert s is not None and s.by_id["t"].type == "text"
+
+
+def test_a_model_fill_may_be_a_colour_tween():
+    got, s = codes(scene([{"id": "m", "type": "model", "shape": "cube",
+                           "fill": {"from": "#ff0000", "to": "#0000ff", "dur": 1}}]))
+    assert s is not None and "bad-value" not in got and "fill" in s.by_id["m"].props
+
+
+def test_a_component_used_twice_owns_ids_nested_under_layers():
+    body = [{"id": "g", "type": "group", "layers": [{"id": "k", "type": "rect", "w": 10, "h": 10}]}]
+    got, s = codes(dict(scene([{"use": "card", "id": "a"}, {"use": "card", "id": "b"}]),
+                        components={"card": {"layers": body}}))
+    assert s is not None and {"a-k", "b-k"} <= set(s.by_id), got  # was: duplicate layer id 'k'
+
+
 def test_shapes_models_write_instead_of_kinescript_are_read():
     from kinescript.render import glsl_to_sksl
     _, s = codes(scene([{"id": "p", "type": "progress"},

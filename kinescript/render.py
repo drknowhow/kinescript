@@ -666,7 +666,7 @@ class Renderer:
         if raw is None:
             return None
         p = skia.Paint(AntiAlias=True)
-        if isinstance(raw, dict):
+        if isinstance(raw, dict) and key not in L.props:  # a gradient; a colour tween is compiled into props
             bx, by, bw, bh = box
             p.setShader(self._gradient(raw, bx, by, bw, bh, alpha))
         else:
@@ -674,12 +674,15 @@ class Renderer:
             p.setColor(_argb(col, alpha))
         return p
 
-    def _stroke_paint(self, L: Layer, g, alpha=1.0):
-        if L.raw.get("stroke") is None:
+    def _stroke_paint(self, L: Layer, g, box, alpha=1.0):
+        raw = L.raw.get("stroke")
+        if raw is None:
             return None
-        col = g("stroke") if "stroke" in L.props else C.parse(L.raw["stroke"])
         p = skia.Paint(AntiAlias=True, Style=skia.Paint.kStroke_Style, StrokeWidth=float(g("strokeWidth", 4)))
-        p.setColor(_argb(col, alpha))
+        if isinstance(raw, dict) and "stroke" not in L.props:  # a gradient
+            p.setShader(self._gradient(raw, *box, alpha))
+        else:
+            p.setColor(_argb(g("stroke") if "stroke" in L.props else C.parse(raw), alpha))
         cap = L.raw.get("cap", "round" if L.type in ("line", "arrow", "path") else "butt")
         p.setStrokeCap({"round": skia.Paint.kRound_Cap, "square": skia.Paint.kSquare_Cap}.get(cap, skia.Paint.kButt_Cap))
         p.setStrokeJoin({"round": skia.Paint.kRound_Join, "bevel": skia.Paint.kBevel_Join}.get(L.raw.get("join", "round"), skia.Paint.kMiter_Join))
@@ -705,7 +708,7 @@ class Renderer:
         fp = self._fill_paint(L, g, box, alpha=amt, default=None if has_stroke else self.s.theme.get("paper", "#f2f0e8"))
         if fp is not None and amt > 0:
             c.drawPath(path, fp)
-        sp = self._stroke_paint(L, g)
+        sp = self._stroke_paint(L, g, box)
         if sp is not None and amt > 0.0005:
             c.drawPath(self._trim(path, amt, float(g("drawStart", 0.0))), sp)
 
@@ -810,7 +813,7 @@ class Renderer:
             L.raw["stroke"] = self.s.theme.get("paper", "#f2f0e8")
         path = self._path(L, t, T, g)
         amt = float(g("draw")) * reveal
-        sp = self._stroke_paint(L, g)
+        sp = self._stroke_paint(L, g, box)
         if amt <= 0.0005:
             return
         c.drawPath(self._trim(path, amt), sp)
@@ -855,7 +858,7 @@ class Renderer:
         dst = skia.Rect.MakeXYWH(px + (cx0 - px) * zoom, py + (cy0 - py) * zoom, cw * zoom, ch * zoom)
         c.drawImageRect(img, dst, CUBIC if L.type == "video" else SAMPLING, skia.Paint(AntiAlias=True))
         c.restore()
-        sp = self._stroke_paint(L, g)
+        sp = self._stroke_paint(L, g, box)
         if sp:
             c.drawRRect(skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(*box), r, r), sp)
 
@@ -1103,7 +1106,7 @@ class Renderer:
         emph = g("emph") if "emph" in L.props else C.parse(self.s.theme.get("accent", "#ff633f"))
         act = g("active") if "active" in L.props else emph
         fpaint = skia.Paint(AntiAlias=True)
-        spaint = self._stroke_paint(L, g)
+        spaint = self._stroke_paint(L, g, box)
         split = L.raw.get("split")
         enter = L.enter if split else None
         stagger = (enter.stagger if enter and enter.stagger else 0.04) if split else 0

@@ -10,6 +10,24 @@
   files huge (4 s of `hello.json` as VP9 with alpha: 93 MB, now 0.46 MB). Drawn layers are graded as before.
 - Film grain changes on every frame. Frame 123 at 30 fps (and about 2% of frames at most rates) repeated the
   previous frame's grain, because the frame number was recovered from the time by truncation.
+- Colour tweens work on `fill`, `stroke`, `emph` and `active`, as the docs say: `"fill": {"from": "#f00", "to":
+  "#00f", "dur": 1}` drew a flat grey (it was read as a gradient), and on `stroke` it stopped the render with
+  `unhashable type: 'dict'`. A CSS gradient on `stroke` also stopped the render; it now draws.
+- `kine check` evaluates expressions at every frame their layer is on, not only at its start, middle and end, so
+  `"x": "=100+1/(t-0.7)"` is reported (`bad-expression`, with the frame) instead of failing the render at 0.7 s.
+  An expression that still fails while drawing names its layer, property and time.
+- `**` in an expression is a float power: `9**9**9` made `check` run for hours computing an exact integer; it is
+  now an `OverflowError` at once. Arithmetic on text or lists (`[0]*999999999`) is refused when the scene loads.
+- `"type": "Text"` (any capitalisation of a layer type) is that layer type. `Text` was read as a 3D model with
+  shape text, because model shape names were matched first.
+- A scene component whose group lists its layers under `"layers"` (not `"children"`) can be used more than once.
+- Values of the wrong type are errors from the schema instead of Python errors later: `theme`, `markers`, `grade`
+  and `components` that are not objects, `motionBlur` that is not an object (a number is read as its `samples`),
+  `audio` that is a number, an audio `volume`, `fadeIn`, `fadeOut` or `gain` that is not a number (or keyframes,
+  for gain), an infinite `canvas.duration`, a `canvas.bg` that is a number, a sequence's `clips` or `transition`
+  that is not a list or object, shader `uniforms` that are not an object, a path `d` that is not a string and
+  `points` that are not `[x, y]` pairs. `null` for `canvas.w`, `h` or `fps` means the default. Anything left that
+  fails while loading is a `load` issue in `kine check`, not a traceback.
 
 ## 1.3.1 (2026-10-31)
 

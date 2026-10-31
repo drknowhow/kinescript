@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import copy
 import difflib
+import math
 import re
 
 from . import color as C
@@ -436,7 +437,8 @@ def _layer(raw, rep: Report, path: str, comps: dict):
         _layer_sound(raw, rep, lid)
         return  # parameters are checked when the component expands (components.Params)
     t = raw.get("type")
-    if isinstance(t, str) and t.strip().lower() in ENUMS["shape"] and t not in TYPES and "shape" not in raw:
+    if isinstance(t, str) and t.strip().lower() in ENUMS["shape"] and t.strip().lower() not in TYPES \
+            and "shape" not in raw:  # "Text" is a text layer, not a model with shape text
         raw["type"], raw["shape"] = "model", t.strip().lower()
         rep.add("info", "renamed-value", lid, f"type '{t}' read as a model with shape '{raw['shape']}'",
                 f"write \"type\": \"model\", \"shape\": \"{raw['shape']}\"")
@@ -453,6 +455,12 @@ def _layer(raw, rep: Report, path: str, comps: dict):
             return
     if t == "sequence":
         _keys(raw, SEQUENCE, {"items": "clips", "videos": "clips", "children": "clips"}, rep, lid, "")
+        if raw.get("clips") is not None and not isinstance(raw["clips"], list):
+            rep.add("error", "bad-value", lid, "clips must be a list of files or objects with 'src'",
+                    "\"clips\": [{\"src\": \"a.mp4\"}, {\"src\": \"b.mp4\"}]")
+        if raw.get("transition") is not None and not isinstance(raw["transition"], dict):
+            rep.add("error", "bad-value", lid, f"transition is {raw['transition']!r}; it is an object",
+                    "\"transition\": {\"type\": \"fade\", \"dur\": 0.4}")
         _effects(raw, rep, lid)
         _layer_sound(raw, rep, lid)
         return
@@ -483,6 +491,7 @@ def _layer(raw, rep: Report, path: str, comps: dict):
                     {"text": "\"text\": \"Hello\"", "image": "\"src\": \"photo.jpg\"", "video": "\"src\": \"clip.mp4\""}
                     .get(t, ""))
     _values(raw, t, rep, lid)
+    _structure(raw, t, rep, lid)
     _effects(raw, rep, lid)
     _layer_sound(raw, rep, lid)
     if isinstance(raw.get("box"), dict):
@@ -501,6 +510,25 @@ def _layer(raw, rep: Report, path: str, comps: dict):
     if t == "group" and isinstance(kids, list):
         for i, k in enumerate(kids):
             _layer(k, rep, f"{lid}.children[{i}]", comps)
+
+
+def _number(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _structure(raw: dict, t: str, rep: Report, lid):
+    """Keys with a fixed shape, checked here so a wrong one is an error instead of a crash while drawing."""
+    u = raw.get("uniforms")
+    if u is not None and not isinstance(u, dict):
+        rep.add("error", "bad-value", lid, f"uniforms must be an object like {{\"speed\": 2}}, got {type(u).__name__}")
+    if t == "path" and raw.get("d") is not None and not isinstance(raw["d"], str):
+        rep.add("error", "bad-value", lid, f"d is {raw['d']!r}; it is an SVG path like \"M0 0 L100 0\"")
+    pts = raw.get("points")
+    if t in ("path", "line") and pts is not None and not (
+            isinstance(pts, list) and all(isinstance(p, (list, tuple)) and len(p) == 2 and all(map(_number, p))
+                                          for p in pts)):
+        rep.add("error", "bad-value", lid, "points must be a list of [x, y] number pairs",
+                "\"points\": [[0, 0], [100, 50]]")
 
 
 def _effects(raw: dict, rep: Report, lid):
@@ -568,7 +596,7 @@ def _model(raw: dict, rep: Report, lid):
                 rep.add("error", "bad-value", lid, f"ground {k} is {v!r}; it takes a number")
     elif gr is not None and not isinstance(gr, bool):
         rep.add("error", "bad-value", lid, f"ground is {gr!r}; it takes true or an object like {{\"opacity\": 0.5}}")
-    if isinstance(raw.get("fill"), dict):
+    if isinstance(raw.get("fill"), dict) and not {"to", "keys"} & set(raw["fill"]):
         rep.add("error", "bad-value", lid, "a model's fill is one colour; gradients do not apply to models",
                 "use a colour, and give parts their own fill for more than one")
     parts = raw.get("parts")
@@ -594,6 +622,16 @@ def _audio_values(a: dict, rep: Report, lid, where: str):
     p = a.get("pan")
     if p is not None and (isinstance(p, bool) or not isinstance(p, (int, float)) or not -1 <= p <= 1):
         rep.add("error", "bad-value", lid, f"{where}pan is {p!r}; it must be a number from -1 (left) to 1 (right)")
+    for k in ("volume", "fadeIn", "fadeOut"):
+        v = a.get(k)
+        if v is not None and not (_number(v) and v >= 0):
+            rep.add("error", "bad-value", lid, f"{where}{k} is {v!r}; it must be a number, 0 or more",
+                    "use \"gain\" in dB for a level that changes over time" if k == "volume" else "use seconds")
+    g = a.get("gain")
+    if g is not None and not (_number(g) or isinstance(g, list) or (isinstance(g, str) and g.startswith("="))
+                              or (isinstance(g, dict) and {"to", "keys"} & set(g))):
+        rep.add("error", "bad-value", lid, f"{where}gain is {g!r}; it is dB as a number, keyframes or an expression",
+                "\"gain\": -6, or \"gain\": [[0, -20], [2, 0]]")
     t, r = a.get("text"), a.get("rate")
     if t is not None and not (isinstance(t, str) and t.strip()):
         rep.add("error", "bad-value", lid, f"{where}text is {t!r}; it is the words to speak, as a string")
@@ -684,6 +722,7 @@ def normalize(spec) -> tuple[dict, Report]:
     for k, lo, hi in (("w", 16, 16384), ("h", 16, 16384), ("fps", 1, 240)):
         v = cv.get(k)
         if v is None:
+            cv.pop(k, None)  # null is the default
             continue
         if isinstance(v, str) and _lengthish(v) and not v.strip().endswith("%"):
             v = cv[k] = float(re.sub(r"[a-z]+", "", v))
@@ -692,12 +731,27 @@ def normalize(spec) -> tuple[dict, Report]:
         elif not lo <= v <= hi:
             rep.add("error", "bad-canvas", None, f"canvas.{k} is {v:g}; it must be between {lo} and {hi}")
     d = cv.get("duration")
-    if isinstance(d, (int, float)) and not isinstance(d, bool) and d <= 0:
-        rep.add("error", "bad-canvas", None, f"canvas.duration must be greater than 0 (got {d})",
+    if isinstance(d, (int, float)) and not isinstance(d, bool) and not (d > 0 and math.isfinite(d)):
+        rep.add("error", "bad-canvas", None, f"canvas.duration must be a number of seconds greater than 0 (got {d})",
                 "use seconds, or \"auto\" to end with the last layer")
+    if cv.get("bg") is not None and not isinstance(cv["bg"], (str, dict)):
+        rep.add("error", "bad-colour", None, f"canvas.bg is {cv['bg']!r}; it is a colour like \"#0a0c10\" or a "
+                "gradient object", "use #rrggbb, or \"transparent\"")
     if cv.get("bg") is not None and isinstance(cv["bg"], str) and not cv["bg"].startswith("$") \
             and not C.is_color(cv["bg"]) and cv["bg"] not in ("transparent", "none"):
         rep.add("error", "bad-colour", None, f"canvas.bg '{cv['bg']}' is not a colour", "use #rrggbb")
+    for k, example in (("theme", '{"accent": "#ff633f"}'), ("markers", '{"drop": 2.5}'),
+                       ("grade", '{"vignette": 0.4}'), ("components", '{"card": {"layers": [...]}}')):
+        if spec.get(k) is not None and not isinstance(spec[k], dict):
+            rep.add("error", "bad-value", None, f"{k} must be an object like {example}, got {type(spec[k]).__name__}")
+    mb = spec.get("motionBlur")
+    if isinstance(mb, (int, float)) and not isinstance(mb, bool):
+        spec["motionBlur"] = {"samples": int(mb)}
+        rep.add("info", "renamed-value", None, f"motionBlur {mb} read as {{\"samples\": {int(mb)}}}",
+                f"write \"motionBlur\": {{\"samples\": {int(mb)}}}")
+    elif mb not in (None, False) and not isinstance(mb, dict):
+        rep.add("error", "bad-value", None, f"motionBlur must be an object like {{\"samples\": 8, \"shutter\": 0.5}}, "
+                f"got {mb!r}")
     if isinstance(spec.get("grade"), dict):
         _keys(spec["grade"], GRADE, {"saturation": "saturate"}, rep, None, "grade: ")
     if isinstance(spec.get("motionBlur"), dict):
@@ -716,8 +770,12 @@ def normalize(spec) -> tuple[dict, Report]:
         spec.pop("camera")
     _light(spec, rep, None)
     audio = spec.get("audio")
-    if isinstance(audio, dict):
+    if isinstance(audio, (dict, str)):
         audio = spec["audio"] = [audio]
+    elif audio is not None and not isinstance(audio, list):
+        rep.add("error", "bad-value", None, f"audio is a list of files or objects with 'src', got {audio!r}",
+                "\"audio\": [{\"src\": \"music.mp3\"}]")
+        audio = spec["audio"] = []
     for i, a in enumerate(audio or []):
         if isinstance(a, str):
             audio[i] = a = {"src": a}

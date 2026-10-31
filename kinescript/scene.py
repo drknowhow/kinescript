@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import re
 from pathlib import Path
 
@@ -64,7 +65,11 @@ class Layer:
         p = self.props.get(name)
         if p is None:
             return DEFAULTS.get(name, default)
-        return p.at(t, self.dur, T, i)
+        try:
+            return p.at(t, self.dur, T, i)
+        except (ArithmeticError, ValueError, TypeError) as e:  # a user expression, e.g. 1/(t-0.7) at t=0.7
+            raise SceneError(f"layer '{self.id}': {name} failed at t={t:.3f}s (scene {T:.3f}s): "
+                             f"{type(e).__name__}: {e}", layer=self.id) from e
 
     def visible(self, T: float) -> bool:
         return self.t_in <= T < self.t_out and not self.raw.get("hidden")
@@ -192,7 +197,8 @@ class Scene:
                     try:
                         v = prop.at(t, d, layer.t_in + t, 0)
                     except Exception as e:  # noqa: BLE001 - any failure inside a user expression
-                        self.note("error", "bad-expression", layer.id, f"{name} failed at t={t:.2f}s: {e}")
+                        self.note("error", "bad-expression", layer.id,
+                                  f"{name} failed at t={t:.2f}s: {type(e).__name__}: {e}")
                         break
                     if name in schema.COLOR_KEYS:
                         if isinstance(v, str):
@@ -203,6 +209,25 @@ class Scene:
                         self.note("error", "bad-value", layer.id, f"{name} is {v!r} at t={t:.2f}s; expected a number",
                                   "use a number, a percentage like '50%', or an expression starting with '='")
                         break
+
+    def check_expressions(self, budget: int = 200_000):
+        """An expression can fail at one moment only, like 1/(t-0.7) at t=0.7. `kine check` evaluates each at every
+        frame its layer is on (every few frames past `budget` evaluations in all), so it finds that, not the render.
+        Not part of loading: render workers load the scene too, and 2400 expressions take about 0.15 s."""
+        spans = [(L, name, prop, math.ceil(L.t_in * self.fps - 1e-6), math.ceil(L.t_out * self.fps - 1e-6))
+                 for L in self.all_layers() for name, prop in L.props.items()
+                 if not prop.static and isinstance(prop.value, str)]
+        stride = max(1, -(-sum(n1 - n0 for *_, n0, n1 in spans) // budget))
+        for layer, name, prop, n0, n1 in spans:
+            for n in range(n0, n1, stride):
+                T = n / self.fps
+                t = T - layer.t_in
+                try:
+                    prop.at(t, layer.dur, T, 0)
+                except Exception as e:  # noqa: BLE001 - any failure inside a user expression
+                    self.note("error", "bad-expression", layer.id, f"{name} failed at t={t:.2f}s (frame {n}): "
+                              f"{type(e).__name__}: {e}", "guard the expression, e.g. max(…, 0.001) under a division")
+                    break
 
     def path(self, src: str) -> str:
         p = Path(src)
@@ -360,8 +385,8 @@ class Scene:
             pctx = parent.ctx if parent and parent.ctx else self.ctx
             try:
                 for k, v in raw.items():
-                    if k in ("fill", "stroke", "emph", "active") and not isinstance(v, dict):
-                        layer.props[k] = compile_prop(k, v, pctx)
+                    if k in schema.COLOR_KEYS and (not isinstance(v, dict) or "to" in v or "keys" in v):
+                        layer.props[k] = compile_prop(k, v, pctx)  # a colour, or a tween of one; not a gradient
                     elif k not in STRUCT:
                         layer.props[k] = compile_prop(k, v, pctx)
                 for un, uv in (raw.get("uniforms") or {}).items():

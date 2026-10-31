@@ -87,6 +87,43 @@ def test_expression_rejects_attribute_access():
     assert compile_prop("x", "=clamp(t*2, 0, 1)", Ctx(10, 10, 30)).at(0.25, 1) == 0.5
 
 
+def test_huge_powers_and_repeated_lists_fail_fast():
+    # Exact integer power made 9**9**9 run for hours inside check; '**' is a float power now.
+    assert compile_prop("x", "=2**3 + 4**0.5", Ctx(10, 10, 30)).at(0, 1) == 10
+    with pytest.raises(k.SceneError, match="OverflowError"):
+        k.Scene(scene([{"id": "c", "type": "circle", "r": 10, "x": "=9**9**9"}]))
+    with pytest.raises(ValueError, match="not on text or lists"):
+        compile_prop("x", "=[0]*999999999", Ctx(10, 10, 30))
+
+
+def test_an_expression_that_fails_at_one_frame_is_reported_by_check():
+    r = check(scene([{"id": "c", "type": "circle", "r": 10, "x": "=100+1/(t-0.7)", "y": 50}], duration=1))
+    assert [(i["code"], i["layer"]) for i in r["issues"] if i["level"] == "error"] == [("bad-expression", "c")]
+
+
+def test_an_expression_failing_mid_render_names_its_layer():
+    s = k.Scene(scene([{"id": "c", "type": "circle", "r": 10, "x": "=100+1/(t-0.71)", "y": 50}], duration=1))
+    with pytest.raises(k.SceneError, match=r"layer 'c': x failed at t=0\.710s"):
+        Renderer(s, backend="cpu").draw(0.71)  # between frames, so check could not see it
+
+
+def test_colour_tweens_animate_fill_and_stroke():
+    tween = {"from": "#ff0000", "to": "#0000ff", "dur": 1}
+    spec = scene([{"id": "r", "type": "rect", "x": "50%", "y": "50%", "w": 200, "h": 100, "fill": tween,
+                   "stroke": dict(tween, to="#00ff00"), "strokeWidth": 20}], bg="#000000", duration=2)
+    r = Renderer(k.Scene(spec), backend="cpu")
+    assert tuple(r.frame(0)[90, 160][:3]) == (255, 0, 0)  # the fill used to draw as a flat grey gradient
+    f = r.frame(40)
+    assert tuple(f[90, 160][:3]) == (0, 0, 255) and tuple(f[90, 60][:3]) == (0, 255, 0)  # the stroke used to raise
+
+
+def test_a_css_gradient_stroke_draws():
+    spec = scene([{"id": "r", "type": "rect", "x": "50%", "y": "50%", "w": 200, "h": 100, "strokeWidth": 20,
+                   "stroke": "linear-gradient(to right, #ff0000, #0000ff)"}], bg="#000000")
+    f = _frame(spec, 0)
+    assert f[90, 61][0] > 200 > f[90, 61][2] and f[90, 258][2] > 200 > f[90, 258][0]
+
+
 def test_colour_keyframes_mix_in_oklab():
     p = compile_prop("fill", [[0, "#ff0000"], [1, "#0000ff", "linear"]], Ctx(10, 10, 30))
     mid = p.at(0.5, 1)
