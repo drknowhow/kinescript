@@ -24,7 +24,7 @@
   image or video without a stroke, whose only effect is its opacity now carries that opacity in its paint instead
   of drawing into an offscreen layer of its own. The `expressions` stress scene (600 fading circles) draws a frame
   in a median 8.2 ms instead of 26.3 on the GPU and in about 15 ms instead of 45 s on the CPU; `layers-2000` in
-  21.0 ms instead of 24.3 on the GPU and 26-45 ms instead of 35 s on the CPU. Pixels move by at most 3 levels.
+  21.0 ms instead of 24.2 on the GPU and 24-46 ms instead of 35 s on the CPU. Pixels move by at most 3 levels.
   Strokes, text, groups, shaders and models keep the offscreen layer: a stroke over a fill, or a hairline's joints,
   would darken where the two draws overlap.
 - An output that can't be written (a read-only file, one another program holds, or a folder this account can't
