@@ -143,8 +143,9 @@ def _probe(src: str, mtime: int, size: int) -> dict:
     pf, codec = (v or {}).get("pix_fmt", ""), (v or {}).get("codec_name", "")
     alpha = bool(v) and (pf.startswith(_ALPHA_FMTS) or (tags.get("alpha_mode") == "1" and codec in ALPHA_DECODERS))
     # video: moving pictures to decode. A TS cut with -c copy can declare a video stream and hold no frame of it.
+    # start: the file's own time of its first frame or sample, which source seconds count from.
     return {"duration": dur, "w": w, "h": h, "fps": fps, "audio": a, "video": bool(v) and w > 0 and h > 0 and not image,
-            "image": image, "codec": codec, "alpha": alpha, "rotation": rot,
+            "image": image, "codec": codec, "alpha": alpha, "rotation": rot, "start": start,
             "pix_fmt": pf, "color_space": (v or {}).get("color_space", "")}
 
 
@@ -245,7 +246,9 @@ def _image(src: str, mtime: int, size: int) -> skia.Image:
 class VideoSource:
     """Delivers frames of one clip, already resampled to the scene fps and sized to the
     layer box, so a sequential render reads each frame exactly once. Out-of-order access
-    (contact sheets, probes) reopens the pipe at the requested time."""
+    (contact sheets, probes) reopens the pipe at the requested time.
+    A source time shows the source frame nearest it, the earlier one when two are equally near, whether the pipe
+    was opened there or read on to it: a frame is a function of its time, not of where the render started."""
 
     def __init__(self, src: str, w: int, h: int, fps: float, speed: float = 1.0, fit: str = "cover", ctx=None):
         """ctx: a GPU context. With one, YUV clips without alpha arrive as yuv420p (1.5 bytes a pixel
@@ -258,7 +261,9 @@ class VideoSource:
         # A VP8/VP9 clip with alpha (Kinescript's own transparent .webm, for one) is read by libvpx, which keeps it.
         self.decoder = alpha_decoder(self.info)
         self.end: float | None = None  # the time of the last frame, once a read has run out of picture before it
-        self.held_at: float | None = None  # the time held() opened at, while the pipe still shows that frame
+        # A frame up to this far after a time is the one shown there: the nearest, the earlier of two equally near.
+        # The microsecond keeps an exact tie on the same side however the decoder's arithmetic rounds it.
+        self.near = 0.5 / (self.info["fps"] or fps) - 1e-6
         if self.ctx is not None:  # 4:2:0 planes need even sizes
             self.w, self.h = max(2, self.w - self.w % 2), max(2, self.h - self.h % 2)
             self.yuv_info = skia.YUVAInfo((self.w, self.h), skia.YUVAInfo.kY_U_V, skia.YUVAInfo.k420,
@@ -271,9 +276,14 @@ class VideoSource:
 
     def _vf(self) -> str:
         w, h = self.w, self.h
-        # eof_action=pass: resampled to another fps, the last frame of the file was dropped when the end of the file
-        # fell before the next output frame's time, so a clip opened near its end held the frame before its last one.
-        timing = f"setpts=(PTS-STARTPTS)/{self.speed},fps={self.fps}:eof_action=pass"
+        # Output frame k is source time t0 + k * speed / fps and shows the last frame at or before that time plus
+        # self.near, from any t0. Times are the file's own (-copyts), in nanoseconds, measured from t0, and fps
+        # rounds up. Before, the grid started at the first frame decoded (PTS-STARTPTS), up to half a source frame
+        # from t0, and fps rounded to the nearest output frame: a 30 fps clip at 24 fps showed frame 8 at 0.25 s
+        # played from 0 and frame 7 opened there. eof_action=pass keeps a last frame that ends between output frames.
+        off = (self.info["start"] + self.t0 + self.near) * 1e9
+        timing = (f"settb=1/1000000000,setpts=(PTS-({off!r}))/{self.speed!r},"
+                  f"fps={self.fps}:start_time=0:round=up:eof_action=pass")
         if self.ctx is not None:  # cover or stretch, kept in YUV and limited range
             fit = ":force_original_aspect_ratio=increase" if self.fit == "cover" else ""
             crop = f",crop={w}:{h}" if self.fit == "cover" else ""
@@ -294,13 +304,11 @@ class VideoSource:
     def _open(self, t: float):
         self.close()
         self.t0 = max(0.0, t)
-        # Seek half a source frame early: -ss drops the frames before it, and 41/30 written as 1.3667 lies past
-        # frame 41's own time, so a clip opened there started a frame late. The first frame is now the nearest one.
-        # Rounded down, never up: a 60 fps scene asks for times exactly half a 30 fps frame past one, and 0.96667
-        # written as 0.9667 dropped that frame too, where a clip played through holds it for that output frame.
-        ss = int(max(0.0, self.t0 - 0.5 / max(self.info["fps"] or self.fps, 1)) * 1e4) / 1e4
+        # -ss drops the frames before it, and the frame t0 shows can lie half a source frame before t0: seek a frame
+        # and a half early, which also leaves room for timestamps that wander (phone clips).
+        ss = max(0.0, self.t0 - 1.5 / max(self.info["fps"] or self.fps, 1))
         dec = ["-c:v", self.decoder] if self.decoder else []
-        cmd = [FFMPEG, "-v", "error", *dec, "-ss", f"{ss:.4f}", "-i", self.src, "-an", "-vf", self._vf(),
+        cmd = [FFMPEG, "-v", "error", *dec, "-copyts", "-ss", f"{ss:.6f}", "-i", self.src, "-an", "-vf", self._vf(),
                "-f", "rawvideo", "-pix_fmt", "yuv420p" if self.ctx is not None else "rgba", "-"]
         self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                      bufsize=self.nbytes * 2, creationflags=_NOWIN)
@@ -363,13 +371,16 @@ class VideoSource:
     def at(self, src_t: float) -> skia.Image | None:
         """Frame showing source time src_t (seconds into the file). Past the last frame, the last frame: what a
         clip played up to that time holds once its picture runs out."""
-        self.held_at = None
         dur = self.info["duration"]
         src_t = max(0.0, min(src_t, dur) if dur else src_t)
         if self.end is not None:
             src_t = min(src_t, self.end)
-        want = round((src_t - self.t0) / self.speed * self.fps)
-        if self.proc is None or want < self.index or want > self.index + int(self.fps * 2):
+        k = (src_t - self.t0) / self.speed * self.fps
+        want = round(k)
+        # A time between the pipe's output frames (a held last frame, a loop starting over) opens at that time:
+        # read on to the output frame next to it, it would show that frame's picture instead of its own.
+        if (self.proc is None or want < self.index or want > self.index + int(self.fps * 2)
+                or abs(k - want) > 1e-6):
             self._open(src_t)
             if not self._read():
                 self._last(src_t)
@@ -377,17 +388,6 @@ class VideoSource:
         while self.index < want:
             if not self._read():
                 break
-        return self.frame
-
-    def held(self, src_t: float) -> skia.Image | None:
-        """The frame a clip that has played out holds, src_t being the time of its last frame: always the frame a
-        fresh open at src_t shows. A pipe that reached src_t by reading on from an earlier time can land on the
-        source frame either side of it when the scene's fps is not the clip's, so a hold read that way could change
-        partway through, where one render chunk ends and the next begins. Opened once; later calls reuse it."""
-        if self.held_at != src_t or self.proc is None:
-            self.close()
-            self.at(src_t)
-            self.held_at = src_t
         return self.frame
 
     def _last(self, t: float):

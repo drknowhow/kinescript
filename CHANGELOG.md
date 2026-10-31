@@ -167,6 +167,12 @@
   or the end of the file; past the file it froze the last frame silently. The held frame is the same however a
   render reaches it: a 30 fps clip in a 24 fps scene held frame 28 or 29 depending on where a render worker
   started, and opened past its picture it held the frame before its last.
+- A clip at another frame rate or `speed` shows the same frame however a render reaches it: in order, in a still,
+  or from a render worker starting partway through. A 30 fps clip in a 24 fps scene showed source frame 3 at frame
+  2 played from the start and frame 2 rendered on its own (one frame in four differed; at `speed` 1.5, every other
+  one), and a worker starting at frame 11 showed source frame 17 at frame 13 where one render showed 16. Each frame
+  now shows the source frame nearest its time, the earlier of two equally near, from any start, and footage shows
+  its frame's picture on every motion-blur sub-frame.
 - `kine probe` of a PNG says `image: true` with fps 0; ffprobe gives a still 25 fps, so it said `image: false`. A
   model file (`.glb`, `.gltf`, `.obj`) gives its triangles, vertices, materials and size instead of an ffprobe
   error. A media probe names its `kind` (video, audio, image or model), and a scene's probe has `ok` as a media
