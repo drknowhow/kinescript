@@ -336,6 +336,44 @@ def test_check_warns_when_the_key_light_is_behind_a_model():
     assert not [i for i in check(_key({"azimuth": 60}))["issues"] if i["code"] == "light-behind"]
 
 
+def _ball(**layer):
+    return _model(dict({"shape": "sphere", "r": 60, "detail": "high", "fill": "#ffffff", "metal": 1, "shine": 1,
+                        "light": {"key": 0, "fill": 0, "ambient": 0, "rim": 0}}, **layer), duration=1)
+
+
+def test_a_chrome_ball_reflects_the_sky_above_and_the_floor_below():
+    f = _frame(_ball(env={"top": "#ffffff", "horizon": "#808080", "bottom": "#000000"}), 0).astype(int)
+    above, below = f[45:80, 140:180, :3].mean(), f[100:135, 140:180, :3].mean()
+    assert above > 150 and below < 80
+    red = _frame(_ball(env={"top": "#ff0000", "horizon": "#ff0000", "bottom": "#ff0000"}), 0)
+    assert red[90, 160, 0] > 200 and red[90, 160, 1] < 20
+    assert _frame(_ball(), 0)[60:120, 100:220, :3].max() == 0  # no env, no light: nothing to see
+
+
+def test_a_matte_model_reflects_nothing():
+    matte = dict(metal=0, shine=0, light="studio")
+    assert _frame(_ball(**matte), 0).tobytes() == _frame(_ball(env="chrome", **matte), 0).tobytes()
+
+
+def test_the_environment_stays_in_the_world_as_the_camera_tilts():
+    def frame(rx):
+        spec = _ball(env={"top": "#ffffff", "horizon": "#808080", "bottom": "#000000"})
+        spec["camera"] = {"rotateX": rx}
+        return _frame(spec, 0).astype(int)
+    # Level, the ball's middle reflects the horizon; from above, it reflects the sky behind the camera.
+    assert frame(50)[85:95, 150:170, :3].mean() > frame(0)[85:95, 150:170, :3].mean() + 60
+
+
+def test_gpu_and_cpu_agree_on_reflections():
+    spec = _ball(env="sunset", fill="#e0b54a", metal=0.8, shine=0.7, light="studio")
+    cpu = _frame(spec, 0, "cpu").astype(int)
+    try:
+        gpu = _frame(spec, 0, "gpu").astype(int)
+    except RuntimeError:
+        pytest.skip("no GPU")
+    assert np.abs(cpu - gpu).mean() < 1.5
+
+
 def test_model_parts_hide_each_other_by_depth_not_list_order():
     spec = _model({"light": "flat", "parts": [{"shape": "sphere", "r": 30, "z": 80, "fill": "#ff0000"},
                                               {"shape": "cube", "w": 100, "fill": "#0000ff"}]})

@@ -279,6 +279,11 @@ DEPTH AND CAMERA (3D)
             "range": 1000}]. A directional light takes from, azimuth, elevation and follow like the
             key; a point light sits at x, y, z in canvas px (z toward the viewer) and lights each
             model from where the model's centre is, at half strength range px away. These animate.
+  env       top level, or on one model: what shiny and metal models reflect, fixed in the world:
+            studio | sunset | night | chrome, or {"preset": "studio", "top": "#f6f3ec", "horizon":
+            "#7d828c", "bottom": "#23252b", "amount": 1}. Metal reflects it tinted by its fill,
+            anything else by its shine, most at grazing angles; shine 0 reflects a blur of it and a
+            matte model none. Unset (the default), nothing is reflected. The colours and amount animate.
   Triangles are sorted far to near within one model, so where two parts of one model cut through
   each other the seam is stepped: let parts touch rather than cross. Separate layers draw in list
   order, except in a stage (a group with "sort": "pixel", see DEPTH AND CAMERA), where they meet
@@ -299,6 +304,10 @@ DEPTH AND CAMERA (3D)
   A product turntable from a model file, on a soft floor shadow:
     {"id": "product", "type": "model", "src": "rocket.glb", "x": "50%", "y": "46%", "h": 600,
      "rotateY": [[0, 0], ["end", 360]], "ground": true, "enter": {"name": "build", "dur": 1.6}}
+  A chrome logo reflecting a sunset as it turns:
+    {"id": "chrome", "type": "model", "shape": "torus", "r": 200, "tube": 60, "x": "50%", "y": "50%",
+     "detail": "high", "fill": "#d9dce1", "metal": 1, "shine": 0.95, "env": "sunset",
+     "rotateX": [[0, 70], ["end", 20]], "rotateY": [[0, -30], ["end", 30]]}
   A planet whose key light sweeps round it, with a cool light from the right and a ring that glows:
     {"id": "planet", "type": "model", "x": "50%", "y": "50%", "detail": "high", "rotateY": [[0, -20], ["end", 20]],
      "light": {"preset": "dramatic", "azimuth": [[0, -70], ["end", 40]]},

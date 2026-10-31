@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `env`, for the scene or one model, is what shiny and metal models reflect: `studio`, `sunset`, `night`, `chrome`,
+  or `top`, `horizon` and `bottom` colours with an `amount`, all of which animate. The environment is fixed in the
+  world, so tilting the camera moves a chrome ball's horizon. Metal reflects it tinted by its fill; other materials
+  by their shine and a Fresnel term, so gloss shows at grazing angles and a matte model reflects nothing. On the
+  GPU the reflection is per pixel, on the CPU per vertex, as the rest of the shading. `examples/reflections.json`
+  renders in 2.1 s on the GPU against 2.05 s without `env`, and in 9.8 s on the CPU either way. Models without `env`
+  draw the same bytes: `bench/same.py` finds no difference against main on either backend.
 - Lights animate. Every amount of `light` (`key`, `fill`, `ambient`, `rim`), its colour and two new angles,
   `azimuth` (degrees round from the front) and `elevation` (degrees up), take keyframes, tweens and expressions,
   so a key light sweeping across a model is one key. `"follow": "world"` keeps a light in the scene, so orbiting

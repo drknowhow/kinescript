@@ -130,7 +130,9 @@ the bullets above:
 - The GPU shader gets no fragment position, so a point light lights a whole model from where its centre is.
 - `glow` is a floor, max(lit, fill x glow), not an addition: added to a lit surface it washed the colour to white.
 - glTF `emissiveFactor` is not read yet.
-Still to come, each its own PR: `env`, `fog`, and shadows (`ground` `"from": "light"`, stage `shadows`).
+`env` (branch `env-reflections`): built. The reflected view assumes the camera looks straight down -z at every
+pixel (the shader has no position), and roughness is a blend toward the environment's mean colour as shine falls.
+Still to come, each its own PR: `fog`, and shadows (`ground` `"from": "light"`, stage `shadows`).
 
 ### Phase 3: camera
 

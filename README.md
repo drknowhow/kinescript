@@ -65,7 +65,8 @@ no depth draw exactly as before.
   `metal`, `rim`, `bands` (toon steps) and `glow`. `light`, for the scene or one model, takes `studio`, `soft`,
   `dramatic` or `flat`, or your own amounts, and every amount, its `azimuth`, `elevation` and colour animate. It
   follows the camera, or with `"follow": "world"` stays in the scene as the camera orbits. `lights` adds up to three
-  more, directional or point. `explode` sends faces outward and the `build` motion assembles a model.
+  more, directional or point, and `env` gives shiny and metal models an environment to reflect. `explode` sends
+  faces outward and the `build` motion assembles a model.
 - **Extruded text and SVG paths.** `"shape": "text"` extrudes letters in any font and `"shape": "path"` extrudes
   SVG path data, filled, or stroked with `strokeWidth` for line icons. Both take a `depth` and a 45-degree `bevel`.
 - **Model files.** `src` reads `.glb` and `.gltf` (glTF 2.0) and `.obj` with its `.mtl`: node transforms, base
@@ -239,6 +240,8 @@ More scenes in [`examples/`](https://github.com/drknowhow/kinescript/tree/main/e
 - [`lights.json`](https://github.com/drknowhow/kinescript/blob/main/examples/lights.json): a ringed planet under a
   key light that stays in the scene as the camera orbits, a blue light from the side, a warm point light below and
   a glowing ring, 6 s.
+- [`reflections.json`](https://github.com/drknowhow/kinescript/blob/main/examples/reflections.json): chrome, gold
+  and gloss reflecting their environments as the camera turns, 6 s.
 - [`voiceover.json`](https://github.com/drknowhow/kinescript/blob/main/examples/voiceover.json): titles cued from
   the words of a voice-over, karaoke captions of it, and a music bed that dips under it, 5.4 s.
 - [`narrated.json`](https://github.com/drknowhow/kinescript/blob/main/examples/narrated.json): the same idea

@@ -1,0 +1,18 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 6, "bg": {"radial": [0.5, 0.42], "stops": ["#1f222c", "#0b0c10"]}},
+  "camera": {"rotateY": [[0, -25], ["end", 25, "inOutSine"]], "rotateX": [[0, 4], ["end", 18, "inOutSine"]]},
+  "light": "studio",
+  "env": "studio",
+  "layers": [
+    {"id": "chrome", "type": "model", "shape": "sphere", "r": 170, "x": 480, "y": "48%", "detail": "high",
+     "fill": "#d9dce1", "metal": 1, "shine": 0.95, "ground": {"y": 760, "opacity": 0.5}},
+    {"id": "gold", "type": "model", "shape": "torus", "r": 150, "tube": 52, "x": 960, "y": "48%", "detail": "high",
+     "fill": "#e0b54a", "metal": 0.9, "shine": 0.75, "env": "sunset", "rotateX": [[0, 70], ["end", 35]],
+     "rotateY": [[0, 0], ["end", 60]], "ground": {"y": 760, "opacity": 0.5}},
+    {"id": "gloss", "type": "model", "shape": "cube", "w": 240, "x": 1440, "y": "48%", "detail": "high",
+     "fill": "#ff633f", "shine": 0.9, "rotateX": 20, "rotateY": [[0, 20], ["end", 110]],
+     "ground": {"y": 760, "opacity": 0.5}},
+    {"id": "label", "type": "text", "text": "chrome and gold reflect the environment, gloss at grazing angles",
+     "x": "50%", "y": "90%", "size": 38, "weight": 400, "fill": "$muted", "fixed": true, "at": 0.4, "enter": "fade"}
+  ]
+}

@@ -30,7 +30,7 @@ from .timing import KEYWORDS, LIMIT, finite as _finite_secs, parse_clock, show
 COMMENT = {"note", "notes", "comment", "comments", "description", "name"}
 
 TOP = {"canvas", "theme", "markers", "grade", "motionBlur", "audio", "components", "layers", "meta", "version",
-       "$schema", "camera", "light", "lights", "mix"}
+       "$schema", "camera", "light", "lights", "env", "mix"}
 TOP_ALIAS = {"layer": "layers", "elements": "layers", "objects": "layers", "items": "layers", "scene": "layers",
              "children": "layers", "tracks": "layers", "motion_blur": "motionBlur", "colorGrade": "grade",
              "music": "audio", "sound": "audio", "marker": "markers"}
@@ -79,6 +79,9 @@ LIGHT_ALIAS = {"colour": "color", "direction": "from", "dir": "from", "position"
 MORE_LIGHT = {"type", "from", "azimuth", "elevation", "follow", "x", "y", "z", "color", "intensity", "range"}
 MORE_LIGHT_ALIAS = {"colour": "color", "kind": "type", "direction": "from", "dir": "from", "strength": "intensity",
                     "amount": "intensity", "falloff": "range", "angle": "azimuth", "height": "elevation"}
+ENV = {"preset", "top", "horizon", "bottom", "amount"}
+ENV_ALIAS = {"name": "preset", "sky": "top", "ground": "bottom", "floor": "bottom", "middle": "horizon",
+             "strength": "amount", "intensity": "amount"}
 MATERIAL = {"fill", "shine", "metal", "rim", "bands", "glow"}
 PART = MATERIAL | {"shape", "w", "h", "depth", "r", "tube", "x", "y", "z", "rotateX", "rotateY", "rotate", "scale",
                    "text", "size", "font", "weight", "italic", "letterSpacing", "lineHeight", "d", "strokeWidth",
@@ -116,8 +119,8 @@ TYPES: dict[str, set[str]] = {
     "shader": {"preset", "uniforms", "sksl", "w", "h"},
     "group": {"children", "layers", "w", "h", "clip", "radius", "fill", "sort"},
     "model": PART - {"x", "y", "z", "rotateX", "rotateY", "rotate", "scale"} | {"detail", "parts", "explode",
-                                                                              "draw", "light", "lights", "src",
-                                                                              "ground"},
+                                                                              "draw", "light", "lights", "env",
+                                                                              "src", "ground"},
 }
 SEQUENCE = COMMON | {"clips", "transition", "fit", "volume", "w", "h"}
 TRANSITION = {"type", "dur"}
@@ -204,7 +207,7 @@ SCALAR = {"x", "y", "w", "h", "r", "opacity", "scale", "scaleX", "scaleY", "rota
 REQUIRED = {"text": ("text",), "image": ("src",), "video": ("src",), "path": ("d", "points"), "line": ("points",),
             "captions": ("cues", "src", "voice"), "shader": ("preset", "sksl"), "model": ("shape", "parts", "src")}
 # Keys whose value is an object of their own: never a tween, even with a "from" key (a light's direction).
-OBJECTS = {"light", "lights", "ground", "shadow", "box", "fx", "uniforms", "sound", "enter", "exit", "parts",
+OBJECTS = {"light", "lights", "env", "ground", "shadow", "box", "fx", "uniforms", "sound", "enter", "exit", "parts",
            "transition"}
 # Props that cannot be below 0, and the least each may be.
 AT_LEAST = {"radius": 0, "r": 0, "sides": 3, "blur": 0, "strokeWidth": 0, "size": 0}
@@ -1025,6 +1028,7 @@ def _light(obj: dict, rep: Report, lid):
     checked here."""
     from .render3d import LIGHTS, MORE_LIGHTS
     _more_lights(obj, rep, lid, MORE_LIGHTS)
+    _env(obj, rep, lid)
     v = obj.get("light")
     if isinstance(v, str):
         s = v if v in LIGHTS else suggest(v, LIGHTS)
@@ -1039,6 +1043,31 @@ def _light(obj: dict, rep: Report, lid):
         _light_values(v, ("key", "fill", "ambient", "rim", "azimuth", "elevation"), rep, lid, "light ")
     elif v is not None:
         rep.add("error", "bad-value", lid, f"light must be a preset ({', '.join(LIGHTS)}) or an object, got {v!r}")
+
+
+def _env(obj: dict, rep: Report, lid):
+    """`env` is an environment preset name or an object of its colours and amount."""
+    from .render3d import ENVS
+    v = obj.get("env")
+    if isinstance(v, str):
+        s = v if v in ENVS else suggest(v, ENVS)
+        if s and s.lower() == v.lower():
+            obj["env"] = s
+        else:
+            rep.add("error", "bad-value", lid, "env: " + unknown("environment", v, ENVS))
+    elif isinstance(v, dict):
+        _keys(v, ENV, ENV_ALIAS, rep, lid, "env: ")
+        if v.get("preset") is not None and v["preset"] not in ENVS:
+            rep.add("error", "bad-value", lid, "env preset: " + unknown("environment", v["preset"], ENVS))
+        if "amount" in v and not _tweens(v["amount"]):
+            rep.add("error", "bad-value", lid, f"env amount is {_show(v['amount'])}; it takes a number, or keyframes")
+        for k in ("top", "horizon", "bottom"):
+            if isinstance(v.get(k), str):
+                _colour(v[k], f"env {k}", rep, lid)
+            elif v.get(k) is not None and not _tweens(v[k], colour=True):
+                rep.add("error", "bad-value", lid, f"env {k} is {_show(v[k])}; it takes a colour, or keyframes")
+    elif v is not None:
+        rep.add("error", "bad-value", lid, f"env must be a preset ({', '.join(ENVS)}) or an object, got {_show(v)}")
 
 
 def _more_lights(obj: dict, rep: Report, lid, most: int):
