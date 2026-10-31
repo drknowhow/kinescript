@@ -1,0 +1,59 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "bg": "#0b0706"},
+  "theme": {"accent": "#e3342a", "cream": "#efe6d6", "muted": "#a89c8c"},
+  "grade": {"contrast": 1.04, "vignette": 0.3, "grain": 0.03},
+  "layers": [
+    {"id": "glow", "type": "ellipse", "x": "50%", "y": "50%", "w": 1500, "h": 1100, "until": "title.out",
+     "fill": {"radial": [0.5, 0.5, 0.5], "stops": ["#5a120cff", "#0b070600"]}, "enter": {"name": "fade", "dur": 1.0}, "exit": "fade"},
+    {"id": "kicker", "type": "text", "text": "The DOOM engine,", "x": "50%", "y": "42%", "size": 96, "weight": 600, "fill": "$cream",
+     "at": 0.3, "dur": 3.4, "enter": {"name": "type", "dur": 0.8}, "exit": "fade"},
+    {"id": "kicker2", "type": "text", "text": "rewritten as **WebGPU compute shaders.**", "x": "50%", "y": "56%", "size": 64, "weight": 500,
+     "fill": "$muted", "emph": "$cream", "at": "kicker.in+1.0", "until": "kicker.out", "enter": "rise", "exit": "fade"},
+
+    {"id": "face", "type": "image", "src": "stfgod0.png", "x": "50%", "y": "36%", "h": 330, "fit": "contain", "at": "kicker.out", "dur": 3.4,
+     "enter": {"name": "pop", "dur": 0.45}, "exit": {"name": "zoom+blur", "dur": 0.35}},
+    {"id": "title", "type": "text", "text": "g**P**u(doom)", "font": "IBM Plex Mono", "x": "50%", "y": "70%", "size": 170, "weight": 600,
+     "fill": "$cream", "emph": "$accent", "split": "chars", "at": "face.in+0.25", "until": "face.out",
+     "enter": {"name": "snap", "stagger": 0.05}, "exit": {"name": "zoom+blur", "dur": 0.35}},
+
+    {"id": "backdrop", "type": "sequence", "at": "title.out-0.2", "fit": "cover", "volume": 0, "blur": 48,
+     "fx": {"exposure": -0.8, "saturate": 0.85}, "enter": {"name": "fade", "dur": 0.4},
+     "clips": [
+       {"src": "media/E1M1.mp4", "trim": [0.4, 4.2]}, {"src": "media/E1M1.mp4", "trim": [6.6, 10.4]},
+       {"src": "media/E1M2.mp4", "trim": [5.2, 9.0]}, {"src": "media/E1M3.mp4", "trim": [3.6, 7.4]},
+       {"src": "media/E1M1.mp4", "trim": [18.2, 22.0]}, {"src": "media/E1M2.mp4", "trim": [20.6, 24.0]},
+       {"src": "media/E1M1.mp4", "trim": [29.0, 33.0]}],
+     "transition": {"type": "fade", "dur": 0.4}},
+    {"id": "cut", "type": "sequence", "at": "title.out-0.2", "x": "50%", "y": "50%", "anchor": "center", "w": 1440, "h": 1080, "fit": "contain", "volume": 0,
+     "clips": [
+       {"src": "media/E1M1.mp4", "trim": [0.4, 4.2]}, {"src": "media/E1M1.mp4", "trim": [6.6, 10.4]},
+       {"src": "media/E1M2.mp4", "trim": [5.2, 9.0]}, {"src": "media/E1M3.mp4", "trim": [3.6, 7.4]},
+       {"src": "media/E1M1.mp4", "trim": [18.2, 22.0]}, {"src": "media/E1M2.mp4", "trim": [20.6, 24.0]},
+       {"src": "media/E1M1.mp4", "trim": [29.0, 33.0]}],
+     "transition": {"type": "fade", "dur": 0.4}},
+
+    {"id": "cap1", "use": "caption", "text": "The renderer **and** the game run on the GPU", "at": "cut-1.in+0.3", "until": "cut-1.out-0.2"},
+    {"id": "cap2", "use": "caption", "text": "One GPU thread per screen column", "at": "cut-2.in+0.3", "until": "cut-2.out-0.2"},
+    {"id": "cap3", "use": "caption", "text": "WGSL can't recurse: the BSP walk uses a stack", "at": "cut-3.in+0.3", "until": "cut-3.out-0.2"},
+    {"id": "cap4", "use": "caption", "text": "**17** compute kernels every game tic", "at": "cut-4.in+0.3", "until": "cut-4.out-0.2"},
+    {"id": "cap5", "use": "caption", "text": "**3,806** lines of WGSL", "at": "cut-5.in+0.3", "until": "cut-5.out-0.2"},
+    {"id": "cap6", "use": "caption", "text": "Freedoom's first episode, in a browser tab", "at": "cut-6.in+0.3", "until": "cut-6.out-0.2"},
+    {"id": "cap7", "use": "caption", "text": "Played here by a bot. **You can do better.**", "at": "cut-7.in+0.3", "until": "cut-7.out-0.2"},
+
+    {"id": "endglow", "type": "ellipse", "x": "50%", "y": "40%", "w": 1300, "h": 1000, "at": "cut.out-0.4", "dur": 5.2,
+     "fill": {"radial": [0.5, 0.5, 0.5], "stops": ["#5a120cff", "#0b070600"]}, "enter": {"name": "fade", "dur": 0.6}},
+    {"id": "endface", "type": "image", "src": "stfevl0.png", "x": "50%", "y": "28%", "h": 260, "fit": "contain", "at": "cut.out-0.2", "dur": 5.0,
+     "enter": {"name": "pop", "dur": 0.45}},
+    {"id": "endtitle", "type": "text", "text": "g**P**u(doom)", "font": "IBM Plex Mono", "x": "50%", "y": "55%", "size": 140, "weight": 600,
+     "fill": "$cream", "emph": "$accent", "at": "endface.in+0.2", "until": "endface.out", "enter": "rise"},
+    {"id": "endurl", "type": "text", "text": "Play it: **austegard.com/games/doom**", "font": "IBM Plex Mono", "x": "50%", "y": "70%",
+     "size": 46, "weight": 500, "fill": "$muted", "emph": "$cream", "at": "endtitle.in+0.4", "until": "endface.out", "enter": "rise"},
+    {"id": "endnote", "type": "text", "text": "Needs WebGPU: a recent Chrome, Edge or Safari", "x": "50%", "y": "80%", "size": 34, "weight": 400,
+     "fill": "$muted", "at": "endurl.in+0.4", "until": "endface.out", "enter": "fade"}
+  ],
+  "components": {
+    "caption": {"params": {"text": ""}, "layers": [
+      {"type": "text", "text": "{{text}}", "x": "50%", "y": "11%", "size": 52, "weight": 600, "fill": "$cream", "emph": "$accent",
+       "box": {"fill": "#000000c8", "pad": [14, 26], "radius": 6}, "enter": "rise", "exit": "fade"}]}
+  }
+}

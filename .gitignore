@@ -12,3 +12,4 @@ out_*
 dist/
 build/
 scratch/
+examples/gpu-doom/media/
