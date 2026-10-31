@@ -16,7 +16,8 @@ kine check scene.json
 
 ## Install
 
-It has no dependencies of its own, so it installs next to Kinescript on any Python 3.10 or newer:
+It needs Kinescript 1.3 or newer. It has no dependencies of its own, so it installs next to Kinescript on any
+Python 3.10 or newer:
 
 ```bash
 pip install kinescript-elevenlabs

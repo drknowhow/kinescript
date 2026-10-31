@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 1.3.0 (2026-10-30)
+
+Voices that act. A line's text can say how to speak it, each sound picks its own voice backend, and two new
+backends speak it: Chatterbox on your own machine and ElevenLabs' API.
 
 - The Kokoro voice plugin is on PyPI: `pip install kinescript-kokoro` (Python 3.10 to 3.12). Pushing a tag such
   as `kokoro-v0.1.0` publishes it from `plugins/kinescript-kokoro` (`.github/workflows/release-kokoro.yml`), after
@@ -23,6 +26,11 @@
 - `kinescript-elevenlabs`: ElevenLabs' API (Eleven v4 by default, with audio tags), any voice in the account by name
   or id, voice settings through `options`, and word times from ElevenLabs' character times. It has no
   dependencies and needs `ELEVENLABS_API_KEY`.
+- What a voice backend prints goes to stderr. It used to land in `kine voice`'s JSON and in `kine mcp`'s replies,
+  which Chatterbox's loading messages broke.
+- Pushing a tag such as `chatterbox-v0.1.0` or `elevenlabs-v0.1.0` publishes that plugin to PyPI
+  (`.github/workflows/release-plugins.yml`) after it has spoken a line on CI: Chatterbox with its own models on the
+  CPU, ElevenLabs against a stand-in for its API.
 
 ## 1.2.0 (2026-10-30)
 

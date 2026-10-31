@@ -912,6 +912,22 @@ def test_tags_are_not_words_and_reach_only_backends_that_act_on_them(monkeypatch
     assert [w["word"] for w in words] == ["Well", "okay.", "Go."] and words[2]["id"] == "go"
 
 
+def test_what_a_backend_prints_stays_off_stdout(monkeypatch, tmp_path, capsys):
+    # kine voice answers in JSON on stdout and kine mcp speaks JSON-RPC there; Chatterbox prints as it loads
+    from kinescript import voice
+
+    def speak(req):
+        print("loaded PerthNet")
+        return _fake_speak(req)
+    monkeypatch.delenv("KINE_VOICE_CMD", raising=False)
+    monkeypatch.setattr(voice, "backends", lambda: {"loud": type("E", (), {"load": lambda self: speak})()})
+    spec = scene([{"type": "rect"}], duration="auto")
+    spec["audio"] = [{"id": "a", "text": "hello"}]
+    assert voice.generate(spec, base=tmp_path)["voices"][0]["status"] == "made"
+    out, err = capsys.readouterr()
+    assert out == "" and "loaded PerthNet" in err
+
+
 def test_each_sound_picks_its_backend_and_options(monkeypatch, tmp_path):
     import hashlib
     from kinescript import voice

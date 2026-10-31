@@ -1,0 +1,206 @@
+name: release-plugins
+
+# Push a tag like chatterbox-v0.1.0 or elevenlabs-v0.1.0 to build that plugin from plugins/kinescript-<name> and
+# publish it to PyPI as kinescript-<name>. Run the workflow by hand (Actions > release-plugins > Run workflow) and
+# pick a plugin to publish the same build to TestPyPI instead.
+# Publishing uses trusted publishing (OIDC), as release.yml does. Each project needs a publisher on each index (a
+# pending one before the first upload) that lists this repository, workflow file "release-plugins.yml" and the
+# environment: "pypi" on pypi.org, "testpypi" on test.pypi.org.
+# The smoke test installs kinescript from PyPI, so tag a plugin after the kinescript release it needs is published.
+# kinescript-kokoro keeps release-kokoro.yml, the workflow its PyPI publisher names.
+
+on:
+  push:
+    tags: ["chatterbox-v*", "elevenlabs-v*"]
+  workflow_dispatch:
+    inputs:
+      plugin:
+        description: Plugin to publish to TestPyPI
+        type: choice
+        options: [chatterbox, elevenlabs]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      plugin: ${{ steps.which.outputs.plugin }}
+    steps:
+      - name: Which plugin
+        id: which
+        env:
+          PICKED: ${{ inputs.plugin }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = push ]; then p="${GITHUB_REF_NAME%%-v*}"; else p="$PICKED"; fi
+          case "$p" in chatterbox|elevenlabs) ;; *) echo "no plugin named '$p'"; exit 1 ;; esac
+          echo "plugin=$p" >> "$GITHUB_OUTPUT"
+          echo "PLUGIN=$p" >> "$GITHUB_ENV"
+          echo "DIR=plugins/kinescript-$p" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"   # Chatterbox pins PyTorch 2.6, which has CPU wheels for 3.10 to 3.13
+      - name: Check the tag matches the plugin version
+        if: github.event_name == 'push'
+        run: |
+          v=$(python -c "import tomllib; print(tomllib.load(open('$DIR/pyproject.toml','rb'))['project']['version'])")
+          test "$PLUGIN-v$v" = "${GITHUB_REF_NAME}" || { echo "tag ${GITHUB_REF_NAME} != $PLUGIN-v$v"; exit 1; }
+      - working-directory: ${{ env.DIR }}
+        run: pip install build twine && python -m build && twine check --strict dist/*
+      - name: Check the wheel holds the package and its kine voice entry point
+        working-directory: ${{ env.DIR }}
+        run: |
+          python - <<'EOF'
+          import glob, os, zipfile
+          p = os.environ["PLUGIN"]
+          whl = zipfile.ZipFile(glob.glob("dist/*.whl")[0])
+          names = whl.namelist()
+          stray = [n for n in names if not n.startswith((f"kinescript_{p}/", f"kinescript_{p}-"))]
+          assert not stray, f"stray files in the wheel: {stray}"
+          eps = whl.read(next(n for n in names if n.endswith("entry_points.txt"))).decode()
+          assert "[kinescript.voice]" in eps and f"{p} = kinescript_{p}:synth" in eps, eps
+          EOF
+      - name: System packages
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg libgl1 libegl1 libfontconfig1
+      - name: Install the wheel and kinescript into a new environment
+        run: |
+          whl=$(ls "$PWD/$DIR"/dist/*.whl)
+          python -m venv "$RUNNER_TEMP/smoke"
+          # PyTorch's CPU build: the default Linux wheel brings gigabytes of CUDA libraries that this run never uses.
+          "$RUNNER_TEMP/smoke/bin/pip" install --quiet --extra-index-url https://download.pytorch.org/whl/cpu "$whl" "kinescript>=1.3"
+      # A version cannot be re-uploaded, so prove it speaks first. Chatterbox runs its real models on the CPU.
+      - name: Speak a line through kine voice with Chatterbox
+        if: env.PLUGIN == 'chatterbox'
+        env:
+          KINE_BACKEND: cpu
+          CHATTERBOX_DEVICE: cpu
+        working-directory: ${{ runner.temp }}   # outside the checkout, so the installed packages are the ones that run
+        run: |
+          cat > scene.json <<'EOF'
+          {"canvas": {"w": 640, "h": 360, "fps": 30},
+           "audio": [{"id": "vo", "role": "voice", "backend": "chatterbox", "text": "Write a scene. [[go]][chuckle] Render it."}],
+           "layers": [{"id": "go", "type": "text", "text": "Render", "size": 48, "x": "50%", "y": "50%", "at": "vo:go"}]}
+          EOF
+          smoke/bin/kine voice scene.json > said.json
+          cat said.json
+          smoke/bin/kine check scene.json
+          smoke/bin/python - <<'EOF'
+          import json, subprocess, wave
+          (said,) = json.load(open("said.json"))["voices"]
+          assert not said.get("ignored") and not said.get("note"), f"Turbo should act on [chuckle] and time each word: {said}"
+          words = json.load(open("voice/vo.words.json"))["words"]
+          assert [w["word"] for w in words] == ["Write", "a", "scene.", "Render", "it."], words
+          assert all(w["end"] > w["start"] for w in words), f"a word has no time: {words}"
+          assert all(a["end"] <= b["start"] for a, b in zip(words, words[1:])), f"words overlap: {words}"
+          with wave.open("voice/vo.wav") as f:
+              assert f.getnframes() / f.getframerate() > 1.0, "the voice is too short"
+          probe = json.loads(subprocess.check_output(["smoke/bin/kine", "probe", "scene.json"]))
+          go = next(l for l in probe["layers"] if l["id"] == "go")
+          vo = next(s for s in probe["audio"] if s["id"] == "vo")
+          assert vo["in"] < go["in"] < vo["out"], (vo, go)
+          print("words:", [(w["word"], w["start"]) for w in words], "| go starts at", go["in"])
+          EOF
+      # ElevenLabs needs a key and spends its quota, so a stand-in answers the plugin's calls as the API does.
+      - name: Speak a line through kine voice with a stand-in for ElevenLabs' API
+        if: env.PLUGIN == 'elevenlabs'
+        env:
+          KINE_BACKEND: cpu
+        working-directory: ${{ runner.temp }}
+        run: |
+          cat > scene.json <<'EOF'
+          {"canvas": {"w": 640, "h": 360, "fps": 30},
+           "audio": [{"id": "vo", "role": "voice", "backend": "elevenlabs", "speaker": "George",
+                      "text": "[whispers] Write a scene. [[go]][laughs] Render it.", "options": {"stability": 0.3}}],
+           "layers": [{"id": "go", "type": "text", "text": "Render", "size": 48, "x": "50%", "y": "50%", "at": "vo:go"}]}
+          EOF
+          smoke/bin/python - <<'EOF'
+          import base64, io, json, math, os, struct, urllib.request
+          from kinescript.voice import generate
+
+          GEORGE, STEP, RATE = "JBFqnCBsd6RMkjVDRZzb", 0.06, 24000
+          sent = []
+
+          class Reply(io.BytesIO):
+              def __enter__(self):
+                  return self
+
+              def __exit__(self, *exc):
+                  self.close()
+
+          def api(req, timeout=None):
+              assert req.get_header("Xi-api-key") == "test-key", req.header_items()
+              if req.full_url.endswith("/v1/voices"):
+                  return Reply(json.dumps({"voices": [{"name": "George - Warm, Captivating Storyteller",
+                                                       "voice_id": GEORGE}]}).encode())
+              assert req.full_url.startswith(f"https://api.elevenlabs.io/v1/text-to-speech/{GEORGE}/with-timestamps"), req.full_url
+              body = json.loads(req.data)
+              sent.append(body)
+              text = body["text"]
+              pcm = b"".join(struct.pack("<h", int(8000 * math.sin(2 * math.pi * 220 * i / RATE)))
+                             for i in range(int(len(text) * STEP * RATE)))
+              return Reply(json.dumps({"audio_base64": base64.b64encode(pcm).decode(), "alignment": {
+                  "characters": list(text),
+                  "character_start_times_seconds": [k * STEP for k in range(len(text))],
+                  "character_end_times_seconds": [(k + 1) * STEP for k in range(len(text))]}}).encode())
+
+          urllib.request.urlopen = api
+          os.environ["ELEVENLABS_API_KEY"] = "test-key"
+          (said,) = generate("scene.json")["voices"]
+          print(said)
+          assert not said.get("ignored") and not said.get("note"), f"Eleven v4 should act on both tags: {said}"
+          (body,) = sent
+          assert body["model_id"] == "eleven_v4" and body["voice_settings"] == {"stability": 0.3}, body
+          assert "[whispers]" in body["text"] and "[laughs]" in body["text"] and "[[" not in body["text"], body
+          EOF
+          smoke/bin/kine check scene.json
+          smoke/bin/python - <<'EOF'
+          import json, subprocess
+          words = json.load(open("voice/vo.words.json"))["words"]
+          assert [w["word"] for w in words] == ["Write", "a", "scene.", "Render", "it."], words
+          probe = json.loads(subprocess.check_output(["smoke/bin/kine", "probe", "scene.json"]))
+          go = next(l for l in probe["layers"] if l["id"] == "go")
+          vo = next(s for s in probe["audio"] if s["id"] == "vo")
+          assert vo["in"] < go["in"] < vo["out"], (vo, go)
+          print("words:", [(w["word"], w["start"]) for w in words], "| go starts at", go["in"])
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: ${{ env.DIR }}/dist/
+
+  publish:
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/kinescript-${{ needs.build.outputs.plugin }}/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish-testpypi:
+    needs: build
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/kinescript-${{ needs.build.outputs.plugin }}/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
