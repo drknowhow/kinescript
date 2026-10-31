@@ -202,6 +202,7 @@ def probe(src, at: float | None = None) -> dict:
             scene.close()
             raise ValueError(f"at must be a time in seconds, got {at!r}")
         r = Renderer(scene, track=True)
+        r.footage = False  # boxes only
         r.draw(t)
         out["at"] = t
         out["visible"] = r.boxes
@@ -362,6 +363,8 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
     clips = pool.submit(media_issues, scene)  # and the clips' last seconds are decoded
     pool.shutdown(wait=False)
     r = Renderer(scene, track=True, scale=1.0)
+    # The samples read boxes, not pixels: a clip decoded at each of them reopened ffmpeg nearly every time.
+    r.footage = False
     found: dict[tuple, dict] = {}
     off: dict[str, list] = {}  # media layer (or its sequence) id -> (time, box, share off, layer) when mostly off
     shown: dict[str, int] = {}  # other layer id -> samples it is visible at
@@ -376,6 +379,16 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
         else:
             it["to"] = round(T, 2)
 
+    def broke(e, T):
+        """check's result when the frame at T cannot be drawn."""
+        heard.cancel() or heard.result()
+        clips.cancel() or clips.result()
+        scene.close()
+        lid = (getattr(e, "issues", None) or SceneError(str(e)).issues)[0]["layer"]  # from "layer 'x': ..."
+        return _result(scene.issues + [{"level": "error", "code": "render", "layer": lid, "from": round(T, 2),
+                                        "to": round(T, 2), "message": f"{type(e).__name__}: {e}", "fix": ""}],
+                       duration=scene.duration)
+
     step = max(step, 1 / scene.fps)  # finer than a frame draws the same frames again
     n = max(1, int(scene.duration / step))
     grid = [min(scene.duration - 1e-3, k * step) for k in range(n + 1)]
@@ -389,13 +402,7 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
         try:
             r.draw(T)
         except (ValueError, RuntimeError, OSError) as e:
-            heard.cancel() or heard.result()
-            clips.cancel() or clips.result()
-            scene.close()
-            lid = (getattr(e, "issues", None) or SceneError(str(e)).issues)[0]["layer"]  # from "layer 'x': ..."
-            return _result(scene.issues + [{"level": "error", "code": "render", "layer": lid, "from": round(T, 2),
-                                            "to": round(T, 2), "message": f"{type(e).__name__}: {e}", "fix": ""}],
-                           duration=scene.duration)
+            return broke(e, T)
         for lid in r.culled:
             msg = ("the triangles of this model that cross the camera plane are not drawn"
                    if scene.by_id[lid].type == "model" else "layer crosses the camera plane, so it is not drawn")
@@ -465,12 +472,16 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
         add("warning", "media-offscreen", lid, T, f"{ty} box {rect} is {share:.0%} off the {W}x{H} canvas", fix,
             until=seen[-1][0])
     # Text under a later layer, and contrast: render the frame without the text layer and its successors, compare
-    # luminance under its box.
+    # luminance under its box. These read pixels, footage included.
+    r.footage = True
     for layer in scene.all_layers():
         if layer.type not in ("text", "counter"):
             continue
         T = min(layer.t_out - 1e-3, layer.t_in + min(layer.dur * 0.6, 1.5))
-        r.draw(T)
+        try:
+            r.draw(T)  # the clips on screen are decoded here; the draws below at T show the same frames
+        except (ValueError, RuntimeError, OSError) as e:
+            return broke(e, T)
         boxes = r.boxes  # draw() makes a new dict each time
         b = boxes.get(layer.id)
         if not b or b["alpha"] < 0.5:

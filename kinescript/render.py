@@ -500,6 +500,8 @@ class Renderer:
         self.transparent = alpha and _see_through(scene.bg)
         self.read_info = self.info.makeAlphaType(skia.kUnpremul_AlphaType) if self.transparent else self.info
         self.track = track
+        # False: video layers are placed (box, stroke) but no frame is decoded, for checks that read boxes, not pixels.
+        self.footage = True
         self.boxes: dict[str, dict] = {}
         self._tf: dict = {}
         self._layouts: dict = {}
@@ -1183,7 +1185,8 @@ class Renderer:
         cy0 = by + (bh - ch) / 2
         px, py = bx + fx * bw, by + fy * bh
         dst = skia.Rect.MakeXYWH(px + (cx0 - px) * zoom, py + (cy0 - py) * zoom, cw * zoom, ch * zoom)
-        c.drawImageRect(img, dst, CUBIC if L.type == "video" else SAMPLING, skia.Paint(AntiAlias=True))
+        if img is not None:
+            c.drawImageRect(img, dst, CUBIC if L.type == "video" else SAMPLING, skia.Paint(AntiAlias=True))
         c.restore()
         sp = self._stroke_paint(L, g, box)
         if sp:
@@ -1210,6 +1213,9 @@ class Renderer:
             k = min(max(1.0, zmax) * self.scale, native)
             L.video = media.VideoSource(L.src, round(bw * k), round(bh * k), self.s.fps, speed, L.raw.get("fit", "cover"),
                                         ctx=gpu_context() if self.backend == "gpu" else None)
+        if not self.footage:  # its box and stroke only; made above all the same, so its decode size does not change
+            self._content(c, L, g, box, None, bw, bh)
+            return
         if self._frame_t is not None:
             # A motion-blur sub-frame shows its frame's picture (footage carries its own blur). Sub-frame times lie
             # between the decoder's output frames, so each would reopen it; they used to round to whichever was near.

@@ -384,6 +384,42 @@ def test_check_flags_media_mostly_off_canvas(clip):
     assert not [i for i in res["issues"] if i["code"] == "media-offscreen"]
 
 
+def test_check_places_clips_without_decoding_them(clip, monkeypatch):
+    # check's samples read boxes, not pixels. A clip decoded at each 0.25 s sample reopened ffmpeg nearly every time
+    # (60 cuts: 134 decoders, 17 s); now only the text checks, which read pixels, decode it.
+    clips = [{"src": clip, "trim": [0.3 * n, 0.3 * n + 0.7]} for n in range(4)]
+    layers = [{"id": "v", "type": "video", "src": clip, "x": 40, "y": 20, "w": 200, "h": 120, "radius": 8,
+               "stroke": "#ff0000", "strokeWidth": 12, "rotate": [[0, 0], [2, 30]], "zoom": [[0, 1], [2, 1.4]]},
+              {"id": "cut", "type": "sequence", "x": 100, "y": 60, "w": 160, "h": 90, "clips": clips,
+               "transition": {"type": "slide", "dur": 0.2}}]
+    s = k.Scene(scene(layers, duration=2))
+    try:
+        decoded, placed = Renderer(s, track=True), Renderer(s, track=True)
+        placed.footage = False
+        for T in (0.0, 0.5, 0.61, 1.37, 1.9):  # 0.61: two clips of the sequence in their slide
+            decoded.draw(T)
+            placed.draw(T)
+            assert placed.boxes == decoded.boxes, T
+    finally:
+        s.close()
+    opened = []
+    real = media.VideoSource._open
+    monkeypatch.setattr(media.VideoSource, "_open", lambda self, t: opened.append(t) or real(self, t))
+    check(scene(layers, duration=2))
+    probe(scene(layers, duration=2), at=1.0)
+    assert opened == []
+    # Text over a clip is measured against the clip's picture: grey reads on the black canvas, not on the test card.
+    grey = {"id": "t", "type": "text", "text": "Grey", "x": 160, "y": 90, "size": 40, "fill": "#808080"}
+    assert not [i for i in check(scene([grey], bg="#000000", duration=2))["issues"] if i["code"] == "contrast"]
+    card = {"id": "v", "type": "video", "src": clip, "w": 320, "h": 180, "dur": 2}
+    hit = [i for i in check(scene([card, grey], bg="#000000", duration=2))["issues"] if i["code"] == "contrast"]
+    assert [i["layer"] for i in hit] == ["t"] and opened
+    # A decoder that cannot start there is a render error, as it was in the samples, not a crash.
+    monkeypatch.setattr(media, "FFMPEG", "kine-test-no-ffmpeg")
+    res = check(scene([card, grey], bg="#000000", duration=2))
+    assert [i["code"] for i in res["issues"] if i["level"] == "error"] == ["render"] and not res["ok"]
+
+
 def test_check_lets_media_pass_through_the_edge():
     # Sliding in from off the canvas is mostly off for under a second, which is not a misplaced layer.
     shader = {"id": "s", "type": "shader", "preset": "score", "w": 320, "h": 180, "dur": 2}
