@@ -75,6 +75,33 @@ def test_render_refuses_outputs_it_would_get_wrong(capsys, tmp_path, s, out, say
     assert (tmp_path / "pic.png").read_bytes() == before
 
 
+@pytest.mark.parametrize("args", [["render", "--to", "0.1", "--scale", "0.25"], ["still", "--at", "1"]])
+def test_an_output_that_cannot_be_written_is_refused_before_drawing(capsys, tmp_path, s, args, monkeypatch):
+    out = tmp_path / ("a.mp4" if args[0] == "render" else "a.png")
+    out.write_bytes(b"old")
+    os.chmod(out, 0o444)
+    drawn = []
+    monkeypatch.setattr(output.Renderer, "frame", lambda *a, **k: drawn.append(1))
+    try:
+        rc, res = _run(capsys, args[0], s, *args[1:], "-o", out)
+    finally:
+        os.chmod(out, 0o644)
+    assert rc == 2 and "can't be written" in res["error"] and not drawn, res  # was [Errno 13] after every frame
+    assert out.read_bytes() == b"old"
+
+
+@pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0, reason="a folder's mode does not stop writes here")
+def test_a_folder_that_cannot_be_written_is_refused_before_drawing(capsys, tmp_path, s):
+    d = tmp_path / "ro"
+    d.mkdir()
+    os.chmod(d, 0o555)
+    try:
+        rc, res = _run(capsys, "render", s, "-o", f"{d}/", "--to", "0.1", "--scale", "0.25")
+    finally:
+        os.chmod(d, 0o755)
+    assert rc == 2 and "can't write in" in res["error"], res
+
+
 def test_stills_and_sheets_go_where_asked(capsys, tmp_path, s):
     rc, res = _run(capsys, "still", s, "--at", "1", "--scale", "0.25", "-o", tmp_path / "new" / "dir" / "a.png")
     assert rc == 0 and (tmp_path / "new" / "dir" / "a.png").exists()  # said ok and wrote nothing, before

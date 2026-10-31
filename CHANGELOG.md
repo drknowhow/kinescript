@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- An output that can't be written (a read-only file, one another program holds, or a folder this account can't
+  write in) is an error before the first frame. A 30 s 1080p render to a read-only `.mp4` drew every frame and
+  failed after 2.4 s with `[Errno 13] Permission denied`; it now stops at once and says why.
 - A video's sound keeps pace with its picture at any `speed`. ffmpeg's `atempo` takes 0.5 to 2, so at `"speed": 4`
   the picture showed the file's fourth second while the sound played its second, and at 0.25 the sound ran out
   halfway and the rest was silent. The tempo is now made of steps within that range. `kine check` also measured

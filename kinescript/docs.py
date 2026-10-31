@@ -481,8 +481,10 @@ COMMANDS
                                   .gif (longest side 720 px, 15 fps), or a folder/ for PNG frames
                                   (frames/f_%04d.png names them). .wav, .m4a, .mp3, .flac or
                                   .opus: the sound alone. Any other extension is an error, and so
-                                  is -o naming a file the scene reads. render, still and look make
-                                  the folders in -o that do not exist yet.
+                                  is -o naming a file the scene reads, or a file or folder this
+                                  account can't write (found before the first frame is drawn).
+                                  render, still and look make the folders in -o that do not
+                                  exist yet.
                                   --scale 0.5 halves the size (each side must stay 2 px or more).
                                   --from 2 --to 4 renders a part: every frame on screen from 2 s
                                   until 4 s; a --to past the end stops at the end, with a note.

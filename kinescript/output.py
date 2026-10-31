@@ -434,7 +434,29 @@ def out_path(scene: Scene, out, exts) -> Path:
     reads = {Path(f).resolve() for f in [L.src for L in scene.all_layers()] + [a.src for a in scene.audio] if f}
     if p.resolve() in reads:
         raise ValueError(f"{s} is a file this scene reads; writing there would overwrite it")
+    writable(p)
     return p
+
+
+def writable(p: Path, folder: bool = False) -> None:
+    """ValueError unless `p` (a file, or with `folder` a folder of frames) can be written. A read-only -o drew every
+    frame first and then failed with [Errno 13]: 2.4 s for a 30 s scene that renders in 2.3 s."""
+    if p.is_file():
+        try:
+            with open(p, "r+b"):  # opens to write without changing it; the read-only flag or a lock refuses
+                pass
+        except PermissionError:
+            raise ValueError(f"{p} can't be written: it is read-only or another program has it open") from None
+        return
+    d = p if folder else p.parent
+    while not d.is_dir() and d != d.parent:  # render makes the folders that do not exist yet
+        d = d.parent
+    try:
+        tempfile.TemporaryFile(dir=d).close()
+    except PermissionError:
+        raise ValueError(f"can't write in {d}: this account may not create files there") from None
+    except OSError:
+        pass  # not a permission problem (a drive that is gone, say): the write itself reports it
 
 
 def _seconds(name: str, v) -> float | None:
@@ -512,6 +534,8 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
         out = str(out if out is not None else "")
         folder = out.endswith(("/", "\\"))  # a folder for a PNG sequence
         out_p = Path(out) if folder else out_path(scene, out, (*VIDEO, ".png", *AUDIO_ONLY))
+        if folder:
+            writable(out_p, folder=True)
         f0, f1 = _frames(scene, start, end, notes)
     except ValueError:
         scene.close()
