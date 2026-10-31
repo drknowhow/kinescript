@@ -14,7 +14,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 # Every package this repository publishes to PyPI: the folder with its pyproject.toml and README.md.
-PACKAGES = {"kinescript": ROOT, "kinescript-kokoro": ROOT / "plugins" / "kinescript-kokoro"}
+PACKAGES = {"kinescript": ROOT, **{f"kinescript-{p}": ROOT / "plugins" / f"kinescript-{p}"
+                                   for p in ("kokoro", "chatterbox", "elevenlabs")}}
 each_package = pytest.mark.parametrize("pkg", list(PACKAGES))
 
 # Link targets that work on PyPI. Everything else (docs/hero.gif, ../x, /x, //host/x, a bare filename) is

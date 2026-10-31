@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kinescript-elevenlabs"
+version = "0.1.0"
+description = "ElevenLabs voices for kine voice: audio tags such as whispers, any voice in your account, and word times"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Dr. Know How" }]
+requires-python = ">=3.10"
+dependencies = []
+keywords = ["kinescript", "elevenlabs", "text to speech", "tts", "voice-over", "audio tags", "word timestamps"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Topic :: Multimedia :: Video",
+]
+
+# Same rule as the main package: trusted publishing from drknowhow/kinescript marks a link verified only under
+# https://github.com/drknowhow/kinescript or https://drknowhow.github.io/kinescript.
+[project.urls]
+Homepage = "https://github.com/drknowhow/kinescript/tree/main/plugins/kinescript-elevenlabs"
+Documentation = "https://drknowhow.github.io/kinescript/"
+Source = "https://github.com/drknowhow/kinescript/tree/main/plugins/kinescript-elevenlabs"
+Issues = "https://github.com/drknowhow/kinescript/issues"
+Changelog = "https://github.com/drknowhow/kinescript/blob/main/CHANGELOG.md"
+
+[project.entry-points."kinescript.voice"]
+elevenlabs = "kinescript_elevenlabs:synth"
+
+[tool.setuptools]
+packages = ["kinescript_elevenlabs"]

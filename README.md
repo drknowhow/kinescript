@@ -86,9 +86,15 @@ Sounds are a top-level `audio` list, timed like layers and mixed by ffmpeg while
   word: `"at": "vo1:render"` starts a layer as the voice says "render", and `{"type": "captions", "voice": "vo1"}`
   captions it, lighting each word as it is said.
 - **Voice-over from text.** Write what a voice says in `text` and `kine voice` speaks it through a plugin, writing
-  the file and its word times. [Kokoro](https://github.com/drknowhow/kinescript/tree/main/plugins/kinescript-kokoro)
-  is the first. `[[go]]` in the text names the next word, so a cue to `vo1:go` survives a rewrite of the line.
-  Only a line whose text, speaker or rate changed is spoken again, and rendering never calls a speech engine.
+  the file and its word times: [Kokoro](https://github.com/drknowhow/kinescript/tree/main/plugins/kinescript-kokoro)
+  (local, fast),
+  [Chatterbox](https://github.com/drknowhow/kinescript/tree/main/plugins/kinescript-chatterbox) (local, tags,
+  cloned voices) or [ElevenLabs](https://github.com/drknowhow/kinescript/tree/main/plugins/kinescript-elevenlabs)
+  (cloud, needs an API key), picked per sound with `backend`. `[[go]]` in the text names the next
+  word, so a cue to `vo1:go` survives a rewrite of the line. Only a line whose text, speaker, rate, backend or
+  options changed is spoken again, and rendering never calls a speech engine.
+- **Delivery tags.** `[whispers]`, `[laughs]` or `[sighs]` in the text tell Chatterbox and ElevenLabs how to say
+  what follows. Tags are not words, so cues, marks and captions skip them, and Kokoro says the line without them.
 - **A mix without listening.** Give a sound a `role` and it is set to that role's level: voice -18 LUFS, music
   -16, ambience -30, effects peaking at -6 dBFS. Music and ambience dip 14 dB while a voice speaks, an effect's
   leading silence is skipped so it lands on its cue, and the whole mix ends at -16 LUFS with peaks under
@@ -253,7 +259,8 @@ Within one process, such as the MCP server, the workers stay warm for two minute
 - Audio is mixing and levelling (trim, gain over time, fades, speed, loop, pan, role levels, ducking, a loudness
   target), with no effects such as EQ, compression of single sounds or reverb.
 - Kinescript does not speak by itself: `kine voice` needs a plugin or a command. The Kokoro plugin times words
-  for English voices only and needs Python 3.10 to 3.12.
+  for English voices only and needs Python 3.10 to 3.12; the Chatterbox plugin speaks and times English only;
+  the ElevenLabs plugin needs an API key and a network connection.
 - Video is decoded and resampled by ffmpeg to the scene frame rate. Jumping backwards or far ahead reopens the
   decoder, which is slower than sequential playback.
 - Text layout is single-script left-to-right with greedy wrapping. No shaping for complex scripts or bidi.
@@ -266,7 +273,8 @@ kinescript/   engine: timing, props, scene, components, render (Skia), space, re
               mesh and models (3D), output (encoding and the audio mix),
               verify (check, look, probe), schema, docs, mcp, cli
 examples/     example scenes and the generator for sample media
-plugins/      kinescript-kokoro, the Kokoro voice for kine voice (installed on its own)
+plugins/      voices for kine voice, each installed on its own: kinescript-kokoro, kinescript-chatterbox,
+              kinescript-elevenlabs
 marketing/    the launch video as a scene and its builder; build_site.py renders the site
 site/         the project site: demo scenes next to the videos rendered from them
 brand/        logo files, generated art and the brand guide

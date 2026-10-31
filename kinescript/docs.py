@@ -331,7 +331,19 @@ SOUND
   the two voices, [word](/phonemes/) in text says that word with the IPA phonemes you give (for a name it
   says wrong), and [word](-1) or [word](+1) lowers or raises its stress; captions and word ids keep the
   word. kine check reports a sound with text that is not spoken yet (voice-missing) and one whose text,
-  speaker or rate changed since it was spoken (voice-stale).
+  speaker, rate, backend or options changed since it was spoken (voice-stale).
+  A tag in the text says how to speak what follows, for a backend that acts on tags: [whispers], [laughs],
+  [sighs]. Tags are not words: marks and word ids skip them, a backend without tags says the line without
+  them, and kine voice lists what a backend could not do under "ignored". A sound picks its backend with
+  backend (kokoro, chatterbox, elevenlabs, each a plugin) and hands it settings with options:
+    {"id": "vo2", "role": "voice", "text": "[whispers] Nobody knows. [laughs] Yet.", "backend": "elevenlabs",
+     "speaker": "George", "options": {"stability": 0.3}}
+  chatterbox acts on [laugh], [chuckle], [sigh], [gasp], [cough], [clear throat], [whispering], [angry],
+  [happy], [sarcastic], [surprised], [crying] and a few more ([laughs] reads as [laugh]); its speaker
+  is a clip of 5 s or more whose voice it copies, and "options": {"model": "standard", "exaggeration": 0.8}
+  trades the tags for stronger emotion. elevenlabs needs an ELEVENLABS_API_KEY and uses the account's
+  quota; its speaker is a voice name or id, its options model (eleven_v4), stability, style and
+  similarity_boost. kokoro has no tags.
   You cannot hear the mix, so read it: kine check measures it and names each sound problem with its
   time range, and kine look --audio draws it under the frames, with each sound's loudness in the JSON.
   Sound is mixed into .mp4, .mov and .webm, and into --from/--to renders. -o mix.wav (or .m4a,
@@ -399,11 +411,13 @@ COMMANDS
                                   .wav, .m4a, .mp3 or .flac: the sound alone.
                                   --scale 0.5 halves the size; --from 2 --to 4 renders a part.
   kine voice scene.json           speaks each sound's text into its file and times its words; a sound
-                                  is spoken again only when its text, speaker or rate changed
-                                  (--force: all of them, --only vo1: one). Needs a voice backend,
-                                  the Kokoro plugin (with none installed, kine voice prints the pip
-                                  command), or KINE_VOICE_CMD set to a command that reads JSON
-                                  requests on stdin. Rendering never speaks.
+                                  is spoken again only when its text, speaker, rate, backend or
+                                  options changed (--force: all of them, --only vo1: one). Needs a
+                                  voice backend plugin (with none installed, kine voice prints the
+                                  pip command); --backend picks one for sounds without their own.
+                                  KINE_VOICE_CMD (or KINE_VOICE_CMD_CHATTERBOX for one backend) runs
+                                  a backend in another Python, as JSON requests on stdin.
+                                  Rendering never speaks.
   kine watch scene.json           re-makes the contact sheet on every save
   kine doctor                     checks ffmpeg, the GPU and fonts
   kine mcp                        the same tools for MCP clients

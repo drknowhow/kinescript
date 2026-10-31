@@ -43,7 +43,9 @@ TOOLS = [
                      "required": ["scene"]}},
     {"name": "kine_voice", "description": "Speak each sound's `text` into its file (voice/<id>.wav unless it has a "
      "src) and write its word times, so layers can cue from words (\"vo1:render\") and captions can follow it. Only "
-     "sounds whose text, speaker or rate changed are spoken again, unless force. Run it before check and render.",
+     "sounds whose text, speaker, rate, backend or options changed are spoken again, unless force. A sound's own "
+     "\"backend\" picks its voice plugin; backend here is the one for sounds without. Tags such as [laughs] are "
+     "acted by backends that can and listed under \"ignored\" by the rest. Run it before check and render.",
      "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"},
                                                       "only": {"type": "array", "items": {"type": "string"}},
                                                       "force": {"type": "boolean", "default": False},
