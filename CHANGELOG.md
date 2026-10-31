@@ -6,6 +6,9 @@
   instance id in front too, as top-level ones did. Before, a second use stopped with `duplicate layer id`.
 - The site's sound section has a demo of the three voice backends speaking the same line,
   `site/demos/voices.json`, with the time each took. `bench/voices.py` measures those times.
+- `kine docs`, the README and the site no longer say Chatterbox acts on tags without qualification. In the demo it
+  spoke `[whispers]` in its normal voice and left a silent pause for `[laughs]`; in test takes it made a sound
+  where the laugh goes in six of nine and whispered in none of seven. ElevenLabs acted both.
 - `kine check` warns (`media-offscreen`) when a video, image or shader layer is more than half off the canvas for
   a second or more, and for a video or shader without an `anchor` it says why: they are placed by their top-left
   corner even when `x` and `y` are set. A sequence is reported once, under its own id. Found in #11, where a clip

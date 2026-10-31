@@ -88,13 +88,15 @@ Sounds are a top-level `audio` list, timed like layers and mixed by ffmpeg while
 - **Voice-over from text.** Write what a voice says in `text` and `kine voice` speaks it through a plugin, writing
   the file and its word times: [Kokoro](https://github.com/drknowhow/kinescript/tree/main/plugins/kinescript-kokoro)
   (local, fast),
-  [Chatterbox](https://github.com/drknowhow/kinescript/tree/main/plugins/kinescript-chatterbox) (local, tags,
+  [Chatterbox](https://github.com/drknowhow/kinescript/tree/main/plugins/kinescript-chatterbox) (local,
   cloned voices) or [ElevenLabs](https://github.com/drknowhow/kinescript/tree/main/plugins/kinescript-elevenlabs)
   (cloud, needs an API key), picked per sound with `backend`. `[[go]]` in the text names the next
   word, so a cue to `vo1:go` survives a rewrite of the line. Only a line whose text, speaker, rate, backend or
   options changed is spoken again, and rendering never calls a speech engine.
-- **Delivery tags.** `[whispers]`, `[laughs]` or `[sighs]` in the text tell Chatterbox and ElevenLabs how to say
-  what follows. Tags are not words, so cues, marks and captions skip them, and Kokoro says the line without them.
+- **Delivery tags.** `[whispers]`, `[laughs]` or `[sighs]` in the text tell ElevenLabs how to say what follows.
+  Chatterbox takes them too but acts them only some of the time: in test takes it made a sound where `[laughs]`
+  goes in six of nine and whispered in none of seven. Tags are not words, so cues, marks and captions skip them,
+  and Kokoro says the line without them.
 - **A mix without listening.** Give a sound a `role` and it is set to that role's level: voice -18 LUFS, music
   -16, ambience -30, effects peaking at -6 dBFS. Music and ambience dip 14 dB while a voice speaks, an effect's
   leading silence is skipped so it lands on its cue, and the whole mix ends at -16 LUFS with peaks under
@@ -124,7 +126,7 @@ to its scene file. Install the plugin for the voice you want next to Kinescript:
 
 ```bash
 pip install kinescript-kokoro       # local and fast; Python 3.10 to 3.12
-pip install kinescript-chatterbox   # local, acts on tags, copies a voice from a clip; installs PyTorch
+pip install kinescript-chatterbox   # local, copies a voice from a clip, tags hit or miss; installs PyTorch
 pip install kinescript-elevenlabs   # ElevenLabs' API, acts on tags; needs ELEVENLABS_API_KEY
 ```
 
