@@ -1294,3 +1294,132 @@ def test_doctor_reports_version_and_font(capsys):
     assert main(["doctor"]) == 0
     info = json.loads(capsys.readouterr().out)
     assert info["version"] == k.__version__ and info["font"] == "Space Grotesk", info
+
+
+def _packets(path) -> int:
+    out = subprocess.run([media.FFPROBE, "-v", "error", "-select_streams", "v", "-count_packets", "-show_entries",
+                          "stream=nb_read_packets", "-of", "csv=p=0", str(path)], capture_output=True, text=True)
+    return int(out.stdout.strip() or 0)
+
+
+def _rgb(path, w, h, pix="rgb24") -> np.ndarray:
+    raw = subprocess.run([media.FFMPEG, "-v", "error", "-i", str(path), "-frames:v", "1", "-f", "rawvideo",
+                          "-pix_fmt", pix, "-"], capture_output=True).stdout
+    return np.frombuffer(raw, np.uint8).reshape(h, w, -1)
+
+
+def test_a_clip_opened_mid_way_shows_the_frame_playing_through_shows(clip):
+    # 41/30 s was sent to ffmpeg as 1.3667, past frame 41's own time, so a clip opened there (a still, a contact
+    # sheet, the first frame of a render worker) started on frame 42.
+    play = media.VideoSource(clip, 64, 36, 30)
+    frames = [play.at(n / 30).toarray().copy() for n in range(45)]
+    play.close()
+    for n in (41, 22, 44):
+        cold = media.VideoSource(clip, 64, 36, 30)
+        assert np.array_equal(cold.at(n / 30).toarray(), frames[n]), n
+        cold.close()
+
+
+def test_a_render_with_sound_keeps_its_last_frame(clip, tmp_path):
+    from kinescript import output
+    # 0.49 s at 30 fps is 15 frames (0.5 s) over 0.49 s of sound; the mux used to end with the sound.
+    spec = scene([{"type": "video", "src": clip, "x": 0, "y": 0, "anchor": "topleft", "w": 64, "h": 36}],
+                 w=64, h=36, duration=0.49)
+    res = output.render(spec, str(tmp_path / "a.mp4"), quality="draft", workers=1)
+    assert res["frames"] == 15 == _packets(tmp_path / "a.mp4") and res["audio"]
+
+
+def test_layer_ends_fall_on_the_frame_grid():
+    rect = {"type": "rect", "w": 10, "h": 10}
+    s = k.Scene(scene([dict(rect, id="a", at=2.2, dur=8.9), dict(rect, id="b", at="a.out", dur=1)], duration=13))
+    a, b = s.by_id["a"], s.by_id["b"]  # 2.2 + 8.9 is 11.100000000000001: a also showed on frame 333, b started on 334
+    assert a.visible(332 / 30) and not a.visible(333 / 30) and b.visible(333 / 30)
+
+
+def test_aurora_draws_the_same_on_the_cpu_as_its_formula():
+    # pow() of a negative base is undefined; Skia's raster backend made it NaN and the bands came out wrong.
+    spec = scene([{"type": "shader", "preset": "aurora", "x": 0, "y": 0, "anchor": "topleft", "w": "100%", "h": "100%"}],
+                 w=64, h=64, bg="#000000")
+    got = _frame(spec, 0)[:, 20, :3].astype(float) / 255
+    uv = (np.arange(64) + 0.5) / 64, (20 + 0.5) / 64
+    band = sum(np.exp(-((uv[0] - (0.35 + 0.12 * i + 0.08 * np.sin(uv[1] * (3 + i)))) * (9 - 2 * i)) ** 2) * (0.7 - 0.15 * i)
+               for i in range(3))
+    base, glow, glow2 = (np.array(k.color.parse(c)[:3]) for c in ("#0a0c10", "#b9f45d", "#ff633f"))
+    g = glow + (glow2 - glow) * (0.5 + 0.5 * np.sin(uv[1] * 2))
+    want = base + (g - base) * np.clip(band * 0.75, 0, 0.85)[:, None]
+    assert np.abs(got - want).max() < 3 / 255
+
+
+def test_a_transparent_canvas_in_an_mp4_is_shown_over_black(tmp_path):
+    from kinescript import output
+    half = {"type": "rect", "x": 0, "y": 0, "anchor": "topleft", "w": "100%", "h": "100%", "fill": "#ff0000", "opacity": 0.5}
+    spec = scene([half], w=64, h=36, bg="transparent", duration=0.2)
+    output.render(spec, str(tmp_path / "a.mp4"), quality="high", workers=1)
+    assert 120 <= _rgb(tmp_path / "a.mp4", 64, 36)[18, 32, 0] <= 136  # was 254: straight colour with alpha dropped
+    with pytest.raises(ValueError, match="keeps no alpha"):
+        output.render(spec, str(tmp_path / "b.mp4"), transparent=True)
+
+
+def test_a_half_transparent_background_is_straight_alpha_in_a_mov(tmp_path):
+    from kinescript import output
+    spec = scene([{"type": "rect", "x": 0, "y": 0, "w": 2, "h": 2, "fill": "#00ff00"}], w=64, h=36, bg="#ff000080",
+                 duration=0.2)
+    output.render(spec, str(tmp_path / "a.mov"), quality="draft", workers=1)
+    r, g, b, a = (int(v) for v in _rgb(tmp_path / "a.mov", 64, 36, "rgba")[18, 32])
+    assert r >= 250 and 120 <= a <= 136, (r, g, b, a)  # was (128, 0, 0, 129): premultiplied read as straight
+
+
+def test_3d_text_frames_do_not_depend_on_the_frames_drawn_before():
+    # Early in a slow eased tween, frame 3's size rounds to frame 0's cache key; the outline was built from
+    # whichever exact size was drawn first, so a worker starting at frame 3 drew different pixels.
+    spec = scene([{"id": "m", "type": "model", "shape": "text", "text": "AB", "x": 120, "y": 90,
+                   "size": [[0, 60], [4, 110]], "depth": [[0, 10], [4, 50]], "bevel": [[0, 0], [4, 6]],
+                   "rotateY": "=T*40", "fill": "#ff633f", "shine": [[0, 0.1], [4, 0.9]]}],
+                 w=480, h=270, bg="#101418", duration=4)
+    after = Renderer(k.Scene(spec), scale=0.5, backend="cpu")
+    after.frame(0)
+    alone = Renderer(k.Scene(spec), scale=0.5, backend="cpu")
+    assert np.array_equal(after.frame(3), alone.frame(3))
+
+
+def test_motion_blur_keeps_the_first_frame_inside_the_scene():
+    white = {"type": "rect", "x": 0, "y": 0, "anchor": "topleft", "w": "100%", "h": "100%", "fill": "#ffffff"}
+    spec = dict(scene([white], w=64, h=36, bg="#000000", duration=1), motionBlur={"samples": 8, "shutter": 0.5})
+    assert tuple(_frame(spec, 0)[18, 32, :3]) == (255, 255, 255)  # was 127: half its samples were before 0 s
+
+
+def test_hidden_clips_are_silent_and_looped_clips_loop_their_trim(clip):
+    from kinescript import output
+    vid = {"type": "video", "src": clip, "x": 0, "y": 0, "anchor": "topleft", "w": 64, "h": 36}
+    s = k.Scene(scene([dict(vid, id="h", hidden=True), {"type": "group", "id": "g", "hidden": True,
+                                                         "children": [dict(vid, id="in")]},
+                       dict(vid, id="l", trim=[0.5, 1.5], loop=True, dur=3)], w=64, h=36, duration=3))
+    ins = output._audio_inputs(s)
+    s.close()
+    assert [a["id"] for a in ins] == ["l"] and ins[0]["loop"] == pytest.approx(1.0)
+    spec = scene([dict(vid, id="l", trim=[0.5, 1.5], loop=True, dur=3)], w=64, h=36, duration=3)
+    r = Renderer(k.Scene(spec), backend="cpu")
+    assert np.array_equal(r.frame(15).copy(), r.frame(45))  # 1.5 s in is 1.0 s of the file again; it played on to 2.0
+
+
+@pytest.mark.parametrize("bad, code", [({"trim": [-1, 2]}, "bad-trim"), ({"trim": [None, 2]}, "bad-trim"),
+                                       ({"trim": 3}, "bad-trim"), ({"speed": 0}, "bad-value")])
+def test_bad_trims_and_speeds_are_scene_errors(clip, bad, code):
+    vid = dict({"id": "v", "type": "video", "src": clip, "w": 64, "h": 36}, **bad)
+    with pytest.raises(k.SceneError) as e:
+        k.Scene(scene([vid], w=64, h=36))
+    assert code in [i["code"] for i in e.value.issues]
+
+
+def test_media_tags_and_temp_paths_need_not_be_ascii(clip, tmp_path, monkeypatch):
+    from kinescript import output
+    tagged = tmp_path / "tagged.mp4"
+    subprocess.run([media.FFMPEG, "-y", "-v", "error", "-i", clip, "-t", "0.5", "-c", "copy", "-metadata",
+                    "title=ссс видео 日本", str(tagged)], check=True)
+    assert media.probe(str(tagged))["duration"] > 0  # cp1252 could not decode the tag on Windows
+    odd = tmp_path / "o'brien"
+    odd.mkdir()
+    monkeypatch.setattr("tempfile.tempdir", str(odd))  # a quote in the concat list's paths broke the join
+    spec = scene([{"type": "rect", "x": "=t*100", "y": 10, "w": 10, "h": 10}], w=64, h=36, duration=0.4)
+    res = output.render(spec, str(tmp_path / "j.mp4"), quality="draft", workers=2)
+    assert res["workers"] == 2 and _packets(tmp_path / "j.mp4") == 12

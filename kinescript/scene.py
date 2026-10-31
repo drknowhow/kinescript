@@ -133,7 +133,7 @@ class Scene:
             lid = getattr(e, "layer", None)
             raise SceneError((f"layer '{lid}': " if lid else "") + str(e), layer=lid) from e
         for layer in self.by_id.values():
-            layer.t_in, layer.t_out = self.timeline.resolved[layer.id]
+            layer.t_in, layer.t_out = (_on_grid(t, self.fps) for t in self.timeline.resolved[layer.id])
         for s in self.audio:
             s.t_in, s.t_out = self.timeline.resolved[s.id]
         if self.camera is not None:
@@ -360,11 +360,15 @@ class Scene:
                 layer.src = self.path(raw["src"]) if raw.get("src") else None
             if ltype == "video" and layer.src and Path(layer.src).exists():
                 info = media.probe(layer.src)
-                trim = raw.get("trim") or [0, None]
-                _check_trim(self, lid, trim, info["duration"])
-                end = trim[1] if len(trim) > 1 and trim[1] is not None else info["duration"]
+                trim = _check_trim(self, lid, raw.get("trim") or [0, None], info["duration"])
+                end = trim[1] if trim[1] is not None else info["duration"]
                 end = min(float(end), info["duration"]) if info["duration"] else end
-                natural = max(0.04, (end - trim[0]) / float(raw.get("speed", 1)))
+                speed = raw.get("speed", 1)
+                if not _number(speed) or speed <= 0:
+                    self.note("error", "bad-value", lid, f"speed is {speed!r}; it must be a number above 0",
+                              "2 plays twice as fast, 0.5 at half speed")
+                    speed = 1
+                natural = max(0.04, (end - trim[0]) / float(speed))
             if ltype == "captions" and raw.get("voice") is not None:
                 raw = layer.raw = self._voice_cues(lid, raw)
             elif ltype == "captions" and (raw.get("cues") or (layer.src and Path(layer.src).exists())):
@@ -478,14 +482,25 @@ def _natural(a: dict, src: str | None) -> float | None:
     return max(0.01, float(end) - float(trim[0]))
 
 
-def _check_trim(scene: "Scene", owner, trim, length: float):
-    if not isinstance(trim, (list, tuple)) or not trim:
-        scene.note("error", "bad-trim", owner, f"trim must be [start, end] in source seconds, got {trim!r}")
-        return
+def _number(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _check_trim(scene: "Scene", owner, trim, length: float) -> list:
+    """Note what is wrong with a trim; returns it as [start, end or None] in seconds, or [0, None] if unusable."""
+    if not isinstance(trim, (list, tuple)) or not 1 <= len(trim) <= 2 or not _number(trim[0]) \
+            or (len(trim) > 1 and trim[1] is not None and not _number(trim[1])):
+        scene.note("error", "bad-trim", owner, f"trim must be [start, end] in source seconds, got {trim!r}",
+                   "[1.5, 4] plays 1.5 s to 4 s of the file; [1.5] plays from 1.5 s to its end")
+        return [0.0, None]
     a = float(trim[0])
     b = trim[1] if len(trim) > 1 else None
+    if a < 0:  # the clip would start before its file does, and its sound would play a second early
+        scene.note("error", "bad-trim", owner, f"trim starts at {a:g}s, before the start of the source",
+                   "use a start of 0 or more; to start the clip later in the scene, use \"at\"")
+        return [0.0, None]
     if not length:
-        return
+        return [a, b]
     if a >= length:
         scene.note("error", "bad-trim", owner, f"trim starts at {a:g}s but the source is only {length:.2f}s long",
                    f"use a start below {length:.2f}")
@@ -495,6 +510,16 @@ def _check_trim(scene: "Scene", owner, trim, length: float):
         scene.note("warning", "trim-past-end", owner,
                    f"trim ends at {float(b):g}s but the source is {length:.2f}s long, so it stops at {length:.2f}s",
                    f"use [{a:g}, {length:.2f}] or leave out the end")
+    return [a, b]
+
+
+def _on_grid(t: float | None, fps: float) -> float | None:
+    """t, or the frame boundary it is a float error away from. 2.2 + 8.9 is 11.100000000000001, so a layer at 2.2
+    for 8.9 s also showed on frame 333 (11.1 s), and one at its out on the frame after it."""
+    if t is None:
+        return t
+    k = round(t * fps)
+    return k / fps if abs(t * fps - k) < 1e-6 else t
 
 
 def _num(v, ref):

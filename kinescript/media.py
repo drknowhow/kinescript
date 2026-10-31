@@ -34,7 +34,8 @@ def _version(src: str) -> tuple:
 
 
 def _ffmpeg_says(*args) -> str:
-    return subprocess.run([FFMPEG, "-hide_banner", *args], capture_output=True, text=True, creationflags=_NOWIN).stdout
+    return subprocess.run([FFMPEG, "-hide_banner", *args], capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", creationflags=_NOWIN).stdout
 
 
 @lru_cache(maxsize=1)
@@ -67,8 +68,10 @@ def probe(src: str) -> dict:
 def _probe(src: str, mtime: int, size: int) -> dict:
     if not Path(src).exists():
         raise MediaError(f"media not found: {src}")
+    # ffprobe writes tags and paths as UTF-8; decoded as cp1252 (the Windows default) a Cyrillic or Japanese
+    # title tag raised UnicodeDecodeError.
     out = subprocess.run([FFPROBE, "-v", "error", "-show_streams", "-show_format", "-of", "json", src],
-                         capture_output=True, text=True, creationflags=_NOWIN)
+                         capture_output=True, text=True, encoding="utf-8", errors="replace", creationflags=_NOWIN)
     if out.returncode:
         raise MediaError(f"ffprobe failed on {src}: {out.stderr.strip()[:300]}")
     info = json.loads(out.stdout)
@@ -158,7 +161,10 @@ class VideoSource:
     def _open(self, t: float):
         self.close()
         self.t0 = max(0.0, t)
-        cmd = [FFMPEG, "-v", "error", "-ss", f"{self.t0:.4f}", "-i", self.src, "-an", "-vf", self._vf(),
+        # Seek half a source frame early: -ss drops the frames before it, and 41/30 written as 1.3667 lies past
+        # frame 41's own time, so a clip opened there started a frame late. The first frame is now the nearest one.
+        ss = max(0.0, self.t0 - 0.5 / max(self.info["fps"] or self.fps, 1))
+        cmd = [FFMPEG, "-v", "error", "-ss", f"{ss:.4f}", "-i", self.src, "-an", "-vf", self._vf(),
                "-f", "rawvideo", "-pix_fmt", "yuv420p" if self.ctx is not None else "rgba", "-"]
         self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                      bufsize=self.nbytes * 2, creationflags=_NOWIN)
