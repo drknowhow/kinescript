@@ -34,7 +34,7 @@
   the whole canvas. Every frame, each unit of a `split` text looked up its shaping and width again and drew inside
   its own save and restore, moved or not, and a unit blurring in drew into a layer the size of the canvas, which the
   CPU blurred in 370 ms at 1080p. Units and their shaping are now kept with the layout, only a moved unit saves, and
-  on the CPU the blur layer ends 3 sigma past the unit's right and bottom edges; it starts where the canvas-sized
+  on the CPU the blur layer ends a font size plus 3 sigma past the unit's right and bottom edges; it starts where the canvas-sized
   one did, so glyphs land on the same subpixels. On the GPU any bounds change the blur by up to 9 levels, so the
   layer stays canvas-sized there. The pixels are the same on both. The text-split stress scene draws a frame in 76
   ms on the GPU, from 87 (median frame 17-20 ms, from 31-39), and a frame of letters blurring in takes 1.0 s on the
