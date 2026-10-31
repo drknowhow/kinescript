@@ -374,6 +374,71 @@ def test_gpu_and_cpu_agree_on_reflections():
     assert np.abs(cpu - gpu).mean() < 1.5
 
 
+FOG = {"color": "#0000ff", "near": 300, "far": 800}  # px from the camera, which is 247 px from z 0 at 320 x 180
+
+
+def _fogged(z, fog, **layer):
+    spec = _model(dict({"shape": "sphere", "r": 40, "light": "flat", "fill": "#ff0000", "z": z}, **layer), duration=1)
+    spec["fog"] = fog
+    return spec
+
+
+def _floor(fog, sort=None):
+    """A long red floor going away from the camera, alone in a group (a stage with sort "pixel")."""
+    floor = {"id": "floor", "type": "rect", "w": 300, "h": 1200, "y": 40, "z": -400, "rotateX": 90, "fill": "#ff0000"}
+    group = {"id": "g", "type": "group", "x": 160, "y": 90, "children": [floor]}
+    if sort:
+        group["sort"] = sort
+    spec = scene([group], bg="#000000", duration=1)
+    spec["fog"], spec["camera"] = fog, {"rotateX": 20}
+    return spec
+
+
+def test_fog_mixes_far_models_into_its_colour():
+    near, mid, far = (_frame(_fogged(z, FOG), 0)[90, 160, :3].astype(int) for z in (0, -300, -1000))
+    assert tuple(near) == (255, 0, 0) and tuple(far) == (0, 0, 255)
+    assert 100 < mid[0] < 200 and 50 < mid[2] < 150 and mid[1] == 0
+    assert any(i["code"] == "fog-hides" and i["layer"] == "m" for i in check(_fogged(-1000, FOG))["issues"])
+    assert not any(i["code"] == "fog-hides" for i in check(_fogged(-300, FOG))["issues"])
+
+
+def test_default_fog_is_the_background_and_starts_at_the_canvas_plane():
+    def spec(z, fog=True):
+        s = _fogged(z, fog)
+        s["canvas"]["bg"] = "#204060"
+        return s
+    assert _frame(spec(0), 0).tobytes() == _frame(spec(0, None), 0).tobytes()
+    assert tuple(_frame(spec(-5000), 0)[90, 160, :3]) == (0x20, 0x40, 0x60)
+    assert tuple(_frame(spec(-5000, {}), 0)[90, 160, :3]) == (0x20, 0x40, 0x60)
+
+
+def test_fog_mixes_a_flat_layer_by_the_depth_of_its_middle():
+    def middle(**card):
+        spec = scene([dict({"id": "c", "type": "rect", "x": 160, "y": 90, "w": 100, "h": 60, "z": -300,
+                            "fill": "#ff0000"}, **card)], bg="#000000", duration=1)
+        spec["fog"] = FOG
+        return _frame(spec, 0)[90, 160, :3].astype(int)
+    r, g, b = middle()
+    assert abs(r - 129) <= 2 and g == 0 and abs(b - 126) <= 2  # (547 - 300) / 500 of the way to blue
+    assert tuple(middle(stroke="#ffffff")) == (r, g, b)  # drawn in an offscreen layer: fogged once all the same
+
+
+def test_a_stage_fogs_each_pixel_by_its_own_depth():
+    flat, staged = (_frame(_floor(FOG, sort), 0)[:, 160, :3].astype(int) for sort in (None, "pixel"))
+    assert np.array_equal(flat[50], flat[170])  # one mix for the whole layer
+    assert staged[50, 2] > staged[50, 0] and tuple(staged[170]) == (255, 0, 0)  # far end blue, near end red
+
+
+def test_gpu_and_cpu_agree_on_fog():
+    for spec in (_fogged(-300, FOG, detail="high", light="studio"), _floor(FOG, "pixel"), _floor(FOG)):
+        cpu = _frame(spec, 0, "cpu").astype(int)
+        try:
+            gpu = _frame(spec, 0, "gpu").astype(int)
+        except RuntimeError:
+            pytest.skip("no GPU")
+        assert np.abs(cpu - gpu).mean() < 1.0
+
+
 def test_model_parts_hide_each_other_by_depth_not_list_order():
     spec = _model({"light": "flat", "parts": [{"shape": "sphere", "r": 30, "z": 80, "fill": "#ff0000"},
                                               {"shape": "cube", "w": 100, "fill": "#0000ff"}]})

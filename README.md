@@ -57,6 +57,7 @@ no depth draw exactly as before.
   `camera` pans, dollies, orbits and rolls with perspective; `fixed` layers ignore its moves, and a group with
   `"sort": "depth"` draws its children far to near. The `flip`, `flip-up`, `tumble` and `push` motions work on
   whole layers and per letter with `split`. A two-sided card is a group with `"backface": "hidden"` on each side.
+  `fog` fades far layers into the background colour, or a colour of your own.
 - **Stages.** A group with `"sort": "pixel"` draws each child with an image of its depth and shows the nearest at
   each pixel, so models and cards pass through each other with a clean edge, and a model's `ground` shadow lies
   on a floor layer.
@@ -242,6 +243,8 @@ More scenes in [`examples/`](https://github.com/drknowhow/kinescript/tree/main/e
   a glowing ring, 6 s.
 - [`reflections.json`](https://github.com/drknowhow/kinescript/blob/main/examples/reflections.json): chrome, gold
   and gloss reflecting their environments as the camera turns, 6 s.
+- [`fog.json`](https://github.com/drknowhow/kinescript/blob/main/examples/fog.json): a hall of pillars fading
+  into fog as the camera walks in and a ball comes out of it, 6 s.
 - [`voiceover.json`](https://github.com/drknowhow/kinescript/blob/main/examples/voiceover.json): titles cued from
   the words of a voice-over, karaoke captions of it, and a music bed that dips under it, 5.4 s.
 - [`narrated.json`](https://github.com/drknowhow/kinescript/blob/main/examples/narrated.json): the same idea

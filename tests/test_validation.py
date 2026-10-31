@@ -418,3 +418,16 @@ def test_env_is_checked():
     assert e["message"].startswith("env:") and "studio" in e["message"] + e["fix"], e
     e = one_error(scene([dict(cube, env={"top": 5})]), "m")
     assert e["message"].startswith("env top"), e
+
+
+def test_fog_is_checked():
+    cube = {"id": "m", "type": "model", "shape": "cube"}
+    for fog in (True, {"color": "#202a50", "near": 1200, "far": [[0, 6000], ["end", 3000]], "amount": 0.8}):
+        errs, s = errors(dict(scene([cube]), fog=fog))
+        assert s is not None and not errs, errs
+    e = one_error(dict(scene([cube]), fog="thick"))
+    assert e["message"].startswith("fog is true or an object"), e
+    e = one_error(dict(scene([cube]), fog={"near": 3000, "far": 1000}))
+    assert e["message"].startswith("fog far (1000) must be past near"), e
+    e = one_error(dict(scene([cube]), fog={"color": [[0, "#ff0000"], [1, "nope"]]}))
+    assert e["message"].startswith("fog color"), e

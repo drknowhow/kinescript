@@ -50,7 +50,7 @@ class SceneError(ValueError):
 
 
 # Parts of a scene that are not layers; an issue there reads "canvas: ...", not "layer 'canvas': ...".
-SECTIONS = ("canvas", "markers", "theme", "grade", "motionBlur", "mix", "camera", "light", "lights", "env",
+SECTIONS = ("canvas", "markers", "theme", "grade", "motionBlur", "mix", "camera", "light", "lights", "env", "fog",
             "components")
 
 
@@ -151,6 +151,8 @@ class Scene:
         self.light = _subst(spec.get("light"), theme)
         self.lights = _subst(spec.get("lights"), theme)
         self.env = _subst(spec.get("env"), theme)
+        fog = _subst(spec.get("fog"), theme)
+        self.fog = {} if fog is True else fog if isinstance(fog, dict) else None  # None: no fog
         self._compile_lights()
         self.audio = self._build_audio()
         self._check_media()
@@ -332,6 +334,9 @@ class Scene:
                 col = light.get("color")
                 for c in [k[1] for k in col if isinstance(k, list) and len(k) >= 2] if isinstance(col, list) else [col]:
                     one(c, f"{key} color", owner or key)
+        fog = self.fog.get("color") if isinstance(self.fog, dict) else None
+        for c in [x[1] for x in fog if isinstance(x, list) and len(x) >= 2] if isinstance(fog, list) else [fog]:
+            one(c, "fog color", "fog")
         for owner, v in [(None, self.env)] + [(L.id, L.raw.get("env")) for L in self.all_layers()]:
             for k in ("top", "horizon", "bottom"):
                 col = v.get(k) if isinstance(v, dict) else None
@@ -625,7 +630,8 @@ class Scene:
     def _compile_lights(self):
         """Compile the keys of every light that tween, so a bad expression stops the load rather than a frame."""
         from .render3d import FIXED
-        specs = [(None, "light", self.light), (None, "lights", self.lights), (None, "env", self.env)]
+        specs = [(None, "light", self.light), (None, "lights", self.lights), (None, "env", self.env),
+                 (None, "fog", self.fog)]
         specs += [(L.id, k, L.raw.get(k)) for L in self.all_layers() for k in ("light", "lights", "env")]
         for owner, key, v in specs:
             for spec in v if isinstance(v, list) else [v]:

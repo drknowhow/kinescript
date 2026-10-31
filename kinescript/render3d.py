@@ -191,6 +191,38 @@ def environment(spec) -> dict | None:
                 **{k: v for k, v in spec.items() if k != "preset"})
 
 
+def fog(r, T: float) -> tuple | None:
+    """The scene's fog at scene time T as (colour, near, far, amount, focus), near and far in px from the camera
+    and focus the distance of the canvas plane (z 0) from it, or None."""
+    if r.s.fog is None or r._lens is None:
+        return None
+    f = at(r._lit, r.s.ctx, r.s.fog, T, r.s.duration, T)
+    focus = -1.0 / r._lens[3, 2]
+    return (_rgb(f.get("color", _fog_colour(r.s.bg))), float(f.get("near", focus)), float(f.get("far", 4 * focus)),
+            float(f.get("amount", 1.0)), focus)
+
+
+def _fog_colour(bg):
+    """Fog's default colour: the canvas background's, or its gradient's first stop."""
+    if isinstance(bg, dict):
+        stops = bg.get("stops") or ["#000000"]
+        bg = stops[0][1] if isinstance(stops[0], (list, tuple)) else stops[0]
+    return bg if C.is_color(bg) else "#000000"
+
+
+def fogged(fg: tuple, w):
+    """How much of fog fg covers points whose camera projection gives them w: 0 (clear) up to its amount."""
+    col, near, far, amt, focus = fg
+    return np.clip((np.asarray(w, float) * focus - near) / max(far - near, 1e-6), 0.0, 1.0) * amt
+
+
+def fog_filter(fg: tuple, f: float) -> skia.ColorFilter:
+    """A colour filter that mixes a layer f of the way to the fog's colour."""
+    r_, g_, b_ = fg[0]
+    k = 1.0 - f
+    return skia.ColorFilters.Matrix([k, 0, 0, 0, r_ * f, 0, k, 0, 0, g_ * f, 0, 0, k, 0, b_ * f, 0, 0, 0, 1, 0])
+
+
 def _env(e: dict | None, R) -> tuple | None:
     """The environment as the shader takes it: top, horizon and bottom colours, the world's down in camera
     space, and the amount."""
@@ -200,7 +232,7 @@ def _env(e: dict | None, R) -> tuple | None:
     return _rgb(e["top"]), _rgb(e["horizon"]), _rgb(e["bottom"]), down, float(e.get("amount", 1.0))
 
 
-def _shade(nv, M, mats, key, fill, col, amt, more=(), env=None) -> np.ndarray:
+def _shade(nv, M, mats, key, fill, col, amt, more=(), env=None, fog=None) -> np.ndarray:
     """The shader's lighting, per vertex, as 0xAARRGGBB: the raster backend's path."""
     base = np.array([(*m[0], m[1]) for m in mats])[M]
     sp, ex, metal, rim = np.array([m[2:6] for m in mats])[M].T
@@ -238,6 +270,8 @@ def _shade(nv, M, mats, key, fill, col, amt, more=(), env=None) -> np.ndarray:
     glow = np.array([m[6] for m in mats])[M]
     if glow.any():  # at least its fill times glow, however it is lit
         rgb = np.maximum(rgb, base[:, :3] * glow[:, None])
+    if fog is not None:  # (how much of each vertex the fog covers, its colour)
+        rgb = np.clip(rgb, 0, 1) * (1 - fog[0][:, None]) + np.asarray(fog[1]) * fog[0][:, None]
     c = np.round(np.clip(rgb, 0, 1) * 255).astype(np.uint32)
     return 0xFF000000 | (c[:, 0] << 16) | (c[:, 1] << 8) | c[:, 2]
 
@@ -451,7 +485,7 @@ def _hull(p: np.ndarray) -> np.ndarray:
     return h[np.argsort(np.arctan2(h[:, 1] - mid[1], h[:, 0] - mid[0]))]
 
 
-def _ground(r, c: skia.Canvas, spec, rest: np.ndarray, pts: np.ndarray):
+def _ground(r, c: skia.Canvas, spec, rest: np.ndarray, pts: np.ndarray, fg=None):
     """A soft shadow under the model, as if lit from straight above: the footprint of its points on a level
     floor, darkest where it touches and wider and fainter as it rises. The floor lies in the layer's parent
     space, at the model's lowest point before it turns (`rest`), unless `y` places it."""
@@ -478,6 +512,7 @@ def _ground(r, c: skia.Canvas, spec, rest: np.ndarray, pts: np.ndarray):
     box = np.array([[lo[0], lo[1], 0, 1], [hi[0], lo[1], 0, 1], [lo[0], hi[1], 0, 1], [hi[0], hi[1], 0, 1]])
     if ((box @ to.T)[:, 3] < space.NEAR).any():
         return  # the floor passes behind the camera
+    clear = 1.0 if fg is None else 1.0 - float(fogged(fg, (box @ to.T)[:, 3].mean()))  # fog thins the shadow
     # Blurred seen from above at a few floor px per pixel, then laid on the floor: a blur drawn under the
     # camera's perspective added 36 ms to a CPU frame of examples/import.json, this adds about 3.
     px = max(1.0, soft / 4)
@@ -489,7 +524,8 @@ def _ground(r, c: skia.Canvas, spec, rest: np.ndarray, pts: np.ndarray):
     for hull, sigma, alpha in shapes:
         path = skia.Path()
         path.addPoly([skia.Point(*q) for q in hull.tolist()], True)
-        cv.drawPath(path, skia.Paint(AntiAlias=True, Color=skia.ColorSetARGB(round(255 * min(1.0, alpha)), 0, 0, 0),
+        a = round(255 * min(1.0, alpha) * clear)
+        cv.drawPath(path, skia.Paint(AntiAlias=True, Color=skia.ColorSetARGB(a, 0, 0, 0),
                                      MaskFilter=skia.MaskFilter.MakeBlur(skia.kNormal_BlurStyle, sigma)))
     c.save()
     c.resetMatrix()
@@ -622,6 +658,7 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
     in device pixels, or None."""
     m, mats = model(r, L, g)
     lt, more, env = _lighting(r, L, m, t, scene_t)
+    fg = fog(r, scene_t) if r._stage is None else None  # a stage fogs each pixel it shows
     P, N, T, M = m.P, m.N, m.T, m.M
     amt = max(0.0, min(1.0, float(g("draw")) * reveal))
     tid = slice(None)  # each triangle's index in the whole mesh
@@ -674,26 +711,39 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
     cv.clear(skia.ColorTRANSPARENT)
     cv.restore()
     q = np.stack([X, Y], 1) * ss
+    fv = None if fg is None else fogged(fg, w[used])
+    if fv is not None and fv.min() >= 0.999:
+        r.fogged.add(L.id)
+    if fv is not None and fv.max() <= 0.002:
+        fv = None
+    mode = skia.BlendMode.kDst  # vertex colours as given, when there are any
     if r.backend == "gpu":
         paint, colors = _paint(r, L, mats, lt, more, env), None
         uv = np.stack([2.0 * M + 0.5 + 0.45 * nv[:, 0], nv[:, 1]], 1)  # the normal, with the material slot packed in
+        if fv is not None:
+            # Each vertex's fog as its colour (fog colour, alpha the share); kDstATop gives that plus the shading
+            # times what the fog leaves.
+            a = np.round(fv * 255).astype(np.uint32)
+            cr, cg, cb = (round(v * 255) for v in fg[0])
+            colors, mode = (a << 24) | (cr << 16) | (cg << 8) | cb, skia.BlendMode.kDstATop
     else:
         # The raster backend runs SkSL slowly: examples/model.json spent 275 ms a frame in drawVertices
         # at 2x supersampling. Shading each vertex in numpy, the whole frame takes 72 ms.
-        paint, colors = skia.Paint(), _shade(nv, M, mats, *lt, more, env)
+        uv = None
+        paint, colors = skia.Paint(), _shade(nv, M, mats, *lt, more, env, None if fv is None else (fv, fg[0]))
     # Skia indexes vertices with 16 bits, and converts each one it is given: draw in sorted chunks, each
     # with only the vertices its triangles use (one chunk uses them all). Indices go as a memoryview of
     # uint16, which Skia reads 30% faster than a list and 4 times as fast as a numpy array.
     for k in range(0, len(T), 20000):
         sel, idx = (slice(None), T) if len(T) <= 20000 else _compact(T[k:k + 20000], len(q))
-        tex = None if colors is not None else _points(uv[sel])
+        tex = None if uv is None else _points(uv[sel])
         verts = skia.Vertices.MakeCopy(skia.Vertices.kTriangles_VertexMode, _points(q[sel]), tex,
                                        None if colors is None else colors[sel].tolist(),
                                        memoryview(idx.astype(np.uint16).ravel()))
-        cv.drawVertices(verts, paint, skia.BlendMode.kDst)  # kDst: vertex colours as given, when there are any
+        cv.drawVertices(verts, paint, mode)
     img = surf.makeImageSnapshot()
     if L.raw.get("ground") not in (None, False):
-        _ground(r, c, L.raw["ground"], m.P, foot)
+        _ground(r, c, L.raw["ground"], m.P, foot, fg)
     if r._stage is not None and r._stage.child is L:
         r._stage.depth(q, 1.0 / w[used], T)
     c.save()

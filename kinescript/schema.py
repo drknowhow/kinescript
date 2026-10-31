@@ -30,7 +30,7 @@ from .timing import KEYWORDS, LIMIT, finite as _finite_secs, parse_clock, show
 COMMENT = {"note", "notes", "comment", "comments", "description", "name"}
 
 TOP = {"canvas", "theme", "markers", "grade", "motionBlur", "audio", "components", "layers", "meta", "version",
-       "$schema", "camera", "light", "lights", "env", "mix"}
+       "$schema", "camera", "light", "lights", "env", "fog", "mix"}
 TOP_ALIAS = {"layer": "layers", "elements": "layers", "objects": "layers", "items": "layers", "scene": "layers",
              "children": "layers", "tracks": "layers", "motion_blur": "motionBlur", "colorGrade": "grade",
              "music": "audio", "sound": "audio", "marker": "markers"}
@@ -82,6 +82,8 @@ MORE_LIGHT_ALIAS = {"colour": "color", "kind": "type", "direction": "from", "dir
 ENV = {"preset", "top", "horizon", "bottom", "amount"}
 ENV_ALIAS = {"name": "preset", "sky": "top", "ground": "bottom", "floor": "bottom", "middle": "horizon",
              "strength": "amount", "intensity": "amount"}
+FOG = {"color", "near", "far", "amount"}
+FOG_ALIAS = {"colour": "color", "start": "near", "end": "far", "density": "amount", "strength": "amount"}
 MATERIAL = {"fill", "shine", "metal", "rim", "bands", "glow"}
 PART = MATERIAL | {"shape", "w", "h", "depth", "r", "tube", "x", "y", "z", "rotateX", "rotateY", "rotate", "scale",
                    "text", "size", "font", "weight", "italic", "letterSpacing", "lineHeight", "d", "strokeWidth",
@@ -1070,6 +1072,24 @@ def _env(obj: dict, rep: Report, lid):
         rep.add("error", "bad-value", lid, f"env must be a preset ({', '.join(ENVS)}) or an object, got {_show(v)}")
 
 
+def _fog(spec: dict, rep: Report):
+    """`fog` is true or {color, near, far, amount}; near and far are px from the camera."""
+    v = spec.get("fog")
+    if v is None or isinstance(v, bool):
+        return
+    if not isinstance(v, dict):
+        rep.add("error", "bad-value", "fog", f"fog is true or an object like {{\"near\": 1500, \"far\": 4000}}, "
+                f"got {_show(v)}")
+        spec.pop("fog")
+        return
+    _keys(v, FOG, FOG_ALIAS, rep, "fog", "fog: ")
+    _light_values(v, ("near", "far", "amount"), rep, "fog", "fog ")
+    near, far = v.get("near"), v.get("far")
+    if all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in (near, far)) and far <= near:
+        rep.add("error", "bad-value", "fog", f"fog far ({far:g}) must be past near ({near:g})",
+                "far is where the fog hides everything, near where it starts")
+
+
 def _more_lights(obj: dict, rep: Report, lid, most: int):
     v = obj.get("lights")
     if isinstance(v, dict):
@@ -1372,6 +1392,7 @@ def normalize(spec) -> tuple[dict, Report]:
                 f"got {type(cam).__name__}")
         spec.pop("camera")
     _light(spec, rep, None)
+    _fog(spec, rep)
     audio = spec.get("audio")
     if isinstance(audio, (dict, str)):
         audio = spec["audio"] = [audio]

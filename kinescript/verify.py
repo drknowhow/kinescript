@@ -407,6 +407,9 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
             msg = ("the triangles of this model that cross the camera plane are not drawn"
                    if scene.by_id[lid].type == "model" else "layer crosses the camera plane, so it is not drawn")
             add("warning", "behind-camera", lid, T, msg, "lower its z, or move the camera back (a higher camera z)")
+        for lid in r.fogged:
+            add("warning", "fog-hides", lid, T, "this layer lies past the fog's far distance, so it shows only the "
+                "fog's colour", "bring it nearer, or move fog far back")
         for lid in r.unlit:
             add("warning", "light-behind", lid, T, "the key light is behind this model as the camera sees it, so "
                 "its front shows only ambient and rim light", "turn the light toward the camera: an azimuth between "
