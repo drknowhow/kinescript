@@ -49,6 +49,14 @@
   The seed for each boil comes from the layer's time, so a frame is still a function of its time alone. The
   `rough-200` stress scene (100 outlined cards boiling 8 times a second, 100 rough lines drawing on) draws a 1080p
   frame in 4.1 ms on the GPU, 1.6 ms more than without `rough`.
+- `combine` on a group (`union`, `subtract`, `intersect` or `xor`) merges its shapes and text into one shape drawn
+  with the group's own fill, stroke, `draw`, `dash` and `rough`, so a word cut out of a badge is a group of a rect
+  and a text with `"combine": "subtract"`, and a stroke runs round the merged outline only. A filled child gives
+  its fill's outline and a line or arrow its stroke's; nested groups give their children's. A frame merges again
+  only from the first child that changed. `kine check` warns about children it leaves out (images, videos,
+  shaders, models, captions), a combine with too few children, and a stroke on a group without `combine`. The
+  `combine-60` stress scene (60 badges with a word cut out, 30 with a hole moving through them as well) draws a
+  1080p frame in 5.9 ms on the GPU, 4.0 ms more than the same layers drawn as themselves.
 - `kine check` warns `strobe` where a layer moves more than 40 px a frame at 1080p for five frames running in a
   scene without motion blur, where the eye sees separate copies instead of one moving thing.
 - 2D frames cost less Python: keyframes find their segment by bisection, expressions compile once to a function,

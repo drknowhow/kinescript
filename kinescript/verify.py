@@ -224,6 +224,14 @@ def _pixels(r: Renderer) -> np.ndarray:
     return buf
 
 
+def _combined(layer) -> bool:
+    """Whether a combining group merges the layer into its shape, so it is not drawn as itself."""
+    p = layer.parent
+    while p is not None and not p.raw.get("combine"):
+        p = p.parent
+    return p is not None
+
+
 def _over(boxes: dict, lid: str, a: list) -> str | None:
     """The layer drawn after `lid` whose box covers most of `lid`'s box, if any covers it at all."""
     best, area, after = None, 0.0, False
@@ -620,7 +628,7 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
             return broke(e, T)
         boxes = r.boxes  # draw() makes a new dict each time
         b = boxes.get(layer.id)
-        if not b or b["alpha"] < 0.5:
+        if not b or b["alpha"] < 0.5 or _combined(layer):
             continue
         l, t, rr, bb = (int(max(0, v)) for v in b["rect"])
         rr, bb = min(r.w, rr), min(r.h, bb)

@@ -157,7 +157,7 @@ TYPES: dict[str, set[str]] = {
     "captions": TEXT | {"src", "cues", "mode", "active", "voice"},
     "shader": {"preset", "uniforms", "sksl", "w", "h"},
     "group": {"children", "layers", "w", "h", "clip", "radius", "fill", "sort", "shadows", "speed", "loop",
-              "timeRemap"},
+              "timeRemap", "combine"} | SHAPE,
     "model": PART - {"x", "y", "z", "rotateX", "rotateY", "rotate", "scale"} | {"detail", "parts", "explode",
                                                                               "draw", "light", "lights", "env",
                                                                               "src", "ground", "edges",
@@ -219,6 +219,7 @@ ENUMS = {
               "color"),
     "backface": ("visible", "hidden"),
     "sort": ("order", "depth", "pixel"),
+    "combine": ("union", "subtract", "intersect", "xor"),
     "shape": ("cube", "sphere", "cylinder", "cone", "torus", "plane", "capsule", "lathe", "tube", "text", "path"),
     "detail": ("low", "medium", "high"),
     "role": ("voice", "music", "sfx", "ambience"),
@@ -227,6 +228,8 @@ ENUM_ALIAS = {"middle": "center", "centre": "center", "centered": "center", "mid
               "characters": "chars", "letters": "chars", "char": "chars", "word": "words", "line": "lines",
               "uppercase": "upper", "lowercase": "lower", "fill": "cover", "crop": "cover", "scale": "contain",
               "plus": "add", "additive": "add", "soft-light": "softLight", "softlight": "softLight",
+              "merge": "union", "minus": "subtract", "cut": "subtract", "intersection": "intersect",
+              "exclude": "xor",
               "box": "cube", "cuboid": "cube", "ball": "sphere", "globe": "sphere", "donut": "torus",
               "doughnut": "torus", "ring": "torus", "can": "cylinder", "pipe": "cylinder", "pill": "capsule",
               "revolve": "lathe", "revolved": "lathe", "turned": "lathe", "spun": "lathe",
@@ -894,6 +897,7 @@ def _layer(raw, rep: Report, path: str, comps: dict):
     if t == "group":
         _shadows(raw, rep, lid)
         _clock(raw, rep, lid)
+        _combine(raw, rep, lid)
     kids = raw.get("children") if raw.get("children") is not None else raw.get("layers")
     if t == "group" and raw.get("children") is not None and raw.get("layers") is not None:
         rep.add("error", "duplicate-key", lid, "a group lists its layers under 'children' or 'layers', not both",
@@ -975,6 +979,28 @@ def _rough(raw: dict, rep: Report, lid):
                 "wobble", example)
     if v.get("amount") == 0:
         rep.add("warning", "ignored-key", lid, "rough with amount 0 draws the shape smooth", example)
+
+
+COMBINES = {"rect", "circle", "ellipse", "polygon", "path", "line", "arrow", "text", "counter", "group"}
+
+
+def _combine(raw: dict, rep: Report, lid):
+    """combine on a group merges its shapes and text into one shape; without it the group draws no stroke."""
+    kids = raw.get("children") if raw.get("children") is not None else raw.get("layers")
+    kids = [k for k in kids if isinstance(k, dict)] if isinstance(kids, list) else []
+    if not raw.get("combine"):
+        drawn = sorted(SHAPE - {"fill"} & set(raw))
+        if drawn:
+            rep.add("warning", "ignored-key", lid, f"{', '.join(drawn)} on a group draw only with combine, which "
+                    "merges its children into one shape", '"combine": "union"')
+        return
+    left = [str(k.get("id", k.get("type"))) for k in kids if k.get("type") not in COMBINES]
+    if left:
+        rep.add("warning", "ignored-key", lid, f"combine merges shapes and text, so {', '.join(left)} is left out",
+                "move it out of the group")
+    if len(kids) - len(left) < (2 if raw["combine"] != "union" else 1):
+        rep.add("warning", "ignored-key", lid, f"combine {raw['combine']} needs at least two shapes or texts to "
+                "combine", "put the shapes to merge in the group's children")
 
 
 def _clock(raw: dict, rep: Report, lid):

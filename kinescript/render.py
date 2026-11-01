@@ -34,6 +34,8 @@ _GROTESK = {400: "SpaceGrotesk-Regular.ttf", 500: "SpaceGrotesk-Medium.ttf", 600
 _PLEX = {400: "IBMPlexMono-Regular.ttf", 500: "IBMPlexMono-Medium.ttf", 600: "IBMPlexMono-SemiBold.ttf",
          700: "IBMPlexMono-Bold.ttf"}
 BUNDLED = {"space grotesk": _GROTESK, "sans": _GROTESK, "ibm plex mono": _PLEX, "mono": _PLEX}
+COMBINE = {"union": skia.PathOp.kUnion_PathOp, "subtract": skia.PathOp.kDifference_PathOp,
+           "intersect": skia.PathOp.kIntersect_PathOp, "xor": skia.PathOp.kXOR_PathOp}
 BLENDS = {"normal": skia.BlendMode.kSrcOver, "multiply": skia.BlendMode.kMultiply, "screen": skia.BlendMode.kScreen,
           "overlay": skia.BlendMode.kOverlay, "add": skia.BlendMode.kPlus, "lighten": skia.BlendMode.kLighten,
           "darken": skia.BlendMode.kDarken, "softLight": skia.BlendMode.kSoftLight,
@@ -99,6 +101,13 @@ def _rrect(box, r) -> skia.RRect:
         rr.setRectRadii(rect, [skia.Point(max(0.0, float(v)), max(0.0, float(v))) for v in r])
         return rr
     return skia.RRect.MakeRectXY(rect, r, r)
+
+
+def _outline(paint: skia.Paint, path: skia.Path) -> skia.Path:
+    """The area path covers when drawn with paint: a stroke's outline, dashes and all."""
+    out = skia.Path()
+    paint.getFillPath(path, out)
+    return out
 
 
 def _blur_sksl(n: int) -> str:
@@ -573,6 +582,9 @@ class Renderer:
         self._shaped: dict = {}  # (typeface, size, text, rtl) -> how _draw_pieces draws it (_pieces)
         self._paths: dict = {}
         self._roughs: dict = {}  # layer id: (seed, the path it wobbled, the wobbled path), the last one made
+        # While a combining group draws its children: into its space, and the outlines they give instead of drawing
+        self._capture: tuple[skia.Matrix, list] | None = None
+        self._combos: dict = {}  # a combining group's id: (the outlines it merged, the merged path), the last one
         self._routes: dict[str, tuple] = {}  # an along's path by layer (data) or route id: (path, measure, length)
         self._group_T: dict[str, float] = {}  # a group with a clock: the scene time it is drawn at, for its kids
         self._solid: dict[int, skia.Paint] = {}  # an antialiased fill paint for each colour (_fill_paint)
@@ -1076,6 +1088,8 @@ class Renderer:
             return
         if L.id in self.s.surfaces:  # a model's texture: drawn there (_surface), not here
             return
+        if self._capture is not None and L.type in ("image", "video", "shader", "model", "captions"):
+            return  # a combining group merges shapes and text only
         F = self._frame_t
         if not L.visible(T if F is None else F):
             return
@@ -1252,10 +1266,16 @@ class Renderer:
             if self._m3d is not None and L.raw.get("sort") == "pixel" and self._stage is None:
                 stage.stage(self).draw(self, c, kids, T, parent_alpha * alpha, L.raw.get("shadows"))
             else:
+                outer_capture = self._capture
+                if L.raw.get("combine"):
+                    inv = skia.Matrix()
+                    self._capture = (inv, []) if c.getTotalMatrix().invert(inv) else None
                 for child in kids:
                     if self._stopped:
                         break
                     self._layer(c, child, T, parent_alpha * alpha)
+                if L.raw.get("combine"):
+                    self._combine(c, L, t, g, box, reveal, outer_capture)
             self._frame_t = frame_t
         if layered == 2:
             c.restore()
@@ -1265,6 +1285,51 @@ class Renderer:
         self._m3d = outer
         if self.stop_after == L.id:
             self._stopped = True
+
+    def _combine(self, c, L: Layer, t: float, g, box, reveal, outer):
+        """Merge the outlines L's children gave (_take), first to last by L's combine, and draw the merged shape with
+        L's fill and stroke; inside another combining group, give it to that one. Each merge so far is kept: a frame
+        merges again from the first child whose outline changed, so children that hold still are merged once."""
+        taken, self._capture = self._capture, outer
+        if taken is None or self._stopped:
+            return
+        paths, op = taken[1], COMBINE[L.raw["combine"]]
+        old, folds = self._combos.get(L.id, ([], []))
+        k = 0
+        while k < min(len(old), len(paths)) and old[k] == paths[k]:
+            k += 1
+        folds = folds[:k]
+        for p in paths[k:]:
+            folds.append((skia.Op(folds[-1], p, op) or folds[-1]) if folds else skia.Path(p))
+        self._combos[L.id] = (paths, folds)
+        out = folds[-1] if folds else skia.Path()
+        if out.isEmpty():
+            return
+        if box is None:
+            b = out.computeTightBounds()
+            box = (b.left(), b.top(), b.width(), b.height())
+        self._ink, self._alpha, self._cf, self._t = None, 1.0, None, t
+        self._shape(c, L, g, out, box, reveal)
+
+    def _take(self, c, path: skia.Path):
+        """For a combining group: path, drawn in the canvas's current space, put in the group's space."""
+        inv, paths = self._capture
+        out = skia.Path()
+        path.transform(skia.Matrix.Concat(inv, c.getTotalMatrix()), out)
+        paths.append(out)
+
+    @staticmethod
+    def _letters(pcs: list[Piece] | None, s: str, x: float, y: float, font: skia.Font) -> skia.Path:
+        """The outlines of s's letters where _draw_pieces draws them; a shaped piece letter by letter, unjoined."""
+        out = skia.Path()
+        for text, f, width in [(s, font, 0.0)] if pcs is None else [(p.text, p.font, p.width) for p in pcs]:
+            glyphs = f.textToGlyphs(text)
+            for gid, gx in zip(glyphs, f.getXPos(glyphs)):
+                gp = f.getPath(gid)
+                if gp is not None:
+                    out.addPath(gp, x + gx, y)
+            x += width
+        return out
 
     @staticmethod
     def _inner(L: Layer, t: float, T: float) -> float:
@@ -1490,6 +1555,16 @@ class Renderer:
         has_stroke = L.raw.get("stroke") is not None
         fp = self._fill_paint(L, g, box, alpha=amt * self._alpha,
                               default=None if has_stroke else self.s.theme.get("paper", "#f2f0e8"))
+        if self._capture is not None:  # a combining group takes its fill's outline, or its stroke's
+            if fp is not None:
+                if amt > 0:
+                    self._take(c, path)
+            elif (sp := self._stroke_paint(L, g, box)) is not None and amt > 0.0005:
+                start = float(g("drawStart", 0.0))
+                if "dash" in L.raw:
+                    self._dash(L, g, sp, path, start)
+                self._take(c, _outline(sp, self._trim(path, amt, start)))
+            return
         if fp is not None and self._cf is not None:
             fp = skia.Paint(fp)  # a kept solid paint is shared
             fp.setColorFilter(self._cf)
@@ -1506,6 +1581,8 @@ class Renderer:
 
     # ---- layer types ----------------------------------------------------------------------
     def _draw_group(self, c, L, t, T, g, box, reveal, mods):
+        if L.raw.get("combine"):  # its fill and stroke draw what its children merge into (_combine)
+            return
         if box is not None and L.raw.get("clip"):
             c.clipRRect(_rrect(box, self._radius(g)), doAntiAlias=True)
         fp = self._fill_paint(L, g, box) if box is not None else None
@@ -1692,6 +1769,12 @@ class Renderer:
         if "dash" in L.raw:  # the head stays whole
             shaft = skia.Paint(sp)
             self._dash(L, g, shaft)
+        if self._capture is not None:  # a combining group takes the outline of its stroke
+            out = _outline(shaft, self._trim(path, amt))
+            if hp is not None:
+                out.addPath(_outline(sp, hp))
+            self._take(c, out)
+            return
         c.drawPath(self._trim(path, amt), shaft)
         if hp is not None:
             c.drawPath(hp, sp)
@@ -2255,7 +2338,7 @@ class Renderer:
         bx, by, bw, bh = box
         pad = self._pad(L)
         boxspec = L.raw.get("box")
-        if boxspec:
+        if boxspec and self._capture is None:
             bs = boxspec if isinstance(boxspec, dict) else {}
             r = float(bs.get("radius", 10))
             c.drawRRect(skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(*box), r, r),
@@ -2342,6 +2425,9 @@ class Renderer:
                     if r.rtl:
                         x += self._measure(font, r.text, True, r.ctx) - self._measure(font, text, True, r.ctx)
                     pcs = self._pieces(font, text, r.rtl, r.ctx)
+                if self._capture is not None:  # a combining group takes the letters' outlines
+                    self._take(c, self._letters(pcs, text, x, y, font))
+                    continue
                 if spaint is not None:
                     self._draw_pieces(c, pcs, text, x, y, font, spaint)
                 self._draw_pieces(c, pcs, text, x, y, font, ink)
@@ -2349,7 +2435,8 @@ class Renderer:
                 c.restore()
             if moved:
                 c.restore()
-        if visible_chars is not None and L.raw.get("caret") and (int(T * 2) % 2 == 0 or reveal < 1):
+        if visible_chars is not None and L.raw.get("caret") and (int(T * 2) % 2 == 0 or reveal < 1) and (
+                self._capture is None):
             last = None
             for r in lay.runs:
                 if r.char0 < visible_chars:

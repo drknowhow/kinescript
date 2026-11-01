@@ -322,6 +322,20 @@ def test_dash_corner_and_four_corner_radius_are_checked(layer, words):
     assert words in one_error(scene([layer]))["message"]
 
 
+def test_combine_is_checked_and_warns_about_what_it_leaves_out():
+    disc = {"id": "d", "type": "circle", "r": 10}
+    e = one_error(scene([{"id": "g", "type": "group", "combine": "weld", "children": [disc]}]), "g")
+    assert "combine" in e["message"], e
+    for g, words in (({"combine": "subtract", "children": [disc]}, "needs at least two"),
+                     ({"stroke": "#fff", "strokeWidth": 3, "children": [disc]}, "draw only with combine"),
+                     ({"combine": "union", "children": [disc, dict(disc, id="e"), {"id": "s", "type": "shader",
+                                                                                    "preset": "grid"}]}, "s is left out")):
+        w = warnings(scene([dict({"id": "g", "type": "group"}, **g)]), "ignored-key")
+        assert w and words in w[0]["message"], (g, w)
+    issues, s = load(scene([{"id": "g", "type": "group", "combine": "minus", "children": [disc, dict(disc, id="e")]}]))
+    assert s is not None and s.by_id["g"].raw["combine"] == "subtract", issues
+
+
 @pytest.mark.parametrize("rough, words", [
     ("lots", "rough is"), ({"amount": -1}, "rough amount is -1"), ({"length": 0}, "rough length is 0"),
     ({"seed": 1.5}, "rough seed is 1.5"), ({"seed": True}, "rough seed is"), ({"boil": -2}, "rough boil is -2"),

@@ -220,6 +220,61 @@ def test_a_gradient_animates_into_another():
     assert np.array_equal(_frame(spec, 15), mid)  # a pure function of the frame
 
 
+def _combine(op, kids, **group):
+    return dict({"id": "g", "type": "group", "x": 160, "y": 90, "combine": op, "fill": "#ffffff", "children": kids},
+                **group)
+
+
+TWO_DISCS = [{"id": "a", "type": "circle", "x": -40, "r": 60}, {"id": "b", "type": "circle", "x": 40, "r": 60}]
+
+
+@pytest.mark.parametrize("op, left, middle, right", [
+    ("union", True, True, True), ("subtract", True, False, False), ("intersect", False, True, False),
+    ("xor", True, False, True),
+])
+def test_combine_merges_a_groups_shapes_into_one(op, left, middle, right):
+    f = _frame(scene([_combine(op, TWO_DISCS)], bg="#000000"), 0)
+    assert [f[90, x, 0] > 200 for x in (80, 160, 240)] == [left, middle, right]
+
+
+def test_a_combined_shape_strokes_only_its_outline_and_takes_text_lines_and_nested_groups():
+    union = _combine("union", TWO_DISCS, fill="#000000", stroke="#ffffff", strokeWidth=6)
+    f = _frame(scene([union], bg="#000000"), 0)
+    assert f[90, 220, 0] < 20 and f[90, 140, 0] < 20 and f[90, 60, 0] > 200  # no stroke where the discs overlap
+    cut = _combine("subtract", [{"id": "plate", "type": "rect", "w": 260, "h": 110},
+                                {"id": "word", "type": "text", "text": "IIII", "size": 90, "weight": 800}])
+    plate = _combine("subtract", cut["children"][:1])
+    lit, whole = (_frame(scene([s], bg="#000000"), 0)[..., 0] > 200 for s in (cut, plate))
+    assert 0.5 < lit.sum() / whole.sum() < 0.95 and not (lit & ~whole).any()  # the letters are holes in the plate
+    bar = _combine("subtract", [{"id": "plate", "type": "rect", "w": 200, "h": 100},
+                                {"id": "inner", "type": "group", "children": [
+                                    {"id": "line", "type": "line", "points": [[-120, 0], [120, 0]], "strokeWidth": 10}]}])
+    f = _frame(scene([bar], bg="#000000"), 0)
+    assert f[90, 160, 0] < 20 and f[60, 160, 0] > 200  # a line takes the outline of its stroke
+
+
+def test_a_combining_group_merges_again_only_when_a_child_changes():
+    still = scene([_combine("subtract", [{"id": "p", "type": "rect", "w": 200, "h": 100},
+                                         {"id": "h", "type": "circle", "r": 30}]),
+                   _combine("subtract", [{"id": "q", "type": "rect", "w": 200, "h": 100},
+                                         {"id": "m", "type": "circle", "r": 30, "x": [[0, -80], [1, 80]]}],
+                            id="moving", y=40)], bg="#000000", duration=1)
+    r = Renderer(k.Scene(still), backend="cpu")
+    r.frame(0)
+    kept, moved = r._combos["g"][1][-1], r._combos["moving"][1]
+    f = r.frame(15)
+    assert r._combos["g"][1][-1] is kept and r._combos["moving"][1][0] is moved[0]  # the rect, not merged again
+    assert r._combos["moving"][1][-1] is not moved[-1]
+    assert np.array_equal(f, _frame(still, 15))
+
+
+def test_check_does_not_read_combined_text_for_contrast():
+    badge = _combine("subtract", [{"id": "plate", "type": "rect", "w": 260, "h": 110},
+                                  {"id": "word", "type": "text", "text": "SALE", "size": 60}], fill="#ff633f")
+    issues = check(scene([badge], bg="#f2f0e8"))["issues"]
+    assert not [i for i in issues if i["code"] in ("contrast", "text-hidden")], issues
+
+
 DASHED = {"id": "l", "type": "line", "points": [[20, 90], [300, 90]], "strokeWidth": 6, "cap": "butt",
           "stroke": "#ffffff", "dash": [20, 20]}
 

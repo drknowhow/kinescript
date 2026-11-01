@@ -196,6 +196,13 @@ LAYER TYPES (defaults in brackets)
             start again, so a looping icon is one group with "loop": 1.2) and timeRemap (keyframes
             or an expression giving their time in seconds at the group's time t; a number freezes
             them there). Sounds keep the scene's time.
+            combine (union|subtract|intersect|xor) merges its shapes and text into one shape, drawn
+            with the group's fill, stroke, strokeWidth, draw, dash and rough instead of the
+            children's own: "subtract" cuts every later child out of the first, so a word cut out of
+            a badge is a group of a rect and a text. A filled child gives its fill's outline, a line
+            or arrow its stroke's; images, videos, shaders, models and captions are left out. Text
+            gives its letters' outlines, a shaped script's letter by letter. Children that hold
+            still are merged once; moving ones each frame.
   sequence  clips [{"src": "a.mp4", "trim": [0, 4]}, ...] (an image clip needs dur) and transition
             {"type": "fade", "dur": 0.4} (fade|wipe|slide|zoom|blur|cut; dur defaults to 0.5, cut
             takes none, and no transition is a cut). Becomes a group of back-to-back layers named
