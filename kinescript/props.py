@@ -66,9 +66,20 @@ def mix(a, b, t: float) -> str:
     return _hex(C.mix(C.parse(a), C.parse(b), max(0.0, min(1.0, float(t)))))
 
 
+def sweep(i: float, n: float, p: float, soft: float = 1.0) -> float:
+    """1 for the units a sweep across n of them has passed at p (0 to 1), 0 for those it has not reached, and in
+    between, eased, over `soft` units at its front. It starts before unit 0 and ends past the last one."""
+    soft = max(0.0, float(soft))
+    front = float(p) * (float(n) + soft)
+    if soft == 0:
+        return 1.0 if i < front else 0.0
+    x = max(0.0, min(1.0, (front - float(i)) / soft))
+    return x * x * (3 - 2 * x)
+
+
 EXPR_ENV: dict[str, Any] = {k: getattr(math, k) for k in (
     "sin", "cos", "tan", "pi", "sqrt", "floor", "ceil", "exp", "log", "atan2", "hypot", "tau")}
-EXPR_ENV.update(abs=abs, min=min, max=max, round=round, noise=noise, hsl=hsl, mix=mix,
+EXPR_ENV.update(abs=abs, min=min, max=max, round=round, noise=noise, hsl=hsl, mix=mix, sweep=sweep,
                 clamp=lambda v, a=0.0, b=1.0: max(a, min(b, v)),
                 lerp=lambda a, b, t: a + (b - a) * t,
                 wiggle=lambda freq, amp, t, seed=0: noise(t * freq, seed) * amp,
@@ -138,8 +149,12 @@ class Prop:
     def __init__(self, static: bool, value=None, fn: Callable | None = None, keys: Callable | None = None):
         self.static, self.value, self.fn, self.keys = static, value, fn, keys
 
-    def at(self, t: float, d: float, T: float = 0.0, i: int = 0):
-        return self.value if self.static else self.fn(t, d, T, i)
+    def at(self, t: float, d: float, T: float = 0.0, i: int = 0, n: int | None = None):
+        """The value at t of a layer d long, for unit (or copy, or part) i; n, the unit count, goes to a unit key's
+        expression."""
+        if self.static:
+            return self.value
+        return self.fn(t, d, T, i) if n is None else self.fn(t, d, T, i, n)
 
     def held(self, t0: float, t1: float, d: float) -> bool:
         """Whether the value is the same at every time in [t0, t1]: a constant, or keyframes before their first key or
@@ -207,6 +222,8 @@ class _FloatPow(ast.NodeTransformer):
 
 _GLOBALS = {"__builtins__": {}, "_pow": _pow}
 ARGS = ("t", "d", "p", "T", "i")  # what an expression function takes, in order (expr_fn)
+FIELD = re.compile(r"\{:([^{}]*)\}")  # where a counter's format writes its value, and how
+UNIT = {"unitX", "unitY", "unitRotate", "unitScale", "unitOpacity", "unitFill", "unitBlur"}  # n, the unit count, too
 
 
 def compile_expr(src: str, name: str, allowed: set[str], args: tuple[str, ...] = ()):
@@ -221,9 +238,10 @@ def compile_expr(src: str, name: str, allowed: set[str], args: tuple[str, ...] =
                          "write it shorter, or split it across keyframes") from None
 
 
-def expr_fn(src: str, name: str, env: dict) -> Callable:
-    """The expression as a function of (t, d, p, T, i) whose globals are env's helpers, so a call builds no dict."""
-    return eval(compile_expr(src, name, set(env) | set(ARGS), ARGS), dict(env, **_GLOBALS))
+def expr_fn(src: str, name: str, env: dict, args: tuple[str, ...] = ARGS) -> Callable:
+    """The expression as a function of args, (t, d, p, T, i) unless given, whose globals are env's helpers, so a
+    call builds no dict."""
+    return eval(compile_expr(src, name, set(env) | set(args), args), dict(env, **_GLOBALS))
 
 
 def _compile_expr(src: str, name: str, allowed: set[str], args: tuple[str, ...] = ()):
@@ -292,6 +310,18 @@ def compile_prop(name: str, raw, ctx: Ctx, smooth: bool = False) -> Prop:
     and each key's ease is ignored except hold."""
     if name in NOT_ANIMATABLE:
         return Prop(True, raw)
+    if isinstance(raw, str) and raw.startswith("=") and name in UNIT:  # a split text's unit i of n
+        fn = expr_fn(raw[1:], name, dict(EXPR_ENV, W=ctx.w, H=ctx.h, fps=ctx.fps), ARGS + ("n",))
+
+        def fu(t, d, T, i, n=1, fn=fn):
+            try:
+                v = fn(t, d, t / d if d else 0.0, T, i, n)
+            except OverflowError:
+                raise ValueError("gives a number too large for a float, not a finite number") from None
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and not _finite(v):
+                raise ValueError(f"gives {_show(v)}, not a finite number")
+            return _norm(v)
+        return Prop(False, raw, fn=fu)
     if isinstance(raw, str) and raw.startswith("="):
         fn = expr_fn(raw[1:], name, dict(EXPR_ENV, W=ctx.w, H=ctx.h, fps=ctx.fps))
 

@@ -168,7 +168,7 @@ ROUGH_ALIAS = {"roughness": "amount", "jitter": "amount", "wobble": "amount", "s
                "size": "length", "rate": "boil", "fps": "boil"}
 TEXT = {"text", "size", "weight", "font", "italic", "fill", "emph", "align", "maxWidth", "lineHeight",
         "letterSpacing", "stroke", "strokeWidth", "box", "case", "textCase", "caret", "split",
-        "unitX", "unitY", "unitRotate", "unitScale", "unitOpacity"}
+        "unitX", "unitY", "unitRotate", "unitScale", "unitOpacity", "unitFill", "unitBlur"}
 MEDIA = {"src", "w", "h", "fit", "zoom", "focus", "focusX", "focusY", "radius", "stroke", "strokeWidth", "cap", "join",
          "dash", "dashOffset"}
 TYPES: dict[str, set[str]] = {
@@ -289,14 +289,14 @@ ENUM_ALIAS = {"middle": "center", "centre": "center", "centered": "center", "mid
 WEIGHTS = {"thin": 100, "extralight": 200, "light": 300, "normal": 400, "regular": 400, "book": 400,
            "medium": 500, "semibold": 600, "demibold": 600, "bold": 700, "extrabold": 800, "heavy": 900,
            "black": 900}
-COLOR_KEYS = {"fill", "stroke", "emph", "active"}
+COLOR_KEYS = {"fill", "stroke", "emph", "active", "unitFill"}
 # Objects some tools nest animated values under; their keys belong on the layer itself.
 WRAPPERS = {"tween", "tweens", "keyframes", "animate", "animation", "animations", "props", "properties", "style"}
 # Props whose value must be one number (after % and expressions are resolved).
 SCALAR = {"x", "y", "w", "h", "r", "opacity", "scale", "scaleX", "scaleY", "rotate", "blur", "size", "weight",
           "strokeWidth", "draw", "drawStart", "zoom", "value", "radius", "dimOutside", "sides", "inner", "x1", "y1",
           "x2", "y2", "bend", "head", "maxWidth", "lineHeight", "letterSpacing", "focusX", "focusY", "speed",
-          "unitX", "unitY", "unitRotate", "unitScale", "unitOpacity", "z", "rotateX", "rotateY", "fov",
+          "unitX", "unitY", "unitRotate", "unitScale", "unitOpacity", "unitBlur", "z", "rotateX", "rotateY", "fov",
           "depth", "tube", "shine", "metal", "rim", "bands", "explode", "bevel", "transparency", "timeRemap",
           "dashOffset", "corner"}
 REQUIRED = {"text": ("text",), "image": ("src", "frames", "sheet"), "video": ("src",), "path": ("d", "points"),
@@ -307,8 +307,8 @@ OBJECTS = {"light", "lights", "env", "ground", "shadow", "shadows", "box", "fx",
            "parts", "transition", "texture", "edges", "animation", "repeat", "along", "rough", "mask", "glow",
            "outline", "innerShadow", "displace", "textPath"}
 # Props that cannot be below 0, and the least each may be.
-AT_LEAST = {"radius": 0, "r": 0, "sides": 3, "blur": 0, "strokeWidth": 0, "size": 0, "corner": 0, "glow size": 0,
-            "glow amount": 0, "outline width": 0, "innerShadow blur": 0, "displace amount": 0}
+AT_LEAST = {"radius": 0, "r": 0, "sides": 3, "blur": 0, "unitBlur": 0, "strokeWidth": 0, "size": 0, "corner": 0,
+            "glow size": 0, "glow amount": 0, "outline width": 0, "innerShadow blur": 0, "displace amount": 0}
 COLOUR_FIX = f"write {C.FORMATS}"
 TIME_FORMS = 'seconds like 1.5, "45f" (frames), "0:02.5", "title.out+0.2" or a marker name'
 
@@ -503,6 +503,9 @@ def _values(raw: dict, ltype: str, rep: Report, lid):
         if isinstance(v, dict) and not _tween(v) and k in ("fill", "stroke"):
             if ltype != "model":  # _model says a model takes no gradient
                 gradient(v, k, rep, lid)
+        elif isinstance(v, dict) and not _tween(v) and k == "unitFill":
+            rep.add("error", "bad-value", lid, "unitFill is one colour for each unit, not a gradient",
+                    "give fill the gradient, or make unitFill an expression of i, e.g. \"=hsl(i * 30)\"")
         elif k in SCALAR or k in COLOR_KEYS or (isinstance(v, dict) and _tween(v)):
             _prop(k, v, rep, lid)
 

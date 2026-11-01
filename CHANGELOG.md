@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Per-unit paint: `unitFill` colours each unit of a split text and `unitBlur` blurs it, beside `unitX`, `unitY`,
+  `unitRotate`, `unitScale` and `unitOpacity`. Unit expressions now see `n`, how many units there are, as well as
+  `i`, and the new helper `sweep(i, n, p, soft)` is 1 for the units a sweep has passed and 0 for the rest, eased over
+  `soft` units at its front, so `"unitFill": "=mix('#f2f0e8', '#ff633f', sweep(i, n, p, 3))"` runs a highlight
+  across a line. `unitFill` colours a unit's plain letters, over a gradient fill too; emphasised words keep theirs.
+  Loading and `kine check` try each unit expression on the first unit and the last, with `n` counted from the text.
+  `examples/sweep.json` runs a highlight, a rainbow and a focus pull across three lines.
 - Text on a path: `textPath` lays a text's or a counter's letters along SVG path data in the layer's space, or along
   `"#id"` of a path, line, arrow or polygon in the same group where that layer draws it, each letter turned to the
   path where its middle is: `{"d": "#arc", "offset": [[0, 0], [3, 1]], "align": "center"}`. `offset` is how far
