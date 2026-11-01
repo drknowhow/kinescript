@@ -319,6 +319,14 @@ DEPTH AND CAMERA (3D)
             at the top level): give y when the model moves up and down. "from": "light" casts it along
             the model's key light instead, so it moves as the light does (none when the light is
             below the floor). For shadows on other layers, use a stage's shadows.
+  edges     lines along the model: true (creases and the outline, 2 px, theme ink), "all" (every
+            triangle's edges: a wireframe with the lines behind it hidden), or {"width": 2, "color":
+            "#0a0c10", "angle": 30}. A crease is drawn where the faces either side turn by more than
+            angle degrees (0 draws every edge), the outline where a face toward the camera meets one
+            turned away. Lines are width px wide whatever their depth, and hidden by whatever is in
+            front of them. width, color and angle animate: "width": [[0, 0], [1, 2]] draws them in.
+            Where parts of one model touch, a line along the seam can come out stepped, as the faces
+            there do.
   explode   0..1: faces fly out along their normals.
   draw      0..1, or "enter": "build": triangles appear from the bottom up.
   light     top level, or on one model: studio (default) | soft | dramatic | flat (no shading),

@@ -1,0 +1,18 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 6, "bg": "#f2f0e8"},
+  "camera": {"rotateX": 14, "rotateY": [[0, -12], ["end", 12, "inOutSine"]]},
+  "light": {"preset": "studio", "follow": "world"},
+  "layers": [
+    {"id": "rocket", "type": "model", "src": "media/rocket.glb", "x": "21%", "y": "47%", "h": 560, "bands": 3,
+     "rotateY": [[0, -30], ["end", 150]], "edges": {"width": 3}, "ground": {"opacity": 0.5},
+     "enter": {"name": "build", "dur": 1.4}},
+    {"id": "knot", "type": "model", "shape": "torus", "r": 190, "tube": 70, "detail": "low", "x": "50%", "y": "46%",
+     "fill": "#f2f0e8", "light": "flat", "rotateX": [[0, 64], ["end", 20, "inOutSine"]], "rotateY": [[0, 0], ["end", 90]],
+     "edges": {"angle": 0, "width": [[0, 0], [1.2, 2, "outCubic"]], "color": "#0a0c10"}},
+    {"id": "word", "type": "model", "shape": "text", "text": "EDGE", "x": "79%", "y": "46%", "size": 190, "weight": 800,
+     "depth": 70, "fill": "#ff633f", "shine": 0.5, "rotateY": [[0, -35], ["end", 25, "inOutSine"]],
+     "rotateX": -10, "edges": {"width": 3, "angle": 40, "color": [[0, "#0a0c10"], [3, "#0a0c10"], [4.5, "#7b5cff"]]}},
+    {"id": "caption", "type": "text", "text": "toon outlines  ·  hidden-line wireframe  ·  creases",
+     "x": "50%", "y": "90%", "size": 32, "weight": 500, "fill": "#0a0c10", "fixed": true, "at": 0.6, "enter": "fade"}
+  ]
+}

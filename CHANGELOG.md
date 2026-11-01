@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Models take `edges`: lines along creases and the outline (`true`: 2 px, theme `ink`, creases past 30 degrees),
+  along every edge as a wireframe (`"all"`), or `{"width", "color", "angle"}`, each of which animates. Corners at
+  the same place count as one point, so a cube's faces meet in creases and a plane drawn back to back has only its
+  border. Each line is a quad drawn in the depth sort after every face at its ends, so it is hidden where something
+  in the model is in front of it, and in a stage it hides per pixel. `examples/edges.json` renders in 1.8 s on the
+  GPU against 1.7 s without its edges, and in 5.6 s on the CPU against 4.9 s. Models without edges draw the same
+  bytes: `bench/same.py` finds no difference against main on thirteen 3D examples and `hello.json`, on either
+  backend.
 - Model files give off light: glTF `emissiveFactor` (times `KHR_materials_emissive_strength`) and
   `emissiveTexture`, and `.mtl` `Ke` and `map_Ke`, are added to a material's colour however it is lit. Both used to
   be ignored. An emissive texture is one more pass of the sorted triangles, added before the fog;

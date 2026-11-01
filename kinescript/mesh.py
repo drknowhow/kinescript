@@ -168,6 +168,36 @@ def merge(meshes: list[Mesh], materials: list[int]) -> Mesh:
     return cat([m._replace(M=np.full(len(m.P), k, np.int32)) for m, k in zip(meshes, materials)])
 
 
+def edges(P: np.ndarray, T: np.ndarray) -> tuple:
+    """Each edge of triangles T once, for drawing lines along them. Corners at the same place are one point, so
+    a cube's faces, whose corners are kept apart for their normals, still meet; triangles on the same three
+    points are one face, so a face drawn back to back (a double-sided plane) counts once. Returns each vertex's
+    point, each triangle's face (-1 for one with two corners at a point), each face's first triangle, and per
+    edge its two points, the faces either side (the second is the face count past a border) and whether the
+    second face runs along the edge the way the first does (a mesh wound against itself there)."""
+    span = float(np.ptp(P, axis=0).max()) if len(P) else 0.0
+    q = np.round((P - P.min(0)) / (span or 1.0) * 1e6).astype(np.int64) if len(P) else np.zeros((0, 3), np.int64)
+    _, weld = np.unique((q[:, 0] * 1000003 + q[:, 1]) * 1000003 + q[:, 2], return_inverse=True)
+    weld = weld.ravel()
+    W = weld[T]
+    _, first, face = np.unique(np.sort(W, 1), axis=0, return_index=True, return_inverse=True)
+    face = face.ravel()
+    ok = (W[:, 0] != W[:, 1]) & (W[:, 1] != W[:, 2]) & (W[:, 2] != W[:, 0])
+    face[~ok] = -1
+    g = np.flatnonzero(ok[first])  # the faces with three points
+    Wf = W[first[g]]
+    a, b, f = Wf.ravel(), Wf[:, [1, 2, 0]].ravel(), np.repeat(g, 3)
+    n = int(weld.max()) + 1 if len(weld) else 1
+    key = np.minimum(a, b) * n + np.maximum(a, b)
+    o = np.argsort(key, kind="stable")
+    key, a, b, f = key[o], a[o], b[o], f[o]
+    s = np.flatnonzero(np.r_[True, key[1:] != key[:-1]]) if len(key) else np.zeros(0, np.int64)
+    two = np.r_[s[1:], len(key)] - s >= 2  # a second face along this edge (any past it are left out)
+    nxt = np.minimum(s + 1, max(len(key) - 1, 0))
+    sides = np.stack([f[s], np.where(two, f[nxt], len(first))], 1)
+    return weld, face, first, np.stack([a[s], b[s]], 1), sides, two & (a[nxt] == a[s])
+
+
 def build_order(m: Mesh) -> np.ndarray:
     """Triangle indices bottom to top, the order `draw` and the build motion reveal them in."""
     return np.argsort(-m.P[m.T, 1].mean(1), kind="stable")
