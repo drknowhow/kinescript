@@ -48,6 +48,41 @@ rendered from.
   `kinetic`, plus your own with `{{param}}` placeholders.
 - **Outputs.** H.264 `.mp4`, ProRes 4444 `.mov` and VP9 `.webm` with alpha for compositing, `.gif`, PNG sequences.
 
+## 2D
+
+Paths, shapes, masks and effects are drawn by the same Skia renderer as everything else, and every frame is still a
+function of the scene and its number alone.
+
+- **Motion along paths.** `along` rides a layer along SVG path data or a path layer (`"#route"`), turned with the
+  path when `orient` is set. `position` takes keyframes of points, and `{"keys": [...], "smooth": true}` passes
+  through every key without stopping and without overshooting them.
+- **Groups with their own time.** A group's enter with a `stagger` brings its children in one by one, in an `order`
+  (`start`, `end`, `center`, `edges` or `random`). `speed`, `loop` and `timeRemap` run a group's children on a clock
+  of their own, so a looping icon is one group with `"loop": 1.2`.
+- **Vector shapes.** `d` takes keyframes and morphs any path into any other. Strokes take `dash` and `dashOffset`
+  (marching dashes that still draw on), `corner` rounds every corner, and a rect's `radius` takes four values.
+  `rough` wobbles an outline as if drawn by hand and `boil` redraws it several times a second. `combine` merges a
+  group's shapes and text into one shape, so a badge with a word cut out of it is a group of a rect and a text.
+  Gradients take `angle` and `sweep`, fill text and strokes, and animate.
+- **Masks and blends.** `mask` shows a layer through another by its alpha or luma, or their inverse, with a
+  `feather`; the mask moves on its own clock, so a lens can slide over a layer that holds still. Seven more blend
+  modes: hardLight, colorDodge, colorBurn, exclusion, hue, saturation and luminosity.
+- **Layer effects.** `glow`, `outline`, `innerShadow` and `displace` (noise waves that slide), sized by keys that
+  animate.
+- **Motion an agent can read.** `kine look --trails` draws each moving layer's path over the frames, a dot a frame,
+  so the spacing shows eases, overshoots and stops; `--onion 3` draws the three frames before each one over it.
+  `kine probe --curve title.x` gives a key's value and speed at every frame. `kine check` warns `stop-and-go`,
+  `strobe` and `slow-effects`.
+
+A dot that rides a dashed route as it draws on:
+
+```json
+{"id": "route", "type": "path", "d": "M200 700 C 600 300 1300 1000 1720 400", "stroke": "#9299a8",
+ "strokeWidth": 5, "dash": [14, 10], "draw": [[0, 0], [3, 1, "inOutSine"]]},
+{"id": "dot", "type": "circle", "r": 18, "fill": "#ff633f", "glow": 24,
+ "along": {"d": "#route", "p": [[0, 0], [3, 1, "inOutSine"]], "orient": true}}
+```
+
 ## 3D
 
 Depth and models are drawn by the same Skia renderer as everything else, with no extra dependency. Scenes that use
@@ -331,7 +366,10 @@ Within one process, such as the MCP server, the workers stay warm for two minute
 
 - Without a usable GPU, Kinescript falls back to Skia's CPU rasteriser. With the Windows `skia-python` wheel this is
   very slow (about 0.65 s per 1080p frame for the launch video); use `--scale 0.5` for previews on such machines.
-  `KINE_BACKEND=cpu` forces this path.
+  `KINE_BACKEND=cpu` forces this path. Blur, shadows, masks and layer effects draw in offscreen layers, which the
+  CPU fills slowly: a blur over a whole 1080p layer takes about 0.44 s, and a split text whose letters blur as they
+  enter blurs a layer for each letter (up to 179 s a frame for `bench/stress.py`'s `text-split`). `kine check` warns
+  `slow-effects` when a frame's effects pass 0.25 s.
 - 3D is drawn by Skia with a depth sort, not a GL pipeline: models cast shadows on each other only inside a stage,
   and a skinned vertex follows at most four joints. Separate layers hide each other per pixel only inside a
   stage, and parts of one model that cut through each other meet at a stepped seam. A textured model is drawn
@@ -343,7 +381,10 @@ Within one process, such as the MCP server, the workers stay warm for two minute
   the ElevenLabs plugin needs an API key and a network connection.
 - Video is decoded and resampled by ffmpeg to the scene frame rate. Jumping backwards or far ahead reopens the
   decoder, which is slower than sequential playback.
-- Text layout is single-script left-to-right with greedy wrapping. No shaping for complex scripts or bidi.
+- Text wraps greedily, with no hyphenation. Right-to-left words are put in order on a line by part of the Unicode
+  bidi algorithm applied to whole words; explicit embeddings and isolates are not supported. `split: "chars"` and
+  `letterSpacing` draw each letter on its own, so Arabic letters do not join there (`kine check` warns
+  `unjoined-letters`).
 - Expressions are limited to arithmetic and the listed helpers; attribute access and other names are rejected.
 
 ## Project layout

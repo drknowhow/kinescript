@@ -56,10 +56,14 @@ DEMO = {
     "voice": ("site/demos/voice.json", 6.0, 0.5),
     "voices": ("site/demos/voices.json", 18.45, 0.5),
     "edit": ("site/demos/edit.json", 2.0, 0.5),
+    "logo": ("examples/logo.json", 4.5, 0.5),
+    "kinetic": ("examples/kinetic.json", 3.5, 0.5),
+    "explainer": ("examples/explainer.json", 4.9, 0.5),
 }
 HERO = ("marketing/hero.json", 3.6, 2 / 3)
 LOOK = "card-flip"          # the contact sheet shown in the agent section
 LISTEN = "voice"            # the contact sheet with the sound under it, in the sound section
+TRAILS = "explainer"        # the contact sheet with motion trails, in the agent section
 CHECK = "site/demos/problems.json"
 PROBE = ("card-flip", 1.5)
 CUES = "site/demos/cues.json"
@@ -94,6 +98,9 @@ def look_sheet() -> None:
         png = Path(tmp) / "listen.png"
         run(*KINE, "look", DEMO[LISTEN][0], "--audio", "-n", "8", "--cols", "4", "--width", "480", "-o", str(png))
         run("ffmpeg", "-y", "-v", "error", "-i", str(png), "-q:v", "3", str(MEDIA / "listen.jpg"))
+        png = Path(tmp) / "trails.png"
+        run(*KINE, "look", DEMO[TRAILS][0], "--trails", "-n", "8", "--cols", "4", "--width", "480", "-o", str(png))
+        run("ffmpeg", "-y", "-v", "error", "-i", str(png), "-q:v", "3", str(MEDIA / "trails.jpg"))
 
 
 def _wav(path: Path, audio, rate: int = 48000) -> None:

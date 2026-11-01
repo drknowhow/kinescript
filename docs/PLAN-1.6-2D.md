@@ -1,8 +1,10 @@
 # Kinescript 1.6: 2D plan
 
-Proposal, 2026-11-01; the decisions at the end were agreed the same day. Numbers marked "target" are budgets to
-measure against. The others were measured on the development machine on 2026-11-01 (RTX 5060 Ti, skia-python 144.1,
-Python 3.14) or come from the 2026-10-31 stress report.
+Proposal, 2026-11-01; the decisions at the end were agreed the same day. Released as 1.6.0 on 2026-11-01 with
+Phases 0 to 3 and 7 (#84 to #103); Phases 4 to 6 move to 1.6.1 (decision 1). Each phase's status says what was
+built and how it differs from its bullets. Numbers marked "target" are budgets to measure against. The others were
+measured on the development machine on 2026-11-01 (RTX 5060 Ti, skia-python 144.1, Python 3.14) or come from the
+2026-10-31 stress report.
 
 ## Where 2D stands in 1.5.1
 
@@ -139,7 +141,7 @@ constant groups to replay. Frame times on the GPU, frames 50 to 89: `layers-2000
   (a layer moves more than about 40 px a frame at 1080p without `motionBlur`, naming the time).
 
 Status (2026-11-01): smooth keys, position keyframes and `stop-and-go` merged (#85); `along` and `strobe` (#86);
-group stagger and `order`, then group clocks, in the two PRs after. Changes from the bullets above: smooth keys are
+group stagger and `order` (#87), then group clocks (#88). Changes from the bullets above: smooth keys are
 at rest at the first and last key whatever their eases. x and y move an `along` path as they move a path layer, so
 a path's data rides the same route in both. `strobe` needs five fast frames running, since three flagged the first
 frames of the docs' outCubic bar recipe. The remap key is `timeRemap`, because `time` already reads as `at`.
@@ -163,7 +165,7 @@ frames of the docs' outCubic bar recipe. The remap key is `timeRemap`, because `
   (`{"sweep": [0.5, 0.5], "stops": [...]}`), `angle` in degrees for a linear one, and gradients that animate: a fill
   keyframed between two gradient objects with the same number of stops mixes their points and colours.
 
-Status (2026-11-01): gradients (#89), then strokes, `rough`, `combine` and morphing in the PRs after. Changes from the bullets above: a gradient
+Status (2026-11-01): gradients (#89), strokes (#90), `rough` (#91), `combine` (#92) and morphing (#93). Changes from the bullets above: a gradient
 animates into one of the same kind as well as the same stop count, since a linear and a sweep gradient have no
 points in common to mix. `dash` marks out the strokes of images and videos too, and `radius` takes four values on
 groups, images and videos as well as rects. `strokes-300` draws in 6.2 ms a frame on the GPU, 3.2 ms more than its
@@ -192,7 +194,7 @@ with Skia's Path.interpolate; `morph-200` draws in 2.2 ms a frame on the GPU aga
   time). Target: a glowing 1080p title under 1 ms on the GPU (`glow-text`).
 - Check rule: `slow-effects` on the CPU when masks and effects together pass a measured per-frame cost.
 
-Status (2026-11-01): masks in their own PR. Changes from the bullet above: the mask layer stands beside the layer it
+Status (2026-11-01): masks (#94), then blend modes (#95). Changes from the bullet above: the mask layer stands beside the layer it
 masks, in the same group (check says `bad-mask` otherwise), so its x and y mean what they say. A saveLayer bounded by
 the masked layer's box alone was not enough: the layer and its mask are recorded as pictures, and both layers hold
 all of both, in whole pixels, since Skia's CPU antialiasing of a circle changes by up to 56 levels where a layer's
@@ -201,7 +203,7 @@ corner and 0.16 s in these (without feathers). On the GPU it draws in 5.4 ms, 3.
 is Skia's blur filter, which is slow on the CPU (15 ms for a 400x150 layer), as a layer's `blur` already is: the
 `slow-effects` rule covers both.
 
-Status (2026-11-01), effects: in their own PR. `displace` is not an image filter: Skia's DisplacementMap takes the
+Status (2026-11-01), effects: merged (#96). `displace` is not an image filter: Skia's DisplacementMap takes the
 nearest pixel, which left bent edges in steps, so the layer is drawn into an image and redrawn through a runtime
 shader that samples between pixels. `outline` is copies of the layer round circles instead of `Dilate`, which is
 square and took 135 ms a pass on the CPU for a 220 px word. All four draw in an offscreen layer only as large as what
@@ -211,7 +213,7 @@ the layer draws: in a layer the size of the frame, which `blur` and `shadow` sti
 frame-sized layers in 1.6, since bounding them changes pixels; the CPU blurs a 1080p layer in 0.44 s, which
 `slow-effects` reports.
 
-Status (2026-11-01), `slow-effects`: in its own PR. The renderer counts, each frame, the pixels its offscreen effects
+Status (2026-11-01), `slow-effects`: merged (#97). The renderer counts, each frame, the pixels its offscreen effects
 blur (an outline's copies, a mask's two layers and displace count as the share of a blur they take), at 0.44 s for a
 1080p layer; `check` warns past 0.25 s a frame when it draws on the CPU. On the stress scenes and on layers with
 blur or shadow, the estimate came within 2% below to 35% above the measured time. The letters of a split text that
@@ -219,6 +221,8 @@ blur in were left out until the stress report found `text-split` taking up to 17
 counted, they bring its estimates to 1% to 21% below the measured time.
 
 ### Phase 4: many things at once
+
+Status (2026-11-01): moves to 1.6.1 (decision 1).
 
 - `repeat` on 2D layers (shapes, text, images, groups) with the model's keys plus `opacity` and `stroke`, through
   the same `Copies` class: `{"count": 60, "rotate": "=i * 6", "x": "=cos(i * 0.1047) * 300", "fill":
@@ -237,6 +241,8 @@ counted, they bring its estimates to 1% to 21% below the measured time.
 
 ### Phase 5: type and vector art
 
+Status (2026-11-01): moves to 1.6.1 (decision 1).
+
 - Text on a path: `textPath` (`{"d": "...", "offset": [[0, 0], [2, 1]], "align": "start"}`) lays the letters along a
   curve, each turned to it, through `TextBlob.MakeFromRSXform`. Split units and their keys still apply.
 - Per-unit keys `unitFill` and `unitBlur`, and an expression helper `sweep(i, n, p, soft)` that is 1 for units the
@@ -250,6 +256,8 @@ counted, they bring its estimates to 1% to 21% below the measured time.
   picture (Phase 0). Target: `svg-500` (a 500-element drawing, static) under 2 ms a frame on the GPU.
 
 ### Phase 6: motion library
+
+Status (2026-11-01): moves to 1.6.1 (decision 1).
 
 - Enter and exit motions: a drop with real bounces, `elastic`, `squash` (squash and stretch on landing), `swing`,
   `iris` (a circle opening from the middle), `clock` (a radial wipe), `blinds`, `rise-mask` (each line rises from
@@ -269,28 +277,32 @@ counted, they bring its estimates to 1% to 21% below the measured time.
 
 - `kine look --trails` draws each moving layer's anchor path over its tiles, a dot per frame, so spacing shows speed
   and an agent can see arcs, eases and stops without watching. `--onion 3` ghosts the three frames before each tile.
-  Status (2026-11-01): in its own PR. The renderer records each tracked layer's anchor (`pos`, also in `probe`);
+  Status (2026-11-01): merged (#98). The renderer records each tracked layer's anchor (`pos`, also in `probe`);
   the trails come from a pass over every frame at a quarter of the thumbnails' scale, since anchors come from the
   matrices, which on the CPU took a stress frame from 24 to 38 ms down to 4 to 8.
 - `kine probe scene.json --curve title.x` samples a value and its speed at every frame, with stops and the fastest
   frame, as JSON.
-  Status (2026-11-01): in its own PR. It reads the key without drawing, through group clocks as the renderer does;
+  Status (2026-11-01): merged (#101). It reads the key without drawing, through group clocks as the renderer does;
   stops are spans where the value is the same for 2 frames or more. Enters, exits and along move a layer on top of
   its keys, which it notes; `look --trails` shows where the layer is drawn.
 - Examples: `logo.json` (an SVG logo draws on, morphs into a wordmark and glows), `kinetic.json` (stagger orders,
   `rise-mask`, `scramble`, text on a path), `explainer.json` (rough shapes, a dashed route with a dot riding it,
   masks), `confetti.json` (a burst over a counter).
-  Status (2026-11-01): `logo`, `kinetic` and `explainer` in their own PR, built from Phases 1 to 3 only, since SVG
+  Status (2026-11-01): `logo`, `kinetic` and `explainer` merged (#99), built from Phases 1 to 3 only, since SVG
   layers, text on a path, `rise-mask` and `scramble` are 1.6.1 work: the logo draws the mark from its path data and
   morphs its arms, and kinetic's mask reveal is a text masked by a rect. `confetti` waits for particles.
 - The 1.6 stress report: every Phase 0 stress scene and the four 2D scenes above, GPU and CPU, frame time and peak
   memory, as 1.5's table.
-  Status (2026-11-01): in `docs/stress-test-1.6/`, with `logo`, `kinetic` and `explainer` as the 2D examples, since
-  `confetti` waits for particles. `vs-1.5.1.txt` times GPU frames of the Phase 0 scenes against 1.5.1 in alternating
-  runs. `text-split` times out on the CPU at 900 s: its letters blur in layers from the frame's corner, up to 179 s a
-  frame, which decision 3 keeps and `slow-effects` reports since #102.
+  Status (2026-11-01): merged (#103), in `docs/stress-test-1.6/`, with `logo`, `kinetic` and `explainer` as the 2D
+  examples, since `confetti` waits for particles. `vs-1.5.1.txt` times GPU frames of the Phase 0 scenes against 1.5.1
+  in alternating runs. `text-split` times out on the CPU at 900 s: its letters blur in layers from the frame's
+  corner, up to 179 s a frame, which decision 3 keeps and `slow-effects` reports since #102.
 - README's 2D section and its limits (the stale shaping line fixed), `kine docs`, site/, CHANGELOG with measured
   numbers, version 1.6.0. A 2D shot in the launch video is optional and means re-measuring the promo.
+  Status (2026-11-01): built on branch `release-1.6.0`: the README's 2D section, its limits for text and for
+  effects on the CPU, the site's 2D section with the logo, kinetic and explainer demos and a `--trails` sheet in
+  the agent section, version 1.6.0. Each feature's `kine docs` lines came with its PR; `kine docs` is 742
+  lines. The launch video is unchanged, so its numbers stand.
 
 ## Out of scope
 
