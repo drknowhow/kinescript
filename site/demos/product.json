@@ -1,0 +1,18 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 6, "bg": {"radial": [0.5, 0.3], "stops": ["#2a2e38", "#0b0c10"]}},
+  "camera": {"rotateX": 12, "y": -20, "aperture": 22, "focus": 110},
+  "light": {"preset": "studio", "follow": "world", "azimuth": -40, "elevation": 42},
+  "env": "studio",
+  "layers": [
+    {"id": "stage", "type": "group", "x": "50%", "y": "50%", "sort": "pixel", "shadows": {"opacity": 0.5, "soft": 4},
+     "children": [
+      {"id": "floor", "type": "rect", "y": 261, "z": -600, "w": 4200, "h": 2400, "rotateX": 90, "fill": "#1d2129"},
+      {"id": "turntable", "type": "model", "shape": "cylinder", "r": 300, "h": 24, "y": 249, "fill": "#e8e2d4",
+       "shine": 0.25, "rotateY": [[0, 0], ["end", 300]]},
+      {"id": "can", "type": "model", "src": "media/can.glb", "h": 470, "rotateY": [[0, -30], ["end", 270]]},
+      {"id": "left", "type": "model", "src": "media/can.glb", "h": 470, "x": -760, "y": 26, "z": -1300, "rotateY": 40},
+      {"id": "right", "type": "model", "src": "media/can.glb", "h": 470, "x": 820, "y": 26, "z": -1600, "rotateY": -70}]},
+    {"id": "title", "type": "text", "text": "one glTF file, its label a texture, turning on a table",
+     "x": "50%", "y": "92%", "size": 34, "weight": 400, "fill": "$muted", "fixed": true, "at": 0.4, "enter": "fade"}
+  ]
+}
