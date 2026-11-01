@@ -208,8 +208,13 @@ square and took 135 ms a pass on the CPU for a 220 px word. All four draw in an 
 the layer draws: in a layer the size of the frame, which `blur` and `shadow` still use, the CPU took 16.5 s for a
 `glow-text` frame, against 0.31 s now. A glowing 220 px title adds 0.6 ms a 1080p frame on the GPU (target: under
 1 ms). A model keeps `glow` and `outline` as its material's glow and its edges. `blur` and `shadow` keep their
-frame-sized layers in 1.6, since bounding them changes pixels; the CPU blurs a 1080p layer in 380 ms, which
+frame-sized layers in 1.6, since bounding them changes pixels; the CPU blurs a 1080p layer in 0.44 s, which
 `slow-effects` reports.
+
+Status (2026-11-01), `slow-effects`: in its own PR. The renderer counts, each frame, the pixels its offscreen effects
+blur (an outline's copies, a mask's two layers and displace count as the share of a blur they take), at 0.44 s for a
+1080p layer; `check` warns past 0.25 s a frame when it draws on the CPU. On the stress scenes and on layers with
+blur or shadow, the estimate came within 2% below to 35% above the measured time.
 
 ### Phase 4: many things at once
 
