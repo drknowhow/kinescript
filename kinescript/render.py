@@ -47,6 +47,7 @@ BLENDS = {"normal": skia.BlendMode.kSrcOver, "multiply": skia.BlendMode.kMultipl
           "colorBurn": skia.BlendMode.kColorBurn, "exclusion": skia.BlendMode.kExclusion, "hue": skia.BlendMode.kHue,
           "saturation": skia.BlendMode.kSaturation, "luminosity": skia.BlendMode.kLuminosity}
 SAMPLING = skia.SamplingOptions(skia.FilterMode.kLinear, skia.MipmapMode.kNone)
+NEAREST = skia.SamplingOptions(skia.FilterMode.kNearest, skia.MipmapMode.kNone)  # an image that is "pixelated"
 # Video frames arrive at source size and upscale here. Catmull-Rom interpolates (a 1:1 draw is
 # exact); Mitchell, used before, blurred every native-size frame (mean error 14.8 vs 4.7 on a sharp clip).
 CUBIC = skia.SamplingOptions(skia.CubicResampler.CatmullRom())
@@ -1906,12 +1907,12 @@ class Renderer:
             ax, ay = ANCHORS.get(L.raw["anchor"], (0.5, 0.5))
             return (-ax * w, -ay * h, w, h)
         elif ty == "image":
-            img = media.image(L.src)
-            w, h = float(g("w", img.width())), float(g("h", img.height()))
+            iw, ih = self._natural(L)
+            w, h = float(g("w", iw)), float(g("h", ih))
             if L.raw.get("w") is not None and L.raw.get("h") is None:
-                h = w * img.height() / img.width()
+                h = w * ih / iw
             elif L.raw.get("h") is not None and L.raw.get("w") is None:
-                w = h * img.width() / img.height()
+                w = h * iw / ih
         elif ty in ("video", "shader"):
             w, h = float(g("w", self.s.w)), float(g("h", self.s.h))
         else:
@@ -2317,9 +2318,30 @@ class Renderer:
 
     def _draw_image(self, c, L, t, T, g, box, reveal, mods):
         img = media.image(L.src)
-        self._content(c, L, g, box, img, img.width(), img.height())
+        if L.seq is None:
+            self._content(c, L, g, box, img, img.width(), img.height())
+            return
+        if self._frame_t is not None:  # a motion-blur sub-frame shows its frame's drawing, as a video layer does
+            t = min(max(self._frame_t, L.t_in), math.nextafter(L.t_out, -math.inf)) - L.t_in
+        q = L.seq
+        k = q.at(t, float(L.raw.get("fps", media.SEQUENCE_FPS)), L.raw.get("loop", True))
+        if q.files is not None:
+            img = media.image(q.files[k])
+            self._content(c, L, g, box, img, img.width(), img.height())
+            return
+        w, h = img.width() / q.cols, img.height() / q.rows
+        self._content(c, L, g, box, img, w, h, skia.Rect.MakeXYWH(k % q.cols * w, k // q.cols * h, w, h))
 
-    def _content(self, c, L, g, box, img, iw, ih):
+    @staticmethod
+    def _natural(L: Layer) -> tuple[float, float]:
+        """Image layer L's own size: its image's, its first frame's, or a cell of its sheet."""
+        img = media.image(L.src)
+        if L.seq is not None and L.seq.files is None:
+            return img.width() / L.seq.cols, img.height() / L.seq.rows
+        return img.width(), img.height()
+
+    def _content(self, c, L, g, box, img, iw, ih, src: skia.Rect | None = None):
+        """img (iw x ih, or the part of it in src) drawn in box by L's fit, zoom and focus, with its stroke."""
         bx, by, bw, bh = box
         zoom = float(g("zoom"))
         fx, fy = (L.raw.get("focus") or [0.5, 0.5]) if not isinstance(L.raw.get("focus"), str) else (0.5, 0.5)
@@ -2342,8 +2364,12 @@ class Renderer:
         px, py = bx + fx * bw, by + fy * bh
         dst = skia.Rect.MakeXYWH(px + (cx0 - px) * zoom, py + (cy0 - py) * zoom, cw * zoom, ch * zoom)
         if img is not None:
-            c.drawImageRect(img, dst, CUBIC if L.type == "video" else SAMPLING,
-                            skia.Paint(AntiAlias=True, Alphaf=self._alpha, ColorFilter=self._cf))
+            how = CUBIC if L.type == "video" else NEAREST if L.raw.get("pixelated") else SAMPLING
+            paint = skia.Paint(AntiAlias=True, Alphaf=self._alpha, ColorFilter=self._cf)
+            if src is None:
+                c.drawImageRect(img, dst, how, paint)
+            else:  # strictly inside src, so a cell's edge does not take in its neighbour's pixels
+                c.drawImageRect(img, src, dst, how, paint, skia.Canvas.kStrict_SrcRectConstraint)
         c.restore()
         sp = self._stroke_paint(L, g, box)
         if sp:

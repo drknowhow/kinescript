@@ -25,7 +25,7 @@ STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "children", "laye
           "sksl", "preset", "uniforms", "caret", "case", "italic", "smooth", "closed", "focus", "use",
           "backface", "fixed", "sort", "shape", "detail", "parts", "light", "span", "sound", "voice",
           "fadeIn", "fadeOut", "sequence", "animation", "repeat", "profile", "along", "dash", "rough", "mask",
-          "glow", "outline", "innerShadow", "displace"}
+          "glow", "outline", "innerShadow", "displace", "frames", "sheet", "fps", "pixelated"}
 PART_STRUCT = {"shape", "texture", "text", "font", "d", "italic", "profile"}  # a part's keys that never animate
 # Property defaults by name; everything not listed defaults to None.
 DEFAULTS = {"x": 0.0, "y": 0.0, "opacity": 1.0, "scale": 1.0, "scaleX": 1.0, "scaleY": 1.0, "rotate": 0.0,
@@ -72,7 +72,7 @@ def _where(owner, message: str) -> str:
 class Layer:
     __slots__ = ("id", "type", "raw", "t_in", "t_out", "props", "enter", "exit", "children", "parent",
                  "index", "src", "video", "ahead", "ctx", "parts", "copies", "xf", "along", "turn", "clock",
-                 "rough", "morph", "mask", "looks", "warp", "particles")
+                 "rough", "morph", "mask", "looks", "warp", "particles", "seq")
 
     def __init__(self, lid: str, ltype: str, raw: dict, parent: "Layer | None", index: int):
         self.id, self.type, self.raw, self.parent, self.index = lid, ltype, raw, parent, index
@@ -98,6 +98,7 @@ class Layer:
         self.looks: dict | None = None  # its glow, outline and innerShadow; their sizes are props "glow size"
         self.warp: dict | None = None  # its displace; its amount is the prop "displace amount"
         self.particles: particles.Emitter | None = None  # a particles layer's emitter
+        self.seq: media.Frames | None = None  # an image layer's frames or sheet; src is its first frame, or the sheet
 
     @property
     def dur(self) -> float:
@@ -264,6 +265,23 @@ class Scene:
 
         self.surfaces: set[str] = set()  # groups drawn as a texture, and so not where they stand
         for layer in self.all_layers():
+            q = layer.seq
+            if q is not None and q.files is not None and isinstance(layer.raw.get("frames"), list):
+                for f in dict.fromkeys(q.files[1:]):
+                    if missing(f, layer.id, "frames file"):
+                        break
+            if q is not None and q.files is None and Path(layer.src).is_file():
+                try:
+                    img = media.image(layer.src)
+                except media.MediaError as e:
+                    self.note("error", "bad-media", layer.id, f"sheet {e}", "save it again as .png")
+                else:
+                    w, h = img.width(), img.height()
+                    if w % q.cols or h % q.rows:
+                        self.note("warning", "sheet-grid", layer.id, f"sheet {Path(layer.src).name} is {w} x {h} px, "
+                                  f"which {q.cols} column{'s' * (q.cols > 1)} and {q.rows} row{'s' * (q.rows > 1)} do "
+                                  "not divide evenly, so its frames cut through pixels and drift",
+                                  "check cols and rows against the sheet")
             if layer.src and not missing(layer.src, layer.id, f"{layer.type} src") and layer.type == "model":
                 try:
                     imp = models.load(layer.src)
@@ -620,6 +638,37 @@ class Scene:
         p = Path(src)
         return str(p if p.is_absolute() else (self.base / p))
 
+    def _frames(self, layer: Layer):
+        """An image layer's frames (a pattern, glob, folder or list of files) or sheet, as layer.seq, with its first
+        frame, or the sheet, as layer.src. Numbers missing from a sequence are reported here."""
+        raw, sheet = layer.raw, layer.raw.get("sheet")
+        if isinstance(sheet, dict):
+            cols, rows = int(sheet.get("cols", 1)), int(sheet.get("rows", 1))
+            layer.src = self.path(sheet["src"])
+            layer.seq = media.Frames(None, cols, rows, int(sheet.get("count") or cols * rows))
+            return
+        spec = raw["frames"]
+        if isinstance(spec, list):
+            files, gaps = [self.path(s) for s in spec], []  # each is checked by _check_media
+        else:
+            files, gaps = media.sequence(self.path(spec))
+        if not files:
+            p = Path(self.path(spec))
+            folder = p if p.is_dir() else p.parent
+            near = sorted(x.name for x in folder.iterdir() if x.is_file()) if folder.is_dir() else []
+            self.note("error", "media-missing", layer.id, f"frames {spec} match no files" + (
+                " (a folder of frames is read for .png, .jpg, .webp, .bmp and .gif)" if p.is_dir() else ""),
+                (f"files in {folder}: {', '.join(near[:12])}" if near else f"folder {folder} does not exist"
+                 if not folder.is_dir() else f"folder {folder} is empty") + " (paths are relative to the scene file)")
+            return
+        if gaps:
+            shown = ", ".join(map(str, gaps[:8])) + (f" and {len(gaps) - 8} more" if len(gaps) > 8 else "")
+            self.note("warning", "missing-frames", layer.id, f"frames {spec} skip number{'s' * (len(gaps) > 1)} "
+                      f"{shown}, so {'each' if len(gaps) > 1 else 'it'} shows the frame before",
+                      "render the missing frames again, or number the files without gaps")
+        layer.src = files[0]
+        layer.seq = media.Frames(files, 1, 1, len(files))
+
     def _read_words(self) -> dict[str, dict]:
         """Each audio entry's word times, read before the layers so cues and captions can use them:
         {id: {"words": [...] or None, "trim0", "trim1" (the part of the file that plays), "file"}}."""
@@ -747,6 +796,8 @@ class Scene:
             natural = None
             if ltype in ("video", "image", "model") or (ltype in ("captions", "particles") and raw.get("src")):
                 layer.src = self.path(raw["src"]) if raw.get("src") else None
+            if ltype == "image" and (raw.get("frames") or isinstance(raw.get("sheet"), dict)):
+                self._frames(layer)
             info = None
             if ltype == "video" and layer.src and Path(layer.src).is_file():  # a folder or missing file: _check_media
                 try:
@@ -1031,7 +1082,8 @@ def _num(v, ref):
 
 
 def _infer_type(raw: dict) -> str:
-    for key, t in (("rate", "particles"), ("burst", "particles"), ("emitter", "particles"), ("shape", "model"),
+    for key, t in (("rate", "particles"), ("burst", "particles"), ("emitter", "particles"), ("frames", "image"),
+                   ("sheet", "image"), ("shape", "model"),
                    ("parts", "model"), ("text", "text"), ("cues", "captions"), ("d", "path"),
                    ("points", "path"), ("children", "group"), ("layers", "group"), ("r", "circle")):
         if key in raw:

@@ -1,7 +1,9 @@
 """Footage and image access through ffmpeg/ffprobe pipes."""
 from __future__ import annotations
 
+import fnmatch
 import json
+import math
 import os
 import re
 import shutil
@@ -10,6 +12,7 @@ import subprocess
 import threading
 from functools import lru_cache
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 import skia
@@ -241,6 +244,70 @@ def _image(src: str, mtime: int, size: int) -> skia.Image:
     if img is None:
         raise MediaError(f"cannot decode image {src} (png, jpg, webp, gif, bmp are supported)")
     return img
+
+
+FRAME_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif")  # the files a folder of frames is read for
+SEQUENCE_FPS = 12  # frames a second of a sequence or sheet without fps: hand-drawn animation's usual rate
+_NUMBER = re.compile(r"%0?\d*d|#+")  # the number in a pattern: run_%03d.png (as ffmpeg writes it) or run_####.png
+
+
+class Frames(NamedTuple):
+    """An image layer's frame-by-frame animation: `files` in order, a missing number holding the file before it, or
+    None for a sheet, whose `count` frames are its cells of `cols` x `rows`, row by row from the top left."""
+    files: list | None
+    cols: int
+    rows: int
+    count: int
+
+    def at(self, t: float, fps: float, loop) -> int:
+        """The frame shown at the layer's own time t: frame k from k / fps seconds. loop True starts again after the
+        last, "pingpong" plays back to the first and on, and False holds the last."""
+        k, n = math.floor(t * fps + 1e-6), self.count
+        if loop == "pingpong" and n > 1:
+            k %= 2 * n - 2
+            return k if k < n else 2 * n - 2 - k
+        return k % n if loop else min(max(k, 0), n - 1)
+
+
+def _natural(name: str) -> list:
+    """A sort key that puts run_2 before run_10."""
+    return [(0, int(s), "") if s.isdigit() else (1, 0, s.lower()) for s in re.split(r"(\d+)", name) if s]
+
+
+def sequence(spec: str) -> tuple[list[str], list[int]]:
+    """The files of an image sequence and the numbers missing from it. `spec` is a pattern with the number in it
+    (run_%03d.png or run_####.png), a glob (run_*.png) or a folder of images. When the names differ only in their
+    number, frame k is the lowest number plus k, and a missing number shows the file before it, so the others keep
+    their times; otherwise the files go in name order, numbers counted as numbers."""
+    p = Path(spec)
+    parts = _NUMBER.split(p.name)
+    if p.is_dir():
+        found = [x for x in p.iterdir() if x.is_file() and x.suffix.lower() in FRAME_EXTS]
+    elif len(parts) > 1:  # the number is the first %d or # run; the rest must match as written
+        rx = re.compile(re.escape(parts[0]) + r"(\d+)" + "".join(map(re.escape, parts[1:])), re.I)
+        found = [x for x in p.parent.iterdir() if x.is_file() and rx.fullmatch(x.name)] if p.parent.is_dir() else []
+    elif any(ch in p.name for ch in "*?["):
+        found = [x for x in p.parent.iterdir() if x.is_file() and fnmatch.fnmatch(x.name.lower(), p.name.lower())
+                 ] if p.parent.is_dir() else []
+    else:
+        return ([str(p)] if p.is_file() else []), []
+    if len(parts) > 1 and not p.is_dir():
+        nums = {x: int(rx.fullmatch(x.name).group(1)) for x in found}
+    else:  # numbered when the names differ only in their last number: run_1.png, run_2.png
+        shapes = {re.sub(r"\d+(\D*)$", r"#\1", x.name.lower()) for x in found}
+        nums = ({x: int(re.findall(r"\d+", x.name)[-1]) for x in found}
+                if len(shapes) == 1 and "#" in next(iter(shapes)) else {})
+    if found and len(nums) == len(found) and len(set(nums.values())) == len(found):
+        by = {n: str(x) for x, n in nums.items()}
+        files, missing, last = [], [], by[min(by)]
+        for n in range(min(by), max(by) + 1):
+            if n in by:
+                last = by[n]
+            else:
+                missing.append(n)
+            files.append(last)
+        return files, missing
+    return [str(x) for x in sorted(found, key=lambda x: _natural(x.name))], []
 
 
 class VideoSource:

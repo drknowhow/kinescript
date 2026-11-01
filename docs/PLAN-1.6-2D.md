@@ -248,6 +248,10 @@ Status (2026-11-01): moves to 1.6.1 (decision 1).
   to 159 fps on the GPU.
 - Image sequences: `image` with `frames` (`"frames/run_%03d.png"` or a folder) or `sheet` (`{"src": "run.png",
   "cols": 8, "rows": 2}`), `fps` and `loop`, for frame-by-frame animation. Check: `missing-frames`.
+  Status (2026-11-01): in its own PR, with `flipbook.json`. `frames` also takes `####`, a glob or a list, and `sheet`
+  a `count`; `fps` is 12 unless given, `loop` true unless given, and `"pingpong"` plays back to the first frame. A
+  missing number holds the frame before it rather than closing the gap, so the rest keep their times. `pixelated`
+  joined for pixel-art sheets, and `sheet-grid` warns when cols and rows do not divide the sheet.
 
 ### Phase 5: type and vector art
 

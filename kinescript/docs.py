@@ -201,7 +201,17 @@ LAYER TYPES (defaults in brackets)
   image     src (every src, for image, video, captions and audio, is relative to the scene
             file), w, h (give one and the other keeps the
             aspect), fit [cover] (cover|contain|stretch), zoom [1] (zooms inside the frame),
-            focus [[0.5, 0.5]] (the point zoom moves toward), radius, stroke, strokeWidth
+            focus [[0.5, 0.5]] (the point zoom moves toward), radius, stroke, strokeWidth,
+            pixelated (true scales it with hard pixel edges, for pixel art).
+            Frame by frame: frames in place of src, a pattern with the frame number in it
+            ("run/run_%03d.png" or "run/run_####.png"), a glob ("run/*.png"), a folder of images
+            or a list of files; or sheet {"src": "walk.png", "cols": 8, "rows": 2, "count": 14},
+            its cells played row by row from the top left. fps [12] is frames a second; loop
+            [true] starts again after the last frame, false holds it, "pingpong" plays back to
+            the first. A number missing from the files shows the frame before it (check warns
+            missing-frames). The box is a frame's size, or a cell's. A file is decoded when it
+            first shows and the last 64 stay decoded: a new 1080p PNG every frame took 34 ms a
+            frame on an RTX 5060 Ti, one already decoded 4 ms.
   video     src, trim [start, end] (seconds in the source file), speed [1] (any number above 0),
             volume [1] (a number; 0 mutes), loop, w, h [canvas size], fit, zoom, focus, radius.
             Its sound is mixed in at the clip's speed and stops at the trim end unless loop is true.
