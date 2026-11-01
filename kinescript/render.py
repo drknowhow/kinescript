@@ -223,6 +223,15 @@ def _covers(tf: skia.Typeface, cp: int) -> bool:
     return hit
 
 
+def _face(tf: skia.Typeface, cluster: str) -> skia.Typeface:
+    """The typeface a cluster is drawn in: tf, or the system font that has what tf lacks."""
+    missing = next((ch for ch in cluster if not _ignorable(ch) and not _covers(tf, ord(ch))), None)
+    if missing is None:
+        return tf
+    style = tf.fontStyle()
+    return _fallback(style, ord(missing), _emoji(cluster)) or _fallback(style, ord(missing)) or tf
+
+
 def _ignorable(ch: str) -> bool:
     """Drawn as nothing (joiners, variation selectors, direction marks), so it needs no glyph of its own."""
     cp = ord(ch)
@@ -1817,13 +1826,9 @@ class Renderer:
         rtl: the text around reads right to left; before, after: the direction of the text on either side, 'R' or
         'L' (default: rtl's), which punctuation at the ends of s takes when both agree."""
         tf, size = font.getTypeface(), font.getSize()
-        style = tf.fontStyle()
         units: list[list] = []  # [text, typeface, shaped, direction (R, L or N)]
         for cl in clusters(s):
-            use = tf
-            missing = next((ch for ch in cl if not _ignorable(ch) and not _covers(tf, ord(ch))), None)
-            if missing is not None:
-                use = _fallback(style, ord(missing), _emoji(cl)) or _fallback(style, ord(missing)) or tf
+            use = _face(tf, cl)
             d = _strong(cl) or "N"
             joins = joining(cl)
             if joins and units and units[-1][1] is use and units[-1][2] == "join":
@@ -1898,9 +1903,11 @@ class Renderer:
                 c.drawTextBlob(p.blob, x, y + p.drop, paint)
             x += p.width
 
-    def undrawable(self, L: Layer) -> tuple[list[str], list[str]]:
+    def undrawable(self, L: Layer) -> tuple[list[str], list[str], list[str]]:
         """Characters of a text, counter, captions or 3D text layer that no installed font has (they draw as empty
-        boxes), and those its font draws but cannot shape (3D text only: marks and right-to-left letters)."""
+        boxes), and those 3D text cannot draw as written: colour emoji (the first character of each), whose font has
+        no outline for them, and with letterSpacing (each character on its own) marks, right-to-left letters and
+        emoji parts."""
         fam = L.raw.get("font") or self.s.theme.get("font")
         tf = self._typeface(fam, int(L.get("weight", 0.0, 0.0, 0, 600) or 600), bool(L.raw.get("italic")))
         if L.type == "captions":
@@ -1909,15 +1916,24 @@ class Renderer:
             text = _FMT.sub("0123456789,.-", str(L.raw.get("format", "{:,.0f}")))
         else:
             text = str(L.raw.get("text", ""))
+        text = text.replace("**", "")
         missing, flat = [], []
-        for ch in dict.fromkeys(text.replace("**", "")):
+        spaced = L.raw.get("letterSpacing") not in (None, 0)
+        for ch in dict.fromkeys(text):
             if ch in "\n" or _ignorable(ch):
                 continue
             if not _covers(tf, ord(ch)) and _fallback(tf.fontStyle(), ord(ch)) is None:
                 missing.append(ch)
-            elif L.type == "model" and _shapes(ch):
+            elif L.type == "model" and spaced and _shapes(ch):
                 flat.append(ch)
-        return missing, flat
+        emoji: list[str] = []
+        for cl in dict.fromkeys(clusters(text) if L.type == "model" else []):
+            ch = next((c for c in cl if not _ignorable(c)), " ")
+            if not ch.isspace() and ch not in missing and ch not in emoji:
+                face = _face(tf, cl)
+                if skia.Font(face, 12).getPath(face.unicharToGlyph(ord(ch))) is None:
+                    emoji.append(ch)
+        return missing, emoji, [ch for ch in flat if ch not in emoji]
 
     def _text_layout(self, L: Layer, t, T, g, txt: str, size: float | None = None, max_w=None) -> Layout:
         size = float(size if size is not None else g("size", 64))

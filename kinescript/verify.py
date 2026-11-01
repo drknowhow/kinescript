@@ -595,19 +595,22 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
     for layer in scene.all_layers():
         if not (layer.type in ("text", "counter", "captions") or layer.type == "model" and layer.raw.get("shape") == "text"):
             continue
-        missing, flat = r.undrawable(layer)
+        missing, emoji, flat = r.undrawable(layer)
         if missing:
             them = "it" if len(missing) == 1 else "them"
             add("warning", "missing-glyph", layer.id, layer.t_in,
                 f"no installed font has {_chars(missing)}, so "
                 + ("it draws as an empty box" if len(missing) == 1 else "they draw as empty boxes"),
                 f"install a font that has {them} and name it in \"font\", or take {them} out", until=layer.t_out)
+        if emoji:
+            add("warning", "unshaped-3d-text", layer.id, layer.t_in,
+                f"colour emoji have no outline to push out in depth, so 3D text leaves out {_chars(emoji)}",
+                "put emoji in a text or image layer beside the model", until=layer.t_out)
         if flat:
             add("warning", "unshaped-3d-text", layer.id, layer.t_in,
-                f"3D text draws each character on its own, so {_chars(flat)} "
+                f"letterSpacing draws each character of 3D text on its own, so {_chars(flat)} "
                 f"{'comes' if len(flat) == 1 else 'come'} out unjoined, in the wrong order or with misplaced marks",
-                "use a text layer for right-to-left text, accents typed as separate marks and emoji sequences",
-                until=layer.t_out)
+                "take letterSpacing out: without it 3D text is shaped as a text layer is", until=layer.t_out)
         text = str(layer.raw.get("text", ""))
         spaced = layer.raw.get("letterSpacing") not in (None, 0)
         if layer.type == "text" and (layer.raw.get("split") == "chars" or spaced) and joining(text):

@@ -5,6 +5,7 @@ index packed into it, so every part of a model draws in one call and hides the o
 from __future__ import annotations
 
 import math
+import re
 
 import numpy as np
 import skia
@@ -450,9 +451,39 @@ def _material(get, emit=None) -> tuple:
             1.0 - min(1.0, max(0.0, float(get("transparency", 0.0)))))
 
 
+def _shaped(r, font: skia.Font, line: str) -> tuple[skia.Path, float]:
+    """A line that needs shaping (marks, right-to-left letters, letters from another font) as the outline a text
+    layer draws: its words in bidi order, each as its pieces (render._pieces), from x 0 on the baseline; and its
+    width. TextBlob.Iter gives no glyph positions, so the pieces are drawn on Skia's SVG canvas, which writes
+    shaped glyphs as path data. Colour emoji have no outline and come out empty."""
+    from .render import _bidi_order, _strong  # render imports this module
+    words = [w for w in line.split(" ") if w]
+    if not words:
+        return skia.Path(), 0.0
+    order, rtls, around = _bidi_order(words, _strong(line) == "R")
+    space, size = font.measureText(" "), font.getSize()
+    widths = [r._measure(font, words[k], rtls[k], around[k]) for k in order]
+    width = sum(widths) + space * (len(words) - 1)
+    pad = 4 * size  # the canvas starts at 0, 0: draw well inside it, then move the outline back
+    st = skia.DynamicMemoryWStream()
+    c = skia.SVGCanvas.Make(skia.Rect(0, 0, width + 2 * pad, 2 * pad), st,
+                            skia.SVGCanvas.kConvertTextToPaths_Flag | skia.SVGCanvas.kNoPrettyXML_Flag)
+    x = pad
+    for k, w in zip(order, widths):
+        r._draw_pieces(c, r._pieces(font, words[k], rtls[k], around[k]), words[k], x, pad, font, skia.Paint())
+        x += w + space
+    del c  # writes the document
+    data = " ".join(re.findall(r' d="([^"]*)"', bytes(st.detachAsData()).decode("utf-8", "replace")))
+    path = svgpath.parse(data) if data.strip() else skia.Path()
+    path.offset(-pad, -pad)
+    return path, width
+
+
 def _text_path(r, num, raw) -> tuple[skia.Path, float]:
-    """Outline of the text, centred on the origin (lines on their middle, capitals on theirs), and its size."""
-    from .render import _covers, _fallback, _ignorable  # render imports this module
+    """Outline of the text, centred on the origin (lines on their middle, capitals on theirs), and its size. A
+    line with marks, right-to-left letters or letters the font lacks is shaped as a text layer's is, unless
+    letterSpacing sets its characters apart."""
+    from .render import _covers, _fallback, _ignorable, _shapes  # render imports this module
     size = float(num("size", 120))
     fam = raw.get("font") or r.s.theme.get("font")
     font = skia.Font(r._typeface(fam, int(num("weight", 600)), bool(raw.get("italic"))), size)
@@ -461,11 +492,15 @@ def _text_path(r, num, raw) -> tuple[skia.Path, float]:
     path = skia.Path()
     for i, line in enumerate(lines):
         glyphs = font.textToGlyphs(line)
+        if not ls and (not all(glyphs) or any(map(_shapes, line))):
+            gp, width = _shaped(r, font, line)
+            path.addPath(gp, -width / 2, i * lh)
+            continue
         if all(glyphs):
             fonts = [font] * len(glyphs)
             xs = np.array(font.getXPos(glyphs)) + ls * np.arange(len(glyphs))
             width = font.measureText(line) + ls * max(0, len(glyphs) - 1)
-        else:  # a letter the font lacks comes from the system font that has it (CJK, emoji), unshaped
+        else:  # spaced letters: one the font lacks comes from the system font that has it (CJK, emoji), unshaped
             fonts, glyphs, adv = [], [], []
             for ch in line:
                 if _ignorable(ch):

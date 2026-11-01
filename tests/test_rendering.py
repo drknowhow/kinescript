@@ -283,13 +283,57 @@ def test_check_warns_that_split_chars_unjoins_arabic():
     assert not _codes(res, "unjoined-letters")
 
 
-def test_check_warns_that_3d_text_does_not_shape():
-    style = skia.FontStyle(600, 5, skia.FontStyle.kUpright_Slant)
-    if _fallback(style, ord("ש")) is None:
-        pytest.skip("no installed font has Hebrew")
-    res = check(scene([{"id": "m", "type": "model", "shape": "text", "text": "שלום", "x": 160,
-                        "y": 90, "size": 60, "depth": 10}]))
-    assert _codes(res, "unshaped-3d-text")
+def _need(ch, script):
+    if _fallback(skia.FontStyle(600, 5, skia.FontStyle.kUpright_Slant), ord(ch)) is None:
+        pytest.skip(f"no installed font has {script}")
+
+
+def _ink(layer):
+    """Where a layer drawn white on black covers, cut to its ink."""
+    spec = scene([dict({"x": 160, "y": 90, "size": 50, "weight": 600, "fill": "#ffffff"}, **layer)], bg="#000000")
+    on = Renderer(k.Scene(spec), backend="cpu").frame(0)[..., :3].max(-1) > 127
+    ys, xs = np.nonzero(on)
+    return on[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+
+
+def _within_a_pixel(a, b) -> float:
+    """The smaller share of either ink that has the other's ink within a pixel of it."""
+    h, w = min(a.shape[0], b.shape[0]), min(a.shape[1], b.shape[1])
+
+    def share(p, q):
+        grown, padded = np.zeros((h, w), bool), np.pad(q[:h, :w], 1)
+        for dy in range(3):
+            for dx in range(3):
+                grown |= padded[dy:dy + h, dx:dx + w]
+        return p[:h, :w][grown].sum() / p[:h, :w].sum()
+    return min(share(a, b), share(b, a))
+
+
+@pytest.mark.parametrize("text, ch, script", [("שלום", "ש", "Hebrew"), ("مرحبا", "م", "Arabic"),
+                                              ("Hi שלום 42", "ש", "Hebrew"), ("É", "E", "Latin")])
+def test_3d_text_is_shaped_as_a_text_layer_is(text, ch, script):
+    _need(ch, script)
+    solid = {"id": "m", "type": "model", "shape": "text", "text": text, "depth": 1, "light": "flat"}
+    ref = _ink({"id": "t", "type": "text", "text": text})
+    assert _within_a_pixel(_ink(solid), ref) > 0.97
+    # letterSpacing draws each character on its own: unjoined, right to left text backwards, the mark not raised.
+    assert _within_a_pixel(_ink(dict(solid, letterSpacing=0.01)), ref) < 0.9
+
+
+def test_check_warns_about_3d_text_it_cannot_draw_as_written():
+    _need("ש", "Hebrew")
+    m = {"id": "m", "type": "model", "shape": "text", "text": "שלום", "x": 160, "y": 90, "size": 60, "depth": 10}
+    assert not _codes(check(scene([m])), "unshaped-3d-text")
+    spaced = _codes(check(scene([dict(m, letterSpacing=4)])), "unshaped-3d-text")
+    assert len(spaced) == 1 and spaced[0]["message"].startswith("letterSpacing draws each character")
+    # Each character named is one 3D text draws nothing for: a colour emoji font has no outlines (and with no emoji
+    # font installed, missing-glyph names it).
+    for text, cp in (("\U0001F600", "U+1F600"), ("❤️", "U+2764"), ("❤", "U+2764")):
+        drawn = Renderer(k.Scene(scene([dict(m, text=text)], bg="#000000")), backend="cpu").frame(0)[..., :3].max()
+        res = check(scene([dict(m, text=f"hi {text}")]))
+        named = _codes(res, "unshaped-3d-text") + _codes(res, "missing-glyph")
+        assert bool(named) == (drawn < 40), (text, drawn, named)
+        assert not named or cp in named[0]["message"]
 
 
 def test_text_in_other_scripts_is_pure_function_of_index():
@@ -298,6 +342,8 @@ def test_text_in_other_scripts_is_pure_function_of_index():
          "x": "50%", "y": 50, "size": 28, "enter": {"name": "type", "dur": 1.5}, "caret": True},
         {"id": "b", "type": "text", "text": "a\U0001F600b é́ 世界", "x": "50%", "y": 120, "size": 28,
          "split": "chars", "enter": {"name": "rise", "stagger": 0.05}},
+        {"id": "c", "type": "model", "shape": "text", "text": "مرحبا שָׁלוֹם é́", "x": "50%", "y": 155, "size": 28,
+         "depth": 6, "rotateY": "=t * 30"},
     ])
     r = Renderer(k.Scene(spec), backend="cpu")
     seq = [r.frame(n).copy() for n in range(0, 40, 3)]

@@ -268,7 +268,7 @@ nine rounds: a floor reaching to just in front of the camera took eight.
 - `cube` takes `radius` for a rounded box. New shapes: `capsule`; `lathe`, where `profile` (`[[r, y], ...]` or
   path data) turns around the vertical axis; and `tube`, a round tube along path data `d`, where `draw` grows it
   along its length for 3D lines and routes.
-  Built on branch `shapes`. A cube's `r` (or `radius`) rounds it: `unit` pushes each face's grid onto a box with
+  Merged (#80). A cube's `r` (or `radius`) rounds it: `unit` pushes each face's grid onto a box with
   ellipsoid corners, so scaled to w, h and depth they are round; `capsule` (`r`, `h` end to end) is built the
   same way, both kept as unit meshes that scale per frame. `lathe` takes `[[r, y], ...]` or path data; bends
   past 40 degrees keep a normal each side, and an open profile off the axis is two-sided. `tube` runs along `d`
@@ -279,6 +279,12 @@ nine rounds: a floor reaching to just in front of the camera took eight.
 - Shaped 3D text: glyph runs from `TextBlob.MakeFromShapedText` (HarfBuzz, which 2D text already uses), read with
   `TextBlob.Iter`, outlines from `Font.getPath`. Arabic letters join, marks sit on their letters and right-to-left
   runs read right to left. `unshaped-3d-text` narrows to colour emoji, which have no outline to extrude.
+  Built on branch `shaped-3d-text`. `TextBlob.Iter` gives glyph ids but no positions, so a line that needs shaping
+  is laid out as a text layer's (`_bidi_order`, `_pieces`) and drawn on Skia's SVG canvas with text converted to
+  paths; the `d` of each path is the outline. Building it takes 0.9 ms for `مرحبا بالعالم` at 120 px, against
+  0.03 ms for a plain line, and the solid is kept per text. Plain lines are built as before, so `title3d.json` and
+  `edges.json` keep their bytes. `letterSpacing` still draws characters one by one, unshaped, and
+  `unshaped-3d-text` warns about that and about colour emoji.
 - `EXT_meshopt_compression` decoded in numpy. Draco per decision 2.
 
 ### Phase 7: tooling and release

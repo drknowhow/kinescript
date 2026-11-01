@@ -285,9 +285,10 @@ DEPTH AND CAMERA (3D)
   text      shape "text" pushes letters out in depth: text ("\n" breaks lines), size [120],
             weight [600], font, italic, letterSpacing, lineHeight, depth [size x 0.2], bevel [0]
             (px of 45-degree edge). Centred on x, y. Each new text, size, depth or bevel value
-            rebuilds the solid, so grow it with scale. Characters are not shaped: right-to-left
-            letters, accents typed as separate marks and emoji sequences come out wrong (check
-            warns: unshaped-3d-text), so use a text layer for those.
+            rebuilds the solid, so grow it with scale. Lines are shaped as a text layer's are:
+            Arabic letters join, marks sit on their letters, right-to-left runs read right to left.
+            letterSpacing draws each character on its own, unshaped, and colour emoji have no
+            outline, so they are left out (check warns: unshaped-3d-text).
   path      shape "path": d (SVG path data, filled nonzero), w and/or h (fits inside them, keeping
             its shape), depth [a fifth of its larger side], bevel [0], strokeWidth (in d's units:
             extrudes the stroke, with round ends, for line icons).
@@ -582,9 +583,10 @@ COMMANDS
                                   0.3 s per word, or one or two words for under 0.4 s
                                   (read-time), a character no installed font has
                                   (missing-glyph), Arabic drawn letter by letter
-                                  (unjoined-letters), 3D text it cannot shape
-                                  (unshaped-3d-text), or a video, image or shader more than
-                                  half off the canvas for 1 s or more (media-offscreen).
+                                  (unjoined-letters), colour emoji or spaced-out letters
+                                  in 3D text (unshaped-3d-text), or a video, image or shader
+                                  more than half off the canvas for 1 s or more
+                                  (media-offscreen).
                                   With sound (it is
                                   mixed and measured, see SOUND): a voice cut off (audio-cut), two
                                   voices at once (voice-overlap), music under 10 LU below a voice
