@@ -51,7 +51,7 @@ MOTION_ALIAS = {"type": "name", "preset": "name", "duration": "dur", "easing": "
                 "delay": "stagger"}
 TWEEN = {"from", "to", "dur", "delay", "ease", "keys", "smooth"}
 TWEEN_ALIAS = {"duration": "dur", "easing": "ease", "start": "from", "end": "to", "begin": "from"}
-GRADIENT = {"linear", "radial", "stops"}
+GRADIENT = {"linear", "radial", "sweep", "angle", "stops"}
 AUDIO = {"src", "at", "trim", "gain", "volume", "fadeIn", "fadeOut", "id", "role", "dur", "until", "loop", "pan",
          "words", "text", "speaker", "rate", "backend", "options"}
 AUDIO_ALIAS = {"source": "src", "file": "src", "path": "src", "start": "at", "fade_in": "fadeIn",
@@ -501,6 +501,11 @@ def _prop(k: str, v, rep: Report, lid):
         values = [("", v)]
     for where, x in values:
         _constant(k, x, where, rep, lid)
+    grads = [x for _, x in values if isinstance(x, dict)]
+    if grads and (len(grads) < len(values) or len({(_kind(x), len(x.get("stops") or [])) for x in grads}) > 1):
+        rep.add("error", "bad-value", lid, f"{k}: a gradient animates only into a gradient of the same kind (linear, "
+                "radial, sweep, or an angle) with as many stops", "give every key the same kind of gradient and the "
+                "same number of stops")
 
 
 def _constant(k: str, x, where: str, rep: Report, lid):
@@ -522,7 +527,18 @@ def _constant(k: str, x, where: str, rep: Report, lid):
     elif k in COLOR_KEYS and x is not None:
         if isinstance(x, dict) and not where:
             return  # a gradient, checked by the caller
-        _colour(x, f"{k}{where}", rep, lid)
+        if isinstance(x, dict):  # a gradient that animates
+            gradient(x, f"{k}{where}", rep, lid)
+        else:
+            _colour(x, f"{k}{where}", rep, lid)
+
+
+def _kind(g: dict) -> str:
+    """A gradient's kind, as Gradient.of reads it."""
+    for k in ("radial", "sweep"):
+        if k in g:
+            return k
+    return "angle" if "linear" not in g and g.get("angle") is not None else "linear"
 
 
 def gradient(g: dict, where: str, rep: Report, lid):
@@ -553,9 +569,19 @@ def gradient(g: dict, where: str, rep: Report, lid):
                             "positions run from 0 (start) to 1 (end)")
                 s = s[1]
             _colour(s, f"{where} gradient stop {j}", rep, lid)
-    lin, rad = g.get("linear"), g.get("radial")
-    if lin is not None and rad is not None:
-        rep.add("error", "bad-value", lid, f"{where} gradient has both 'linear' and 'radial'; give one")
+    lin, rad, swp, ang = g.get("linear"), g.get("radial"), g.get("sweep"), g.get("angle")
+    kinds = [k for k in ("linear", "radial", "sweep") if g.get(k) is not None]
+    if len(kinds) > 1:
+        rep.add("error", "bad-value", lid, f"{where} gradient has {' and '.join(kinds)}; give one")
+    if ang is not None and not _finite(ang):
+        rep.add("error", "bad-value", lid, f"{where} gradient: angle is {_show(ang)}; it is degrees, 0 running up and "
+                "90 to the right", '{"angle": 90, "stops": ["#ff633f", "#7b5cff"]}')
+    elif ang is not None and (lin is not None or rad is not None):
+        rep.add("warning", "ignored-key", lid, f"{where} gradient: angle is ignored beside "
+                f"{'linear points' if lin is not None else 'radial'}", "give the angle alone, or the points alone")
+    if swp is not None and swp is not True and not (isinstance(swp, list) and len(swp) == 2 and all(map(_finite, swp))):
+        rep.add("error", "bad-value", lid, f"{where} gradient: sweep is {_show(swp)}; it is its middle [x, y], each "
+                "from 0 to 1 of the layer's box", '"sweep": [0.5, 0.5]')
     if lin is not None and not (isinstance(lin, list) and len(lin) == 2 and all(
             isinstance(p, (list, tuple)) and len(p) == 2 and all(map(_finite, p)) for p in lin)):
         rep.add("error", "bad-value", lid, f"{where} gradient: linear is {_show(lin)}; it is two points [[x1, y1], "

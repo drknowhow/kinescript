@@ -165,6 +165,61 @@ def test_a_css_gradient_stroke_draws():
     assert f[90, 61][0] > 200 > f[90, 61][2] and f[90, 258][2] > 200 > f[90, 258][0]
 
 
+RED_BLUE = ["#ff0000", "#0000ff"]
+
+
+def _lit(f, over=150):
+    """(xs, colours) of the pixels brighter than `over` in some channel."""
+    ys, xs = np.nonzero(f[..., :3].max(-1) > over)
+    return xs, f[ys, xs, :3].astype(int)
+
+
+def test_text_takes_a_gradient_fill_and_stroke_and_keeps_its_emphasis_colour():
+    text = {"id": "t", "type": "text", "text": "HHHH **HH**", "x": "50%", "y": "50%", "size": 60, "weight": 800,
+            "fill": {"angle": 90, "stops": RED_BLUE}, "emph": "#00ff00"}
+    xs, cols = _lit(_frame(scene([text], bg="#000000"), 0), 200)
+    green = (cols[:, 1] > 200) & (cols[:, 0] < 60)
+    assert cols[xs < xs.min() + 20].mean(0)[0] > 200  # red at its left: it used to draw in the paper colour
+    assert green.any() and xs[green].min() > 160 and not (cols.min(1) > 200).any()
+    outline = dict(text, text="HHHHHH", fill="#000000", stroke={"linear": [[0, 0], [1, 0]], "stops": RED_BLUE},
+                   strokeWidth=3)
+    xs, cols = _lit(_frame(scene([outline], bg="#000000"), 0))
+    left, right = cols[xs < xs.min() + 10].mean(0), cols[xs > xs.max() - 10].mean(0)
+    assert left[0] > 200 > left[2] and right[2] > 200 > right[0]
+
+
+@pytest.mark.parametrize("fill, red, blue", [
+    ({"sweep": True, "stops": RED_BLUE}, (30, 165), (30, 155)),  # from the top, clockwise
+    ({"sweep": [0.5, 0.5], "angle": 90, "stops": RED_BLUE}, (95, 220), (85, 220)),  # from the right
+])
+def test_a_sweep_gradient_turns_round_its_middle(fill, red, blue):
+    f = _frame(scene([{"id": "c", "type": "circle", "x": 160, "y": 90, "r": 80, "fill": fill}], bg="#000000"), 0)
+    assert f[red][0] > 240 > 15 > f[red][2] and f[blue][2] > 240 > 15 > f[blue][0]
+
+
+@pytest.mark.parametrize("angle, red, blue", [(0, (138, 160), (42, 160)), (90, (90, 62), (90, 257)),
+                                              (180, (42, 160), (138, 160))])
+def test_an_angle_gradient_runs_as_css_reads_one(angle, red, blue):
+    f = _frame(scene([{"id": "r", "type": "rect", "x": 160, "y": 90, "w": 200, "h": 100,
+                       "fill": {"angle": angle, "stops": RED_BLUE}}], bg="#000000"), 0)
+    assert f[red][0] > 240 > 15 > f[red][2] and f[blue][2] > 240 > 15 > f[blue][0]
+
+
+def test_a_gradient_animates_into_another():
+    tween = {"from": {"angle": 90, "stops": RED_BLUE}, "to": {"angle": 90, "stops": RED_BLUE[::-1]}, "dur": 1,
+             "ease": "linear"}
+    ring = [[0, {"sweep": True, "stops": RED_BLUE}], [1, {"sweep": True, "angle": 180, "stops": RED_BLUE}, "linear"]]
+    spec = scene([{"id": "r", "type": "rect", "x": 100, "y": 90, "w": 120, "h": 100, "fill": tween},
+                  {"id": "c", "type": "circle", "x": 250, "y": 90, "r": 50, "fill": None, "strokeWidth": 10,
+                   "stroke": ring}], bg="#000000", duration=1)
+    assert check(spec)["ok"]
+    r = Renderer(k.Scene(spec), backend="cpu")
+    first, mid, last = (r.frame(n).astype(int) for n in (0, 15, 29))
+    assert first[90, 42][0] > 240 and last[90, 42][2] > 240 and 60 < mid[90, 42][0] < 200  # the rect's left edge
+    assert first[44, 252][0] > 240 and last[136, 248][0] > 240  # the ring starts at the top, then at the bottom
+    assert np.array_equal(_frame(spec, 15), mid)  # a pure function of the frame
+
+
 def test_colour_keyframes_mix_in_oklab():
     p = compile_prop("fill", [[0, "#ff0000"], [1, "#0000ff", "linear"]], Ctx(10, 10, 30))
     mid = p.at(0.5, 1)

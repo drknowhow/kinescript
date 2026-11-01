@@ -361,7 +361,8 @@ class Scene:
                                   f"{name} failed at t={t:.2f}s: {type(e).__name__}: {e}")
                         break
                     if name in schema.COLOR_KEYS:
-                        if v is not None and not (isinstance(v, (tuple, list)) and len(v) in (3, 4)):
+                        if v is not None and not (isinstance(v, (tuple, list)) and len(v) in (3, 4)
+                                                  or isinstance(v, C.Gradient)):
                             self._bad_colour(v, name if t == 0 else f"{name} at t={t:.2f}s", layer.id)
                             break
                     elif name in schema.SCALAR and (isinstance(v, bool) or not isinstance(v, (int, float))):
@@ -535,7 +536,8 @@ class Scene:
                     self.note("error", "bad-expression", layer.id, f"{name} failed at t={t:.2f}s (frame {n}): "
                               f"{type(e).__name__}: {e}", "guard the expression, e.g. max(…, 0.001) under a division")
                     break
-                if name.split(": ")[-1] in schema.COLOR_KEYS and not (isinstance(v, (tuple, list)) and len(v) in (3, 4)):
+                if name.split(": ")[-1] in schema.COLOR_KEYS and not (isinstance(v, (tuple, list)) and len(v) in (3, 4)
+                                                                       or isinstance(v, C.Gradient)):
                     self._bad_colour(v, f"{name} at t={t:.2f}s (frame {n})", layer.id)
                     break
         for layer in self.all_layers():  # a model's repeat: every copy, at every few frames past the budget

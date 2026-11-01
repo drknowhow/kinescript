@@ -163,6 +163,54 @@ def mix(a: RGBA, b: RGBA, t: float) -> RGBA:
     return (r, g, bl, a[3] + (b[3] - a[3]) * t)
 
 
+class Gradient:
+    """A gradient object made into numbers, so one that animates mixes from key to key: its kind (linear, radial,
+    sweep, or angle for a linear one given by an angle), its points as shares of the box, its angle in degrees, and
+    its stops' positions and colours."""
+    __slots__ = ("kind", "geo", "angle", "pos", "cols")
+
+    def __init__(self, kind: str, geo: tuple, angle: float, pos: list[float], cols: list[RGBA]):
+        self.kind, self.geo, self.angle, self.pos, self.cols = kind, geo, angle, pos, cols
+
+    @classmethod
+    def of(cls, spec: dict) -> "Gradient":
+        stops = spec.get("stops") or ["#000", "#fff"]
+        if isinstance(stops[0], str):  # spread evenly, as Skia spreads stops without positions
+            pos, cols = [k / max(1, len(stops) - 1) for k in range(len(stops))], [parse(s) for s in stops]
+        else:
+            pos, cols = [float(s[0]) for s in stops], [parse(s[1]) for s in stops]
+        angle = spec.get("angle")
+        if "radial" in spec:
+            kind, geo = "radial", ((spec["radial"] + [0.5, 0.5, 0.6])[:3] if isinstance(spec["radial"], list)
+                                    else (0.5, 0.5, 0.6))
+        elif "sweep" in spec:
+            kind, geo = "sweep", (spec["sweep"] + [0.5, 0.5])[:2] if isinstance(spec["sweep"], list) else (0.5, 0.5)
+        elif "linear" not in spec and angle is not None:
+            kind, geo = "angle", ()
+        else:
+            (x1, y1), (x2, y2) = spec.get("linear", [[0, 0], [1, 1]])
+            kind, geo = "linear", (x1, y1, x2, y2)
+        return cls(kind, tuple(float(v) for v in geo), float(angle or 0), pos, cols)
+
+    def mix(self, other: "Gradient", t: float) -> "Gradient":
+        """The gradient t of the way to `other`; one of another kind or stop count is not mixed but cut to at t 1."""
+        if other.kind != self.kind or len(other.cols) != len(self.cols):
+            return other if t >= 1 else self
+        return Gradient(self.kind, tuple(a + (b - a) * t for a, b in zip(self.geo, other.geo)),
+                        self.angle + (other.angle - self.angle) * t,
+                        [a + (b - a) * t for a, b in zip(self.pos, other.pos)],
+                        [mix(a, b, t) for a, b in zip(self.cols, other.cols)])
+
+    def spec(self) -> dict:
+        """As a gradient object again, with every stop's position and parsed colour."""
+        out = {"stops": [[p, c] for p, c in zip(self.pos, self.cols)], "angle": self.angle}
+        if self.kind == "linear":
+            out["linear"] = [list(self.geo[:2]), list(self.geo[2:])]
+        elif self.kind != "angle":
+            out[self.kind] = list(self.geo)
+        return out
+
+
 def luminance(c: RGBA) -> float:
     r, g, b = (_lin(v) for v in c[:3])
     return 0.2126 * r + 0.7152 * g + 0.0722 * b

@@ -279,6 +279,32 @@ def test_a_gradient_stop_past_the_end_warns_that_it_is_pinned():
     assert w and "drawn at 1" in w[0]["message"], w
 
 
+TWO = ["#fff", "#000"]
+
+
+@pytest.mark.parametrize("fill, words", [
+    ({"sweep": [0.5], "stops": TWO}, "sweep is"),
+    ({"sweep": "middle", "stops": TWO}, "sweep is"),
+    ({"angle": "up", "stops": TWO}, "angle is"),
+    ({"linear": [[0, 0], [1, 0]], "sweep": True, "stops": TWO}, "has linear and sweep"),
+    ({"from": {"angle": 0, "stops": TWO}, "to": {"sweep": True, "stops": TWO}, "dur": 1}, "same kind"),
+    ({"from": {"angle": 0, "stops": TWO}, "to": {"angle": 90, "stops": TWO + ["#f00"]}, "dur": 1}, "as many stops"),
+    ([[0, "#fff"], [1, {"angle": 90, "stops": TWO}]], "same kind"),
+    ([[0, {"angle": 0, "stops": TWO}], [1, {"angle": 90, "stops": ["#fff", "nope"]}]], "keyframe 2 gradient stop 2"),
+])
+def test_sweep_angle_and_animated_gradients_are_checked(fill, words):
+    assert words in one_error(scene([rect(fill=fill)]), "r")["message"]
+
+
+def test_sweep_and_angle_gradients_load_and_an_angle_beside_points_is_ignored():
+    for fill in ({"sweep": True, "stops": TWO}, {"sweep": [0.3, 0.5], "angle": 45, "stops": TWO},
+                 {"angle": 90, "stops": TWO}, {"from": {"angle": 0, "stops": TWO}, "to": {"angle": 90, "stops": TWO}}):
+        errs, s = errors(scene([rect(fill=fill)]))
+        assert s is not None and not errs, (fill, errs)
+    w = warnings(scene([rect(fill={"linear": [[0, 0], [1, 0]], "angle": 90, "stops": TWO})]), "ignored-key")
+    assert w and "angle is ignored" in w[0]["message"], w
+
+
 def test_null_values_mean_their_defaults():
     _, s = load(dict(scene([rect(fill=None, x=None, fx={"brightness": None}),
                             {"id": "t", "type": "text", "text": "a **b**", "emph": None}]),

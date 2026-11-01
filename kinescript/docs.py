@@ -453,6 +453,11 @@ ANIMATING A VALUE (any number or colour key)
   Colours animate too: "fill": {"from": "#ff633f", "to": "#b9f45d", "dur": 1}.
   Gradient fill: "fill": {"linear": [[0, 0], [1, 1]], "stops": ["#ff633f", "#7b5cff"]}
                  or {"radial": [0.5, 0.5, 0.6], "stops": [...]}; points are 0..1 of the layer box.
+                 {"angle": 90, "stops": [...]} runs corner to corner as CSS's does (0 up, 90 right);
+                 {"sweep": [0.5, 0.5], "stops": [...]} goes round its middle from the top, clockwise,
+                 turned by angle. Text and strokes take gradients too. A gradient animates into one
+                 of the same kind with as many stops, by keyframes or a tween:
+                 "fill": {"from": {"angle": 0, "stops": [...]}, "to": {"angle": 180, "stops": [...]}}
 
 ENTER AND EXIT
   "enter": "rise"   or   {"name": "rise", "dur": 0.5, "ease": "outCubic", "stagger": 0.03}
