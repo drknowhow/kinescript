@@ -120,14 +120,15 @@ _EFFECTS: dict[tuple, skia.RuntimeEffect] = {}
 
 
 def _effect(n: int, more: int = 0, glow: bool = False, env: bool = False, part: str | None = None,
-            emit: bool = False) -> skia.RuntimeEffect:
+            emit: bool = False, edge: bool = False) -> skia.RuntimeEffect:
     """The shading effect for n materials, one pair of uniforms each (base colour + bands, then
     specular amount, exponent, metal and rim), a glow each if any glows, `more` lights, and an
     environment to reflect. Without these the source is what it was before they existed, so those
     models draw the same bytes. part "light" is half the light that falls on a white surface (or the glow, if
     more), and "add" what is added over the surface's colour, for a textured model (_COMBINE). emit: an emission
-    colour each, added to the light of an untextured model (a textured one draws it as a pass of its own)."""
-    if (n, more, glow, env, part, emit) not in _EFFECTS:
+    colour each, added to the light of an untextured model (a textured one draws it as a pass of its own). edge:
+    slot n is the model's edge lines (draw), drawn in their colour, unlit."""
+    if (n, more, glow, env, part, emit, edge) not in _EFFECTS:
         decl = "\n".join(f"uniform half4 base{i};\nuniform half4 surf{i};" + (f"\nuniform half glow{i};" if glow else "")
                          + (f"\nuniform half3 emit{i};" if emit else "") for i in range(n))
         decl += "".join(f"\nuniform half3 dir{j};\nuniform half3 col{j};" for j in range(more)) + (_ENV if env else "")
@@ -137,6 +138,10 @@ def _effect(n: int, more: int = 0, glow: bool = False, env: bool = False, part: 
             pick = "half3 e = emit0;\n    " + pick
         if glow:
             pick = "half g = glow0;\n    " + pick
+        if edge:
+            decl += "\nuniform half3 edgeCol;" if part is None else ""
+            line = {None: "edgeCol", "light": "half3(0.5)", "add": "half3(0.0)"}[part]
+            pick = f"if (m == {n}.0) {{ return half4({line}, 1.0); }}\n    " + pick
         lit = "diffuse + spec + rim * keyCol" + (" + refl" if env else "")
         lit = f"max({lit}, b.rgb * g)" if glow else lit
         lit = f"{lit} + e" if emit and part is None else lit
@@ -151,8 +156,8 @@ def _effect(n: int, more: int = 0, glow: bool = False, env: bool = False, part: 
             more_src = more_src.replace("diffuse += b.rgb * ", "diffuse += ")
         src = (src.replace("DECLARE", decl).replace("LOOKUP", pick).replace("MORE", more_src)
                .replace("ENV", _ENV_MAIN if env else "").replace("LIT", lit))
-        _EFFECTS[n, more, glow, env, part, emit] = skia.RuntimeEffect.MakeForShader(src)
-    return _EFFECTS[n, more, glow, env, part, emit]
+        _EFFECTS[n, more, glow, env, part, emit, edge] = skia.RuntimeEffect.MakeForShader(src)
+    return _EFFECTS[n, more, glow, env, part, emit, edge]
 
 
 def light(spec) -> dict:
@@ -295,9 +300,12 @@ def _env(e: dict | None, R) -> tuple | None:
     return _rgb(e["top"]), _rgb(e["horizon"]), _rgb(e["bottom"]), down, float(e.get("amount", 1.0))
 
 
-def _shade(nv, M, mats, key, fill, col, amt, more=(), env=None, fog=None, split=False):
+def _shade(nv, M, mats, key, fill, col, amt, more=(), env=None, fog=None, split=False, edge=None):
     """The shader's lighting, per vertex, as 0xAARRGGBB: the raster backend's path. split: instead, half each of
-    the two parts a textured model draws (_effect's "light" and "add"; _textured)."""
+    the two parts a textured model draws (_effect's "light" and "add"; _textured). Vertices past the materials
+    are edge lines (draw), in the colour edge."""
+    line = M >= len(mats)
+    M = np.minimum(M, len(mats) - 1)
     base = np.array([(*m[0], m[1]) for m in mats])[M]
     sp, ex, metal, rim = np.array([m[2:6] for m in mats])[M].T
     n = np.c_[nv[:, :2], np.sqrt(np.clip(1 - (nv[:, :2] ** 2).sum(1), 0, 1))]
@@ -324,6 +332,7 @@ def _shade(nv, M, mats, key, fill, col, amt, more=(), env=None, fog=None, split=
             add += _reflect(n, sp, metal, base, env)
         if glow.any():
             lit = np.maximum(lit, glow[:, None])
+        lit[line], add[line] = 1.0, 0.0
         return _argb(lit * 0.5), _argb(add * 0.5)
     rgb = base[:, :3] * light * (1 - 0.75 * metal)[:, None]
     rgb += (1 - metal[:, None] + metal[:, None] * base[:, :3]) * (s * amt[0])[:, None] * col
@@ -339,6 +348,8 @@ def _shade(nv, M, mats, key, fill, col, amt, more=(), env=None, fog=None, split=
     emit = np.array([m[7] for m in mats])[M]
     if emit.any():  # the light it gives off itself
         rgb += emit
+    if line.any():
+        rgb[line] = edge
     if fog is not None:  # (how much of each vertex the fog covers, its colour)
         rgb = np.clip(rgb, 0, 1) * (1 - fog[0][:, None]) + np.asarray(fog[1]) * fog[0][:, None]
     return _argb(rgb)
@@ -765,14 +776,17 @@ def _points(xy: np.ndarray) -> list:
     return list(map(skia.Point.Make, xy[:, 0].tolist(), xy[:, 1].tolist()))
 
 
-def _paint(r, L, mats, lt, more, env, part: str | None = None) -> skia.Paint:
+def _paint(r, L, mats, lt, more, env, part: str | None = None, edge=None) -> skia.Paint:
     """The GPU's shading paint for these materials, lights and environment, kept while they hold. part: one of
-    _effect's parts, for a textured model."""
+    _effect's parts, for a textured model. edge: the colour of its edge lines, if it has any."""
     glow = any(mt[6] for mt in mats)
     emit = part is None and any(any(mt[7]) for mt in mats)
 
     def make():
-        bld = skia.RuntimeShaderBuilder(_effect(len(mats), len(more), glow, env is not None, part, emit))
+        bld = skia.RuntimeShaderBuilder(_effect(len(mats), len(more), glow, env is not None, part, emit,
+                                                edge is not None))
+        if edge is not None and part is None:
+            bld.setUniform("edgeCol", list(edge))
         for i, mt in enumerate(mats):
             bld.setUniform(f"base{i}", [*mt[0], mt[1]])
             bld.setUniform(f"surf{i}", list(mt[2:6]))
@@ -789,7 +803,8 @@ def _paint(r, L, mats, lt, more, env, part: str | None = None) -> skia.Paint:
             bld.setUniform(name, v)
         return skia.Paint(Shader=bld.makeShader())
     key = (tuple(mats), tuple(map(tuple, lt)), tuple((tuple(d), tuple(c)) for d, c in more),
-           None if env is None else tuple(tuple(v) if isinstance(v, list) else v for v in env))
+           None if env is None else tuple(tuple(v) if isinstance(v, list) else v for v in env),
+           None if edge is None else tuple(edge))
     return _kept(r, ("paint", L.id) if part is None else ("paint", L.id, part), key, make)
 
 
@@ -879,24 +894,28 @@ def _look(r, L, i: int, fill, tx, slot: str = "look") -> skia.Shader:
     return _kept(r, (slot, L.id, i), (tuple(fill), None if tx is None else (tx[0], tx[3], tx[4])), make)
 
 
-def _textured(r, L, cv: skia.Canvas, region: skia.Rect, q, T, nv, M, U, mats, texs, glows, lit, fv, fg) -> bool:
+def _textured(r, L, cv: skia.Canvas, region: skia.Rect, q, T, nv, M, U, mats, texs, glows, lit, fv, fg,
+              edge=None) -> bool:
     """A textured model's sorted triangles T on cv (cleared in region): its picture, each material's texture over
     its fill, times twice half the light on a white surface, plus its highlights, rim and reflection, under its
     fog. Each is drawn on its own surface with the same triangles and they are combined per pixel: drawn one over
     another, a triangle behind would be lit again by the one in front. On the GPU the light is per pixel. On the
     CPU it is per vertex, as for any model; the picture is drawn times its light straight onto cv, all at half
     strength, which saved two copies of the region, and True says the model is to be drawn twice as bright.
-    The light a model file's materials give off (glows: emission textures) is one more such pass, added."""
+    The light a model file's materials give off (glows: emission textures) is one more such pass, added. Edge
+    lines (in the colour edge, slot len(mats)) are their colour in the picture, lit at 1 and given nothing."""
     lt, more, env = lit
 
     def pictures(txs, under, slot):
         """Each material's picture and its texture coordinates in pixels of its image."""
-        looks, sizes = [], np.zeros((len(mats), 6))  # repeat, offset and size of each image
+        looks, sizes = [], np.zeros((len(mats) + 1, 6))  # repeat, offset and size of each image
         for i, (mt, tx) in enumerate(zip(mats, txs)):
             looks.append(_look(r, L, i, under(mt), tx, slot))
             if tx is not None:
                 img, rep, off = tx[:3]
                 sizes[i] = (*rep, *off, img.width(), img.height())
+        if edge is not None:
+            looks.append(skia.Shaders.Color(skia.Color4f(*(edge if slot == "look" else (0.0, 0.0, 0.0)), 1.0)))
         z = sizes[M]
         return looks, (U * z[:, :2] - z[:, 2:4]) * z[:, 4:]
 
@@ -930,8 +949,8 @@ def _textured(r, L, cv: skia.Canvas, region: skia.Rect, q, T, nv, M, U, mats, te
     if gpu:
         normal = np.stack([2.0 * M + 0.5 + 0.45 * nv[:, 0], nv[:, 1]], 1)  # as for any model (draw)
         parts = {"base": apart(0, None, coords=uv, by_material=True),
-                 "light": apart(1, _paint(r, L, mats, lt, more, env, "light"), coords=normal),
-                 "add": apart(2, _paint(r, L, mats, lt, more, env, "add"), coords=normal)}
+                 "light": apart(1, _paint(r, L, mats, lt, more, env, "light", edge), coords=normal),
+                 "add": apart(2, _paint(r, L, mats, lt, more, env, "add", edge), coords=normal)}
         if shines is not None:
             parts["emit"] = apart(4, None, coords=shines[1], by_material=True, looks=shines[0])
         b = skia.RuntimeShaderBuilder(_combined(shines is not None))
@@ -941,7 +960,7 @@ def _textured(r, L, cv: skia.Canvas, region: skia.Rect, q, T, nv, M, U, mats, te
                    skia.Shaders.Color(skia.ColorTRANSPARENT))
         cv.drawPaint(skia.Paint(Shader=b.makeShader(), BlendMode=skia.BlendMode.kSrc))
     else:
-        light, add = _shade(nv, M, mats, *lt, more, env, split=True)
+        light, add = _shade(nv, M, mats, *lt, more, env, split=True, edge=edge)
         for a, b in runs:
             _vertices(cv, q, T[a:b], uv, light, skia.Paint(Shader=looks[slot[a]]), skia.BlendMode.kModulate)
         glow = None if shines is None else apart(4, None, coords=shines[1], by_material=True, looks=shines[0])
@@ -951,6 +970,68 @@ def _textured(r, L, cv: skia.Canvas, region: skia.Rect, q, T, nv, M, U, mats, te
                 cv.drawImage(img, 0, 0, skia.SamplingOptions(), skia.Paint(BlendMode=mode, ColorFilter=cf))
     cv.restore()
     return not gpu
+
+
+def _edging(r, L, t: float, T: float) -> tuple | None:
+    """The layer's edge lines at its time t (scene time T): (width in px, colour, cosine of the least crease
+    angle drawn, 2 for every edge), or None. "all" draws every edge, true the defaults."""
+    v = L.raw.get("edges")
+    if v is None or v is False:
+        return None
+    v = {"angle": 0} if v == "all" else at(r._lit, r.s.ctx, v, t, L.dur, T) if isinstance(v, dict) else {}
+    width, angle = float(v.get("width", 2.0)), float(v.get("angle", 30.0))
+    if width <= 0:
+        return None
+    return (width, _rgb(v.get("color", r.s.theme.get("ink", "#0a0c10"))),
+            math.cos(math.radians(angle)) if angle > 0 else 2.0)
+
+
+def _lines(r, L, m, T, ids, front, w, cos: float, exact: bool) -> tuple:
+    """The edges of triangles T (the mesh's triangles ids) to draw a line along, where `front` says which face
+    the camera: creases whose faces turn more than the angle (cos, its cosine) and the outline, where a face
+    toward the camera meets one away from it or none. Returns each line's two vertices, taken from a face toward
+    the camera (an exploded face takes its lines with it), and its place in the sort: after every face at either
+    end, so a line is hidden only by what is in front of it. exact: by the sort's own key; else by each face's
+    nearest corner, for triangles _unswim is to cut."""
+    hit = r._models.get(("edges", L.id))
+    if hit is None or hit[0] is not m.T or hit[1] != len(m.P):  # a size that animates keeps the triangles
+        hit = r._models[("edges", L.id)] = (m.T, len(m.P), mesh.edges(m.P, m.T))
+    weld, face, first, ends, sides, same = hit[2]
+
+    def creases():  # the cosine of the angle between the faces either side of each edge
+        a, b, c = (m.P[m.T[first, k]] for k in range(3))
+        n = np.cross(b - a, c - a)
+        n = np.r_[n / (np.linalg.norm(n, axis=1, keepdims=True) + 1e-30), np.zeros((1, 3))]
+        return (n[sides[:, 0]] * n[sides[:, 1]]).sum(1) * np.where(same, -1.0, 1.0)
+    dots = _fixed(r, L, m, "creases", creases)
+    rows = np.flatnonzero(front)
+    fid = face[ids[rows]]
+    seen = np.zeros(len(first) + 1, bool)  # each face toward the camera; the last, past a border, never is
+    seen[fid] = True
+    seen[-1] = False
+    row = np.zeros(len(first) + 1, np.int64)
+    row[fid] = rows
+    fa, fb = seen[sides[:, 0]], seen[sides[:, 1]]
+    e = np.flatnonzero((fa | fb) & ((dots < cos) | (fa != fb)))
+    rw = row[np.where(fa[e], sides[e, 0], sides[e, 1])]
+    pts = weld[m.T[ids[rw]]]  # the points of each line's face, to find its two ends among its corners
+    va = T[rw, np.argmax(pts == ends[e, :1], 1)]
+    vb = T[rw, np.argmax(pts == ends[e, 1:], 1)]
+    ww = w[T[rows]]
+    top = np.full(int(weld.max()) + 1, -np.inf)
+    np.maximum.at(top, weld[m.T[ids[rows]]].ravel(), np.repeat(-ww.sum(1) if exact else -3 * ww.min(1), 3))
+    return va, vb, np.maximum(top[ends[e, 0]], top[ends[e, 1]])
+
+
+def _quads(a: np.ndarray, b: np.ndarray, half: float, wa, wb) -> tuple[np.ndarray, np.ndarray]:
+    """Lines from points a to b, half px either side and past each end (square caps, so lines meeting at a
+    corner close it), as four corners each, and each corner's depth (that of the end it is at)."""
+    d = b - a
+    ln = np.hypot(d[:, 0], d[:, 1])[:, None]
+    d = np.where(ln > 1e-9, d / np.maximum(ln, 1e-9), [1.0, 0.0]) * half  # an edge end on: a square
+    n = np.stack([-d[:, 1], d[:, 0]], 1)
+    xy = np.stack([a - d + n, b + d + n, b + d - n, a - d - n], 1).reshape(-1, 2)
+    return xy, np.stack([wa, wb, wb, wa], 1).ravel()
 
 
 def _combined(emit: bool = False) -> skia.RuntimeEffect:
@@ -975,6 +1056,8 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
     if amt < 1.0:
         tid = _fixed(r, L, m, "order", lambda: mesh.build_order(m))[:math.ceil(amt * len(T))]
         T = T[tid]
+    edging = _edging(r, L, t, scene_t)
+    ids = np.arange(len(T)) if isinstance(tid, slice) else tid  # the same, kept through the culls for the edges
     ex = float(g("explode", 0.0))
     if ex > 0 and len(T):
         # Each face flies out along its own normal, some further than others (a fixed per-face hash).
@@ -999,11 +1082,13 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
         near = (w[T] < space.NEAR).any(1)
         if near.any():
             r.culled.add(L.id)
-            T = T[~near]
+            T, ids = T[~near], ids[~near]
     d = np.where(np.abs(w) < 1e-9, 1e-9, w)
     X, Y = hom[:, 0] / d, hom[:, 1] / d
     x, y = X[T], Y[T]  # each triangle's corners
-    T = T[(x[:, 1] - x[:, 0]) * (y[:, 2] - y[:, 0]) - (y[:, 1] - y[:, 0]) * (x[:, 2] - x[:, 0]) > 0]
+    front = (x[:, 1] - x[:, 0]) * (y[:, 2] - y[:, 0]) - (y[:, 1] - y[:, 0]) * (x[:, 2] - x[:, 0]) > 0
+    lines = None if edging is None or not front.any() else _lines(r, L, m, T, ids, front, w, edging[2], U is None)
+    T = T[front]
     if not len(T):
         return None
     if U is not None:
@@ -1012,7 +1097,9 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
         w = P @ r._m3d[3, :3] + r._m3d[3, 3]
         d = np.where(np.abs(w) < 1e-9, 1e-9, w)
         X, Y = hom[:, 0] / d, hom[:, 1] / d
-    T = T[np.argsort(-w[T].sum(1), kind="stable")]
+    key = -w[T].sum(1)
+    order = np.argsort(key, kind="stable")
+    T, key = T[order], key[order]
     r.tris += len(T)
     # From here on, only the vertices of the triangles drawn: about half of them face away.
     used, T = _compact(T, len(P))
@@ -1020,7 +1107,22 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
     U = None if U is None else U[used]
     nv = N @ np.linalg.inv(view[:3, :3])  # normals into camera space
     nv /= np.linalg.norm(nv, axis=1, keepdims=True)
-    X, Y = X[used] * r.scale, Y[used] * r.scale  # device pixels
+    edge, wv = None, w[used]
+    if lines is not None and len(lines[0]):
+        # Each line a quad of four vertices of its own, in the sort after every face at its ends.
+        va, vb, after = lines
+        n0, k = len(used), len(va)
+        xy, wq = _quads(np.stack([X[va], Y[va]], 1), np.stack([X[vb], Y[vb]], 1), edging[0] / 2, w[va], w[vb])
+        X, Y, wv = np.r_[X[used], xy[:, 0]], np.r_[Y[used], xy[:, 1]], np.r_[wv, wq]
+        nv = np.r_[nv, np.tile([0.0, 0.0, 1.0], (4 * k, 1))]
+        M = np.r_[M, np.full(4 * k, len(mats), M.dtype)]
+        U = None if U is None else np.r_[U, np.zeros((4 * k, 2))]
+        quads = (n0 + 4 * np.arange(k))[:, None, None] + np.array([[0, 1, 2], [0, 2, 3]])
+        T = np.insert(T, np.repeat(np.searchsorted(key, after, side="right"), 2), quads.reshape(-1, 3), axis=0)
+        edge = edging[1]
+    else:
+        X, Y = X[used], Y[used]
+    X, Y = X * r.scale, Y * r.scale  # device pixels
     lo, hi = (X.min(), Y.min()), (X.max(), Y.max())
     bounds = [float(lo[0]), float(lo[1]), float(hi[0]), float(hi[1])]
     x0, y0 = max(0, math.floor(lo[0]) - 2), max(0, math.floor(lo[1]) - 2)
@@ -1035,7 +1137,7 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
     cv.clear(skia.ColorTRANSPARENT)
     cv.restore()
     q = np.stack([X, Y], 1) * ss
-    fv = None if fg is None else fogged(fg, w[used])
+    fv = None if fg is None else fogged(fg, wv)
     if fv is not None and fv.min() >= 0.999:
         r.fogged.add(L.id)
     if fv is not None and fv.max() <= 0.002:
@@ -1043,9 +1145,9 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
     mode = skia.BlendMode.kDst  # vertex colours as given, when there are any
     halved = False  # drawn at half strength (_textured)
     if U is not None:
-        halved = _textured(r, L, cv, region, q, T, nv, M, U, mats, texs, glows, (lt, more, env), fv, fg)
+        halved = _textured(r, L, cv, region, q, T, nv, M, U, mats, texs, glows, (lt, more, env), fv, fg, edge)
     elif r.backend == "gpu":
-        paint, colors = _paint(r, L, mats, lt, more, env), None
+        paint, colors = _paint(r, L, mats, lt, more, env, edge=edge), None
         uv = np.stack([2.0 * M + 0.5 + 0.45 * nv[:, 0], nv[:, 1]], 1)  # the normal, with the material slot packed in
         if fv is not None:
             # Each vertex's fog as its colour (fog colour, alpha the share); kDstATop gives that plus the shading
@@ -1057,14 +1159,15 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
         # The raster backend runs SkSL slowly: examples/model.json spent 275 ms a frame in drawVertices
         # at 2x supersampling. Shading each vertex in numpy, the whole frame takes 72 ms.
         uv = None
-        paint, colors = skia.Paint(), _shade(nv, M, mats, *lt, more, env, None if fv is None else (fv, fg[0]))
+        paint, colors = skia.Paint(), _shade(nv, M, mats, *lt, more, env, None if fv is None else (fv, fg[0]),
+                                             edge=edge)
     if U is None:
         _vertices(cv, q, T, uv, colors, paint, mode)
     img = surf.makeImageSnapshot()
     if L.raw.get("ground") not in (None, False):
         _ground(r, c, L.raw["ground"], m.P, foot, fg, lt[0])
     if r._stage is not None and r._stage.child is L:
-        r._stage.depth(q, 1.0 / w[used], T)
+        r._stage.depth(q, 1.0 / wv, T)
     c.save()
     c.resetMatrix()
     c.scale(r._dev, r._dev)

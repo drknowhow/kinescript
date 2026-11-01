@@ -104,8 +104,12 @@ MODEL_ALIAS = {"radius": "r", "thickness": "tube", "geometry": "shape", "primiti
                "specular": "shine", "metallic": "metal", "metalness": "metal", "toon": "bands", "steps": "bands",
                "quality": "detail", "lighting": "light", "children": "parts", "meshes": "parts", "model": "src",
                "floor": "ground", "groundShadow": "ground", "contactShadow": "ground", "map": "texture",
-               "image": "texture", "picture": "texture", "decal": "texture", "skin": "texture"}
+               "image": "texture", "picture": "texture", "decal": "texture", "skin": "texture", "outline": "edges",
+               "outlines": "edges", "lines": "edges", "creases": "edges"}
 GROUND = {"y", "opacity", "blur", "from"}
+EDGES = {"width", "color", "angle"}
+EDGES_ALIAS = {"colour": "color", "thickness": "width", "size": "width", "strokeWidth": "width", "crease": "angle",
+               "threshold": "angle", "creaseAngle": "angle"}
 SHADOWS = {"opacity", "soft"}
 SHADOWS_ALIAS = {"alpha": "opacity", "strength": "opacity", "softness": "soft", "blur": "soft"}
 GROUND_ALIAS = {"alpha": "opacity", "strength": "opacity", "softness": "blur", "radius": "blur", "level": "y"}
@@ -135,7 +139,7 @@ TYPES: dict[str, set[str]] = {
     "group": {"children", "layers", "w", "h", "clip", "radius", "fill", "sort", "shadows"},
     "model": PART - {"x", "y", "z", "rotateX", "rotateY", "rotate", "scale"} | {"detail", "parts", "explode",
                                                                               "draw", "light", "lights", "env",
-                                                                              "src", "ground"},
+                                                                              "src", "ground", "edges"},
 }
 SEQUENCE = COMMON | {"clips", "transition", "fit", "volume", "w", "h"}
 TRANSITION = {"type", "dur"}
@@ -223,7 +227,7 @@ REQUIRED = {"text": ("text",), "image": ("src",), "video": ("src",), "path": ("d
             "captions": ("cues", "src", "voice"), "shader": ("preset", "sksl"), "model": ("shape", "parts", "src")}
 # Keys whose value is an object of their own: never a tween, even with a "from" key (a light's direction).
 OBJECTS = {"light", "lights", "env", "ground", "shadow", "shadows", "box", "fx", "uniforms", "sound", "enter", "exit",
-           "parts", "transition", "texture"}
+           "parts", "transition", "texture", "edges"}
 # Props that cannot be below 0, and the least each may be.
 AT_LEAST = {"radius": 0, "r": 0, "sides": 3, "blur": 0, "strokeWidth": 0, "size": 0}
 COLOUR_FIX = f"write {C.FORMATS}"
@@ -1270,10 +1274,33 @@ def _texture(obj: dict, rep: Report, lid, where: str = ""):
                 f"{'a group' if src.startswith('#') else 'a still image'}", "drop them, or use a video file")
 
 
+def _edges(raw: dict, rep: Report, lid):
+    """`edges` is true, "all" or {"width", "color", "angle"}, each of which may animate."""
+    v = raw.get("edges")
+    if v is None or isinstance(v, bool) or v == "all":
+        return
+    if isinstance(v, str) and v.lower() in ("all", "wireframe", "every"):
+        raw["edges"] = "all"
+        return
+    if not isinstance(v, dict):
+        rep.add("error", "bad-value", lid, f"edges is {_show(v)}; it takes true, \"all\" or an object",
+                '"edges": {"width": 2, "color": "#0a0c10", "angle": 30}')
+        return
+    _keys(v, EDGES, EDGES_ALIAS, rep, lid, "edges: ")
+    for k, why in (("width", "px"), ("angle", "degrees, 0 for every edge")):
+        if k in v and not _tweens(v[k]):
+            rep.add("error", "bad-value", lid, f"edges {k} is {_show(v[k])}; it takes a number ({why}), or keyframes")
+    if isinstance(v.get("color"), str):
+        _colour(v["color"], "edges color", rep, lid)
+    elif v.get("color") is not None and not _tweens(v["color"], colour=True):
+        rep.add("error", "bad-value", lid, f"edges color is {_show(v['color'])}; it takes a colour, or keyframes")
+
+
 def _model(raw: dict, rep: Report, lid):
     _light(raw, rep, lid)
     _outline(raw, rep, lid)
     _texture(raw, rep, lid)
+    _edges(raw, rep, lid)
     if raw.get("src") and raw.get("shape"):
         rep.add("warning", "ignored-key", lid, f"shape '{raw['shape']}' is ignored: the model comes from src",
                 "drop shape, or make the shape its own part")

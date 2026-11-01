@@ -71,8 +71,9 @@ no depth draw exactly as before.
   an app on a phone's screen. `light`, for the scene or one model, takes `studio`, `soft`,
   `dramatic` or `flat`, or your own amounts, and every amount, its `azimuth`, `elevation` and colour animate. It
   follows the camera, or with `"follow": "world"` stays in the scene as the camera orbits. `lights` adds up to three
-  more, directional or point, and `env` gives shiny and metal models an environment to reflect. `explode` sends
-  faces outward and the `build` motion assembles a model.
+  more, directional or point, and `env` gives shiny and metal models an environment to reflect. `edges` draws
+  lines along creases and the outline, or along every edge as a wireframe, hidden where something is in front of
+  them. `explode` sends faces outward and the `build` motion assembles a model.
 - **Extruded text and SVG paths.** `"shape": "text"` extrudes letters in any font and `"shape": "path"` extrudes
   SVG path data, filled, or stroked with `strokeWidth` for line icons. Both take a `depth` and a 45-degree `bevel`.
 - **Model files.** `src` reads `.glb` and `.gltf` (glTF 2.0) and `.obj` with its `.mtl`: node transforms, base
@@ -262,12 +263,14 @@ More scenes in [`examples/`](https://github.com/drknowhow/kinescript/tree/main/e
   a label on a can and a map on a globe, on a tiled floor, as the camera swings round, 6 s.
 - [`screens.json`](https://github.com/drknowhow/kinescript/blob/main/examples/screens.json): an animated app on a
   phone's screen and footage round a turning drum: a group and a video as textures, 6 s.
+- [`edges.json`](https://github.com/drknowhow/kinescript/blob/main/examples/edges.json): a toon-shaded rocket with
+  outlines, a hidden-line wireframe ring and extruded letters with their creases drawn, 6 s.
 - [`voiceover.json`](https://github.com/drknowhow/kinescript/blob/main/examples/voiceover.json): titles cued from
   the words of a voice-over, karaoke captions of it, and a music bed that dips under it, 5.4 s.
 - [`narrated.json`](https://github.com/drknowhow/kinescript/blob/main/examples/narrated.json): the same idea
   with a voice written as text, a marked word and a click on it. Run `kine voice examples/narrated.json` first.
 
-`edit.json`, `import.json`, `voiceover.json` and `narrated.json` read sample media: run
+`edit.json`, `import.json`, `edges.json`, `voiceover.json` and `narrated.json` read sample media: run
 `python examples/make_media.py` first to generate it.
 
 ## Performance
