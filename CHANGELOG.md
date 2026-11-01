@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Models take `transparency` (0 to 1, animating), on the layer or a part: the surface is see-through, its far
+  side and whatever is behind showing. Its faces turned away from the camera are drawn too, lit from inside, and
+  the sorted triangles blend far to near; a plane drawn back to back shows once. glTF materials with
+  `alphaMode` `BLEND` are see-through by their base colour's alpha, and `.mtl` materials by `d` or `Tr`; both used
+  to be drawn solid. A model with a texture still draws solid, and `kine check` warns (`ignored-key`) when it is
+  given `transparency`. The layer's `opacity` still fades a model as a whole, as it does every layer.
+  `examples/glass.json` renders in 1.5 s on the GPU against 1.4 s without its transparency, and in 11.9 s on the
+  CPU against 9.4 s. Solid models draw the same bytes: `bench/same.py` finds no difference against main on
+  fourteen 3D examples and `hello.json`, on either backend.
 - Models take `edges`: lines along creases and the outline (`true`: 2 px, theme `ink`, creases past 30 degrees),
   along every edge as a wireframe (`"all"`), or `{"width", "color", "angle"}`, each of which animates. Corners at
   the same place count as one point, so a cube's faces meet in creases and a plane drawn back to back has only its

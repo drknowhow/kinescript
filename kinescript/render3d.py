@@ -13,7 +13,7 @@ from . import color as C
 from . import media, mesh, models, schema, space, svgpath
 from .props import compile_prop
 
-MATERIAL = ("fill", "shine", "metal", "rim", "bands", "glow", "texture")
+MATERIAL = ("fill", "shine", "metal", "rim", "bands", "glow", "texture", "transparency")
 MAX_MATERIALS = 8
 # Lights are fixed to the camera by default, like a studio key light on the camera rig: turning a model
 # changes its shading, orbiting the camera around it does not. "follow": "world" fixes one in the scene instead.
@@ -120,22 +120,26 @@ _EFFECTS: dict[tuple, skia.RuntimeEffect] = {}
 
 
 def _effect(n: int, more: int = 0, glow: bool = False, env: bool = False, part: str | None = None,
-            emit: bool = False, edge: bool = False) -> skia.RuntimeEffect:
+            emit: bool = False, edge: bool = False, clear: bool = False) -> skia.RuntimeEffect:
     """The shading effect for n materials, one pair of uniforms each (base colour + bands, then
     specular amount, exponent, metal and rim), a glow each if any glows, `more` lights, and an
     environment to reflect. Without these the source is what it was before they existed, so those
     models draw the same bytes. part "light" is half the light that falls on a white surface (or the glow, if
     more), and "add" what is added over the surface's colour, for a textured model (_COMBINE). emit: an emission
     colour each, added to the light of an untextured model (a textured one draws it as a pass of its own). edge:
-    slot n is the model's edge lines (draw), drawn in their colour, unlit."""
-    if (n, more, glow, env, part, emit, edge) not in _EFFECTS:
+    slot n is the model's edge lines (draw), drawn in their colour, unlit. clear: an opacity each (1 - its
+    transparency), the colour premultiplied by it, for an untextured model."""
+    if (n, more, glow, env, part, emit, edge, clear) not in _EFFECTS:
         decl = "\n".join(f"uniform half4 base{i};\nuniform half4 surf{i};" + (f"\nuniform half glow{i};" if glow else "")
-                         + (f"\nuniform half3 emit{i};" if emit else "") for i in range(n))
+                         + (f"\nuniform half3 emit{i};" if emit else "")
+                         + (f"\nuniform half alpha{i};" if clear else "") for i in range(n))
         decl += "".join(f"\nuniform half3 dir{j};\nuniform half3 col{j};" for j in range(more)) + (_ENV if env else "")
-        g = ("; g = glow{0}" if glow else "") + ("; e = emit{0}" if emit else "")
+        g = ("; g = glow{0}" if glow else "") + ("; e = emit{0}" if emit else "") + ("; a = alpha{0}" if clear else "")
         pick = " ".join(f"if (m == {i}.0) {{ b = base{i}; p = surf{i}{g.format(i)}; }}" for i in range(1, n))
         if emit:
             pick = "half3 e = emit0;\n    " + pick
+        if clear:
+            pick = "half a = alpha0;\n    " + pick
         if glow:
             pick = "half g = glow0;\n    " + pick
         if edge:
@@ -145,7 +149,7 @@ def _effect(n: int, more: int = 0, glow: bool = False, env: bool = False, part: 
         lit = "diffuse + spec + rim * keyCol" + (" + refl" if env else "")
         lit = f"max({lit}, b.rgb * g)" if glow else lit
         lit = f"{lit} + e" if emit and part is None else lit
-        src = _SKSL
+        src = _SKSL.replace("saturate(LIT), 1.0)", "saturate(LIT) * a, a)") if clear and part is None else _SKSL
         if part == "light":
             src = src.replace("half3 diffuse = b.rgb * ", "half3 diffuse = ")
             lit = "max(diffuse, half3(g)) * 0.5" if glow else "diffuse * 0.5"
@@ -156,8 +160,8 @@ def _effect(n: int, more: int = 0, glow: bool = False, env: bool = False, part: 
             more_src = more_src.replace("diffuse += b.rgb * ", "diffuse += ")
         src = (src.replace("DECLARE", decl).replace("LOOKUP", pick).replace("MORE", more_src)
                .replace("ENV", _ENV_MAIN if env else "").replace("LIT", lit))
-        _EFFECTS[n, more, glow, env, part, emit, edge] = skia.RuntimeEffect.MakeForShader(src)
-    return _EFFECTS[n, more, glow, env, part, emit, edge]
+        _EFFECTS[n, more, glow, env, part, emit, edge, clear] = skia.RuntimeEffect.MakeForShader(src)
+    return _EFFECTS[n, more, glow, env, part, emit, edge, clear]
 
 
 def light(spec) -> dict:
@@ -303,7 +307,8 @@ def _env(e: dict | None, R) -> tuple | None:
 def _shade(nv, M, mats, key, fill, col, amt, more=(), env=None, fog=None, split=False, edge=None):
     """The shader's lighting, per vertex, as 0xAARRGGBB: the raster backend's path. split: instead, half each of
     the two parts a textured model draws (_effect's "light" and "add"; _textured). Vertices past the materials
-    are edge lines (draw), in the colour edge."""
+    are edge lines (draw), in the colour edge. Each vertex takes its material's opacity (1 - its transparency)
+    as its alpha."""
     line = M >= len(mats)
     M = np.minimum(M, len(mats) - 1)
     base = np.array([(*m[0], m[1]) for m in mats])[M]
@@ -352,6 +357,10 @@ def _shade(nv, M, mats, key, fill, col, amt, more=(), env=None, fog=None, split=
         rgb[line] = edge
     if fog is not None:  # (how much of each vertex the fog covers, its colour)
         rgb = np.clip(rgb, 0, 1) * (1 - fog[0][:, None]) + np.asarray(fog[1]) * fog[0][:, None]
+    alpha = np.array([m[8] for m in mats])[M]
+    if (alpha < 1).any():
+        alpha[line] = 1.0
+        return _argb(rgb, alpha)
     return _argb(rgb)
 
 
@@ -378,9 +387,10 @@ def _reflect(n, sp, metal, base, env) -> np.ndarray:
     return (mean + (sky - mean) * sh) * (metal[:, None] * base[:, :3] + (1 - metal[:, None]) * sh * fr) * k
 
 
-def _argb(rgb: np.ndarray) -> np.ndarray:
+def _argb(rgb: np.ndarray, alpha=None) -> np.ndarray:
     c = np.round(np.clip(rgb, 0, 1) * 255).astype(np.uint32)
-    return 0xFF000000 | (c[:, 0] << 16) | (c[:, 1] << 8) | c[:, 2]
+    a = 0xFF000000 if alpha is None else np.round(np.clip(alpha, 0, 1) * 255).astype(np.uint32) << 24
+    return a | (c[:, 0] << 16) | (c[:, 1] << 8) | c[:, 2]
 
 
 def _texture(r, spec, L=None, t: float = 0.0, T: float = 0.0) -> tuple | None:
@@ -419,12 +429,14 @@ def _mipped(r, img: skia.Image) -> skia.Image:
 
 
 def _material(get, emit=None) -> tuple:
-    """A material as the shaders take it; emit is the light a model file's material gives off, not a layer key."""
+    """A material as the shaders take it; emit is the light a model file's material gives off, not a layer key.
+    Last, its opacity: 1 - its transparency."""
     col = get("fill")
     col = C.parse(col) if isinstance(col, str) else col
     shine, metal = float(get("shine", 0.4)), float(get("metal", 0.0))
     return (tuple(col[:3]), float(get("bands", 0)), 0.6 * shine + 0.4 * metal, 6 + 90 * shine * shine, metal,
-            float(get("rim", 0.5)), float(get("glow", 0.0)), tuple(emit or (0.0, 0.0, 0.0)))
+            float(get("rim", 0.5)), float(get("glow", 0.0)), tuple(emit or (0.0, 0.0, 0.0)),
+            1.0 - min(1.0, max(0.0, float(get("transparency", 0.0)))))
 
 
 def _text_path(r, num, raw) -> tuple[skia.Path, float]:
@@ -781,10 +793,11 @@ def _paint(r, L, mats, lt, more, env, part: str | None = None, edge=None) -> ski
     _effect's parts, for a textured model. edge: the colour of its edge lines, if it has any."""
     glow = any(mt[6] for mt in mats)
     emit = part is None and any(any(mt[7]) for mt in mats)
+    clear = part is None and any(mt[8] < 1 for mt in mats)
 
     def make():
         bld = skia.RuntimeShaderBuilder(_effect(len(mats), len(more), glow, env is not None, part, emit,
-                                                edge is not None))
+                                                edge is not None, clear))
         if edge is not None and part is None:
             bld.setUniform("edgeCol", list(edge))
         for i, mt in enumerate(mats):
@@ -794,6 +807,8 @@ def _paint(r, L, mats, lt, more, env, part: str | None = None, edge=None) -> ski
                 bld.setUniform(f"glow{i}", mt[6])
             if emit:
                 bld.setUniform(f"emit{i}", list(mt[7]))
+            if clear:
+                bld.setUniform(f"alpha{i}", mt[8])
         for name, v in zip(("keyDir", "fillDir", "keyCol", "amt"), lt):
             bld.setUniform(name, v)
         for j, (d, col) in enumerate(more):
@@ -993,10 +1008,7 @@ def _lines(r, L, m, T, ids, front, w, cos: float, exact: bool) -> tuple:
     the camera (an exploded face takes its lines with it), and its place in the sort: after every face at either
     end, so a line is hidden only by what is in front of it. exact: by the sort's own key; else by each face's
     nearest corner, for triangles _unswim is to cut."""
-    hit = r._models.get(("edges", L.id))
-    if hit is None or hit[0] is not m.T or hit[1] != len(m.P):  # a size that animates keeps the triangles
-        hit = r._models[("edges", L.id)] = (m.T, len(m.P), mesh.edges(m.P, m.T))
-    weld, face, first, ends, sides, same = hit[2]
+    weld, face, first, ends, sides, same = _topology(r, L, m)
 
     def creases():  # the cosine of the angle between the faces either side of each edge
         a, b, c = (m.P[m.T[first, k]] for k in range(3))
@@ -1021,6 +1033,14 @@ def _lines(r, L, m, T, ids, front, w, cos: float, exact: bool) -> tuple:
     top = np.full(int(weld.max()) + 1, -np.inf)
     np.maximum.at(top, weld[m.T[ids[rows]]].ravel(), np.repeat(-ww.sum(1) if exact else -3 * ww.min(1), 3))
     return va, vb, np.maximum(top[ends[e, 0]], top[ends[e, 1]])
+
+
+def _topology(r, L, m) -> tuple:
+    """mesh.edges of the model's mesh, kept while its triangles are (a size that animates keeps them)."""
+    hit = r._models.get(("edges", L.id))
+    if hit is None or hit[0] is not m.T or hit[1] != len(m.P):
+        hit = r._models[("edges", L.id)] = (m.T, len(m.P), mesh.edges(m.P, m.T))
+    return hit[2]
 
 
 def _quads(a: np.ndarray, b: np.ndarray, half: float, wa, wb) -> tuple[np.ndarray, np.ndarray]:
@@ -1088,7 +1108,21 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
     x, y = X[T], Y[T]  # each triangle's corners
     front = (x[:, 1] - x[:, 0]) * (y[:, 2] - y[:, 0]) - (y[:, 1] - y[:, 0]) * (x[:, 2] - x[:, 0]) > 0
     lines = None if edging is None or not front.any() else _lines(r, L, m, T, ids, front, w, edging[2], U is None)
-    T = T[front]
+    clear = np.array([mt[8] < 1 for mt in mats]) if U is None else np.zeros(len(mats), bool)
+    if clear.any():
+        # A see-through face turned away shows through the near ones: drawn too, lit from inside, unless it is the
+        # back of a face drawn back to back (a plane), which would show twice. A copy of its corners with the
+        # normals turned round, so the near faces sharing them keep theirs.
+        face = _topology(r, L, m)[1]
+        seen = np.zeros(int(face.max()) + 2, bool)
+        seen[face[ids[front]]] = True
+        back = np.flatnonzero(~front & clear[M[T[:, 0]]] & ~seen[face[ids]])
+        idx, n = T[back].ravel(), len(P)
+        N, M = np.r_[N, -N[idx]], np.r_[M, M[idx]]
+        X, Y, w = np.r_[X, X[idx]], np.r_[Y, Y[idx]], np.r_[w, w[idx]]
+        T = np.r_[T[front], (n + np.arange(len(idx), dtype=T.dtype)).reshape(-1, 3)]
+    else:
+        T = T[front]
     if not len(T):
         return None
     if U is not None:
@@ -1102,7 +1136,7 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
     T, key = T[order], key[order]
     r.tris += len(T)
     # From here on, only the vertices of the triangles drawn: about half of them face away.
-    used, T = _compact(T, len(P))
+    used, T = _compact(T, len(X))
     N, M = N[used], M[used]
     U = None if U is None else U[used]
     nv = N @ np.linalg.inv(view[:3, :3])  # normals into camera space

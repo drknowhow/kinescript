@@ -1,0 +1,18 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 6, "bg": {"radial": [0.5, 0.35], "stops": ["#23262f", "#0b0c10"]}},
+  "camera": {"rotateX": 14, "rotateY": [[0, -14], ["end", 14, "inOutSine"]]},
+  "light": {"preset": "studio", "follow": "world"},
+  "env": "studio",
+  "layers": [
+    {"id": "case", "type": "model", "x": "34%", "y": "50%", "rotateY": [[0, 20], ["end", 110]], "rotateX": -12,
+     "edges": {"width": 2, "color": "#f2f0e8"},
+     "parts": [{"shape": "cube", "w": 380, "fill": "#9fd3ff", "transparency": 0.75, "shine": 0.9},
+               {"shape": "sphere", "r": 95, "fill": "#ff633f", "shine": 0.7},
+               {"shape": "torus", "r": 140, "tube": 22, "rotateX": 70, "fill": "#b9f45d", "shine": 0.6}]},
+    {"id": "ghost", "type": "model", "shape": "torus", "r": 190, "tube": 80, "x": "70%", "y": "50%",
+     "fill": "#7b5cff", "shine": 0.8, "rim": 0.9, "rotateX": [[0, 70], ["end", 20, "inOutSine"]],
+     "rotateY": [[0, 0], ["end", 120]], "transparency": [[0, 0], [2, 0.65, "inOutSine"]]},
+    {"id": "caption", "type": "text", "text": "transparency: the far side shows through",
+     "x": "50%", "y": "90%", "size": 32, "weight": 400, "fill": "$muted", "fixed": true, "at": 0.4, "enter": "fade"}
+  ]
+}

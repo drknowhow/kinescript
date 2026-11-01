@@ -111,7 +111,8 @@ def _finish(pieces: list, mats: list) -> Imported:
         t, e = m.get("texture"), m.get("emitTexture")
         k = seen.setdefault((tuple(np.round(m["fill"], 3)), m["shine"], m["metal"],
                              None if t is None else (id(t["image"]), t["tint"], t["tile"]), m.get("emit"),
-                             None if e is None else (id(e["image"]), e["tint"], e["tile"])), len(seen))
+                             None if e is None else (id(e["image"]), e["tint"], e["tile"]),
+                             m.get("transparency")), len(seen))
         looks.setdefault(k, (t, e))
         remap.append(k)
     remap = np.array(remap + [-1], int)
@@ -123,7 +124,8 @@ def _finish(pieces: list, mats: list) -> Imported:
     merged = [dict(fill=tuple(map(float, keys[k][0])), shine=keys[k][1], metal=keys[k][2],
                    **({} if looks[k][0] is None else {"texture": looks[k][0]}),
                    **({} if keys[k][4] is None else {"emit": keys[k][4]}),
-                   **({} if looks[k][1] is None else {"emitTexture": looks[k][1]})) for k in kept]
+                   **({} if looks[k][1] is None else {"emitTexture": looks[k][1]}),
+                   **({} if keys[k][6] is None else {"transparency": keys[k][6]})) for k in kept]
     return Imported(Mesh(P - (lo + hi) / 2, N, T, lut[M].astype(np.int32), U), merged, hi - lo)
 
 
@@ -231,6 +233,9 @@ def _gltf(p: Path) -> tuple[list, list]:
         # Rough metal looks like plain paint here; only smooth metal gets the tinted highlight.
         mats.append({"fill": tuple(np.clip(col, 0, 1) ** (1 / 2.2)), "shine": round(1 - rough, 3),
                      "metal": round(metal * (1 - rough), 3)})
+        alpha = float(np.clip(pbr.get("baseColorFactor", (1.0, 1.0, 1.0, 1.0))[3:4] or [1.0], 0, 1)[0])
+        if mt.get("alphaMode") == "BLEND" and alpha < 1:  # see-through: the base colour's alpha
+            mats[-1]["transparency"] = round(1 - alpha, 3)
         if got is not None:  # the image times the base colour factor, as the file asks
             tint = tuple(float(v) for v in np.round(factor ** (1 / 2.2), 4))
             mats[-1]["texture"] = {"image": got[0], "tint": None if min(tint) >= 1 else tint, "tile": got[2]}
@@ -303,7 +308,8 @@ def _gltf(p: Path) -> tuple[list, list]:
 
 def _mtl(path: Path) -> dict:
     """Materials of an .mtl file: Kd is the colour, Ns (0..1000) the shine, map_Kd a texture drawn as it is, Ke
-    the light it gives off and map_Ke an image of that (times Ke, when the file gives one)."""
+    the light it gives off and map_Ke an image of that (times Ke, when the file gives one), d (1 solid) or Tr
+    (0 solid) how see-through it is."""
     out: dict = {}
     cur = None
     if not path.is_file():
@@ -318,6 +324,10 @@ def _mtl(path: Path) -> dict:
             cur["fill"] = tuple(min(1.0, max(0.0, float(x))) for x in t[1:4])
         elif cur is not None and t[0] == "Ns" and len(t) >= 2:
             cur["shine"] = round(min(1.0, max(0.0, float(t[1]) / 1000)) ** 0.5, 3)
+        elif cur is not None and t[0] in ("d", "Tr") and len(t) >= 2:
+            v = min(1.0, max(0.0, float(t[-1])))
+            if (1 - v if t[0] == "d" else v) > 0:
+                cur["transparency"] = round(1 - v if t[0] == "d" else v, 3)
         elif cur is not None and t[0] == "Ke" and len(t) >= 4:
             cur["_ke"] = tuple(max(0.0, float(x)) for x in t[1:4])
         elif cur is not None and t[0] in ("map_Kd", "map_Ke") and len(t) >= 2:
