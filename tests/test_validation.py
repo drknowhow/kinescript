@@ -322,6 +322,24 @@ def test_dash_corner_and_four_corner_radius_are_checked(layer, words):
     assert words in one_error(scene([layer]))["message"]
 
 
+@pytest.mark.parametrize("rough, words", [
+    ("lots", "rough is"), ({"amount": -1}, "rough amount is -1"), ({"length": 0}, "rough length is 0"),
+    ({"seed": 1.5}, "rough seed is 1.5"), ({"seed": True}, "rough seed is"), ({"boil": -2}, "rough boil is -2"),
+])
+def test_rough_is_checked(rough, words):
+    assert words in one_error(scene([rect(rough=rough, fill="#fff")]), "r")["message"]
+
+
+def test_rough_takes_true_or_an_amount_and_warns_when_it_does_nothing():
+    _, s = load(scene([rect(rough=True), dict(LINE, rough=2.5), dict(LINE, id="m", rough=False)]))
+    assert s.by_id["r"].rough == (3.0, 12.0, 0, 0.0) and s.by_id["l"].rough == (2.5, 12.0, 0, 0.0)
+    assert s.by_id["m"].rough is None and "rough" not in s.by_id["m"].raw
+    w = warnings(scene([rect(rough={"amount": 0, "seed": 3})]), "ignored-key")
+    assert w and "draws the shape smooth" in w[0]["message"], w
+    issues, s = load(scene([rect(rough={"jitter": 2, "rate": 6})]))
+    assert s.by_id["r"].rough == (2.0, 12.0, 0, 6.0) and {i["code"] for i in issues} == {"renamed-key"}, issues
+
+
 def test_dash_and_corner_warn_where_they_do_nothing_and_their_svg_names_are_read():
     for layer, words in ((rect(dash=[8, 4]), "has none"), (dict(LINE, dashOffset=4), "no dash"),
                          (dict(LINE, corner=12, smooth=True), "smooth leaves none")):

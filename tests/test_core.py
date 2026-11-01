@@ -249,6 +249,28 @@ def test_corner_rounds_a_paths_corners():
     assert sharp[31, 61, 0] > 200 and round_[31, 61, 0] < 20 and round_[90, 61, 0] > 200
 
 
+def test_rough_wobbles_a_shape_the_same_for_the_same_seed_and_boils_on_time():
+    def frames(rough, *ns):
+        layer = {"id": "r", "type": "rect", "x": 160, "y": 90, "w": 200, "h": 100, "fill": "#ffffff", "rough": rough}
+        r = Renderer(k.Scene(scene([layer], bg="#000000", duration=1)), backend="cpu")
+        return [r.frame(n).astype(int)[..., 0] for n in ns]
+    smooth = _frame(scene([{"id": "r", "type": "rect", "x": 160, "y": 90, "w": 200, "h": 100, "fill": "#ffffff"}],
+                          bg="#000000"), 0).astype(int)[..., 0]
+    one, again, two = frames({"amount": 4, "seed": 1}, 0, 20)[0], *frames({"amount": 4, "seed": 1}, 0),         frames({"amount": 4, "seed": 2}, 0)[0]
+    assert np.array_equal(one, again) and not np.array_equal(one, two) and not np.array_equal(one, smooth)
+    assert (one[46:134, 66:254] > 200).all() and (one[:34] < 20).all() and (one[:, :54] < 20).all()  # within 4 px
+    still, a, b, c = frames({"amount": 4, "seed": 1, "boil": 4}, 0, 0, 7, 8)  # boil 4 at 30 fps: anew at frame 8
+    assert np.array_equal(a, b) and not np.array_equal(b, c)
+    assert np.array_equal(frames({"amount": 4, "seed": 1}, 0, 25)[0], frames({"amount": 4, "seed": 1}, 25)[0])
+
+
+def test_a_rough_line_stays_open():
+    line = {"id": "l", "type": "line", "points": [[20, 40], [160, 150], [300, 40]], "strokeWidth": 4,
+            "stroke": "#ffffff", "rough": {"amount": 2, "seed": 4}}
+    f = _frame(scene([line], bg="#000000"), 0)
+    assert f[40:46, 100:220, 0].max() < 20 and f[140:156, 150:170, 0].max() > 200  # no stroke back to its start
+
+
 @pytest.mark.parametrize("layer", [
     {"id": "r", "type": "rect", "x": 160, "y": 90, "w": 200, "h": 100, "fill": "#ffffff", "radius": [40, 0, 40, 0]},
     {"id": "g", "type": "group", "x": 160, "y": 90, "w": 200, "h": 100, "anchor": "center", "fill": "#ffffff",
@@ -289,6 +311,10 @@ def test_frame_is_pure_function_of_index():
         {"id": "t", "type": "text", "text": "Hi **there**", "x": "50%", "y": "50%", "size": 40, "split": "chars",
          "enter": {"name": "rise+blur", "stagger": 0.05}},
         {"id": "c", "type": "circle", "r": 10, "x": "=160+cos(t*3)*100", "y": 40, "fill": "#ff5a36"},
+        {"id": "w", "type": "text", "text": "one two three four", "y": 150, "x": "50%", "size": 24, "split": "words",
+         "enter": {"name": "rise", "stagger": 0.1, "order": "random", "seed": 3}},
+        {"id": "r", "type": "rect", "x": 60, "y": 120, "w": 60, "h": 40, "fill": "#4a7dff",
+         "rough": {"amount": 3, "seed": 2, "boil": 8}},
     ], duration=2)
     r = Renderer(k.Scene(spec), backend="cpu")
     sequential = [r.frame(n).copy() for n in range(0, 30)]

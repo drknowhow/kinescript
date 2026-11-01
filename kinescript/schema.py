@@ -133,7 +133,10 @@ GROUND_ALIAS = {"alpha": "opacity", "strength": "opacity", "softness": "blur", "
 COMMON = {"id", "type", "at", "dur", "until", "x", "y", "anchor", "opacity", "scale", "scaleX", "scaleY", "rotate",
           "blur", "blend", "shadow", "fx", "enter", "exit", "hidden", "allowOffscreen", "z", "rotateX", "rotateY",
           "backface", "fixed", "sound", "along"}
-SHAPE = {"fill", "stroke", "strokeWidth", "draw", "drawStart", "cap", "join", "dash", "dashOffset"}
+SHAPE = {"fill", "stroke", "strokeWidth", "draw", "drawStart", "cap", "join", "dash", "dashOffset", "rough"}
+ROUGH = {"amount", "length", "seed", "boil"}
+ROUGH_ALIAS = {"roughness": "amount", "jitter": "amount", "wobble": "amount", "segment": "length",
+               "size": "length", "rate": "boil", "fps": "boil"}
 TEXT = {"text", "size", "weight", "font", "italic", "fill", "emph", "align", "maxWidth", "lineHeight",
         "letterSpacing", "stroke", "strokeWidth", "box", "case", "textCase", "caret", "split",
         "unitX", "unitY", "unitRotate", "unitScale", "unitOpacity"}
@@ -250,7 +253,7 @@ REQUIRED = {"text": ("text",), "image": ("src",), "video": ("src",), "path": ("d
             "captions": ("cues", "src", "voice"), "shader": ("preset", "sksl"), "model": ("shape", "parts", "src")}
 # Keys whose value is an object of their own: never a tween, even with a "from" key (a light's direction).
 OBJECTS = {"light", "lights", "env", "ground", "shadow", "shadows", "box", "fx", "uniforms", "sound", "enter", "exit",
-           "parts", "transition", "texture", "edges", "animation", "repeat", "along"}
+           "parts", "transition", "texture", "edges", "animation", "repeat", "along", "rough"}
 # Props that cannot be below 0, and the least each may be.
 AT_LEAST = {"radius": 0, "r": 0, "sides": 3, "blur": 0, "strokeWidth": 0, "size": 0, "corner": 0}
 COLOUR_FIX = f"write {C.FORMATS}"
@@ -871,6 +874,7 @@ def _layer(raw, rep: Report, path: str, comps: dict):
     _values(raw, t, rep, lid)
     _structure(raw, t, rep, lid)
     _stroke(raw, t, rep, lid)
+    _rough(raw, rep, lid)
     _along(raw, rep, lid)
     _effects(raw, rep, lid)
     _layer_sound(raw, rep, lid)
@@ -943,6 +947,34 @@ def _stroke(raw: dict, t: str, rep: Report, lid):
     if "corner" in raw and raw.get("smooth") is True:
         rep.add("warning", "ignored-key", lid, "corner rounds the corners between straight pieces, and smooth "
                 "leaves none", "drop smooth to keep the points' straight lines and round their corners")
+
+
+def _rough(raw: dict, rep: Report, lid):
+    """rough: true, an amount in px, or {"amount", "length", "seed", "boil"}, made into the object."""
+    v = raw.get("rough")
+    if v is None or v is False:
+        raw.pop("rough", None)
+        return
+    example = '"rough": {"amount": 3, "seed": 1, "boil": 8}'
+    if v is True:
+        raw["rough"] = v = {}
+    elif _finite(v):
+        raw["rough"] = v = {"amount": v}
+    if not isinstance(v, dict):
+        rep.add("error", "bad-value", lid, f"rough is {_show(v)}; it is true, an amount in px, or an object", example)
+        return
+    _keys(v, ROUGH, ROUGH_ALIAS, rep, lid, "rough: ")
+    for k, least, what in (("amount", 0, "how far in px the line strays, 0 or more"),
+                           ("length", 1, "the px between the points that stray, 1 or more"),
+                           ("boil", 0, "how many times a second it is drawn anew, 0 or more")):
+        if k in v and not (_finite(v[k]) and v[k] >= least):
+            rep.add("error", "bad-value", lid, f"rough {k} is {_show(v[k])}; it is {what}", example)
+    s = v.get("seed")
+    if s is not None and not (isinstance(s, int) and not isinstance(s, bool) and 0 <= s < 2 ** 31):
+        rep.add("error", "bad-value", lid, f"rough seed is {_show(s)}; it is a whole number, 0 or more, that picks the "
+                "wobble", example)
+    if v.get("amount") == 0:
+        rep.add("warning", "ignored-key", lid, "rough with amount 0 draws the shape smooth", example)
 
 
 def _clock(raw: dict, rep: Report, lid):

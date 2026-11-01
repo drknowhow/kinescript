@@ -23,7 +23,7 @@ STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "children", "laye
           "allowOffscreen", "style", "audio", "shadow", "box", "fx", "fill", "stroke", "emph", "active",
           "sksl", "preset", "uniforms", "caret", "case", "italic", "smooth", "closed", "focus", "use",
           "backface", "fixed", "sort", "shape", "detail", "parts", "light", "span", "sound", "voice",
-          "fadeIn", "fadeOut", "sequence", "animation", "repeat", "profile", "along", "dash"}
+          "fadeIn", "fadeOut", "sequence", "animation", "repeat", "profile", "along", "dash", "rough"}
 PART_STRUCT = {"shape", "texture", "text", "font", "d", "italic", "profile"}  # a part's keys that never animate
 # Property defaults by name; everything not listed defaults to None.
 DEFAULTS = {"x": 0.0, "y": 0.0, "opacity": 1.0, "scale": 1.0, "scaleX": 1.0, "scaleY": 1.0, "rotate": 0.0,
@@ -69,7 +69,8 @@ def _where(owner, message: str) -> str:
 
 class Layer:
     __slots__ = ("id", "type", "raw", "t_in", "t_out", "props", "enter", "exit", "children", "parent",
-                 "index", "src", "video", "ahead", "ctx", "parts", "copies", "xf", "along", "turn", "clock")
+                 "index", "src", "video", "ahead", "ctx", "parts", "copies", "xf", "along", "turn", "clock",
+                 "rough")
 
     def __init__(self, lid: str, ltype: str, raw: dict, parent: "Layer | None", index: int):
         self.id, self.type, self.raw, self.parent, self.index = lid, ltype, raw, parent, index
@@ -89,6 +90,7 @@ class Layer:
         # how far along is props["along"]
         self.turn: float | None = None  # seconds after its group starts that the group's staggered enter reaches it
         self.clock: tuple[float, float] | None = None  # a group's speed and loop for its children (timeRemap in props)
+        self.rough: tuple[float, float, int, float] | None = None  # rough's amount, length, seed and boil
 
     @property
     def dur(self) -> float:
@@ -760,6 +762,10 @@ class Scene:
                                    for p in raw.get("parts") or [] if isinstance(p, dict)]
                     if isinstance(raw.get("repeat"), dict):
                         layer.copies = Copies(raw["repeat"], pctx)
+                rough = raw.get("rough")
+                if isinstance(rough, dict):  # amount, length, seed, boil
+                    layer.rough = (float(rough.get("amount", 3)), float(rough.get("length", 12)),
+                                   int(rough.get("seed", 0)), float(rough.get("boil", 0)))
                 along = raw.get("along")
                 if isinstance(along, dict) and isinstance(along.get("d"), str):
                     layer.along = (along["d"], along.get("orient") is True)
