@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `kine look --wire` draws every model's drawn triangles over the frames, after any cutting for textures, and
+  `kine look --depth` dims the frames and shows each stage's depth image on them, nearer brighter over the range
+  that frame holds; the JSON's `notes` say when no stage drew. The MCP `kine_look` tool takes `wire` and `depth`.
 - Models take `transparency` (0 to 1, animating), on the layer or a part: the surface is see-through, its far
   side and whatever is behind showing. Its faces turned away from the camera are drawn too, lit from inside, and
   the sorted triangles blend far to near; a plane drawn back to back shows once. glTF materials with

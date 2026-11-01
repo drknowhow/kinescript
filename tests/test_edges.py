@@ -122,3 +122,27 @@ def test_edges_are_checked():
     assert ("warning", "unknown-key") in codes({"widht": 2}) or ("error", "unknown-key") in codes({"widht": 2})
     issues = check(scene([dict({k: v for k, v in cube().items()}, outline={"colour": "#fff"})]))["issues"]
     assert {i["code"] for i in issues} == {"renamed-key"}
+
+
+@pytest.mark.parametrize("backend", ["cpu", "gpu"])
+def test_look_draws_the_triangles_and_a_stages_depth(tmp_path, backend):
+    from kinescript.verify import contact_sheet
+    kids = [{"id": "ball", "type": "model", "shape": "sphere", "r": 40, "z": 60, "light": "flat"},
+            {"id": "card", "type": "rect", "w": 200, "h": 120, "fill": "#0000ff"}]
+    spec = scene([{"id": "g", "type": "group", "x": 160, "y": 90, "sort": "pixel", "children": kids}])
+    try:
+        r = Renderer(k.Scene(spec), backend=backend)
+    except RuntimeError:
+        pytest.skip("no GPU")
+    r.frame(0)
+    assert r.wires == [] and r.depths == []  # only when asked
+    r.wire = r.depth_view = True
+    r.frame(0)
+    (segs,), (d,) = r.wires, r.depths
+    assert segs.shape[1:] == (2, 2) and len(segs) > 100
+    assert np.abs(segs.reshape(-1, 2) - (160, 90)).max() < 60  # round the ball
+    assert d.shape == (180, 320) and d[90, 160] > d[90, 240] > 0 and d[5, 5] == 0  # the ball nearer than the card
+    out = contact_sheet(spec, str(tmp_path / "a.png"), count=1, width=160, wire=True, depth=True)
+    assert "notes" not in out
+    flat = contact_sheet(scene([cube()]), str(tmp_path / "b.png"), count=1, width=160, depth=True)
+    assert "no stage" in flat["notes"][0]

@@ -41,10 +41,12 @@ def _times(scene: Scene, count: int, times=None) -> list[float]:
 
 
 def contact_sheet(src, out: str, count: int = 12, cols: int | None = None, width: int = 480,
-                  times=None, boxes: bool = False, audio: bool = False) -> dict:
+                  times=None, boxes: bool = False, audio: bool = False, wire: bool = False,
+                  depth: bool = False) -> dict:
     """One PNG of `count` evenly spaced frames, each labelled with its time and frame number.
     boxes=True outlines every visible layer with its id. audio=True adds the sound under the frames, one lane per
-    role and one for the mix, and returns its measurements."""
+    role and one for the mix, and returns its measurements. wire=True draws every model's drawn triangles over
+    it; depth=True dims the frame and shows each stage's depth image on it, nearer brighter."""
     from .output import IMAGE, at_note, out_path, save_image
     scene = load(src)
     try:
@@ -62,6 +64,8 @@ def contact_sheet(src, out: str, count: int = 12, cols: int | None = None, width
     rows = math.ceil(len(ts) / cols)
     scale = width / scene.w
     r = Renderer(scene, track=boxes, scale=scale)
+    r.wire, r.depth_view = wire, depth
+    staged = 0  # frames in which a stage drew its depth
     tw, th = r.w, r.h
     gap, label_h = 8, 26
     rep = listen.report(scene) if audio else None
@@ -79,6 +83,11 @@ def contact_sheet(src, out: str, count: int = 12, cols: int | None = None, width
         x = gap + (k % cols) * (tw + gap)
         y = gap + (k // cols) * (th + label_h + gap)
         c.drawImage(img, x, y + label_h)
+        if depth:
+            staged += bool(r.depths)
+            _draw_depth(c, r.depths, x, y + label_h, tw, th)
+        if wire and r.wires:
+            _draw_wire(c, r.wires, x, y + label_h, tw, th)
         c.drawString(f"{T:6.2f}s  f{n}", x + 2, y + 18, font, skia.Paint(AntiAlias=True, Color=_argb("#f2f0e8")))
         if boxes:
             _draw_boxes(c, scene, r.boxes, x, y + label_h, tw, th, small)
@@ -89,9 +98,41 @@ def contact_sheet(src, out: str, count: int = 12, cols: int | None = None, width
     info = {"out": out, "times": [round(t, 3) for t in ts], "grid": [cols, rows], "backend": r.backend}
     if audio:
         info["audio"] = listen.summary(rep)
+    if depth and not staged:
+        notes.append('no stage drew in these frames: --depth shows the depth of groups with "sort": "pixel"')
     if notes:
         info["notes"] = notes
     return info
+
+
+def _draw_wire(c, wires: list, ox: float, oy: float, tw: float, th: float):
+    """Every model's drawn triangle edges, as hairlines over its thumbnail."""
+    from .render3d import _points
+    paint = skia.Paint(AntiAlias=True, Style=skia.Paint.kStroke_Style, StrokeWidth=0, Color=_argb("#b9f45dc0"))
+    c.save()
+    c.clipRect(skia.Rect.MakeXYWH(ox, oy, tw, th))
+    c.translate(ox, oy)
+    for segs in wires:
+        if len(segs):
+            c.drawPoints(skia.Canvas.kLines_PointMode, _points(segs.reshape(-1, 2).astype(float)), paint)
+    c.restore()
+
+
+def _draw_depth(c, depths: list, ox: float, oy: float, tw: float, th: float):
+    """The thumbnail dimmed, and the stages' depth over it: nearer is brighter, over the range this frame holds."""
+    c.drawRect(skia.Rect.MakeXYWH(ox, oy, tw, th), skia.Paint(Color=_argb("#0a0c10c0")))
+    if not depths:
+        return
+    d = np.max(np.stack([a[:th, :tw] for a in depths]), axis=0)
+    seen = d > 0
+    if not seen.any():
+        return
+    lo, hi = float(d[seen].min()), float(d[seen].max())
+    v = np.where(seen, 40 + 215 * (d - lo) / max(hi - lo, 1e-12), 0).astype(np.uint8)
+    px = np.zeros(d.shape + (4,), np.uint8)
+    px[..., 0] = px[..., 1] = px[..., 2] = v
+    px[..., 3] = seen * 255
+    c.drawImage(skia.Image.fromarray(px, skia.kRGBA_8888_ColorType), ox, oy)
 
 
 def _behind(boxes: dict, lid: str, a: list, w: int, h: int) -> str | None:

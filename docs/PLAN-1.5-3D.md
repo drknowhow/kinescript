@@ -198,14 +198,13 @@ where a face toward the camera meets one turned away or none, gets a quad `width
 vertices join the sorted triangles after every face at either end (by each face's nearest corner on a textured
 model, whose triangles are cut later), in an extra material slot drawn in the line's colour, unlit. A line taken
 from a face toward the camera moves with it when the model explodes. `"edges": true` uses 2 px, theme `ink` and
-30 degrees; `"all"` is angle 0. In a stage the quads write their depth too. See-through models are built on
-branch `opacity`, not merged, as a material key `transparency` (layer, part, and glTF `alphaMode` `BLEND` or
-`.mtl` `d` and `Tr`) instead of the layer's `opacity`: `opacity` and the enter and exit fades fade every layer as
-a flat image, and keyframed fades of models would have started showing their far side. A see-through face turned
-away is drawn too, lit from inside, unless it is the back of a face drawn back to back; the colour is
-premultiplied by the opacity in the shader (GPU) or the vertex colour's alpha (CPU), and the sorted triangles
-blend far to near. A textured model draws solid (`ignored-key`): its passes are combined per pixel, nearest face
-only. Emission:
+30 degrees; `"all"` is angle 0. In a stage the quads write their depth too. See-through models merged (#68) as a
+material key `transparency` (layer, part, and glTF `alphaMode` `BLEND` or `.mtl` `d` and `Tr`) instead of the
+layer's `opacity`: `opacity` and the enter and exit fades fade every layer as a flat image, and keyframed fades of
+models would have started showing their far side. A see-through face turned away is drawn too, lit from inside,
+unless it is the back of a face drawn back to back; the colour is premultiplied by the opacity in the shader (GPU)
+or the vertex colour's alpha (CPU), and the sorted triangles blend far to near. A textured model draws solid
+(`ignored-key`): its passes are combined per pixel, nearest face only. Emission:
 glTF `emissiveFactor` (with `KHR_materials_emissive_strength`) and `emissiveTexture`, and `.mtl` `Ke` and
 `map_Ke` are an emission colour per material, added in the shader (GPU) or per vertex (CPU) of an untextured
 model, and drawn as one more pass of a textured one. It is not a layer key: `glow` stays the way to light a
@@ -254,6 +253,8 @@ nine rounds: a floor reaching to just in front of the camera took eight.
 ### Phase 7: tooling and release
 
 - `kine look --depth` shows a stage's depth image; `kine look --wire` draws triangle edges over the frame.
+  Built on branch `look-depth-wire`, not merged: the renderer keeps each model's drawn triangle edges and each
+  stage's merged depth (the nearest of a frame pixel's samples) while `look` asks for them.
 - Stress scenes `stage-16`, `textured-100k`, `skinned`, `repeat-1000` and `dof-stage`, each with frame time and
   peak memory in the 1.5 report.
 - Examples: `stage.json`, `product.json` (a textured glTF turntable under world lights with `env`, depth of field

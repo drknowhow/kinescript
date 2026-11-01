@@ -24,7 +24,8 @@ TOOLS = [
      "overlapping, an effect late on its cue, silence, loudness and peaks). Returns issues with time ranges and fixes.",
      "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"}}, "required": ["scene"]}},
     {"name": "kine_look", "description": "Contact sheet: `count` frames in one labelled image. boxes=true outlines each "
-     "layer with its id. audio=true draws the sound under the frames on the same time axis (a lane per role and the "
+     "layer with its id. wire=true draws every model's drawn triangles; depth=true shows each stage's depth image, "
+     "nearer brighter. audio=true draws the sound under the frames on the same time axis (a lane per role and the "
      "mix, with levels, the duck and issues in red) and returns its measurements. times are read as kine_still reads "
      "at; one outside the scene draws its first or last frame, with a note. Use it to review motion, layout "
      "and sound without watching video.",
@@ -32,6 +33,8 @@ TOOLS = [
                                                       "count": {"type": "integer", "default": 12},
                                                       "times": {"type": "array", "items": {"type": "number"}},
                                                       "boxes": {"type": "boolean", "default": False},
+                                                      "wire": {"type": "boolean", "default": False},
+                                                      "depth": {"type": "boolean", "default": False},
                                                       "audio": {"type": "boolean", "default": False},
                                                       "width": {"type": "integer", "default": 400}}, "required": ["scene"]}},
     {"name": "kine_still", "description": "One full-size frame at time `at` (seconds), returned as an image, then "
@@ -119,7 +122,8 @@ def call(name: str, args: dict) -> list[dict]:
         from .verify import contact_sheet
         out = str(Path(tempfile.gettempdir()) / f"kine_look_{os.getpid()}.png")
         info = contact_sheet(_scene(args), out, int(args.get("count", 12)), None, int(args.get("width", 400)),
-                             args.get("times"), bool(args.get("boxes")), bool(args.get("audio")))
+                             args.get("times"), bool(args.get("boxes")), bool(args.get("audio")),
+                             wire=bool(args.get("wire")), depth=bool(args.get("depth")))
         del info["out"]  # a temporary file, gone once read
         return [_image(out), _text(info)]
     if name == "kine_still":

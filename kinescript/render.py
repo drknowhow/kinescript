@@ -592,6 +592,11 @@ class Renderer:
         self._on: float | None = None  # the frame time the last draw showed, to tell a render drawing forward
         self._clips: dict = {}  # video textures: (model id, src, timing) -> (model layer, decoder)
         self._insets: set[str] = set()  # the groups being drawn as textures (_surface)
+        # kine look --wire and --depth: keep each model's drawn triangle edges (frame px, (n, 2, 2)) and each
+        # stage's depth image (frame px, 1/w over stage.QMAX, 0 where nothing is) as the frame draws.
+        self.wire = self.depth_view = False
+        self.wires: list[np.ndarray] = []
+        self.depths: list[np.ndarray] = []
 
     # ---- public -------------------------------------------------------------------------
     def frame(self, n: int) -> np.ndarray:
@@ -816,6 +821,7 @@ class Renderer:
         self.unfocused = self.slow_dof = False
         self._dof, self._span = None, [math.inf, 0.0]
         self.tris = 0
+        self.wires, self.depths = [], []
         self.stop_at, self.stop_after, self._stopped = stop_at, stop_after, False
         self._frame_t = frame_t
         c = self.surface.getCanvas()

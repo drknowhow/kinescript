@@ -162,6 +162,7 @@ An agent cannot watch a video, so Kinescript gives it things it can read:
 | `kine docs` | the full scene reference, short enough to keep in context |
 | `kine check scene.json` | every problem at once as JSON, each with its layer, time range and a fix |
 | `kine look scene.json --boxes` | one PNG of many labelled frames, with every layer outlined and the top-level ones named |
+| `kine look scene.json --wire --depth` | the same frames with every model's triangles drawn over them, and each stage's depth image, nearer brighter |
 | `kine look scene.json --audio` | the same frames with the sound under them: a lane per role and the mix, the duck and issues, plus each sound's measured loudness |
 | `kine probe scene.json --at 3.2` | resolved in/out of every layer and each visible layer's screen box |
 | `kine still` / `kine render` | a frame, a range (`--from/--to`), a draft (`-q draft --scale 0.5`) or the final file |

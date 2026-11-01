@@ -569,7 +569,9 @@ COMMANDS
                                   times, read as still reads them (use it to see a transition;
                                   a time outside the scene draws its first or last frame and
                                   the JSON's "notes" say so), --width 480 (16 to 4096), --cols 4,
-                                  -o (.png or .jpg).
+                                  -o (.png or .jpg). --wire draws every model's triangles over the
+                                  frames; --depth dims them and shows each stage's depth image,
+                                  nearer brighter.
                                   --audio adds the sound under the frames on the same time axis:
                                   a lane per role and one for the mix, the duck, and issues in red;
                                   its JSON gives each sound's loudness and gain and the mix's.
