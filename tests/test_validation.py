@@ -357,6 +357,12 @@ def test_rough_is_checked(rough, words):
     assert words in one_error(scene([rect(rough=rough, fill="#fff")]), "r")["message"]
 
 
+def test_blend_modes_take_css_names():
+    issues, s = load(scene([rect(blend="hard-light"), dict(RECT, id="q", blend="color-dodge"),
+                            dict(RECT, id="u", blend="Luminosity")]))
+    assert [s.by_id[i].raw["blend"] for i in "rqu"] == ["hardLight", "colorDodge", "luminosity"], issues
+
+
 LENS = {"id": "lens", "type": "circle", "r": 20}
 
 

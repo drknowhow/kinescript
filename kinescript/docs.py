@@ -113,7 +113,8 @@ KEYS EVERY LAYER HAS
   z, rotateX, rotateY, backface, fixed   depth: see DEPTH AND CAMERA
   blur          px
   blend         normal | multiply | screen | overlay | add | lighten | darken | softLight |
-                difference | color
+                hardLight | colorDodge | colorBurn | difference | exclusion | hue | saturation |
+                color | luminosity (the last four take that of the layer and the rest from below)
   mask          the id of a layer beside it, in the same group, that it shows through: "mask": "lens",
                 or {"layer": "lens", "mode": "alpha", "feather": 12}. mode alpha (default: shown where
                 the mask is opaque), luma (where it is bright), alphaInvert or lumaInvert (where it is
