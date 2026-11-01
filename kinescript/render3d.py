@@ -35,6 +35,7 @@ DOF_MAX = 48.0  # the most a layer or a stage pixel blurs out of focus (sigma, p
 SWIM = 1.0  # px a textured triangle's image may lie from where perspective puts it before the triangle is cut
 TILE = {"repeat": skia.TileMode.kRepeat, "mirror": skia.TileMode.kMirror, "clamp": skia.TileMode.kClamp}
 _DOUBLE = skia.ColorFilters.Matrix([2, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 1, 0])
+_HALF = skia.ColorFilters.Matrix([0.5, 0, 0, 0, 0, 0, 0.5, 0, 0, 0, 0, 0, 0.5, 0, 0, 0, 0, 0, 1, 0])
 _SKSL = """
 DECLARE
 uniform half3 keyDir;
@@ -102,6 +103,9 @@ half4 main(float2 p) {
     return half4(saturate(t.rgb * light.eval(p).rgb * 2.0 + add.eval(p).rgb) * (1.0 - f.a) + f.rgb, t.a);
 }
 """
+# The same with the light a model file's materials give off themselves (emission), added before the fog.
+_COMBINE_EMIT = _COMBINE.replace("uniform shader fog;", "uniform shader fog;\nuniform shader emit;").replace(
+    "+ add.eval(p).rgb)", "+ add.eval(p).rgb + emit.eval(p).rgb)")
 # A material's picture: its texture, times its tint, over its fill.
 _LOOK = """
 uniform shader image;
@@ -115,23 +119,27 @@ half4 main(float2 p) {
 _EFFECTS: dict[tuple, skia.RuntimeEffect] = {}
 
 
-def _effect(n: int, more: int = 0, glow: bool = False, env: bool = False, part: str | None = None
-            ) -> skia.RuntimeEffect:
+def _effect(n: int, more: int = 0, glow: bool = False, env: bool = False, part: str | None = None,
+            emit: bool = False) -> skia.RuntimeEffect:
     """The shading effect for n materials, one pair of uniforms each (base colour + bands, then
     specular amount, exponent, metal and rim), a glow each if any glows, `more` lights, and an
     environment to reflect. Without these the source is what it was before they existed, so those
     models draw the same bytes. part "light" is half the light that falls on a white surface (or the glow, if
-    more), and "add" what is added over the surface's colour, for a textured model (_COMBINE)."""
-    if (n, more, glow, env, part) not in _EFFECTS:
+    more), and "add" what is added over the surface's colour, for a textured model (_COMBINE). emit: an emission
+    colour each, added to the light of an untextured model (a textured one draws it as a pass of its own)."""
+    if (n, more, glow, env, part, emit) not in _EFFECTS:
         decl = "\n".join(f"uniform half4 base{i};\nuniform half4 surf{i};" + (f"\nuniform half glow{i};" if glow else "")
-                         for i in range(n))
+                         + (f"\nuniform half3 emit{i};" if emit else "") for i in range(n))
         decl += "".join(f"\nuniform half3 dir{j};\nuniform half3 col{j};" for j in range(more)) + (_ENV if env else "")
-        g = "; g = glow{}" if glow else ""
+        g = ("; g = glow{0}" if glow else "") + ("; e = emit{0}" if emit else "")
         pick = " ".join(f"if (m == {i}.0) {{ b = base{i}; p = surf{i}{g.format(i)}; }}" for i in range(1, n))
+        if emit:
+            pick = "half3 e = emit0;\n    " + pick
         if glow:
             pick = "half g = glow0;\n    " + pick
         lit = "diffuse + spec + rim * keyCol" + (" + refl" if env else "")
         lit = f"max({lit}, b.rgb * g)" if glow else lit
+        lit = f"{lit} + e" if emit and part is None else lit
         src = _SKSL
         if part == "light":
             src = src.replace("half3 diffuse = b.rgb * ", "half3 diffuse = ")
@@ -143,8 +151,8 @@ def _effect(n: int, more: int = 0, glow: bool = False, env: bool = False, part: 
             more_src = more_src.replace("diffuse += b.rgb * ", "diffuse += ")
         src = (src.replace("DECLARE", decl).replace("LOOKUP", pick).replace("MORE", more_src)
                .replace("ENV", _ENV_MAIN if env else "").replace("LIT", lit))
-        _EFFECTS[n, more, glow, env, part] = skia.RuntimeEffect.MakeForShader(src)
-    return _EFFECTS[n, more, glow, env, part]
+        _EFFECTS[n, more, glow, env, part, emit] = skia.RuntimeEffect.MakeForShader(src)
+    return _EFFECTS[n, more, glow, env, part, emit]
 
 
 def light(spec) -> dict:
@@ -328,6 +336,9 @@ def _shade(nv, M, mats, key, fill, col, amt, more=(), env=None, fog=None, split=
         rgb += _reflect(n, sp, metal, base, env)
     if glow.any():  # at least its fill times glow, however it is lit
         rgb = np.maximum(rgb, base[:, :3] * glow[:, None])
+    emit = np.array([m[7] for m in mats])[M]
+    if emit.any():  # the light it gives off itself
+        rgb += emit
     if fog is not None:  # (how much of each vertex the fog covers, its colour)
         rgb = np.clip(rgb, 0, 1) * (1 - fog[0][:, None]) + np.asarray(fog[1]) * fog[0][:, None]
     return _argb(rgb)
@@ -396,12 +407,13 @@ def _mipped(r, img: skia.Image) -> skia.Image:
     return img.makeTextureImage(r.gr, skia.GrMipmapped.kYes) if r.gr is not None else img.withDefaultMipmaps()
 
 
-def _material(get) -> tuple:
+def _material(get, emit=None) -> tuple:
+    """A material as the shaders take it; emit is the light a model file's material gives off, not a layer key."""
     col = get("fill")
     col = C.parse(col) if isinstance(col, str) else col
     shine, metal = float(get("shine", 0.4)), float(get("metal", 0.0))
     return (tuple(col[:3]), float(get("bands", 0)), 0.6 * shine + 0.4 * metal, 6 + 90 * shine * shine, metal,
-            float(get("rim", 0.5)), float(get("glow", 0.0)))
+            float(get("rim", 0.5)), float(get("glow", 0.0)), tuple(emit or (0.0, 0.0, 0.0)))
 
 
 def _text_path(r, num, raw) -> tuple[skia.Path, float]:
@@ -557,9 +569,9 @@ def _fit(g, size) -> float:
     return min(s) if s else 300.0 / max(float(size.max()), 1e-9)
 
 
-def model(r, L, g, t: float = 0.0, T: float = 0.0) -> tuple[mesh.Mesh, list[tuple], list]:
+def model(r, L, g, t: float = 0.0, T: float = 0.0) -> tuple[mesh.Mesh, list[tuple], list, list]:
     """The model's mesh in its own space at its time t (scene time T), its materials, and each material's texture
-    or None."""
+    and emission texture (a model file's) or None. "texture": false on the layer turns both off."""
     parts, keys = _parts(r, L)
     shape = L.raw.get("shape")
     meshes = [] if parts is None else [parts]
@@ -579,8 +591,9 @@ def model(r, L, g, t: float = 0.0, T: float = 0.0) -> tuple[mesh.Mesh, list[tupl
         m = hit[1]
     accent = r.s.theme.get("accent", "#ff633f")
     root = lambda k, d=None: g(k, accent if k == "fill" and d is None else d)  # noqa: E731
-    mats = [_material(lambda k, d=None, o=o: o.get(k, root(k, d))) for o in keys]
-    return m, mats, [_texture(r, o.get("texture", L.raw.get("texture")), L, t, T) for o in keys]
+    mats = [_material(lambda k, d=None, o=o: o.get(k, root(k, d)), o.get("emit")) for o in keys]
+    glows = [_texture(r, o.get("emitTexture")) if L.raw.get("texture") is not False else None for o in keys]
+    return m, mats, [_texture(r, o.get("texture", L.raw.get("texture")), L, t, T) for o in keys], glows
 
 
 def _inner(p: np.ndarray) -> np.ndarray:
@@ -756,14 +769,17 @@ def _paint(r, L, mats, lt, more, env, part: str | None = None) -> skia.Paint:
     """The GPU's shading paint for these materials, lights and environment, kept while they hold. part: one of
     _effect's parts, for a textured model."""
     glow = any(mt[6] for mt in mats)
+    emit = part is None and any(any(mt[7]) for mt in mats)
 
     def make():
-        bld = skia.RuntimeShaderBuilder(_effect(len(mats), len(more), glow, env is not None, part))
+        bld = skia.RuntimeShaderBuilder(_effect(len(mats), len(more), glow, env is not None, part, emit))
         for i, mt in enumerate(mats):
             bld.setUniform(f"base{i}", [*mt[0], mt[1]])
             bld.setUniform(f"surf{i}", list(mt[2:6]))
             if glow:
                 bld.setUniform(f"glow{i}", mt[6])
+            if emit:
+                bld.setUniform(f"emit{i}", list(mt[7]))
         for name, v in zip(("keyDir", "fillDir", "keyCol", "amt"), lt):
             bld.setUniform(name, v)
         for j, (d, col) in enumerate(more):
@@ -843,7 +859,7 @@ def _unswim(r, L, P, N, M, U, T, texs) -> tuple:
     return P, N, M, U, T
 
 
-def _look(r, L, i: int, fill, tx) -> skia.Shader:
+def _look(r, L, i: int, fill, tx, slot: str = "look") -> skia.Shader:
     """Material i's picture: its texture tx times its tint over its fill, kept while they hold. A runtime shader:
     skia-python's Shaders.Blend took 1.5 ms with a small image and 99 ms with a 1080p video frame on the GPU."""
     def make():
@@ -860,30 +876,39 @@ def _look(r, L, i: int, fill, tx) -> skia.Shader:
         return b.makeShader()
     # The image itself in the key, not its id: a video's or group's frame goes once drawn, and a later frame's
     # image could take its id.
-    return _kept(r, ("look", L.id, i), (tuple(fill), None if tx is None else (tx[0], tx[3], tx[4])), make)
+    return _kept(r, (slot, L.id, i), (tuple(fill), None if tx is None else (tx[0], tx[3], tx[4])), make)
 
 
-def _textured(r, L, cv: skia.Canvas, region: skia.Rect, q, T, nv, M, U, mats, texs, lit, fv, fg) -> bool:
+def _textured(r, L, cv: skia.Canvas, region: skia.Rect, q, T, nv, M, U, mats, texs, glows, lit, fv, fg) -> bool:
     """A textured model's sorted triangles T on cv (cleared in region): its picture, each material's texture over
     its fill, times twice half the light on a white surface, plus its highlights, rim and reflection, under its
     fog. Each is drawn on its own surface with the same triangles and they are combined per pixel: drawn one over
     another, a triangle behind would be lit again by the one in front. On the GPU the light is per pixel. On the
     CPU it is per vertex, as for any model; the picture is drawn times its light straight onto cv, all at half
-    strength, which saved two copies of the region, and True says the model is to be drawn twice as bright."""
+    strength, which saved two copies of the region, and True says the model is to be drawn twice as bright.
+    The light a model file's materials give off (glows: emission textures) is one more such pass, added."""
     lt, more, env = lit
-    looks, sizes = [], np.zeros((len(mats), 6))  # each material's picture; repeat, offset and size of its image
-    for i, (mt, tx) in enumerate(zip(mats, texs)):
-        looks.append(_look(r, L, i, mt[0], tx))
-        if tx is not None:
-            img, rep, off = tx[:3]
-            sizes[i] = (*rep, *off, img.width(), img.height())
-    z = sizes[M]
-    uv = (U * z[:, :2] - z[:, 2:4]) * z[:, 4:]  # in pixels of each image
+
+    def pictures(txs, under, slot):
+        """Each material's picture and its texture coordinates in pixels of its image."""
+        looks, sizes = [], np.zeros((len(mats), 6))  # repeat, offset and size of each image
+        for i, (mt, tx) in enumerate(zip(mats, txs)):
+            looks.append(_look(r, L, i, under(mt), tx, slot))
+            if tx is not None:
+                img, rep, off = tx[:3]
+                sizes[i] = (*rep, *off, img.width(), img.height())
+        z = sizes[M]
+        return looks, (U * z[:, :2] - z[:, 2:4]) * z[:, 4:]
+
+    looks, uv = pictures(texs, lambda mt: mt[0], "look")
+    shines = None  # emission: each material's emission texture over its emission colour (black without)
+    if any(gl is not None for gl in glows) or any(any(mt[7]) for mt in mats):
+        shines = pictures(glows, lambda mt: mt[7], "glow")
     slot = M[T[:, 0]]
     cuts = np.flatnonzero(np.diff(slot)) + 1
     runs = list(zip(np.r_[0, cuts], np.r_[cuts, len(T)]))  # triangles in sort order that share a material
 
-    def apart(k: int, paint, colors=None, coords=None, mode=skia.BlendMode.kDst, by_material=False):
+    def apart(k: int, paint, colors=None, coords=None, mode=skia.BlendMode.kDst, by_material=False, looks=looks):
         surf = r._model_spare(k)
         c = surf.getCanvas()
         c.save()
@@ -907,7 +932,9 @@ def _textured(r, L, cv: skia.Canvas, region: skia.Rect, q, T, nv, M, U, mats, te
         parts = {"base": apart(0, None, coords=uv, by_material=True),
                  "light": apart(1, _paint(r, L, mats, lt, more, env, "light"), coords=normal),
                  "add": apart(2, _paint(r, L, mats, lt, more, env, "add"), coords=normal)}
-        b = skia.RuntimeShaderBuilder(_combined())
+        if shines is not None:
+            parts["emit"] = apart(4, None, coords=shines[1], by_material=True, looks=shines[0])
+        b = skia.RuntimeShaderBuilder(_combined(shines is not None))
         for name, img in parts.items():
             b.setChild(name, img.makeShader(skia.SamplingOptions()))
         b.setChild("fog", fog.makeShader(skia.SamplingOptions()) if fog is not None else
@@ -917,28 +944,31 @@ def _textured(r, L, cv: skia.Canvas, region: skia.Rect, q, T, nv, M, U, mats, te
         light, add = _shade(nv, M, mats, *lt, more, env, split=True)
         for a, b in runs:
             _vertices(cv, q, T[a:b], uv, light, skia.Paint(Shader=looks[slot[a]]), skia.BlendMode.kModulate)
-        for img, mode in ((apart(2, skia.Paint(), add), skia.BlendMode.kPlus), (fog, skia.BlendMode.kSrcOver)):
+        glow = None if shines is None else apart(4, None, coords=shines[1], by_material=True, looks=shines[0])
+        for img, mode, cf in ((apart(2, skia.Paint(), add), skia.BlendMode.kPlus, None),
+                              (glow, skia.BlendMode.kPlus, _HALF), (fog, skia.BlendMode.kSrcOver, None)):
             if img is not None:
-                cv.drawImage(img, 0, 0, skia.SamplingOptions(), skia.Paint(BlendMode=mode))
+                cv.drawImage(img, 0, 0, skia.SamplingOptions(), skia.Paint(BlendMode=mode, ColorFilter=cf))
     cv.restore()
     return not gpu
 
 
-def _combined() -> skia.RuntimeEffect:
-    if "combine" not in _EFFECTS:
-        _EFFECTS["combine"] = skia.RuntimeEffect.MakeForShader(_COMBINE)
-    return _EFFECTS["combine"]
+def _combined(emit: bool = False) -> skia.RuntimeEffect:
+    key = "combine emit" if emit else "combine"
+    if key not in _EFFECTS:
+        _EFFECTS[key] = skia.RuntimeEffect.MakeForShader(_COMBINE_EMIT if emit else _COMBINE)
+    return _EFFECTS[key]
 
 
 def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float = 0.0):
     """Draw model layer L on canvas c at its time t (scene_t on the scene's clock). Returns its projected bounds
     in device pixels, or None."""
-    m, mats, texs = model(r, L, g, t, scene_t)
+    m, mats, texs, glows = model(r, L, g, t, scene_t)
     lt, more, env = _lighting(r, L, m, t, scene_t)
     fg = fog(r, scene_t) if r._stage is None else None  # a stage fogs each pixel it shows
     P, N, T, M = m.P, m.N, m.T, m.M
     U = None  # texture coordinates, when any material has a texture (a file without them: check says no-uvs)
-    if any(tx is not None for tx in texs):
+    if any(tx is not None for tx in texs + glows):
         U = m.U if m.U is not None else np.zeros((len(P), 2))
     amt = max(0.0, min(1.0, float(g("draw")) * reveal))
     tid = slice(None)  # each triangle's index in the whole mesh
@@ -977,7 +1007,7 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
     if not len(T):
         return None
     if U is not None:
-        P, N, M, U, T = _unswim(r, L, P, N, M, U, T, texs)
+        P, N, M, U, T = _unswim(r, L, P, N, M, U, T, [tx if tx is not None else gl for tx, gl in zip(texs, glows)])
         hom = P @ r._m3d[:3, :3].T + r._m3d[:3, 3]
         w = P @ r._m3d[3, :3] + r._m3d[3, 3]
         d = np.where(np.abs(w) < 1e-9, 1e-9, w)
@@ -1013,7 +1043,7 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
     mode = skia.BlendMode.kDst  # vertex colours as given, when there are any
     halved = False  # drawn at half strength (_textured)
     if U is not None:
-        halved = _textured(r, L, cv, region, q, T, nv, M, U, mats, texs, (lt, more, env), fv, fg)
+        halved = _textured(r, L, cv, region, q, T, nv, M, U, mats, texs, glows, (lt, more, env), fv, fg)
     elif r.backend == "gpu":
         paint, colors = _paint(r, L, mats, lt, more, env), None
         uv = np.stack([2.0 * M + 0.5 + 0.45 * nv[:, 0], nv[:, 1]], 1)  # the normal, with the material slot packed in

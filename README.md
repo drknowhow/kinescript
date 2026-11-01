@@ -76,7 +76,8 @@ no depth draw exactly as before.
 - **Extruded text and SVG paths.** `"shape": "text"` extrudes letters in any font and `"shape": "path"` extrudes
   SVG path data, filled, or stroked with `strokeWidth` for line icons. Both take a `depth` and a 45-degree `bevel`.
 - **Model files.** `src` reads `.glb` and `.gltf` (glTF 2.0) and `.obj` with its `.mtl`: node transforms, base
-  colours and base colour textures, and metallic and roughness as `metal` and `shine`. `ground` puts a soft shadow under any model, straight
+  colours and base colour textures, emission (`emissiveFactor` and `emissiveTexture`, or `Ke` and `map_Ke`), and
+  metallic and roughness as `metal` and `shine`. `ground` puts a soft shadow under any model, straight
   down or, with `"from": "light"`, cast along its key light.
 
 A 3D title that builds in and turns to face the camera:

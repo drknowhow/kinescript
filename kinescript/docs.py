@@ -310,7 +310,8 @@ DEPTH AND CAMERA (3D)
             and skins do not. A glTF base colour texture (with its TEXCOORD_n) or an .obj map_Kd is
             drawn as a texture; "texture": false draws its mean colour, and a texture on the layer
             replaces the file's (check warns no-uvs when the file has no texture coordinates).
-            Long triangles are cut to 1/24 of its size for the depth sort. Draco- or meshopt-
+            The light a material gives off (glTF emissiveFactor and emissiveTexture, .mtl Ke and
+            map_Ke) is added to its colour however it is lit. Long triangles are cut to 1/24 of its size for the depth sort. Draco- or meshopt-
             compressed files are not read.
   ground    true or {"opacity": 0.5, "blur": px, "y": px, "from": "above"}: a soft shadow on a level
             floor under the model, as if lit from above, fainter as the model rises. The floor sits at
