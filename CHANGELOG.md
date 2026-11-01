@@ -5,6 +5,9 @@
 - Examples of the 2D features: `logo.json` (draw on, morphing, a mask and a glow), `kinetic.json` (stagger orders,
   `combine`, a mask, marching dashes and a looping group) and `explainer.json` (`rough` with `boil`, a dashed route
   ridden with `along`, a lens mask and a glow).
+- `kine check`'s contrast rule reads a text with an alpha or luma mask only inside its mask's box, and skips it
+  while the two do not meet. It read the whole box, so a word sliding out from behind a shape through a mask was
+  reported at 1.0:1 against the shape it was hidden by.
 - Smooth keyframes: `"x": {"keys": [[0, 200], [1, 700], [2, 960]], "smooth": true}` passes through each key without
   stopping, on a monotone cubic through the keys (Fritsch-Butland), so no value overshoots its neighbours. It is at
   rest only at the first and last key, at a turn, and around a `hold` key; other eases on the keys are ignored. It

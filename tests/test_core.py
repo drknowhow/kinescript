@@ -275,6 +275,18 @@ def test_check_does_not_read_combined_text_for_contrast():
     assert not [i for i in issues if i["code"] in ("contrast", "text-hidden")], issues
 
 
+def test_check_reads_masked_text_for_contrast_where_its_mask_shows_it():
+    def contrast(window):
+        layers = [{"id": "plate", "type": "rect", "x": 60, "y": 90, "w": 120, "h": 120, "fill": "#ffffff"},
+                  {"id": "win", "type": "rect", "anchor": "left", "y": 90, "w": 160, "h": 180, **window},
+                  {"id": "word", "type": "text", "text": "HELLO", "x": 160, "y": 90, "size": 40, "fill": "#ffffff",
+                   "mask": "win"}]
+        return [i["code"] for i in check(scene(layers, bg="#000000", duration=2))["issues"]].count("contrast")
+    assert contrast({"x": 0}) == 1  # it shows over the white plate
+    assert contrast({"x": 125}) == 0  # it shows only over the black past the plate
+    assert contrast({"x": [[0, 400], [1, 400], [2, 125]]}) == 0  # nothing shows at the time check reads it
+
+
 TRIANGLE, DISC = "M0 -70 L70 50 L-70 50 Z", "M0 -70 A70 70 0 1 1 -0.1 -70 Z"
 SQUARE, RING = "M-60 -60 H60 V60 H-60 Z", "M-70 0 A70 70 0 1 0 70 0 A70 70 0 1 0 -70 0 Z M-35 0 A35 35 0 1 1 35 0 "     "A35 35 0 1 1 -35 0 Z"
 
