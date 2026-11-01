@@ -6,6 +6,7 @@ renderer composes with the layer's own properties.
 from __future__ import annotations
 
 import math
+import random
 import re
 from dataclasses import dataclass, field
 
@@ -146,6 +147,8 @@ class Motion:
     ease: str = ""
     stagger: float = 0.0
     opts: dict = field(default_factory=dict)
+    order: str = "start"
+    seed: int = 0
 
     def mods(self, p: float) -> Mods:
         out = IDENT
@@ -153,6 +156,27 @@ class Motion:
             e = E.get(self.ease or DEFAULT_EASE.get(n, "outCubic"))
             out = out.combine(PRESETS[n](e(max(0.0, min(1.0, p))), self.opts))
         return out
+
+
+ORDERS = ("start", "end", "center", "edges", "random")
+
+
+def turns(n: int, order: str = "start", seed: int = 0) -> list[float]:
+    """When each of n staggered units starts, in staggers: start goes first to last, end last to first, center from
+    the middle out and edges from both ends in (units as far from the middle go together), random in the shuffled
+    order seed picks."""
+    if order == "end":
+        return [float(n - 1 - k) for k in range(n)]
+    if order in ("center", "edges"):
+        far = [abs(k - (n - 1) / 2) for k in range(n)]
+        lo, hi = min(far, default=0.0), max(far, default=0.0)
+        return [f - lo if order == "center" else hi - f for f in far]
+    if order == "random":
+        out = [0.0] * n
+        for j, k in enumerate(random.Random(seed).sample(range(n), n)):
+            out[k] = float(j)
+        return out
+    return [float(k) for k in range(n)]
 
 
 # Motion options that are numbers, and what each one is.
@@ -164,6 +188,10 @@ def option_problem(key: str, v) -> str | None:
     """Why a motion option's value cannot be used, or None."""
     if key == "ease":
         return E.problem(v) if v not in (None, "") else None
+    if key == "order":
+        return None if v is None or v in ORDERS else f"order is {v!r}; it takes {', '.join(ORDERS)}"
+    if key == "seed" and v is not None and not (isinstance(v, int) and not isinstance(v, bool)):
+        return f"seed is {v!r}; it takes a whole number"
     if key not in NUMBERS or v is None:  # null is the default
         return None
     try:
@@ -195,7 +223,8 @@ def parse(spec, default_dur: float = 0.5, key: str = "motion") -> Motion | None:
         why = option_problem(k, v)
         if why:
             raise ValueError(f"{key}: {why}")
-    opts = {k: v for k, v in spec.items() if k not in ("name", "dur", "ease", "stagger") and v is not None}
+    opts = {k: v for k, v in spec.items() if k not in ("name", "dur", "ease", "stagger", "order", "seed")
+            and v is not None}
     dur, stagger = spec.get("dur"), spec.get("stagger")
     return Motion(names, float(default_dur if dur is None else dur), spec.get("ease") or "",
-                  float(stagger or 0), opts)
+                  float(stagger or 0), opts, spec.get("order") or "start", int(spec.get("seed") or 0))

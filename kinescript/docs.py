@@ -457,7 +457,11 @@ ENTER AND EXIT
   Combine with +: "rise+blur". Options: dist (px moved by rise, drop, left, right; default 48),
   from (start scale of pop [0.4] and zoom [1.25]), amount (blur px [24], track px [40]).
   With "split" on text, each unit enters in turn: unit k starts k x stagger seconds after the
-  layer starts, so the whole reveal takes dur + (units - 1) x stagger.
+  layer starts, so the whole reveal takes dur + (units - 1) x stagger. On a group, an enter
+  with a stagger, such as {"name": "rise", "stagger": 0.08}, enters its children in turn the
+  same way, and the group itself does not move.
+  order sets who goes first: start (default, in the order listed), end, center (from the
+  middle out), edges (from both ends in) or random (seed, a whole number, picks the shuffle).
   motions: {motions}
   rise moves up into place, drop moves down, left moves left, right moves right. type is a
   typewriter. draw draws a stroke or path on, and builds a model (build is the same). wipe reveals left to right. snap is a hard cut in

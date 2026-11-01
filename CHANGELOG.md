@@ -18,6 +18,11 @@
   a route that draws on. `kine check` names a route that is missing, in another group or not a path. The
   `along-100` stress scene (100 riders, 60 of them on path layers) draws a 1080p frame in 5.6 ms on the GPU,
   0.7 ms more than with the riders standing still.
+- A group's enter with a stagger enters its children in turn, as split text enters its units, and the group itself
+  does not move: `"enter": {"name": "rise", "stagger": 0.08}`. Before, a group ignored its stagger and entered as one
+  picture. `order` sets who goes first, for groups and split text: `start` (the default, as before), `end`, `center`
+  (from the middle out), `edges` (from both ends in) or `random`, with a whole-number `seed` picking the shuffle.
+  `kine check` warns when `order` has no stagger to order.
 - `kine check` warns `strobe` where a layer moves more than 40 px a frame at 1080p for five frames running in a
   scene without motion blur, where the eye sees separate copies instead of one moving thing.
 - 2D frames cost less Python: keyframes find their segment by bisection, expressions compile once to a function,

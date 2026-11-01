@@ -19,6 +19,7 @@ import skia
 
 from . import color as C
 from . import media, render3d, space, stage, svgpath
+from . import presets as P
 from .presets import IDENT, Mods
 from .props import length, noise
 from .scene import Layer, Scene, uses_depth
@@ -737,6 +738,8 @@ class Renderer:
         a, b, d = lo - L.t_in, hi - L.t_in, L.dur
         if L.enter:
             done = L.enter.dur
+            if L.type == "group" and L.enter.stagger and L.children:
+                done += max(k.turn for k in L.children)
             if L.type in ("text", "counter") and L.raw.get("split"):
                 if L.type == "counter":  # its units come from a value that may change
                     return False
@@ -1073,8 +1076,13 @@ class Renderer:
         g = lambda name, default=None: L.get(name, t, T, 0, default)  # noqa: E731
         split = L.raw.get("split") if L.type in ("text", "counter") else None
         mods = IDENT
-        if L.enter and not split and t < L.enter.dur:
+        if L.enter and not split and t < L.enter.dur and not (L.type == "group" and L.enter.stagger):
             mods = L.enter.mods(t / L.enter.dur)
+        if L.turn is not None:  # its group's enter, from its turn
+            m = L.parent.enter
+            p = (T - L.parent.t_in - L.turn) / m.dur if m.dur else 1.0
+            if p < 1:
+                mods = mods.combine(m.mods(p))
         if L.exit and d - t < L.exit.dur:
             mods = mods.combine(L.exit.mods((d - t) / L.exit.dur))
         alpha = max(0.0, min(1.0, float(g("opacity")) * mods.alpha))
@@ -2148,6 +2156,10 @@ class Renderer:
         split = L.raw.get("split")
         enter = L.enter if split else None
         stagger = (enter.stagger if enter and enter.stagger else 0.04) if split else 0
+        units = self._units(lay, font, split)
+        turn = None  # each unit's turn in the stagger, when it is not its place in the text
+        if enter is not None and enter.order != "start":
+            turn = P.turns(len(units), enter.order, enter.seed)
         typing = enter is None and L.enter and "type" in L.enter.names and t < L.enter.dur
         visible_chars = lay.nchars * reveal if (reveal < 1 or typing) else None
         track = mods.track
@@ -2155,10 +2167,10 @@ class Renderer:
         unit_keys = {k for k in ("unitX", "unitY", "unitRotate", "unitScale", "unitOpacity") if k in L.props}
         cols, pop = (fill, emph, act), active is not None and L.raw.get("mode") == "pop"  # captions only
         painted = None  # (which colour, alpha) fpaint holds
-        for ui, (runs, x0, x1) in enumerate(self._units(lay, font, split)):
+        for ui, (runs, x0, x1) in enumerate(units):
             um = IDENT
             if enter is not None:
-                p = (t - ui * stagger) / enter.dur if enter.dur else 1.0
+                p = (t - (ui if turn is None else turn[ui]) * stagger) / enter.dur if enter.dur else 1.0
                 if p < 1:
                     um = enter.mods(p)
             if um.alpha <= 0.002:
