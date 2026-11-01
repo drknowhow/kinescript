@@ -270,9 +270,18 @@ DEPTH AND CAMERA (3D)
 3D MODELS
   A model layer is a lit solid in the space of DEPTH AND CAMERA, so z, rotateX, rotateY, rotate,
   scale and the camera apply to it. x and y place its centre.
-  shape     cube (w [200], h and depth [= w]) | sphere (r [100]) | cylinder (r [80], h [200]) |
-            cone (r [90], h [200], tip up) | torus (r [110], tube [r x 0.35], facing you) |
-            plane (w, h; both sides show) | text | path. Sizes are px and animate.
+  shape     cube (w [200], h and depth [= w], r [0] rounds its edges and corners) | sphere (r [100]) |
+            cylinder (r [80], h [200]) | cone (r [90], h [200], tip up) | capsule (r [60], h [240] end
+            to end: a cylinder with round ends) | torus (r [110], tube [r x 0.35], facing you) |
+            plane (w, h; both sides show) | lathe | tube | text | path. Sizes are px and animate.
+  lathe     shape "lathe" turns profile round the vertical axis: [[r, y], ...] points (r out from the
+            axis, y down; closed when the last point is the first) or path data, its x the distance
+            from the axis. Centred on y. A profile that ends off the axis (a cup with no lid) shows
+            both sides; bends sharper than 40 degrees stay sharp. profile does not animate:
+            "profile": [[0, -120], [70, -120], [40, 0], [90, 120], [0, 120]].
+  tube      shape "tube" runs a round tube of radius r [12] along d (SVG path data, fitted to w and/or
+            h as a path shape's), round at its ends: 3D lines and routes. draw grows it along its
+            length (other shapes show bottom to top). Without d, "tube" is read as a cylinder.
   text      shape "text" pushes letters out in depth: text ("\n" breaks lines), size [120],
             weight [600], font, italic, letterSpacing, lineHeight, depth [size x 0.2], bevel [0]
             (px of 45-degree edge). Centred on x, y. Each new text, size, depth or bevel value
@@ -295,9 +304,9 @@ DEPTH AND CAMERA (3D)
             time, its box (its w and h, else the canvas) filling the image: a UI on a phone's screen.
             The group is drawn only there, its layers as in a scene without a camera. Once on each
             cube face and on a plane, upright from in front (on top and underneath, its top is the
-            far edge); round a sphere, cylinder or cone with its middle facing you, and flat across
-            their ends; once round a torus and its tube; across the front and back of text and path
-            shapes. The fill shows through clear pixels. A part takes the layer's texture unless it
+            far edge); round a sphere, cylinder, cone, capsule or lathe with its middle facing you, and
+            flat across a cylinder's or cone's ends; once round a torus and its tube; along a tube and
+            round it; across the front and back of text and path shapes. The fill shows through clear pixels. A part takes the layer's texture unless it
             sets its own; false draws its fill. Triangles are cut where perspective would slide the
             image across them (check warns texture-swim where that is not enough, right in front of
             the camera). repeat and offset do not animate. A textured model takes about twice as

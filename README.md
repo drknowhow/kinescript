@@ -64,7 +64,8 @@ no depth draw exactly as before.
   each pixel, so models and cards pass through each other with a clean edge, and a model's `ground` shadow lies
   on a floor layer. With `"shadows": true` its models cast shadows from the key light onto the floor, walls and
   each other.
-- **Model layers.** `"type": "model"` draws a lit `cube`, `sphere`, `cylinder`, `cone`, `torus` or `plane`, or
+- **Model layers.** `"type": "model"` draws a lit `cube` (`r` rounds it), `sphere`, `cylinder`, `cone`, `capsule`,
+  `torus` or `plane`, a `lathe` turned from a profile, a `tube` along a path (its `draw` grows it), or
   several shapes merged as `parts` so their triangles are depth-sorted together; part keys animate like layer keys.
   `repeat` draws copies of a model merged into one mesh, each placed and coloured by an expression of its number
   `i`: a waving grid of 100 cubes is one layer. Materials take `fill`, `shine`, `metal`, `rim`, `bands` (toon
@@ -278,6 +279,8 @@ More scenes in [`examples/`](https://github.com/drknowhow/kinescript/tree/main/e
   and two more cans out of focus behind it, 6 s.
 - [`cubes.json`](https://github.com/drknowhow/kinescript/blob/main/examples/cubes.json): a ripple through a grid of
   144 cubes, one model layer with `repeat`, each copy placed and coloured by an expression of its number, 6 s.
+- [`shapes.json`](https://github.com/drknowhow/kinescript/blob/main/examples/shapes.json): a rounded box, a
+  capsule, a lathed vase and cup, and a tube that draws a route between them, 6 s.
 - [`character.json`](https://github.com/drknowhow/kinescript/blob/main/examples/character.json): a skinned glTF
   figure playing its `walk` and `wave` clips: two walk across a floor with their shadows while a third waves, 6 s.
 - [`voiceover.json`](https://github.com/drknowhow/kinescript/blob/main/examples/voiceover.json): titles cued from

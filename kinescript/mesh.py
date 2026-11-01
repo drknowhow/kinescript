@@ -11,8 +11,9 @@ import skia
 
 from . import space
 
-SHAPES = ("cube", "sphere", "cylinder", "cone", "torus", "plane")
+SHAPES = ("cube", "sphere", "cylinder", "cone", "torus", "plane", "capsule")
 EXTRUDED = ("text", "path")
+SWEPT = ("lathe", "tube")  # built at their size: a profile turned round the y axis, a circle along a path
 DETAIL = {"low": 0.5, "medium": 1.0, "high": 2.0}
 
 
@@ -87,11 +88,48 @@ def _disc(y: float, n: int, normal_y: float):
     return P, np.tile([0, normal_y, 0], (n + 2, 1)), _fan(n, 0, 1), _facing(P, (0, normal_y, 0), 1.0)
 
 
+def _band(n: int, arc: int, q: float) -> np.ndarray:
+    """Coordinates across a rounded box's face from -0.5 to 0.5: n pieces over the flat middle, and arc pieces
+    into each rounded edge q wide, spaced so each turns the surface by the same angle."""
+    edge = (0.5 - q) + q * np.tan(np.linspace(0, np.pi / 4, arc + 1))
+    c = np.concatenate([-edge[::-1], np.linspace(-(0.5 - q), 0.5 - q, n + 1)[1:-1], edge])
+    return c[np.r_[True, np.diff(c) > 1e-9]]
+
+
+def _revolve(R, Y, NR, NY, V, seg: int) -> Mesh:
+    """A surface turned round the y axis in seg pieces: profile points at radius R and height Y, their normals
+    (NR, NY) in the profile's plane, and V how far down the image each is."""
+    th = np.linspace(0, 2 * np.pi, seg + 1)
+    c, s, n = np.cos(th)[:, None], np.sin(th)[:, None], len(R)
+    P = np.stack([c * R, np.broadcast_to(Y, (seg + 1, n)), s * R], -1).reshape(-1, 3)
+    N = np.stack([c * NR, np.broadcast_to(NY, (seg + 1, n)), s * NR], -1).reshape(-1, 3)
+    uv = np.stack([np.repeat(th / (2 * np.pi), n), np.tile(V, seg + 1)], -1)
+    return _wrapped(P, N, _grid(seg, n - 1), uv)
+
+
 @lru_cache(maxsize=64)
-def unit(shape: str, detail: str = "medium", tube: float = 0.35) -> Mesh:
-    """`shape` at unit size: cube and plane span -0.5..0.5, round shapes have radius 1 and height 1."""
+def unit(shape: str, detail: str = "medium", form=0.35) -> Mesh:
+    """`shape` at unit size: cube and plane span -0.5..0.5, round shapes have radius 1 and height 1. `form` is a
+    share of the size: the torus's tube radius, the cube's rounding along x, y and z (0: square edges), or the
+    capsule's cap height."""
     k = DETAIL.get(detail, 1.0)
     seg = max(6, round(24 * k))
+    if shape == "cube" and isinstance(form, tuple):
+        # Each face's grid pushed out onto a box with ellipsoid corners; scaled to w, h and depth they are round.
+        n, arc, q = max(1, round(6 * k)), max(1, round(seg / 8)), np.asarray(form, float)
+        faces = []
+        for i, (a, b, c) in enumerate((a, b, c) for a in range(3) for b, c in [((a + 1) % 3, (a + 2) % 3),
+                                                                            ((a + 2) % 3, (a + 1) % 3)]):
+            u, v = np.meshgrid(_band(n, arc, q[b]), _band(n, arc, q[c]), indexing="ij")
+            F = np.zeros((u.size, 3))
+            F[:, a], F[:, b], F[:, c] = 0.5 if i % 2 == 0 else -0.5, u.ravel(), v.ravel()
+            inner = np.clip(F, q - 0.5, 0.5 - q)
+            d = (F - inner) / q
+            d /= np.linalg.norm(d, axis=1, keepdims=True)
+            face = np.zeros(3)
+            face[a] = F[0, a] * 2
+            faces.append(_orient(inner + d * q, d / q, _grid(u.shape[0] - 1, u.shape[1] - 1), _facing(F, face)))
+        return cat(faces)
     if shape in ("cube", "plane"):
         n = max(1, round(6 * k))
         faces = []
@@ -116,7 +154,7 @@ def unit(shape: str, detail: str = "medium", tube: float = 0.35) -> Mesh:
         def fn(u, v):
             th, ph = u * 2 * np.pi, v * 2 * np.pi
             N = np.stack([np.cos(ph) * np.cos(th), np.cos(ph) * np.sin(th), np.sin(ph)], -1)
-            P = np.stack([np.cos(th), np.sin(th), np.zeros_like(th)], -1) + tube * N
+            P = np.stack([np.cos(th), np.sin(th), np.zeros_like(th)], -1) + form * N
             return P, N
         return _orient(*_surface(fn, round(2.6 * seg), seg))  # the image once round the ring and round the tube
     if shape in ("cylinder", "cone"):
@@ -131,6 +169,14 @@ def unit(shape: str, detail: str = "medium", tube: float = 0.35) -> Mesh:
         side = _wrapped(*_surface(fn, 2 * seg, max(1, seg // 6)))
         caps = [_orient(*_disc(0.5, 2 * seg, 1.0))] + ([] if cone else [_orient(*_disc(-0.5, 2 * seg, -1.0))])
         return cat([side] + caps)
+    if shape == "capsule":
+        # Half ellipsoids form high on a cylinder; scaled to r and h they are half spheres.
+        q, ph = min(0.5, max(float(form), 0.001)), np.linspace(0, np.pi / 2, max(2, round(seg / 4)) + 1)
+        body = np.linspace(q - 0.5, 0.5 - q, max(1, seg // 6) + 1)[1:-1] if q < 0.5 else np.zeros(0)
+        R = np.concatenate([np.sin(ph), np.ones(len(body)), np.sin(ph[::-1])])
+        Y = np.concatenate([q - 0.5 - q * np.cos(ph), body, 0.5 - q + q * np.cos(ph[::-1])])
+        NY = np.concatenate([-np.cos(ph) / q, np.zeros(len(body)), np.cos(ph[::-1]) / q])
+        return _revolve(R, Y, R, NY, Y + 0.5, 2 * seg)
     raise ValueError(f"unknown shape '{shape}'. Known: {', '.join(SHAPES)}")
 
 
@@ -138,7 +184,13 @@ def size(shape: str, get) -> tuple[tuple[float, float, float], float]:
     """(x, y, z) scale of the unit shape and the torus tube ratio, from w/h/depth/r/tube via get(key, default)."""
     if shape in ("cube", "plane"):
         w = float(get("w", 200))
-        return (w, float(get("h", w)), float(get("depth", w)) if shape == "cube" else 1.0), 0.35
+        s3 = (w, float(get("h", w)), float(get("depth", w)) if shape == "cube" else 1.0)
+        rr = min(float(get("r", 0) or 0), min(s3) / 2) if shape == "cube" else 0.0  # its edges' rounding
+        return s3, (tuple(max(round(rr / v, 3), 0.001) for v in s3) if rr > 0 else 0.0)
+    if shape == "capsule":
+        r = float(get("r", 60))
+        h = max(float(get("h", 240)), 2 * r)
+        return (r, h, r), round(r / h, 3) if h > 0 else 0.5
     r = float(get("r", {"sphere": 100, "torus": 110, "cylinder": 80, "cone": 90}[shape]))
     if shape == "torus":
         return (r, r, r), round(min(0.95, max(0.02, float(get("tube", r * 0.35)) / (r or 1))), 2)
@@ -464,3 +516,134 @@ def extrude(Q: np.ndarray, starts: np.ndarray, caps: np.ndarray, depth: float, b
     U = (P[:, :2] - lo) / np.maximum(hi - lo, 1e-9)  # the image across the outline's box, seen from the front
     return _orient(P, np.concatenate([p[1] for p in pieces]),
                    np.concatenate([p[2] + o for p, o in zip(pieces, base)]).astype(np.int64), U)
+
+
+# ---- turned and swept shapes (lathe, tube) -------------------------------------------------------------
+
+_EMPTY = Mesh(np.zeros((0, 3)), np.zeros((0, 3)), np.zeros((0, 3), np.int32), np.zeros(0, np.int32))
+
+
+def polylines(path: skia.Path, seg: float) -> list[tuple[np.ndarray, bool]]:
+    """Each piece of `path` as drawn, as (n, 2) points and whether it closes: curves cut into pieces about `seg`
+    long, lines into pieces up to 3 * seg."""
+    out, cur = [], []
+    it = skia.Path.Iter(path, False)
+    while True:
+        verb, pts = it.next()
+        if verb in (skia.Path.kMove_Verb, skia.Path.kClose_Verb, skia.Path.kDone_Verb):
+            q = _plain(np.asarray(cur, float).reshape(-1, 2))
+            closed = verb == skia.Path.kClose_Verb
+            if closed and len(q) > 2 and np.allclose(q[0], q[-1], atol=1e-6):
+                q = q[:-1]  # the line back to the start that closing drew
+            if len(q) >= 2:
+                out.append((q, closed and len(q) >= 3))
+            cur = [(pts[0].fX, pts[0].fY)] if verb == skia.Path.kMove_Verb else []
+            if verb == skia.Path.kDone_Verb:
+                return out
+            continue
+        cur.extend(_flatten(verb, np.array([(q.fX, q.fY) for q in pts]), seg, it.conicWeight()))
+
+
+def _plain(q: np.ndarray) -> np.ndarray:
+    """Points without the ones that repeat the point before."""
+    return q[np.r_[True, np.any(np.abs(np.diff(q, axis=0)) > 1e-6, axis=1)]] if len(q) else q
+
+
+def lathe(lines: list[tuple[np.ndarray, bool]], seg: int, piece: float, crease: float = 40.0) -> Mesh:
+    """Profile lines turned round the y axis in seg pieces. Each line is (n, 2) points [r, y], r out from the axis
+    and y down, and whether it closes. Pieces longer than `piece` are cut, for the painter's sort; where the
+    profile bends by more than `crease` degrees each side keeps its own normal. A line that is open and does not
+    start and end on the axis has two sides, as a plane does."""
+    meshes, cos = [], math.cos(math.radians(crease))
+    for q, closed in lines:
+        q = np.column_stack([np.maximum(q[:, 0], 0.0), q[:, 1]])
+        loop = np.r_[q, q[:1]] if closed else q
+        d = np.diff(loop, axis=0)
+        cuts = np.maximum(1, np.ceil(np.hypot(*d.T) / piece)).astype(int)
+        pts = _plain(np.concatenate([loop[i] + np.linspace(0, 1, k, endpoint=False)[:, None] * d[i]
+                                     for i, k in enumerate(cuts)] + [loop[-1:]]))
+        if len(pts) < 2:
+            continue
+        # Outward is to the right going down the outside: turn round a line drawn the other way, judged by the
+        # outline it makes closed along the axis.
+        if _area(pts if closed else np.r_[pts, [[0.0, pts[-1, 1]], [0.0, pts[0, 1]]]]) < 0:
+            pts = pts[::-1]
+        d = np.diff(pts, axis=0)
+        en = np.stack([d[:, 1], -d[:, 0]], 1) / np.hypot(*d.T)[:, None]  # each piece's outward normal
+        rows = [(pts[0], en[0])]
+        for i in range(1, len(pts)):
+            a = en[i - 1]
+            if i == len(pts) - 1 and not closed:
+                rows.append((pts[i], a))
+                continue
+            b = en[i % len(en)]
+            if a @ b >= cos:  # a gentle bend: one normal between the two
+                m = (a + b) / np.linalg.norm(a + b)
+                rows.append((pts[i], m))
+                if i == len(pts) - 1:  # where a closed line meets its start
+                    rows[0] = (pts[0], m)
+            elif i < len(pts) - 1:
+                rows += [(pts[i], a), (pts[i], b)]
+            else:
+                rows.append((pts[i], a))
+        P = np.array([p for p, _ in rows])
+        N = np.array([n for _, n in rows])
+        V = np.r_[0.0, np.cumsum(np.hypot(*np.diff(P, axis=0).T))]
+        V /= max(float(V[-1]), 1e-9)
+        meshes.append(_revolve(P[:, 0], P[:, 1], N[:, 0], N[:, 1], V, seg))
+        if not closed and max(pts[0, 0], pts[-1, 0]) > 1e-6:
+            meshes.append(_revolve(P[:, 0], P[:, 1], -N[:, 0], -N[:, 1], V, seg))
+    return cat(meshes) if meshes else _EMPTY
+
+
+def tube(lines: list[tuple[np.ndarray, bool]], r: float, around: int, grow: float = 1.0) -> Mesh:
+    """A round tube of radius r along lines in the xy plane (each (n, 2) points, y down, and whether it closes),
+    in `around` pieces round, with round ends where a line ends. grow, from 0 to 1, draws the first share of the
+    lines' whole length, the lines in turn, ending round where it stops."""
+    lens = [np.hypot(*np.diff(np.r_[q, q[:1]] if c else q, axis=0).T) for q, c in lines]
+    total = sum(float(n.sum()) for n in lens)
+    left = max(0.0, min(1.0, grow)) * total
+    al = np.linspace(0, 2 * np.pi, around + 1)
+    ca, sa = np.cos(al)[None, :, None], np.sin(al)[None, :, None]
+    z = np.array([0.0, 0.0, 1.0])
+    meshes, before = [], 0.0
+    for (q, closed), n in zip(lines, lens):
+        if left <= 1e-9 or total <= 0:
+            break
+        pts, s = (np.r_[q, q[:1]] if closed else q), np.r_[0.0, np.cumsum(n)]
+        if left < s[-1] - 1e-9:  # it stops on this line
+            k = int(np.searchsorted(s, left))
+            f = (left - s[k - 1]) / max(float(n[k - 1]), 1e-12)
+            pts, s, closed = np.r_[pts[:k], [pts[k - 1] + f * (pts[k] - pts[k - 1])]], np.r_[s[:k], left], False
+        left -= s[-1]
+        keep = np.r_[True, np.diff(s) > 1e-9]
+        pts, s = pts[keep], s[keep] + before
+        before = s[-1]
+        if len(pts) < 2:
+            continue
+        d = np.diff(pts, axis=0)
+        d /= np.hypot(*d.T)[:, None]
+        t_in, t_out = (np.r_[d[-1:], d], np.r_[d, d[:1]]) if closed else (np.r_[d[:1], d], np.r_[d, d[-1:]])
+        t = t_in + t_out
+        back = np.hypot(*t.T) < 1e-6  # doubling straight back
+        t[back] = t_out[back]
+        t /= np.hypot(*t.T)[:, None]
+        miter = 1.0 / np.maximum((t * t_out).sum(1), 0.3)  # a bend keeps the tube's width across it
+        side = np.c_[-t[:, 1], t[:, 0], np.zeros(len(t))]
+        t3, c3 = np.c_[t, np.zeros(len(t))], np.c_[pts, np.zeros(len(pts))]
+        radial = ca * side[:, None] + sa * z
+        P = [c3[:, None] + r * (ca * (miter[:, None, None] * side[:, None]) + sa * z)]
+        N, S = [radial], [np.repeat(s[:, None], around + 1, 1)]
+        if not closed:  # round ends: rings shrinking to a point past each end
+            ph = np.linspace(0, np.pi / 2, max(2, around // 4) + 1)[1:, None, None]
+            for end, sign in ((0, -1.0), (-1, 1.0)):
+                f = ph if sign > 0 else ph[::-1]
+                rad = radial[end][None]
+                ring = (c3[end] + sign * t3[end] * r * np.sin(f) + r * np.cos(f) * rad,
+                        np.cos(f) * rad + sign * np.sin(f) * t3[end], np.full((len(f), around + 1), s[end]))
+                for rows, part in zip((P, N, S), ring):
+                    rows.insert(0 if sign < 0 else len(rows), part)
+        P, N, S = np.concatenate(P), np.concatenate(N), np.concatenate(S)
+        U = np.stack([S / max(total, 1e-9), np.broadcast_to(al / (2 * np.pi), S.shape)], -1)
+        meshes.append(_orient(P.reshape(-1, 3), N.reshape(-1, 3), _grid(len(P) - 1, around), U.reshape(-1, 2)))
+    return cat(meshes) if meshes else _EMPTY

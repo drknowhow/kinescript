@@ -261,13 +261,21 @@ nine rounds: a floor reaching to just in front of the camera took eight.
 - `examples/make_media.py` writes a skinned, animated glTF (a tube bending on three joints) and a textured one, so
   tests and examples need no downloaded assets.
   With the stress scenes (branch `phase5-stress`) it also writes `figure.glb`: a figure of 8,352 triangles on 11
-  joints, with a 1 s `walk` loop and a 2 s `wave` loop, for `examples/character.json`.
+  joints, with a 1 s `walk` loop and a 2 s `wave` loop, for `examples/character.json`. Merged (#79).
 
 ### Phase 6: shapes, 3D text, compressed files
 
 - `cube` takes `radius` for a rounded box. New shapes: `capsule`; `lathe`, where `profile` (`[[r, y], ...]` or
   path data) turns around the vertical axis; and `tube`, a round tube along path data `d`, where `draw` grows it
   along its length for 3D lines and routes.
+  Built on branch `shapes`. A cube's `r` (or `radius`) rounds it: `unit` pushes each face's grid onto a box with
+  ellipsoid corners, so scaled to w, h and depth they are round; `capsule` (`r`, `h` end to end) is built the
+  same way, both kept as unit meshes that scale per frame. `lathe` takes `[[r, y], ...]` or path data; bends
+  past 40 degrees keep a normal each side, and an open profile off the axis is two-sided. `tube` runs along `d`
+  with mitred bends and round ends; its `draw` cuts the path and rebuilds the mesh, 1.7 ms a frame for a
+  7,008-triangle route. `"shape": "tube"` without `d` is still a cylinder, as 1.4 read it.
+  `examples/shapes.json` shows all four; 180 frames render in 11.0 s on the GPU (6 workers). `bench/same.py`
+  finds no frame that differs.
 - Shaped 3D text: glyph runs from `TextBlob.MakeFromShapedText` (HarfBuzz, which 2D text already uses), read with
   `TextBlob.Iter`, outlines from `Font.getPath`. Arabic letters join, marks sit on their letters and right-to-left
   runs read right to left. `unshaped-3d-text` narrows to colour emoji, which have no outline to extrude.
