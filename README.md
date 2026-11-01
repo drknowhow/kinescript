@@ -65,9 +65,9 @@ no depth draw exactly as before.
   on a floor layer. With `"shadows": true` its models cast shadows from the key light onto the floor, walls and
   each other.
 - **Model layers.** `"type": "model"` draws a lit `cube`, `sphere`, `cylinder`, `cone`, `torus` or `plane`, or
-  several shapes merged as `parts` so their triangles are depth-sorted together. Materials take `fill`, `shine`,
-  `metal`, `rim`, `bands` (toon steps), `glow`, `transparency` (see-through, the far side showing) and `texture`,
-  wrapped round the shape with `repeat` and `offset`: an
+  several shapes merged as `parts` so their triangles are depth-sorted together; part keys animate like layer keys.
+  Materials take `fill`, `shine`, `metal`, `rim`, `bands` (toon steps), `glow`, `transparency` (see-through, the far
+  side showing) and `texture`, wrapped round the shape with `repeat` and `offset`: an
   image, a video that plays on the model, or `"#groupId"`, a group of layers drawn on it at each frame's time, such as
   an app on a phone's screen. `light`, for the scene or one model, takes `studio`, `soft`,
   `dramatic` or `flat`, or your own amounts, and every amount, its `azimuth`, `elevation` and colour animate. It

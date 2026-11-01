@@ -60,10 +60,9 @@ def test_model_keys_parts_and_light_are_checked():
     assert (a["type"], a["shape"], a["r"], a["metal"]) == ("model", "sphere", 40, 0.5)
     assert b["shape"] == "torus" and b["parts"][0]["shape"] == "sphere"
     errs = sorted(i["message"] for i in rep.issues if i["level"] == "error")
-    assert len(errs) == 5, errs
+    assert len(errs) == 4, errs  # a part's keyframes are fine: parts animate
     assert [m for m in errs if "above" in m] and [m for m in errs if "studoi" in m and "studio" in m]
     assert [m for m in errs if "colr" in m] and [m for m in errs if "'big'" in m]
-    assert [m for m in errs if "parts[1]: x" in m and "do not animate" in m]
 
 
 def test_text_and_path_models_need_their_outline_and_keep_the_2d_types():

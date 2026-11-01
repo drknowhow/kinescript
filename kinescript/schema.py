@@ -1390,10 +1390,6 @@ def _model(raw: dict, rep: Report, lid):
         _text(p, rep, lid, where)
         _outline(p, rep, lid, where)
         _texture(p, rep, lid, where)
-        for k, v in p.items():  # what _values lets through for layers but a part cannot animate or resolve
-            if k in SCALAR and (isinstance(v, (list, dict)) or (isinstance(v, str) and (v.startswith("=") or _lengthish(v)))):
-                rep.add("error", "bad-value", lid, f"{where}{k} is {v!r}; parts take plain numbers (they do not animate)",
-                        "animate the model layer, or make the part its own model layer")
 
 
 def _audio_values(a: dict, rep: Report, lid, where: str):
