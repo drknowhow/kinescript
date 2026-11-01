@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from .components import COMPONENT_DOCS
 from .ease import EASES
-from .presets import PRESETS
+from .presets import EMPHASES, PRESETS
 from .shaders import PRESETS as SHADERS
 
 REFERENCE = """\
@@ -151,6 +151,7 @@ KEYS EVERY LAYER HAS
                 slow: blur and shadow blur a layer the size of the frame (0.44 s at 1080p), the rest one as
                 large as the layer, and check warns slow-effects past 0.25 s a frame.
   enter, exit   a motion (see ENTER AND EXIT)
+  emphasis      motions in the middle of the layer's life (see EMPHASIS)
   hidden        true skips the layer (and its sound)
   sound         a file played when the layer starts, timed by the layer (see SOUND)
   allowOffscreen  true stops check warning when the layer leaves the canvas; on a group or
@@ -610,6 +611,22 @@ ENTER AND EXIT
   layer sideways. whip slides in fast from the right, blurred along the way. With split, each
   unit wipes, rises or glitches in its own box. none is no motion.
 
+EMPHASIS
+  "emphasis": "pulse"   or   [{"name": "pulse", "at": 1.2, "repeat": 2}, {"name": "float", "loop": true}]
+  Motions in the middle of a layer's life, each cycle starting and ending at rest. at is
+  seconds into the layer [0], dur one cycle's seconds, repeat how many cycles [1] (2.5 plays two
+  and a half), loop true plays them until the layer ends. They combine with each other (+, or
+  several in the list) and with enter and exit. With stagger on a split text, each unit plays
+  it that many seconds after the one before, as a wave (order and seed as for enter).
+  emphases: {emphases}
+  pulse swells and settles (amount, a scale step [0.12]; 0.5 s), heartbeat beats twice (amount
+  [0.15]; 0.9 s), shake shakes sideways (dist px [12]; 0.6 s), wiggle rocks (deg [8]; 0.6 s),
+  wobble wobbles like jelly (amount [0.15]; 0.8 s), float drifts up and down, turning a little
+  (dist [10], deg [2]; 3 s), bob hops (dist [14]; 0.6 s), flash blinks out twice (amount, how
+  far it dims [1]; 0.8 s), tada shrinks, then grows and rocks (amount [0.1], deg [4]; 1 s),
+  spin turns once (deg [360]; 1 s, ease inOutCubic, or linear when it loops). Others take
+  linear; ease shapes each cycle.
+
 EASES  {eases}, spring, spring(stiffness, damping), bezier(x1, y1, x2, y2), steps(n)
   in* starts slow, out* ends slow (the most natural for entrances), inOut* does both.
   spring(stiffness, damping, mass) takes numbers above 0 [170, 26, 1]; bezier takes four numbers
@@ -850,5 +867,5 @@ WORKFLOW FOR AGENTS
 def reference() -> str:
     comps = "\n".join(f"    {k:<11}{v}" for k, v in COMPONENT_DOCS.items())
     eases = " ".join(sorted(k for k in EASES if k not in ("in", "out", "inOut")))
-    return (REFERENCE.replace("{motions}", " ".join(sorted(PRESETS)))
+    return (REFERENCE.replace("{motions}", " ".join(sorted(PRESETS))).replace("{emphases}", " ".join(EMPHASES))
             .replace("{shaders}", "|".join(SHADERS)).replace("{components}", comps).replace("{eases}", eases))

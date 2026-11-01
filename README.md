@@ -353,6 +353,9 @@ More scenes in [`examples/`](https://github.com/drknowhow/kinescript/tree/main/e
 - [`motions.json`](https://github.com/drknowhow/kinescript/blob/main/examples/motions.json): twelve cards, each
   brought on by one of the motions 1.6.1 adds, from `land` and `squash` to `scramble`, `glitch` and `whip`, under a
   title that rises from behind its edge, 7 s.
+- [`emphasis.json`](https://github.com/drknowhow/kinescript/blob/main/examples/emphasis.json): ten cards that pulse,
+  beat, shake, wiggle, wobble, float, bob, flash, tada and spin in the middle of their lives, under a title a wave
+  runs across, 6 s.
 
 `edit.json`, `import.json`, `textures.json`, `screens.json`, `edges.json`, `product.json`, `voiceover.json`,
 `narrated.json`, `flipbook.json`, `vector.json` and `svg.json` read sample media: run `python examples/make_media.py` first to

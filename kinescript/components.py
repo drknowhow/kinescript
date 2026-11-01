@@ -144,8 +144,8 @@ COMPONENT_DOCS = {
     "progress": "color, h [8], y [\"100%\"] (a bar along the bottom edge that fills over the whole scene)",
     "kinetic": "words [list], every [0.6] (seconds per word), size [180], motion [pop], color, x, y [\"50%\"] (centre)",
 }
-_PASS = ("id", "at", "dur", "until", "enter", "exit", "opacity", "scale", "rotate", "hidden", "z", "rotateX", "rotateY",
-         "fixed", "sound")
+_PASS = ("id", "at", "dur", "until", "enter", "exit", "emphasis", "opacity", "scale", "rotate", "hidden", "z",
+         "rotateX", "rotateY", "fixed", "sound")
 
 
 class Params(dict):

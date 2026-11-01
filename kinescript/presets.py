@@ -1,7 +1,9 @@
 """Enter/exit motions. "enter": "rise", "rise+blur", or {"name": "pop", "dur": 0.4, "ease": "outBack"}.
 
 Each preset maps progress p (0 = absent, 1 = fully present) onto modifiers that the
-renderer composes with the layer's own properties.
+renderer composes with the layer's own properties. Emphasis motions play in the middle of a
+layer's life instead: "emphasis": [{"name": "pulse", "at": 1.2, "repeat": 2}], each cycle
+starting and ending at rest.
 """
 from __future__ import annotations
 
@@ -305,9 +307,165 @@ def turns(n: int, order: str = "start", seed: int = 0) -> list[float]:
 
 # Motion options that are numbers, and what each one is.
 NUMBERS = {"dur": "seconds, 0 or more", "stagger": "seconds between units, 0 or more", "dist": "px moved",
-           "amount": "px (blur, track, whip), a scale step (snap) or how far squash flattens", "deg": "degrees",
+           "amount": "px (blur, track, whip), a scale step (snap, pulse, heartbeat, wobble, tada), how far squash "
+                     "flattens or how far flash dims", "deg": "degrees",
            "from": "the start scale", "bounces": "a whole number from 0 to 20",
            "count": "a whole number from 1 to 100"}
+
+
+# ---- emphasis: each maps u, how far through one cycle (0..1), onto modifiers that are at rest at both ends
+
+def _beat(u: float, a: float, b: float) -> float:
+    """A swell from a to b: 0 outside them, 1 half way, still at both ends."""
+    return math.sin(math.pi * (u - a) / (b - a)) ** 2 if a <= u < b else 0.0
+
+
+def _pulse(u, o):
+    return Mods(scale=1 + o.get("amount", 0.12) * _beat(u, 0, 1))
+
+
+def _heartbeat(u, o):
+    return Mods(scale=1 + o.get("amount", 0.15) * (_beat(u, 0, 0.28) + 0.6 * _beat(u, 0.28, 0.56)))
+
+
+def _shake(u, o):
+    return Mods(dx=o.get("dist", 12) * math.sin(8 * math.pi * u) * (1 - u))
+
+
+def _wiggle(u, o):
+    return Mods(rotate=o.get("deg", 8) * math.sin(6 * math.pi * u) * (1 - u))
+
+
+def _wobble(u, o):
+    w = o.get("amount", 0.15) * math.sin(4 * math.pi * u) * (1 - u)  # a jelly: wide and short, then narrow and tall
+    return Mods(sx=1 + w, sy=1 - w)
+
+
+def _float(u, o):
+    return Mods(dy=-o.get("dist", 10) * (1 - math.cos(2 * math.pi * u)) / 2, rotate=o.get("deg", 2) * math.sin(
+        2 * math.pi * u))
+
+
+def _bob(u, o):
+    return Mods(dy=-o.get("dist", 14) * math.sin(math.pi * u))
+
+
+def _flash(u, o):
+    return Mods(alpha=1 - o.get("amount", 1.0) * (1 - math.cos(4 * math.pi * u)) / 2)
+
+
+def _tada(u, o):
+    """Smaller and turned back a little, then larger and rocking, then at rest."""
+    a, deg = o.get("amount", 0.1), o.get("deg", 4)
+    if u < 0.2:
+        s = math.sin(math.pi * u / 0.2)
+        return Mods(scale=1 - a * s, rotate=-deg * s)
+    s = math.sin(math.pi * (u - 0.2) / 0.8)
+    return Mods(scale=1 + a * s, rotate=deg * math.sin(10 * math.pi * (u - 0.2) / 0.8) * s)
+
+
+def _turn(u, o):
+    return Mods(rotate=o.get("deg", 360) * u)
+
+
+EMPHASES = {"pulse": _pulse, "heartbeat": _heartbeat, "shake": _shake, "wiggle": _wiggle, "wobble": _wobble,
+            "float": _float, "bob": _bob, "flash": _flash, "tada": _tada, "spin": _turn}
+# One cycle's seconds unless given a dur.
+EMPHASIS_DUR = {"pulse": 0.5, "heartbeat": 0.9, "shake": 0.6, "wiggle": 0.6, "wobble": 0.8, "float": 3.0, "bob": 0.6,
+                "flash": 0.8, "tada": 1.0, "spin": 1.0}
+# Names other tools use for them. Keys are lower case without dashes.
+EMPHASIS_ALIASES = {"throb": "pulse", "breathe": "pulse", "grow": "pulse", "beat": "heartbeat", "heart": "heartbeat",
+                    "jiggle": "wiggle", "rock": "wiggle", "jello": "wobble", "jelly": "wobble",
+                    "rubberband": "wobble", "hover": "float", "drift": "float", "hop": "bob", "bounce": "bob",
+                    "blink": "flash", "headshake": "shake", "vibrate": "shake", "rotate": "spin", "turn": "spin",
+                    "celebrate": "tada"}
+EMPHASIS_KEYS = ("name", "at", "dur", "repeat", "loop", "ease", "stagger", "order", "seed")
+
+
+def canonical_emphasis(name: str) -> str | None:
+    """'headShake' -> 'shake', 'heart-beat' -> 'heartbeat'; None when nothing fits."""
+    s = re.sub(r"[-_ ]", "", str(name).strip().lower())
+    return s if s in EMPHASES else EMPHASIS_ALIASES.get(s)
+
+
+@dataclass
+class Emphasis:
+    names: list[str]
+    at: float = 0.0          # seconds into the layer when it starts
+    dur: float = 0.5         # one cycle
+    repeat: float = 1.0      # cycles, inf with loop
+    ease: str = ""
+    stagger: float = 0.0     # on a split text, each unit this long after the one before
+    opts: dict = field(default_factory=dict)
+    order: str = "start"
+    seed: int = 0
+
+    @property
+    def end(self) -> float:
+        return self.at + self.dur * self.repeat
+
+    def mods(self, t: float) -> Mods:
+        """Its modifiers t seconds into the layer: none before it starts or after its last cycle."""
+        k = (t - self.at) / self.dur
+        if not 0 < k < self.repeat:
+            return IDENT
+        u = k - math.floor(k)
+        out = IDENT
+        for n in self.names:
+            e = E.get(self.ease or ("inOutCubic" if n == "spin" and self.repeat != math.inf else "linear"))
+            out = out.combine(EMPHASES[n](e(u), self.opts))
+        return out
+
+
+def emphasis_problem(key: str, v) -> str | None:
+    """Why an emphasis entry's value cannot be used, or None."""
+    try:
+        num = isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+    except OverflowError:  # an int past the float range
+        num = False
+    if key == "dur" and v is not None and not (num and v > 0):
+        return f"dur is {v!r}; it takes the seconds one cycle lasts, more than 0"
+    if key == "at" and v is not None and not (num and v >= 0):
+        return f"at is {v!r}; it takes the seconds after the layer starts, 0 or more"
+    if key == "repeat" and v is not None and not (num and v > 0):
+        return f"repeat is {v!r}; it takes how many cycles to play, more than 0"
+    if key == "loop" and v is not None and not isinstance(v, bool):
+        return f"loop is {v!r}; it takes true (play until the layer ends) or false"
+    return None if key in ("dur", "at", "repeat", "loop") else option_problem(key, v)
+
+
+def parse_emphasis(spec) -> list[Emphasis]:
+    """"pulse", {"name": "pulse", "at": 1.2, "repeat": 2}, or a list of them."""
+    if not spec:
+        return []
+    out = []
+    for k, item in enumerate(spec if isinstance(spec, list) else [spec]):
+        where = f"emphasis[{k}]" if isinstance(spec, list) else "emphasis"
+        if isinstance(item, str):
+            item = {"name": item}
+        if not isinstance(item, dict):
+            raise ValueError(f"{where} must be a name like \"pulse\" or an object "
+                             f"{{\"name\": \"pulse\", \"at\": 1.2}}, got {item!r}")
+        names = []
+        for n in (n.strip() for n in str(item.get("name", "pulse")).split("+") if n.strip()):
+            c = canonical_emphasis(n)
+            if c is None:
+                from .schema import unknown
+                raise ValueError(f"{where}: " + unknown("emphasis", n, EMPHASES))
+            names.append(c)
+        for key, v in item.items():
+            why = emphasis_problem(key, v)
+            if why:
+                raise ValueError(f"{where}: {why}")
+        dur = item.get("dur")
+        if dur is None:
+            dur = max(EMPHASIS_DUR[n] for n in names) if names else 0.5
+        opts = {key: v for key, v in item.items() if key not in EMPHASIS_KEYS and v is not None}
+        out.append(Emphasis(names, float(item.get("at") or 0), float(dur),
+                            math.inf if item.get("loop") is True else float(item.get("repeat") or 1),
+                            item.get("ease") or "", float(item.get("stagger") or 0), opts,
+                            item.get("order") or "start", int(item.get("seed") or 0)))
+    return out
 
 
 def option_problem(key: str, v) -> str | None:

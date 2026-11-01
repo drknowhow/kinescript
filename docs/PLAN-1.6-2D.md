@@ -309,6 +309,11 @@ Status (2026-11-01): moves to 1.6.1 (decision 1).
 - `emphasis`: motions in the middle of a layer's life, `[{"name": "pulse", "at": 1.2, "dur": 0.4, "repeat": 2}]`, or
   `"loop": true` for idle ones. Names: `pulse`, `shake`, `wiggle`, `wobble`, `float`, `bob`, `heartbeat`, `flash`,
   `tada`, `spin`. They use the same `Mods` as enter and exit, so they combine with them.
+  Status (2026-11-01): in its own PR, with `emphasis.json`. `emphasis` takes a name, an object or a list; `repeat` may
+  be fractional, and each cycle starts and ends at rest so repeats and loops join without a jump. `stagger` on a split
+  text plays it unit by unit as a wave, with `order` and `seed` as for enter. `late-emphasis` warns of one that starts
+  after its layer ends. The picture cache waits for a group's emphases to end; a loop keeps the group drawn layer by
+  layer.
 - Sequence transitions: `iris`, `push` (both clips move), `whip`, `luma` (wipe by a gradient's or an image's
   brightness, with `soft`) and `glitch`.
 - Optional, if the phase has room: chart components `bar-chart`, `line-chart` and `pie-chart`, built from today's

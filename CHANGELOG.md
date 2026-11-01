@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- `emphasis`: motions in the middle of a layer's life, each cycle starting and ending at rest. `"emphasis": "pulse"`
+  plays one cycle as the layer starts; `[{"name": "shake", "at": 1.4, "repeat": 2}, {"name": "float", "loop": true}]`
+  plays two shakes 1.4 s in and floats until the layer ends. The ten are `pulse`, `heartbeat`, `shake`, `wiggle`,
+  `wobble`, `float`, `bob`, `flash`, `tada` and `spin`, with `dist`, `amount` and `deg` as for enter and exit. They
+  combine with each other and with enter and exit, and with `stagger` on a split text each unit plays in turn, as a
+  wave. `kine check` names an unknown one with the closest, a dur, at or repeat it cannot use, and one that starts
+  after its layer ends (`late-emphasis`). A group that holds still is drawn from a picture once its layers'
+  emphases end. `examples/emphasis.json` plays all ten.
+- `kine check` read text turned near 90 degrees as tiny (`tiny-text`): it took the text's scale from the matrix's
+  diagonal, which a turn empties, rather than from its determinant.
+- `examples/motions.json` lays its cards out from their middles, as was meant, instead of from their top left
+  corners, which pushed the grid to the right.
 - Twelve enter and exit motions. `land` drops in from above and bounces, each bounce a quarter as high (`bounces`
   [3], `dist` [160]); `squash` does too, long as it falls and flat as it lands, with its bottom edge on the ground
   (`amount` [0.35] is how far it flattens). `elastic` grows in with a springy overshoot, `swing` hangs from its top
