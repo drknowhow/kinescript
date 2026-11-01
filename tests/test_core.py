@@ -786,6 +786,21 @@ def test_a_stage_blurs_each_pixel_by_its_own_depth():
     assert _frame(_focus_stage({"aperture": 0}), 0).tobytes() == flat.tobytes()
 
 
+@pytest.mark.parametrize("backend", ["cpu", "gpu"])
+def test_a_smaller_render_blurs_as_much_of_the_picture(backend):
+    """At --scale 0.5 (a draft, or kine look's small frames) a stage is blurred by half as many px: the frame is
+    the full one made smaller, not one twice as blurred."""
+    spec = _focus_stage({"aperture": 25, "focus": "back"})
+    try:
+        full = Renderer(k.Scene(spec), backend=backend).frame(0)[..., :3].astype(float)
+    except RuntimeError:
+        pytest.skip("no GPU")
+    half = Renderer(k.Scene(spec), backend=backend, scale=0.5).frame(0)[..., :3].astype(float)
+    small = full.reshape(90, 2, 160, 2, 3).mean((1, 3))
+    rows = slice(30, 60)  # across both cubes, the front one blurred
+    assert np.abs(half[rows] - small[rows]).mean() < 3  # 20 when the blur was not made smaller
+
+
 def test_gpu_and_cpu_agree_on_depth_of_field():
     for spec in (_focus_stage({"aperture": 25, "focus": "front"}), dict(scene(CARDS, bg="#000000"),
                                                                        camera={"aperture": 20})):
