@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- 3D text is shaped as a text layer is: Arabic letters join, marks sit on their letters and right-to-left runs
+  read right to left. A line that needs none of this is built as before. `letterSpacing` still draws each
+  character on its own, unshaped, and colour emoji have no outline, so 3D text leaves them out; `unshaped-3d-text`
+  now warns about those two only.
 - New model shapes. A cube takes `r` (or `radius`) and rounds its edges and corners. `capsule` is a cylinder with
   round ends (`r`, and `h` end to end). `lathe` turns a `profile`, `[[r, y], ...]` points or path data, round the
   vertical axis: vases, cups, bottles. `tube` runs a round tube of radius `r` along SVG path data `d`, with round
