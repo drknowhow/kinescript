@@ -1166,14 +1166,35 @@ def _structure(raw: dict, t: str, rep: Report, lid):
                         "{\"start\": 0.5, \"end\": 2, \"text\": \"...\"}, in seconds",
                         "\"cues\": [[0, 1.5, \"Hello\"]]")
                 break
-    if t == "path" and raw.get("d") is not None and not isinstance(raw["d"], str):
-        rep.add("error", "bad-value", lid, f"d is {raw['d']!r}; it is an SVG path like \"M0 0 L100 0\"")
+    if t == "path" and _keyframes(raw.get("d")):
+        _morph(raw["d"], rep, lid)
+    elif t == "path" and raw.get("d") is not None and not isinstance(raw["d"], str):
+        rep.add("error", "bad-value", lid, f"d is {_show(raw['d'])}; it is an SVG path like \"M0 0 L100 0\", or "
+                "keyframes of paths to morph through", '"d": [[0, "M0 0 L100 0 L50 90 Z"], [1, "M50 0 A50 50 0 1 1 '
+                '49.9 0 Z"]]')
     pts = raw.get("points")
     if t in ("path", "line") and pts is not None and not (
             isinstance(pts, list) and all(isinstance(p, (list, tuple)) and len(p) == 2 and all(map(_number, p))
                                           for p in pts)):
         rep.add("error", "bad-value", lid, "points must be a list of [x, y] number pairs",
                 "\"points\": [[0, 0], [100, 50]]")
+
+
+def _morph(keys: list, rep: Report, lid):
+    """d as keyframes of paths: each key's path, its time and ease, and whether the keys have as many shapes."""
+    _prop("d", keys, rep, lid)  # the times and eases
+    counts = []
+    for j, key in enumerate(keys, 1):
+        if isinstance(key[1], str):
+            _path_data(key[1], f"d at keyframe {j}", rep, lid)
+            counts.append(len(re.findall(r"[Mm]", key[1])))
+        else:
+            rep.add("error", "bad-value", lid, f"d at keyframe {j} is {_show(key[1])}; it is SVG path data like "
+                    '"M0 0 L100 0 L50 90 Z"')
+    if len(set(counts)) > 1:
+        rep.add("info", "morph-contours", lid, f"d's keys are drawn in {' and '.join(map(str, sorted(set(counts))))} "
+                "pieces: a piece with no partner grows from, or shrinks into, the middle of the nearest one",
+                "give each key as many pieces (M commands) to pair them as you want")
 
 
 def _effects(raw: dict, rep: Report, lid):

@@ -57,6 +57,15 @@
   shaders, models, captions), a combine with too few children, and a stroke on a group without `combine`. The
   `combine-60` stress scene (60 badges with a word cut out, 30 with a hole moving through them as well) draws a
   1080p frame in 5.9 ms on the GPU, 4.0 ms more than the same layers drawn as themselves.
+- A path's `d` takes keyframes and morphs through them, any path into any other:
+  `"d": [[0, "M0 0 L100 0 L50 90 Z"], [1, "M50 0 A50 50 0 1 1 49.9 0 Z"]]`. Each piece of one key pairs with
+  the piece of its size in the next, both resampled by length to the same number of points, and starts where its
+  points move least; a piece with no partner grows from, or shrinks into, the middle of the nearest one. Each key
+  is drawn as written on its own time, and a pair is matched once, so a frame between keys is one interpolation.
+  An ease that overshoots carries the shape on past the key. `kine check` notes (`morph-contours`) keys drawn in
+  different numbers of pieces. The `morph-200` stress scene (200 paths morphing triangle, circle, star and back)
+  draws a 1080p frame in 2.2 ms on the GPU, 1.0 ms more than the same paths standing still; matching its 600
+  pairs takes 0.7 s once.
 - `kine check` warns `strobe` where a layer moves more than 40 px a frame at 1080p for five frames running in a
   scene without motion blur, where the eye sees separate copies instead of one moving thing.
 - 2D frames cost less Python: keyframes find their segment by bisection, expressions compile once to a function,

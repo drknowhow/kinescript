@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 
 from . import color as C
-from . import components, media, models, schema
+from . import components, media, models, schema, svgpath
 from . import presets as P
 from . import voice as V
 from . import words as W
@@ -70,7 +70,7 @@ def _where(owner, message: str) -> str:
 class Layer:
     __slots__ = ("id", "type", "raw", "t_in", "t_out", "props", "enter", "exit", "children", "parent",
                  "index", "src", "video", "ahead", "ctx", "parts", "copies", "xf", "along", "turn", "clock",
-                 "rough")
+                 "rough", "morph")
 
     def __init__(self, lid: str, ltype: str, raw: dict, parent: "Layer | None", index: int):
         self.id, self.type, self.raw, self.parent, self.index = lid, ltype, raw, parent, index
@@ -91,6 +91,7 @@ class Layer:
         self.turn: float | None = None  # seconds after its group starts that the group's staggered enter reaches it
         self.clock: tuple[float, float] | None = None  # a group's speed and loop for its children (timeRemap in props)
         self.rough: tuple[float, float, int, float] | None = None  # rough's amount, length, seed and boil
+        self.morph: list | None = None  # a path's d keyframes, parsed; props["morph"] is how far through them it is
 
     @property
     def dur(self) -> float:
@@ -762,6 +763,10 @@ class Scene:
                                    for p in raw.get("parts") or [] if isinstance(p, dict)]
                     if isinstance(raw.get("repeat"), dict):
                         layer.copies = Copies(raw["repeat"], pctx)
+                d = raw.get("d")
+                if ltype == "path" and isinstance(d, list) and d:  # morphing: its key, eased, as a number
+                    layer.morph = [svgpath.parse(k[1]) for k in d]
+                    layer.props["morph"] = compile_prop("morph", [[k[0], j, *k[2:]] for j, k in enumerate(d)], pctx)
                 rough = raw.get("rough")
                 if isinstance(rough, dict):  # amount, length, seed, boil
                     layer.rough = (float(rough.get("amount", 3)), float(rough.get("length", 12)),
