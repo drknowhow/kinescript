@@ -305,6 +305,35 @@ def test_sweep_and_angle_gradients_load_and_an_angle_beside_points_is_ignored():
     assert w and "angle is ignored" in w[0]["message"], w
 
 
+LINE = {"id": "l", "type": "line", "points": [[0, 0], [100, 40], [200, 0]]}
+
+
+@pytest.mark.parametrize("layer, words", [
+    (dict(LINE, dash=[]), "dash is"),
+    (dict(LINE, dash=[0, 0]), "dash is"),
+    (dict(LINE, dash=[8, -2]), "dash is"),
+    (dict(LINE, dash="8 4"), "dash is"),
+    (dict(LINE, corner=-3), "corner is -3"),
+    (rect(radius=[4, 4, 4]), "radius is"),
+    (rect(radius=[4, 4, 4, -4]), "radius is"),
+    (rect(radius=[[0, [0, 0, 0, 0]], [1, [8, 8]]]), "radius at keyframe 2"),
+])
+def test_dash_corner_and_four_corner_radius_are_checked(layer, words):
+    assert words in one_error(scene([layer]))["message"]
+
+
+def test_dash_and_corner_warn_where_they_do_nothing_and_their_svg_names_are_read():
+    for layer, words in ((rect(dash=[8, 4]), "has none"), (dict(LINE, dashOffset=4), "no dash"),
+                         (dict(LINE, corner=12, smooth=True), "smooth leaves none")):
+        w = warnings(scene([layer]), "ignored-key")
+        assert w and words in w[0]["message"], (layer, w)
+    issues, s = load(scene([dict(LINE, strokeDasharray=[8, 4], strokeDashoffset=2), rect(corner=6)]))
+    assert s is not None and {i["code"] for i in issues} == {"renamed-key"}, issues
+    assert s.by_id["l"].raw["dash"] == [8, 4] and s.by_id["r"].raw["radius"] == 6
+    errs, s = errors(scene([rect(radius=[12, 12, 0, 0], stroke="#fff", dash=[6, 3], dashOffset="=t*20")]))
+    assert s is not None and not errs, errs
+
+
 def test_null_values_mean_their_defaults():
     _, s = load(dict(scene([rect(fill=None, x=None, fx={"brightness": None}),
                             {"id": "t", "type": "text", "text": "a **b**", "emph": None}]),

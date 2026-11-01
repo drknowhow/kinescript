@@ -220,6 +220,47 @@ def test_a_gradient_animates_into_another():
     assert np.array_equal(_frame(spec, 15), mid)  # a pure function of the frame
 
 
+DASHED = {"id": "l", "type": "line", "points": [[20, 90], [300, 90]], "strokeWidth": 6, "cap": "butt",
+          "stroke": "#ffffff", "dash": [20, 20]}
+
+
+@pytest.mark.parametrize("extra, lit", [
+    ({}, (25, 105, 115)),
+    ({"dash": [20]}, (25, 105, 115)),  # an odd list repeats, as in SVG
+    ({"dashOffset": -10}, (45, 115)),  # the pattern 10 px further along
+    ({"drawStart": 0.25}, (105, 115)),  # the dashes stay where they lie on the whole line
+])
+def test_dash_marks_out_a_stroke_and_dash_offset_slides_it(extra, lit):
+    f = _frame(scene([dict(DASHED, **extra)], bg="#000000"), 0)
+    assert [x for x in (25, 45, 95, 105, 115) if f[90, x, 0] > 200] == list(lit)
+
+
+def test_a_dashed_arrow_keeps_its_head_whole():
+    arrow = {"id": "a", "type": "arrow", "x1": 40, "y1": 90, "x2": 280, "y2": 90, "strokeWidth": 4,
+             "stroke": "#ffffff", "head": 22, "dash": [6, 30]}
+    f = _frame(scene([arrow], bg="#000000"), 0)
+    assert f[95, 271, 0] > 200 and f[85, 271, 0] > 200  # 10 px down each side of the head, inside a gap of the dash
+
+
+def test_corner_rounds_a_paths_corners():
+    square = {"id": "p", "type": "path", "points": [[0, 0], [200, 0], [200, 120], [0, 120]], "closed": True,
+              "x": 60, "y": 30, "fill": "#ffffff"}
+    sharp, round_ = (_frame(scene([dict(square, **extra)], bg="#000000"), 0) for extra in ({}, {"corner": 30}))
+    assert sharp[31, 61, 0] > 200 and round_[31, 61, 0] < 20 and round_[90, 61, 0] > 200
+
+
+@pytest.mark.parametrize("layer", [
+    {"id": "r", "type": "rect", "x": 160, "y": 90, "w": 200, "h": 100, "fill": "#ffffff", "radius": [40, 0, 40, 0]},
+    {"id": "g", "type": "group", "x": 160, "y": 90, "w": 200, "h": 100, "anchor": "center", "fill": "#ffffff",
+     "radius": [40, 0, 40, 0], "children": []},
+    {"id": "r", "type": "rect", "x": 160, "y": 90, "w": 200, "h": 100, "fill": "#ffffff",
+     "radius": [[0, [0, 0, 0, 0]], [1, [40, 0, 40, 0], "linear"]]},
+])
+def test_radius_takes_four_corners(layer):
+    f = _frame(scene([layer], bg="#000000", duration=1), 29)
+    assert [f[y, x, 0] > 200 for y, x in ((41, 61), (41, 258), (138, 258), (138, 61))] == [False, True, False, True]
+
+
 def test_colour_keyframes_mix_in_oklab():
     p = compile_prop("fill", [[0, "#ff0000"], [1, "#0000ff", "linear"]], Ctx(10, 10, 30))
     mid = p.at(0.5, 1)

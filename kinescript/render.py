@@ -90,6 +90,17 @@ half4 main(float2 p) {
 BLUR_GPU = 16
 
 
+def _rrect(box, r) -> skia.RRect:
+    """box rounded by r: one radius, or four as CSS orders them, [top-left, top-right, bottom-right, bottom-left];
+    four that do not fit are scaled down together, as CSS scales them."""
+    rect = skia.Rect.MakeXYWH(*box)
+    if isinstance(r, (list, tuple)):
+        rr = skia.RRect()
+        rr.setRectRadii(rect, [skia.Point(max(0.0, float(v)), max(0.0, float(v))) for v in r])
+        return rr
+    return skia.RRect.MakeRectXY(rect, r, r)
+
+
 def _blur_sksl(n: int) -> str:
     adds = "".join(f"t += floor(float4(s{k}.eval(p)) * 255 + 0.5);" for k in range(n))
     return ("".join(f"uniform shader s{k};" for k in range(n))
@@ -1424,6 +1435,24 @@ class Renderer:
                 break
         return out
 
+    @staticmethod
+    def _dash(L: Layer, g, paint: skia.Paint, path: skia.Path | None = None, start: float = 0.0):
+        """Mark out paint's stroke in L's dash, slid back along it by dashOffset as SVG slides one. A stroke that
+        starts `start` of the way along `path` keeps its dashes where they lie on the whole path."""
+        on = [float(d) for d in L.raw["dash"]]
+        if len(on) % 2:  # an odd list repeats, as in SVG
+            on += on
+        phase = float(g("dashOffset", 0.0))
+        if start > 0 and path is not None:
+            phase += start * skia.PathMeasure(path, False).getLength()
+        paint.setPathEffect(skia.DashPathEffect.Make(on, phase % sum(on)))
+
+    @staticmethod
+    def _radius(g):
+        """radius as one number, or as the list of four corners it may be."""
+        r = g("radius", 0)
+        return [float(v) for v in r] if isinstance(r, (list, tuple)) else float(r)
+
     def _note_ink(self, c, path: skia.Path, paint: skia.Paint):
         """For boxes (track): add the device bounds of `path` stroked with `paint` to the layer's box."""
         if not self.track:
@@ -1451,31 +1480,32 @@ class Renderer:
         if sp is not None:
             self._note_ink(c, path, sp)  # the whole stroke, as the box is the whole shape while it draws on
             if amt > 0.0005:
-                c.drawPath(self._trim(path, amt, float(g("drawStart", 0.0))), sp)
+                start = float(g("drawStart", 0.0))
+                if "dash" in L.raw:
+                    self._dash(L, g, sp, path, start)
+                c.drawPath(self._trim(path, amt, start), sp)
 
     # ---- layer types ----------------------------------------------------------------------
     def _draw_group(self, c, L, t, T, g, box, reveal, mods):
         if box is not None and L.raw.get("clip"):
-            r = float(g("radius", 0))
-            rr = skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(*box), r, r)
-            c.clipRRect(rr, doAntiAlias=True)
+            c.clipRRect(_rrect(box, self._radius(g)), doAntiAlias=True)
         fp = self._fill_paint(L, g, box) if box is not None else None
         if fp is not None:
-            r = float(g("radius", 0))
-            c.drawRRect(skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(*box), r, r), fp)
+            c.drawRRect(_rrect(box, self._radius(g)), fp)
 
     def _draw_rect(self, c, L, t, T, g, box, reveal, mods):
         bx, by, bw, bh = box
-        r = min(float(g("radius", 0)), bw / 2, bh / 2)
+        r = self._radius(g)
+        r = r if isinstance(r, list) else min(r, bw / 2, bh / 2)
         dim = float(g("dimOutside", 0))
         if dim > 0:
             hole = skia.Path()
             hole.addRect(skia.Rect(-40000, -40000, 40000, 40000))
-            hole.addRRect(skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(*box), r, r))
+            hole.addRRect(_rrect(box, r))
             hole.setFillType(skia.PathFillType.kEvenOdd)
             c.drawPath(hole, skia.Paint(AntiAlias=True, Color=_argb("#000000", dim * reveal)))
         path = skia.Path()
-        path.addRRect(skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(*box), r, r))
+        path.addRRect(_rrect(box, r))
         self._shape(c, L, g, path, box, reveal)
 
     def _draw_circle(self, c, L, t, T, g, box, reveal, mods):
@@ -1529,9 +1559,10 @@ class Renderer:
     def _path(self, L: Layer, t, T, g) -> skia.Path:
         ty = L.type
         static = all(L.props[k].static for k in ("x1", "y1", "x2", "y2", "bend", "r", "sides", "inner") if k in L.props)
-        key = L.id
+        rounds = "corner" in L.props and not L.props["corner"].static  # a corner that changes: kept unrounded
+        key = (L.id, "unrounded") if rounds else L.id
         if static and key in self._paths:
-            return self._paths[key]
+            return self._corner(self._paths[key], g) if rounds else self._paths[key]
         p = skia.Path()
         if ty == "path" and L.raw.get("d"):
             p = svgpath.parse(L.raw["d"])
@@ -1571,9 +1602,24 @@ class Renderer:
             for q in pts[1:]:
                 p.lineTo(*q)
             p.close()
+        if static and rounds:
+            self._paths[key] = p
+            return self._corner(p, g)
+        if "corner" in L.props:
+            p = self._corner(p, g)
         if static:
             self._paths[key] = p
         return p
+
+    @staticmethod
+    def _corner(p: skia.Path, g) -> skia.Path:
+        """p with every corner rounded by corner px, so draw and a rider on it follow the rounded line."""
+        corner = float(g("corner", 0))
+        if corner <= 0:
+            return p
+        out = skia.Path()
+        skia.Paint(PathEffect=skia.CornerPathEffect.Make(corner)).getFillPath(p, out)
+        return out
 
     def _draw_path(self, c, L, t, T, g, box, reveal, mods):
         path = self._path(L, t, T, g)
@@ -1619,7 +1665,11 @@ class Renderer:
                 self._note_ink(c, full, sp)
         if amt <= 0.0005:
             return
-        c.drawPath(self._trim(path, amt), sp)
+        shaft = sp
+        if "dash" in L.raw:  # the head stays whole
+            shaft = skia.Paint(sp)
+            self._dash(L, g, shaft)
+        c.drawPath(self._trim(path, amt), shaft)
         hp = head_at(amt)
         if hp is not None:
             c.drawPath(hp, sp)
@@ -1637,10 +1687,10 @@ class Renderer:
         if "focusY" in L.props:
             fy = float(g("focusY"))
         fit = L.raw.get("fit", "cover")
-        r = float(g("radius", 0))
+        r = self._radius(g)
         c.save()
         if zoom != 1 or r or fit == "cover":
-            c.clipRRect(skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(*box), r, r), doAntiAlias=True)
+            c.clipRRect(_rrect(box, r), doAntiAlias=True)
         if fit == "stretch" or L.type == "video":
             cw, ch = bw, bh
         else:
@@ -1656,11 +1706,13 @@ class Renderer:
         c.restore()
         sp = self._stroke_paint(L, g, box)
         if sp:
-            rr = skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(*box), r, r)
+            rr = _rrect(box, r)
             if self.track:
                 edge = skia.Path()
                 edge.addRRect(rr)
                 self._note_ink(c, edge, sp)
+            if "dash" in L.raw:
+                self._dash(L, g, sp)
             c.drawRRect(rr, sp)
 
     def _draw_video(self, c, L, t, T, g, box, reveal, mods):
