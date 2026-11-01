@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `examples/product.json`: a glTF can turning on a table under a studio light and environment, its shadow on the
+  table and two more cans out of focus behind it. `examples/make_media.py` writes the can, `can.glb`, with its label
+  as a texture inside the file.
 - A textured model of several materials draws each pass in one draw call. It used to make one call for each run of
   a material in the depth sort, converting every vertex of the model each time; where the materials take turns,
   as on a glTF can whose label and steel alternate down its side, that was 15,000 calls and 48 s a frame on the

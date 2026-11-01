@@ -277,6 +277,10 @@ nine rounds: a floor reaching to just in front of the camera took eight.
   `slow-depth-of-field`.
 - Examples: `stage.json`, `product.json` (a textured glTF turntable under world lights with `env`, depth of field
   and a floor that takes its shadow), `character.json`, `cubes.json`.
+  `product.json` is built on branch `product-example`, not merged: `examples/make_media.py` writes `can.glb`, a can
+  whose body takes `label.png` as an embedded base colour texture, under a steel lid, rim and ring pull. It turns on
+  a table in a stage with shadows and depth of field, two more cans out of focus behind it. 180 frames render in
+  16.0 s on the GPU (6 workers). `character.json` and `cubes.json` wait for Phase 5.
 - README 3D section and its limitations line, `kine docs`, site/, CHANGELOG with measured numbers, version 1.5.0.
   A 3D shot in the launch video is optional and means re-measuring the promo.
 

@@ -1,4 +1,4 @@
-"""Generate the sample footage, music, voice and model the examples use (no third-party media)."""
+"""Generate the sample footage, music, voice, images and models the examples use (no third-party media)."""
 import json
 import math
 import struct
@@ -156,3 +156,59 @@ def textures():
 
 
 textures()
+
+
+def can(path: Path):
+    """A drinks can as a glTF binary for examples/product.json: the body's base colour texture is label.png,
+    embedded in the file and read through TEXCOORD_0, under a steel lid with a rolled rim and a ring pull."""
+    blob, views, accessors = bytearray(), [], []
+
+    def view(b: bytes, target=None) -> int:
+        views.append(dict({"buffer": 0, "byteOffset": len(blob), "byteLength": len(b)},
+                          **({"target": target} if target else {})))
+        blob.extend(b + b"\0" * (-len(b) % 4))
+        return len(views) - 1
+
+    def add(arr, ctype, kind, target):
+        acc = {"bufferView": view(arr.tobytes(), target), "componentType": ctype, "count": len(arr), "type": kind}
+        if kind == "VEC3":
+            acc.update(min=arr.min(0).tolist(), max=arr.max(0).tolist())
+        accessors.append(acc)
+        return len(accessors) - 1
+
+    def prim(shape, material, detail, tube=0.35, uv=False):
+        m = mesh.unit(shape, detail, tube)  # y down; files are y up with faces wound the other way
+        attrs = {"POSITION": add((m.P * (1, -1, 1)).astype("<f4"), 5126, "VEC3", 34962),
+                 "NORMAL": add((m.N * (1, -1, 1)).astype("<f4"), 5126, "VEC3", 34962)}
+        if uv:  # glTF coordinates, like the mesh's, run right and down across the image
+            attrs["TEXCOORD_0"] = add(m.U.astype("<f4"), 5126, "VEC2", 34962)
+        return {"name": shape, "primitives": [{"attributes": attrs, "material": material,
+                                               "indices": add(m.T[:, [0, 2, 1]].astype("<u2").ravel(), 5123,
+                                                              "SCALAR", 34963)}]}
+
+    meshes = [prim("cylinder", 0, "high", uv=True), prim("cylinder", 1, "medium"), prim("torus", 1, "medium", 0.08),
+              prim("torus", 1, "low", 0.25)]
+    flat = [math.sqrt(0.5), 0, 0, math.sqrt(0.5)]  # a torus laid flat round the can's axis
+    nodes = [{"name": "can", "children": [1, 2, 3, 4]},
+             {"name": "body", "mesh": 0, "scale": [33, 120, 33]},
+             {"name": "lid", "mesh": 1, "translation": [0, 61, 0], "scale": [31, 2, 31]},
+             {"name": "top rim", "mesh": 2, "translation": [0, 61, 0], "rotation": flat, "scale": [31.5, 31.5, 31.5]},
+             {"name": "ring pull", "mesh": 3, "translation": [0, 62.6, 10], "rotation": flat, "scale": [7, 7, 2]}]
+    image = view((out / "label.png").read_bytes())
+    doc = {"asset": {"version": "2.0", "generator": "kinescript examples/make_media.py"}, "scene": 0,
+           "scenes": [{"nodes": [0]}], "nodes": nodes, "meshes": meshes,
+           "materials": [{"name": "label", "pbrMetallicRoughness": {"baseColorTexture": {"index": 0},
+                                                                    "metallicFactor": 0.0, "roughnessFactor": 0.3}},
+                         {"name": "steel", "pbrMetallicRoughness": {"baseColorFactor": [0.6, 0.62, 0.66, 1.0],
+                                                                    "metallicFactor": 1.0, "roughnessFactor": 0.25}}],
+           "textures": [{"source": 0, "sampler": 0}], "samplers": [{}],
+           "images": [{"bufferView": image, "mimeType": "image/png"}],
+           "accessors": accessors, "bufferViews": views, "buffers": [{"byteLength": len(blob)}]}
+    js = json.dumps(doc).encode()
+    js += b" " * (-len(js) % 4)
+    body = struct.pack("<II", len(js), 0x4E4F534A) + js + struct.pack("<II", len(blob), 0x004E4942) + bytes(blob)
+    path.write_bytes(b"glTF" + struct.pack("<II", 2, 12 + len(body)) + body)
+    print("wrote", path)
+
+
+can(out / "can.glb")
