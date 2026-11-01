@@ -126,6 +126,16 @@ KEYS EVERY LAYER HAS
                  "temperature": 0, "tint": 0, "gray": 0, "invert": 0}. brightness adds to every
                 channel (-1..1), so below 0 dark footage turns black; exposure is in stops and
                 multiplies (-1 halves the light), which is the way to darken footage.
+  glow          a blurred copy behind the layer: {"color": "#ff633f", "size": 24, "amount": 1}.
+                No color: the layer's own colours. amount above 1 brightens it. "glow": 24 is the size.
+  outline       a line round the layer's edge, outside it: {"width": 4, "color": "#000000"}
+  innerShadow   a shadow inside the layer's edge: {"x": 0, "y": 4, "blur": 12, "color": "#00000080"}
+  displace      waves that warp the layer: {"amount": 8, "scale": 60, "speed": 1, "seed": 0}. amount is
+                how far in px, scale the size of the waves, speed how many waves a second they slide.
+                The sizes of all four (glow size and amount, outline width, innerShadow x, y and
+                blur, displace amount) animate like any key; each draws the layer offscreen, as blur does.
+                On a model, glow and outline keep their 3D meanings (its material's glow, its edges):
+                put the model in a group to glow or outline it.
   enter, exit   a motion (see ENTER AND EXIT)
   hidden        true skips the layer (and its sound)
   sound         a file played when the layer starts, timed by the layer (see SOUND)

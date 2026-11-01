@@ -23,7 +23,8 @@ STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "children", "laye
           "allowOffscreen", "style", "audio", "shadow", "box", "fx", "fill", "stroke", "emph", "active",
           "sksl", "preset", "uniforms", "caret", "case", "italic", "smooth", "closed", "focus", "use",
           "backface", "fixed", "sort", "shape", "detail", "parts", "light", "span", "sound", "voice",
-          "fadeIn", "fadeOut", "sequence", "animation", "repeat", "profile", "along", "dash", "rough", "mask"}
+          "fadeIn", "fadeOut", "sequence", "animation", "repeat", "profile", "along", "dash", "rough", "mask",
+          "glow", "outline", "innerShadow", "displace"}
 PART_STRUCT = {"shape", "texture", "text", "font", "d", "italic", "profile"}  # a part's keys that never animate
 # Property defaults by name; everything not listed defaults to None.
 DEFAULTS = {"x": 0.0, "y": 0.0, "opacity": 1.0, "scale": 1.0, "scaleX": 1.0, "scaleY": 1.0, "rotate": 0.0,
@@ -70,7 +71,7 @@ def _where(owner, message: str) -> str:
 class Layer:
     __slots__ = ("id", "type", "raw", "t_in", "t_out", "props", "enter", "exit", "children", "parent",
                  "index", "src", "video", "ahead", "ctx", "parts", "copies", "xf", "along", "turn", "clock",
-                 "rough", "morph", "mask")
+                 "rough", "morph", "mask", "looks", "warp")
 
     def __init__(self, lid: str, ltype: str, raw: dict, parent: "Layer | None", index: int):
         self.id, self.type, self.raw, self.parent, self.index = lid, ltype, raw, parent, index
@@ -93,6 +94,8 @@ class Layer:
         self.rough: tuple[float, float, int, float] | None = None  # rough's amount, length, seed and boil
         self.morph: list | None = None  # a path's d keyframes, parsed; props["morph"] is how far through them it is
         self.mask: tuple["Layer", str, float] | None = None  # the layer that masks it, the mode and the feather in px
+        self.looks: dict | None = None  # its glow, outline and innerShadow; their sizes are props "glow size"
+        self.warp: dict | None = None  # its displace; its amount is the prop "displace amount"
 
     @property
     def dur(self) -> float:
@@ -793,7 +796,7 @@ class Scene:
                 for k, v in raw.items():
                     if k in schema.COLOR_KEYS and (not isinstance(v, dict) or "to" in v or "keys" in v):
                         layer.props[k] = compile_prop(k, v, pctx)  # a colour, or a tween of one; not a gradient
-                    elif k not in STRUCT:
+                    elif k not in STRUCT or (ltype == "model" and k in schema.MODEL_OWN):  # a model's glow animates
                         layer.props[k] = compile_prop(k, v, pctx)
                 if ltype == "model":
                     layer.parts = [{k: compile_prop(k, v, pctx) for k, v in p.items() if k not in PART_STRUCT}
@@ -804,6 +807,14 @@ class Scene:
                 if ltype == "path" and isinstance(d, list) and d:  # morphing: its key, eased, as a number
                     layer.morph = [svgpath.parse(k[1]) for k in d]
                     layer.props["morph"] = compile_prop("morph", [[k[0], j, *k[2:]] for j, k in enumerate(d)], pctx)
+                looks = {k: raw[k] for k in schema.LOOKS
+                         if isinstance(raw.get(k), dict) and not (ltype == "model" and k in schema.MODEL_OWN)}
+                for look, spec in looks.items():
+                    for k in schema.LOOKS[look][2]:
+                        if k in spec:
+                            layer.props[f"{look} {k}"] = compile_prop(f"{look} {k}", spec[k], pctx)
+                layer.warp = looks.pop("displace", None)
+                layer.looks = looks or None
                 rough = raw.get("rough")
                 if isinstance(rough, dict):  # amount, length, seed, boil
                     layer.rough = (float(rough.get("amount", 3)), float(rough.get("length", 12)),

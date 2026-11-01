@@ -191,6 +191,24 @@ def masks_50() -> dict:  # 50 masked layers: 25 gradient cards seen through word
     return _scene(out)
 
 
+def glow_text() -> dict:  # a glowing title over lines that glow, are outlined, shaded inside and displaced
+    out = [{"id": "title", "type": "text", "text": "GLOW", "x": "50%", "y": 260, "size": 220, "weight": 800,
+            "fill": "#ffe1d6", "glow": {"color": "#ff633f", "size": [[0, 16], [2, 48, "inOutSine"], [4, 16, "inOutSine"]]},
+            "outline": {"width": 3, "color": "#ff633f"}}]
+    for n in range(12):
+        x, y, kind = 330 + (n % 3) * 630, 520 + (n // 3) * 140, ("glow", "outline", "innerShadow", "displace")[n % 4]
+        layer = {"id": f"line{n}", "type": "text", "text": _sentence(n, 3).upper(), "x": x, "y": y, "size": 56,
+                 "weight": 800, "fill": "#e8ecf2"}
+        if kind == "innerShadow":
+            layer = {"id": f"card{n}", "type": "rect", "x": x, "y": y, "w": 520, "h": 100, "radius": 18,
+                     "fill": "#2b3240", "innerShadow": {"y": 6, "blur": 14, "color": "#000000c0"}}
+        else:
+            layer[kind] = {"glow": {"size": 20}, "outline": {"width": 4, "color": "#4a7dff"},
+                           "displace": {"amount": 6, "scale": 40, "speed": 1, "seed": n}}[kind]
+        out.append(layer)
+    return _scene(out)
+
+
 def counters() -> dict:
     return _scene([{"id": f"c{n}", "type": "counter", "x": 120 + (n % 10) * 180, "y": 80 + (n // 10) * 100,
                     "size": 40, "value": {"from": 0, "to": 10 ** (1 + n % 6), "dur": 3.5}, "format": "{:,.0f}"}
@@ -470,6 +488,8 @@ SCENES = {
     "combine-60": (combine_60, ".mp4", "60 badges with a word cut out, 30 with a hole moving through them too"),
     "morph-200": (morph_200, ".mp4", "200 paths morphing triangle, circle, star and back"),
     "masks-50": (masks_50, ".mp4", "50 masked cards: 25 seen through words, 25 through a moving lens"),
+    "glow-text": (glow_text, ".mp4", "a 220 px title glowing and outlined over 12 lines with glow, outline, inner "
+                                      "shadow or displace"),
     "shaders": (shaders, ".mp4", "4 full-frame SkSL presets blended, grain and vignette"),
     "uhd-4k": (uhd_4k, ".mp4", "3840x2160: shader, split text, stroke draw, shadow, grade"),
     "long-120s": (long_120s, ".mp4", "3600 frames: worker split, segment joins"),

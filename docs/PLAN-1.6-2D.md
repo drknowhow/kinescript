@@ -201,6 +201,16 @@ corner and 0.16 s in these (without feathers). On the GPU it draws in 5.4 ms, 3.
 is Skia's blur filter, which is slow on the CPU (15 ms for a 400x150 layer), as a layer's `blur` already is: the
 `slow-effects` rule covers both.
 
+Status (2026-11-01), effects: in their own PR. `displace` is not an image filter: Skia's DisplacementMap takes the
+nearest pixel, which left bent edges in steps, so the layer is drawn into an image and redrawn through a runtime
+shader that samples between pixels. `outline` is copies of the layer round circles instead of `Dilate`, which is
+square and took 135 ms a pass on the CPU for a 220 px word. All four draw in an offscreen layer only as large as what
+the layer draws: in a layer the size of the frame, which `blur` and `shadow` still use, the CPU took 16.5 s for a
+`glow-text` frame, against 0.31 s now. A glowing 220 px title adds 0.6 ms a 1080p frame on the GPU (target: under
+1 ms). A model keeps `glow` and `outline` as its material's glow and its edges. `blur` and `shadow` keep their
+frame-sized layers in 1.6, since bounding them changes pixels; the CPU blurs a 1080p layer in 380 ms, which
+`slow-effects` reports.
+
 ### Phase 4: many things at once
 
 - `repeat` on 2D layers (shapes, text, images, groups) with the model's keys plus `opacity` and `stroke`, through
