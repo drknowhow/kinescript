@@ -241,3 +241,52 @@ def test_a_model_inside_a_texture_group_is_drawn_on_the_texture():
         except RuntimeError:
             continue
         assert near(f[90, 160], RED, 24) and near(f[20, 90], (255, 255, 255))  # the ball in the middle, fill round
+
+
+@pytest.mark.parametrize("backend", ["cpu", "gpu"])
+def test_a_model_files_emission_is_added_to_its_light(tmp_path, backend):
+    """A black quad that gives off light: its emissiveFactor, then its emissiveTexture times that, then (with
+    textures off) the texture's mean; and the same from an .obj's Ke and map_Ke."""
+    png = open(quadrants(tmp_path / "q.png"), "rb").read()
+    P = [[-1, 1, 0], [1, 1, 0], [1, -1, 0], [-1, -1, 0]]
+    uv = [[0, 0], [1, 0], [1, 1], [0, 1]]
+
+    def quad(name, **mat):
+        mat = dict({"pbrMetallicRoughness": {"baseColorFactor": [0, 0, 0, 1], "metallicFactor": 0,
+                                             "roughnessFactor": 1}}, **mat)
+        src = write_gltf(tmp_path / name, [(P, [[0, 3, 2], [0, 2, 1]], [[0, 0, 1]] * 4, 0, uv)], materials=[mat],
+                         binary=True, images=[png])
+        return {"id": "m", "type": "model", "src": src, "w": 160, "x": 160, "y": 90, "light": "studio"}
+    try:
+        f = frame(scene([quad("e.glb", emissiveFactor=[1, 0.2, 0.2])]), backend=backend)
+    except RuntimeError:
+        pytest.skip("no GPU")
+    assert near(f[50, 120], (255, 123, 123), 12) and near(f[130, 200], (255, 123, 123), 12)
+    layer = quad("t.glb", emissiveFactor=[1, 1, 1], emissiveTexture={"index": 0})
+    f = frame(scene([layer]), backend=backend)
+    assert near(f[50, 120], RED, 12) and near(f[50, 200], GREEN, 12) and near(f[130, 120], BLUE, 12)
+    f = frame(scene([dict(layer, texture=False)]), backend=backend)  # one colour: the image's mean
+    assert np.abs(f[50, 120] - f[130, 200]).max() <= 2 and f[50, 120].max() > 120
+    (tmp_path / "q.obj").write_text("mtllib q.mtl\nv -1 1 0\nv 1 1 0\nv 1 -1 0\nv -1 -1 0\n"
+                                    "vt 0 1\nvt 1 1\nvt 1 0\nvt 0 0\nusemtl q\nf 1/1 4/4 3/3 2/2\n")
+    (tmp_path / "q.mtl").write_text("newmtl q\nKd 0 0 0\nKe 1 1 1\nmap_Ke q.png\n")
+    f = frame(scene([dict(layer, src=str(tmp_path / "q.obj"))]), backend=backend)
+    assert near(f[50, 120], RED, 12) and near(f[130, 200], YELLOW, 12)
+
+
+def test_emission_adds_to_a_textured_models_picture(tmp_path):
+    png = open(quadrants(tmp_path / "q.png"), "rb").read()
+    P = [[-1, 1, 0], [1, 1, 0], [1, -1, 0], [-1, -1, 0]]
+    uv = [[0, 0], [1, 0], [1, 1], [0, 1]]
+
+    def quad(name, **mat):
+        mat = dict({"pbrMetallicRoughness": {"baseColorTexture": {"index": 0}, "metallicFactor": 0,
+                                             "roughnessFactor": 1}}, **mat)
+        src = write_gltf(tmp_path / name, [(P, [[0, 3, 2], [0, 2, 1]], [[0, 0, 1]] * 4, 0, uv)], materials=[mat],
+                         binary=True, images=[png])
+        return {"id": "m", "type": "model", "src": src, "w": 160, "x": 160, "y": 90, "light": "flat"}
+    plain = frame(scene([quad("p.glb")]))
+    lit = frame(scene([quad("e.glb", emissiveFactor=[0, 0, 0.5])]))
+    blue = round(255 * 0.5 ** (1 / 2.2))
+    assert near(lit[50, 120], (RED[0], RED[1], RED[2] + blue), 6)  # the picture, plus the emission
+    assert (lit[..., :2] == plain[..., :2]).all()  # red and green untouched

@@ -192,9 +192,11 @@ one in front of it. On the CPU the stage blurs at halved sizes and mixes in nump
 
 Status (2026-11-01): image textures merged (#64): coordinates on every shape, `texture` with `repeat` and
 `offset` on layers and parts, glTF `TEXCOORD_n` and `baseColorTexture`, the passes, the cutting, `no-uvs` and
-`texture-swim`. Video and `"#groupId"` textures are built on branch `live-textures`, not merged. glTF emission
-(`emissiveFactor` and `emissiveTexture`) comes next: the importer reads neither yet, and per-pixel emission needs one
-more pass. Then `edges` and model `opacity`. Video and group textures: a video texture takes `loop`, `trim` and
+`texture-swim`. Video and `"#groupId"` textures merged (#65). Emission is built on branch `emission`, not merged:
+glTF `emissiveFactor` (with `KHR_materials_emissive_strength`) and `emissiveTexture`, and `.mtl` `Ke` and
+`map_Ke`, are an emission colour per material, added in the shader (GPU) or per vertex (CPU) of an untextured
+model, and drawn as one more pass of a textured one. It is not a layer key: `glow` stays the way to light a
+model of your own. Then `edges` and model `opacity`. Video and group textures: a video texture takes `loop`, `trim` and
 `speed` as a video layer does and plays on the model's clock. A group named by a texture is drawn only on the
 model, its box (its `w` and `h`, else the canvas) filling the image, its layers as in a scene without a camera
 (those that move in depth seen by a camera of the image's size, with no fog or depth of field). `kine check`

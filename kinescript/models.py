@@ -108,10 +108,11 @@ def _finish(pieces: list, mats: list) -> Imported:
     looks: dict = {}  # each merged material's texture
     remap = []
     for m in mats:
-        t = m.get("texture")
+        t, e = m.get("texture"), m.get("emitTexture")
         k = seen.setdefault((tuple(np.round(m["fill"], 3)), m["shine"], m["metal"],
-                             None if t is None else (id(t["image"]), t["tint"], t["tile"])), len(seen))
-        looks.setdefault(k, t)
+                             None if t is None else (id(t["image"]), t["tint"], t["tile"]), m.get("emit"),
+                             None if e is None else (id(e["image"]), e["tint"], e["tile"])), len(seen))
+        looks.setdefault(k, (t, e))
         remap.append(k)
     remap = np.array(remap + [-1], int)
     M = remap[np.where(M >= 0, M, len(mats))]
@@ -120,7 +121,9 @@ def _finish(pieces: list, mats: list) -> Imported:
     lut[kept] = np.arange(len(kept))
     keys = list(seen)
     merged = [dict(fill=tuple(map(float, keys[k][0])), shine=keys[k][1], metal=keys[k][2],
-                   **({} if looks[k] is None else {"texture": looks[k]})) for k in kept]
+                   **({} if looks[k][0] is None else {"texture": looks[k][0]}),
+                   **({} if keys[k][4] is None else {"emit": keys[k][4]}),
+                   **({} if looks[k][1] is None else {"emitTexture": looks[k][1]})) for k in kept]
     return Imported(Mesh(P - (lo + hi) / 2, N, T, lut[M].astype(np.int32), U), merged, hi - lo)
 
 
@@ -231,7 +234,21 @@ def _gltf(p: Path) -> tuple[list, list]:
         if got is not None:  # the image times the base colour factor, as the file asks
             tint = tuple(float(v) for v in np.round(factor ** (1 / 2.2), 4))
             mats[-1]["texture"] = {"image": got[0], "tint": None if min(tint) >= 1 else tint, "tile": got[2]}
-        sets.append(int((pbr.get("baseColorTexture") or {}).get("texCoord", 0)))
+        # The light it gives off: emissiveFactor (linear, times KHR_materials_emissive_strength) times
+        # emissiveTexture. "emit" is that colour as drawn, with the texture's mean in it; "emitTexture" the image
+        # and the factor as its tint.
+        strength = ((mt.get("extensions") or {}).get("KHR_materials_emissive_strength") or {}).get(
+            "emissiveStrength", 1.0)
+        emit = np.clip(np.array(mt.get("emissiveFactor", (0.0, 0.0, 0.0))[:3], float), 0, None) * float(strength)
+        if emit.max() > 0:
+            lit = texture(mt.get("emissiveTexture"))
+            col = emit if lit is None else emit * lit[1]
+            mats[-1]["emit"] = tuple(float(v) for v in np.round(col ** (1 / 2.2), 4))
+            if lit is not None:
+                tint = tuple(float(v) for v in np.round(emit ** (1 / 2.2), 4))
+                mats[-1]["emitTexture"] = {"image": lit[0], "tint": None if tint == (1.0, 1.0, 1.0) else tint,
+                                           "tile": lit[2]}
+        sets.append(int((pbr.get("baseColorTexture") or mt.get("emissiveTexture") or {}).get("texCoord", 0)))
     pieces = []
 
     def emit(mi: int, world: np.ndarray):
@@ -285,7 +302,8 @@ def _gltf(p: Path) -> tuple[list, list]:
 # ---- OBJ ------------------------------------------------------------------------------------------------
 
 def _mtl(path: Path) -> dict:
-    """Materials of an .mtl file: Kd is the colour, Ns (0..1000) the shine, map_Kd a texture drawn as it is."""
+    """Materials of an .mtl file: Kd is the colour, Ns (0..1000) the shine, map_Kd a texture drawn as it is, Ke
+    the light it gives off and map_Ke an image of that (times Ke, when the file gives one)."""
     out: dict = {}
     cur = None
     if not path.is_file():
@@ -300,11 +318,23 @@ def _mtl(path: Path) -> dict:
             cur["fill"] = tuple(min(1.0, max(0.0, float(x))) for x in t[1:4])
         elif cur is not None and t[0] == "Ns" and len(t) >= 2:
             cur["shine"] = round(min(1.0, max(0.0, float(t[1]) / 1000)) ** 0.5, 3)
-        elif cur is not None and t[0] == "map_Kd" and len(t) >= 2:
+        elif cur is not None and t[0] == "Ke" and len(t) >= 4:
+            cur["_ke"] = tuple(max(0.0, float(x)) for x in t[1:4])
+        elif cur is not None and t[0] in ("map_Kd", "map_Ke") and len(t) >= 2:
             f = path.parent / t[-1].replace("\\", "/")  # options such as -s come first; the file is last
             img = skia.Image.MakeFromEncoded(skia.Data.MakeWithCopy(f.read_bytes())) if f.is_file() else None
             if img is not None:
-                cur["texture"] = {"image": img, "tint": None, "tile": ("repeat", "repeat")}
+                cur["texture" if t[0] == "map_Kd" else "_map_ke"] = {"image": img, "tint": None,
+                                                                    "tile": ("repeat", "repeat")}
+    for cur in out.values():
+        ke, lit = cur.pop("_ke", None), cur.pop("_map_ke", None)
+        if lit is not None and (ke is None or max(ke) > 0):
+            px = lit["image"].toarray(colorType=skia.kRGBA_8888_ColorType)
+            mean = px[::max(1, px.shape[0] // 64), ::max(1, px.shape[1] // 64), :3].reshape(-1, 3).mean(0) / 255
+            cur["emitTexture"] = dict(lit, tint=None if ke is None or ke == (1.0, 1.0, 1.0) else ke)
+            cur["emit"] = tuple(float(v) for v in np.round(mean * (ke or (1.0, 1.0, 1.0)), 4))
+        elif ke is not None and max(ke) > 0:
+            cur["emit"] = ke
     return out
 
 

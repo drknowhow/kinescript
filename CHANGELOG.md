@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Model files give off light: glTF `emissiveFactor` (times `KHR_materials_emissive_strength`) and
+  `emissiveTexture`, and `.mtl` `Ke` and `map_Ke`, are added to a material's colour however it is lit. Both used to
+  be ignored. An emissive texture is one more pass of the sorted triangles, added before the fog;
+  `"texture": false` on the layer gives the texture's mean colour instead. Models whose files give off no light
+  draw the same bytes: `bench/same.py` finds no difference against main on thirteen 3D examples and `hello.json`,
+  on either backend.
 - `texture` takes a video file, which plays on the model's clock with `loop`, `trim` and `speed` as on a video
   layer, and `"#groupId"`, a group of layers drawn on the model at each frame's time, such as an app on a phone's
   screen. The group is drawn only there, its box (its `w` and `h`, else the canvas) filling the image, and its
