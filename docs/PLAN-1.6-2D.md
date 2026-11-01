@@ -316,6 +316,11 @@ Status (2026-11-01): moves to 1.6.1 (decision 1).
   layer.
 - Sequence transitions: `iris`, `push` (both clips move), `whip`, `luma` (wipe by a gradient's or an image's
   brightness, with `soft`) and `glitch`.
+  Status (2026-11-01): in its own PR, with `transitions.json`. Each is an enter on the incoming clip, and push, whip
+  and glitch add an exit on the outgoing one. `"fade": false`, new for enter and exit, keeps push and whip opaque;
+  the two clips overlap by a pixel (a whip by 4) so the background never shows between their edges, and a whip's
+  blur clamps at a pixel inside each clip's box instead of fading out. `luma` is a motion too: a colour matrix turns
+  the map's brightness into alpha, drawn in over the layer (DstIn), so it takes a layer of its own.
 - Optional, if the phase has room: chart components `bar-chart`, `line-chart` and `pie-chart`, built from today's
   layers (bars grow, values count up, the line draws on, slices sweep). The bar recipe in `kine docs` is what they
   replace.

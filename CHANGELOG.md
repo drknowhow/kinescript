@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Sequence transitions `iris`, `push`, `whip`, `luma` and `glitch`. `iris` opens the next clip in a circle from the
+  middle. `push` moves both clips left by the sequence's width, side by side; `whip` does too, faster and blurred
+  across inside each clip. `glitch` breaks the outgoing clip up over the first half and brings the next one in
+  broken up until it settles. `luma` shows the next clip where a map is dark first and where it is light last: `map`
+  is a gradient as a fill takes or an image file, stretched over the clip (a left-to-right gradient if none), and
+  `soft` (0 to 1, 0.2 if none) is how far the edge spreads. `"push"` used to be read as `"slide"`.
+- `luma` is also an enter and exit motion, with `map` and `soft`; on a split text it wipes the whole text.
+- `"fade": false` on an enter or exit keeps the layer opaque while it moves, so
+  `{"name": "left", "dist": 1920, "fade": false}` slides it in solid, and a whip's blur stays inside its box.
+- `kine check` checks a transition's or motion's `map` (a gradient as a fill's, or a file that exists and decodes)
+  and `soft`, and warns of either on something that is not a luma wipe. `examples/transitions.json` plays the six.
 - `emphasis`: motions in the middle of a layer's life, each cycle starting and ending at rest. `"emphasis": "pulse"`
   plays one cycle as the layer starts; `[{"name": "shake", "at": 1.4, "repeat": 2}, {"name": "float", "loop": true}]`
   plays two shakes 1.4 s in and floats until the layer ends. The ten are `pulse`, `heartbeat`, `shake`, `wiggle`,

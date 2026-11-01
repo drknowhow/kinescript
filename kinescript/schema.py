@@ -47,9 +47,10 @@ SHADOW_ALIAS = {"colour": "color", "fill": "color", "offsetX": "x", "offsetY": "
 BOX = {"fill", "pad", "radius"}
 BOX_ALIAS = {"color": "fill", "colour": "fill", "background": "fill", "bg": "fill", "padding": "pad",
              "borderRadius": "radius", "cornerRadius": "radius"}
-MOTION = {"name", "dur", "ease", "stagger", "dist", "from", "amount", "deg", "order", "seed", "bounces", "count"}
+MOTION = {"name", "dur", "ease", "stagger", "dist", "from", "amount", "deg", "order", "seed", "bounces", "count",
+          "fade", "map", "soft"}
 MOTION_ALIAS = {"type": "name", "preset": "name", "duration": "dur", "easing": "ease", "distance": "dist",
-                "delay": "stagger"}
+                "delay": "stagger", "softness": "soft", "feather": "soft", "matte": "map"}
 EMPHASIS = {"name", "at", "dur", "repeat", "loop", "ease", "stagger", "order", "seed", "dist", "amount", "deg"}
 EMPHASIS_ALIAS = {"type": "name", "preset": "name", "duration": "dur", "easing": "ease", "distance": "dist",
                   "times": "repeat", "count": "repeat", "repeats": "repeat", "start": "at", "time": "at",
@@ -201,11 +202,15 @@ TYPES: dict[str, set[str]] = {
     "svg": {"src", "w", "h", "parts", "clip", "speed", "loop", "timeRemap", "repeat"},
 }
 SEQUENCE = COMMON | {"clips", "transition", "fit", "volume", "w", "h"}
-TRANSITION = {"type", "dur"}
-TRANSITION_ALIAS = {"name": "type", "kind": "type", "style": "type", "duration": "dur", "length": "dur"}
-TRANSITIONS = ("fade", "wipe", "slide", "zoom", "blur", "cut")
+TRANSITION = {"type", "dur", "map", "soft"}
+TRANSITION_ALIAS = {"name": "type", "kind": "type", "style": "type", "duration": "dur", "length": "dur",
+                    "softness": "soft", "feather": "soft", "matte": "map", "src": "map", "image": "map",
+                    "gradient": "map"}
+TRANSITIONS = ("fade", "wipe", "slide", "zoom", "blur", "iris", "push", "whip", "luma", "glitch", "cut")
 TRANSITION_VALUE_ALIAS = {"dissolve": "fade", "crossfade": "fade", "crossdissolve": "fade", "xfade": "fade",
-                          "mix": "fade", "none": "cut", "hard": "cut", "hardcut": "cut", "push": "slide"}
+                          "mix": "fade", "none": "cut", "hard": "cut", "hardcut": "cut", "circle": "iris",
+                          "whippan": "whip", "swish": "whip", "lumawipe": "luma", "matte": "luma",
+                          "gradientwipe": "luma", "rgbsplit": "glitch"}
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".svg")  # a sequence clip with one of these is an image
 TYPE_ALIAS = {"rectangle": "rect", "square": "rect", "box": "rect", "shape": "rect", "txt": "text", "label": "text",
               "title": "text", "heading": "text", "string": "text", "img": "image", "picture": "image",
@@ -738,6 +743,19 @@ def _motion(raw: dict, key: str, rep: Report, lid):
     for n in names:
         if n and canonical(n) is None:
             rep.add("error", "bad-motion", lid, f"{key}: " + unknown("motion", n, PRESETS))
+    if isinstance(v, dict):
+        _matte(v, "luma" in [canonical(n) for n in names if n], f"{key}: ", rep, lid)
+
+
+def _matte(spec: dict, luma: bool, where: str, rep: Report, lid):
+    """A luma wipe's map and soft: a gradient checked as a fill's, and either of them without a luma wipe ignored."""
+    given = [k for k in ("map", "soft") if spec.get(k) is not None]
+    if given and not luma:
+        rep.add("warning", "ignored-key", lid, f"{where}{' and '.join(given)} shape a luma wipe, and this is not one, "
+                f"so {'they are' if len(given) > 1 else 'it is'} ignored", "use \"luma\", or remove them")
+    m = spec.get("map")
+    if luma and isinstance(m, dict):
+        gradient(dict(m, stops=m.get("stops", ["#000", "#fff"])), f"{where}map", rep, lid)
 
 
 def _emphasis(raw: dict, rep: Report, lid):
@@ -1352,6 +1370,11 @@ def _transition(raw: dict, rep: Report, lid):
     elif "dur" in tr and not (_number(d) and math.isfinite(d) and d > 0):
         rep.add("error", "bad-value", lid, f"transition dur is {d!r}; it is seconds, a number above 0",
                 "\"dur\": 0.5 overlaps the clips by half a second; for no overlap use \"type\": \"cut\"")
+    from .presets import option_problem
+    for k in ("map", "soft"):
+        if why := option_problem(k, tr.get(k)):
+            rep.add("error", "bad-value", lid, f"transition {why}")
+    _matte(tr, kind == "luma", "transition: ", rep, lid)
 
 
 def _structure(raw: dict, t: str, rep: Report, lid):
