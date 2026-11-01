@@ -162,7 +162,8 @@ MASK_MODES = ("alpha", "luma", "alphaInvert", "lumaInvert")
 MASK_MODE_ALIAS = {"invert": "alphaInvert", "inverted": "alphaInvert", "inverse": "alphaInvert",
                    "alphainverted": "alphaInvert", "luminance": "luma", "lumainverted": "lumaInvert",
                    "luminanceinvert": "lumaInvert"}
-SHAPE = {"fill", "stroke", "strokeWidth", "draw", "drawStart", "cap", "join", "dash", "dashOffset", "rough"}
+SHAPE = {"fill", "stroke", "strokeWidth", "draw", "drawStart", "cap", "join", "dash", "dashOffset", "rough",
+         "fillRule"}
 ROUGH = {"amount", "length", "seed", "boil"}
 ROUGH_ALIAS = {"roughness": "amount", "jitter": "amount", "wobble": "amount", "segment": "length",
                "size": "length", "rate": "boil", "fps": "boil"}
@@ -192,6 +193,7 @@ TYPES: dict[str, set[str]] = {
                                                                               "src", "ground", "edges",
                                                                               "animation", "repeat"},
     "particles": PT.OWN | {"text", "font", "weight", "src", "w", "h", "r"},
+    "svg": {"src", "w", "h", "parts", "clip", "speed", "loop", "timeRemap", "repeat"},
 }
 SEQUENCE = COMMON | {"clips", "transition", "fit", "volume", "w", "h"}
 TRANSITION = {"type", "dur"}
@@ -204,7 +206,7 @@ TYPE_ALIAS = {"rectangle": "rect", "square": "rect", "box": "rect", "shape": "re
               "title": "text", "heading": "text", "string": "text", "img": "image", "picture": "image",
               "photo": "image", "oval": "ellipse", "caption": "captions", "subtitles": "captions",
               "subtitle": "captions", "number": "counter", "count": "counter", "movie": "video", "clip": "video",
-              "svg": "path", "polyline": "line", "star": "polygon", "background": "shader", "container": "group",
+              "polyline": "line", "star": "polygon", "background": "shader", "container": "group",
               "frame": "group", "mesh": "model", "3d": "model", "object": "model", "primitive": "model",
               "solid": "model", "particle": "particles", "emitter": "particles", "particlesystem": "particles",
               "particle_system": "particles", "particle-system": "particles"}
@@ -257,7 +259,7 @@ ENUMS = {
     "split": ("chars", "words", "lines"),
     "fit": ("cover", "contain", "stretch"),
     "case": ("upper", "lower"), "textCase": ("upper", "lower"),
-    "cap": ("butt", "round", "square"), "join": ("miter", "round", "bevel"),
+    "cap": ("butt", "round", "square"), "join": ("miter", "round", "bevel"), "fillRule": ("nonzero", "evenodd"),
     "mode": ("karaoke", "pop"),
     "blend": ("normal", "multiply", "screen", "overlay", "add", "lighten", "darken", "softLight", "difference",
               "color", "hardLight", "colorDodge", "colorBurn", "exclusion", "hue", "saturation", "luminosity"),
@@ -276,7 +278,7 @@ ENUM_ALIAS = {"middle": "center", "centre": "center", "centered": "center", "mid
               "color-burn": "colorBurn", "colour-burn": "colorBurn", "burn": "colorBurn",
               "luminance": "luminosity", "luma": "luminosity", "saturate": "saturation",
               "merge": "union", "minus": "subtract", "cut": "subtract", "intersection": "intersect",
-              "exclude": "xor",
+              "exclude": "xor", "even-odd": "evenodd", "non-zero": "nonzero", "winding": "nonzero",
               "box": "cube", "cuboid": "cube", "ball": "sphere", "globe": "sphere", "donut": "torus",
               "doughnut": "torus", "ring": "torus", "can": "cylinder", "pipe": "cylinder", "pill": "capsule",
               "revolve": "lathe", "revolved": "lathe", "turned": "lathe", "spun": "lathe",
@@ -299,7 +301,8 @@ SCALAR = {"x", "y", "w", "h", "r", "opacity", "scale", "scaleX", "scaleY", "rota
           "unitX", "unitY", "unitRotate", "unitScale", "unitOpacity", "unitBlur", "z", "rotateX", "rotateY", "fov",
           "depth", "tube", "shine", "metal", "rim", "bands", "explode", "bevel", "transparency", "timeRemap",
           "dashOffset", "corner"}
-REQUIRED = {"text": ("text",), "image": ("src", "frames", "sheet"), "video": ("src",), "path": ("d", "points"),
+REQUIRED = {"text": ("text",), "image": ("src", "frames", "sheet"), "video": ("src",), "svg": ("src",),
+            "path": ("d", "points"),
             "line": ("points",), "captions": ("cues", "src", "voice"), "shader": ("preset", "sksl"),
             "model": ("shape", "parts", "src"), "particles": ("rate", "burst", "preset")}
 # Keys whose value is an object of their own: never a tween, even with a "from" key (a light's direction).
@@ -818,6 +821,40 @@ def _box(raw: dict, rep: Report, lid):
     _numbers(b, ("radius",), "box ", rep, lid, least=0)
 
 
+def _svg(raw: dict, rep: Report, lid, comps: dict):
+    """An svg layer's file, size and parts. Its pieces are laid out once, so w and h are numbers; each part is checked
+    as the path layer it changes."""
+    src = raw.get("src")
+    if isinstance(src, str) and src and not src.lower().endswith(".svg"):
+        rep.add("error", "bad-value", lid, f"src '{src}' is not an .svg file, which an svg layer reads",
+                "show other pictures in an image layer: \"type\": \"image\"")
+    for k in ("w", "h"):
+        v = raw.get(k)
+        if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 < v < 1e6):
+            rep.add("error", "bad-value", lid, f"{k} is {_show(v)}; an svg layer's {k} is a number of px above 0, "
+                    "since its pieces are laid out once", "animate scale to change its size")
+    parts = raw.get("parts")
+    if parts is None:
+        return
+    if not isinstance(parts, dict):
+        rep.add("error", "bad-value", lid, f"parts is {_show(parts)}; it maps ids in the file to keys for those "
+                "pieces", '"parts": {"star": {"enter": "pop"}, "*": {"stroke": "#f2f0e8"}}')
+        return
+    for pid, part in parts.items():
+        if not isinstance(part, dict):
+            rep.add("error", "bad-value", lid, f"parts '{pid}' is {_show(part)}; it is an object of layer keys",
+                    f'"parts": {{"{pid}": {{"enter": "pop"}}}}')
+            continue
+        for k in [k for k in ("id", "type", "d", "points", "children", "layers") if k in part]:
+            rep.add("error", "bad-key", lid, f"parts '{pid}': {k} comes from the file", f"drop {k}")
+            del part[k]
+        piece, n = dict(part, id=f"{lid}-{pid}", type="path", d="M0 0"), len(rep.issues)
+        _layer(piece, rep, f"{lid}.parts.{pid}", comps)
+        rep.issues[n:] = [i for i in rep.issues[n:] if i["code"] != "ignored-key"]  # the file may give what it needs
+        part.clear()
+        part.update({k: v for k, v in piece.items() if k not in ("id", "type", "d")})
+
+
 def _layer(raw, rep: Report, path: str, comps: dict):
     if not isinstance(raw, dict):
         rep.add("error", "bad-layer", path, f"{path} must be an object, got {type(raw).__name__}")
@@ -928,12 +965,13 @@ def _layer(raw, rep: Report, path: str, comps: dict):
     for need in [REQUIRED.get(t)]:
         if need and not any(raw.get(k) not in (None, "", []) for k in need):
             rep.add("error", "missing-key", lid, f"a {t} layer needs " + " or ".join(f"'{k}'" for k in need),
-                    {"text": "\"text\": \"Hello\"", "image": "\"src\": \"photo.jpg\"", "video": "\"src\": \"clip.mp4\""}
-                    .get(t, ""))
+                    {"text": "\"text\": \"Hello\"", "image": "\"src\": \"photo.jpg\"", "video": "\"src\": \"clip.mp4\"",
+                     "svg": "\"src\": \"logo.svg\""}.get(t, ""))
     if raw.get("src") not in (None, "") and not isinstance(raw["src"], str):
+        name = {"image": "photo.jpg", "captions": "captions.srt", "model": "model.glb", "svg": "logo.svg"}.get(
+            t, "clip.mp4")
         rep.add("error", "bad-value", lid, f"src is {raw['src']!r}; it is one file name, as a string",
-                f"\"src\": \"{ {'image': 'photo.jpg', 'captions': 'captions.srt', 'model': 'model.glb'}.get(t, 'clip.mp4')}\" "
-                "(a path relative to the scene file)")
+                f"\"src\": \"{name}\" (a path relative to the scene file)")
     if t == "video":
         _volume(raw, rep, lid)
     _values(raw, t, rep, lid)
@@ -964,6 +1002,8 @@ def _layer(raw, rep: Report, path: str, comps: dict):
         _particles(raw, rep, lid)
     if t == "image":
         _frames(raw, rep, lid)
+    if t == "svg":
+        _svg(raw, rep, lid, comps)
     if t == "group":
         _shadows(raw, rep, lid)
         _clock(raw, rep, lid)

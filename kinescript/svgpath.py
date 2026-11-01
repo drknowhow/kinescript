@@ -28,6 +28,10 @@ def parse(d: str) -> skia.Path:
         if cmd is None:
             raise ValueError(f"path data must start with a command: {d[:40]!r}")
         n = _ARGS[cmd.upper()]
+        if n == 7:  # an arc's flags may run into what follows them, as drawing programs write them: a1 1 0 011 1
+            for k in (i + 3, i + 4):
+                if k < len(toks) and len(toks[k]) > 1 and toks[k][0] in "01":
+                    toks[k:k + 1] = [toks[k][0], toks[k][1:]]
         vals = [float(v) for v in toks[i:i + n]]
         if len(vals) < n:
             raise ValueError(f"path command {cmd} needs {n} numbers")

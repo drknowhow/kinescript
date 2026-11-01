@@ -347,9 +347,12 @@ More scenes in [`examples/`](https://github.com/drknowhow/kinescript/tree/main/e
   expressions of `i`, `n` and `sweep`, 6 s.
 - [`vector.json`](https://github.com/drknowhow/kinescript/blob/main/examples/vector.json): an SVG emblem grows from
   its own 120 px to 600, sharp all the way, beside a spinner played from an eight-cell SVG sheet, 6 s.
+- [`svg.json`](https://github.com/drknowhow/kinescript/blob/main/examples/svg.json): the same emblem as an svg layer,
+  brought on piece by piece by its ids in the file: the badge pops, the ring's dashes march, the star draws on and
+  turns and the dots pop one by one, 6 s.
 
 `edit.json`, `import.json`, `textures.json`, `screens.json`, `edges.json`, `product.json`, `voiceover.json`,
-`narrated.json`, `flipbook.json` and `vector.json` read sample media: run `python examples/make_media.py` first to
+`narrated.json`, `flipbook.json`, `vector.json` and `svg.json` read sample media: run `python examples/make_media.py` first to
 generate it.
 
 ## Performance
@@ -366,7 +369,7 @@ Measured on the development machine (Intel Core Ultra 7 265, 20 threads, NVIDIA 
 [`python bench/stages.py`](https://github.com/drknowhow/kinescript/blob/main/bench/stages.py) splits the time
 per frame into drawing, conversion and readback, and writing to ffmpeg for several workloads, and times whole
 renders. [`python bench/stress.py`](https://github.com/drknowhow/kinescript/blob/main/bench/stress.py) generates
-40 scenes that each push one thing far past the examples (2000 layers, 60 cuts, 4K, 120 s, 16-sample motion blur
+41 scenes that each push one thing far past the examples (2000 layers, 60 cuts, 4K, 120 s, 16-sample motion blur
 with alpha, 600 caption cues, 200 morphing paths, 50 masks, a stage of 16 layers, a textured model of 102,400
 triangles and more), then checks, renders and probes each one in its own process and reports time, peak memory and
 whether the output holds every frame.

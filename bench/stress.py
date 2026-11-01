@@ -209,6 +209,42 @@ def glow_text() -> dict:  # a glowing title over lines that glow, are outlined, 
     return _scene(out)
 
 
+def _drawing_svg(n: int = 500) -> str:
+    """An svg of n shapes in a grid, 1920x1080: circles, outlined rounded rects, hexagons filled with one of three
+    gradients, open curves and turned squares in groups of their own. Written to WORK; returns its path."""
+    pal = ("#ff633f", "#b9f45d", "#f2f0e8", "#9299a8", "#7b5cff", "#242832")
+    out = []
+    for i in range(n):
+        x, y, col = 40 + (i % 25) * 75, 40 + (i // 25) * 50, pal[i % len(pal)]
+        kind = i % 5
+        if kind == 0:
+            out.append(f'<circle cx="{x}" cy="{y}" r="{12 + i % 9}" fill="{col}"/>')
+        elif kind == 1:
+            out.append(f'<rect x="{x - 15}" y="{y - 12}" width="30" height="24" rx="5" fill="{col}" '
+                       f'stroke="#0a0c10" stroke-width="2"/>')
+        elif kind == 2:
+            pts = " ".join(f"{x + 16 * math.cos(a * math.pi / 3):.1f},{y + 16 * math.sin(a * math.pi / 3):.1f}"
+                           for a in range(6))
+            out.append(f'<polygon points="{pts}" fill="url(#g{i % 3})"/>')
+        elif kind == 3:
+            out.append(f'<path d="M{x - 18} {y} C {x - 6} {y - 20} {x + 6} {y + 20} {x + 18} {y}" fill="none" '
+                       f'stroke="{col}" stroke-width="3"/>')
+        else:
+            out.append(f'<g transform="translate({x} {y}) rotate({i * 7})"><rect x="-10" y="-10" width="20" '
+                       f'height="20" fill="{col}"/></g>')
+    grads = "".join(f'<linearGradient id="g{j}"><stop offset="0" stop-color="{pal[j]}"/>'
+                    f'<stop offset="1" stop-color="{pal[j + 2]}"/></linearGradient>' for j in range(3))
+    WORK.mkdir(parents=True, exist_ok=True)
+    path = WORK / f"drawing{n}.svg"
+    path.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">'
+                    f'<defs>{grads}</defs>{"".join(out)}</svg>', encoding="utf-8")
+    return path.as_posix()
+
+
+def svg_500() -> dict:  # an svg layer of 500 pieces standing still: drawn once into a picture, then played back
+    return _scene([{"id": "drawing", "type": "svg", "src": _drawing_svg(), "w": 1920, "h": 1080}])
+
+
 def _example(name: str) -> dict:
     return json.loads((ROOT / "examples" / f"{name}.json").read_text(encoding="utf-8"))
 
@@ -522,6 +558,7 @@ SCENES = {
     "masks-50": (masks_50, ".mp4", "50 masked cards: 25 seen through words, 25 through a moving lens"),
     "glow-text": (glow_text, ".mp4", "a 220 px title glowing and outlined over 12 lines with glow, outline, inner "
                                       "shadow or displace"),
+    "svg-500": (svg_500, ".mp4", "an svg layer of 500 shapes, gradients and groups standing still"),
     "logo": (logo, ".mp4", "examples/logo.json: the mark draws on and morphs, the word slides out through a mask"),
     "kinetic": (kinetic, ".mp4", "examples/kinetic.json: stagger orders, a combined badge, a mask, marching dashes"),
     "explainer": (explainer, ".mp4", "examples/explainer.json: boiling rough boxes, a dot riding a route, a lens mask"),

@@ -210,9 +210,9 @@ flipbook()
 
 
 def vectors():
-    """SVG drawings for examples/vector.json: an emblem with only a viewBox 120 units across, so its own size is 120
-    px, its ring of dots a <use> of one dot each (SVG 2 href); and a spinner as a sheet of eight 48 px cells, the lit
-    dot one step further round in each."""
+    """SVG drawings for examples/vector.json and svg.json: an emblem with only a viewBox 120 units across, so its own
+    size is 120 px, its pieces named (badge, ring, star, and dots, a <use> of one dot each, SVG 2 href); and a spinner
+    as a sheet of eight 48 px cells, the lit dot one step further round in each."""
     star = " ".join(f"{'M' if i == 0 else 'L'}{60 + r * math.sin(i * math.pi / 5):.2f} "
                     f"{62 - r * math.cos(i * math.pi / 5):.2f}" for i, r in enumerate([30, 12.5] * 5)) + " Z"
     dots = "".join(f'<use href="#dot" x="{60 + 50 * math.cos(i * math.pi / 6):.2f}" '
@@ -224,11 +224,11 @@ def vectors():
     </radialGradient>
     <circle id="dot" r="2.4" fill="#f2f0e8"/>
   </defs>
-  <circle cx="60" cy="60" r="44" fill="url(#disc)"/>
-  <circle cx="60" cy="60" r="38" fill="none" stroke="#0a0c10" stroke-width="1.2" stroke-dasharray="3 2.5"
+  <circle id="badge" cx="60" cy="60" r="44" fill="url(#disc)"/>
+  <circle id="ring" cx="60" cy="60" r="38" fill="none" stroke="#0a0c10" stroke-width="1.2" stroke-dasharray="3 2.5"
           opacity="0.45"/>
-  <path d="{star}" fill="#f2f0e8" stroke="#0a0c10" stroke-width="2" stroke-linejoin="round"/>
-  {dots}
+  <path id="star" d="{star}" fill="#f2f0e8" stroke="#0a0c10" stroke-width="2" stroke-linejoin="round"/>
+  <g id="dots">{dots}</g>
 </svg>
 """)
     cells = "".join(f'  <circle cx="{k * 48 + 24 + 16 * math.sin(i * math.pi / 4):.2f}" '

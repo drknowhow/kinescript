@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- The svg layer: `{"type": "svg", "src": "logo.svg"}` turns an svg file into a group of path layers, one for each
+  path, rect, circle, ellipse, line, polyline and polygon, with the file's transforms, fill, fill-rule, stroke (width,
+  caps, joins and dashes), opacity and linear and radial gradients, so each piece draws on, enters, moves and morphs as
+  a path layer does. A piece is named `<id>-<its id in the file>`, and a `<g>` with an id or an opacity becomes a
+  group of its pieces. `parts` gives keys to a piece or group by its id in the file and `"*"` to every shape:
+  `"parts": {"star": {"enter": "pop"}, "*": {"stroke": "#f2f0e8"}}`. `kine check` names an id the file lacks
+  (`unknown-part`, with the closest one) and what the layer leaves out (`svg-unsupported`: text, `<style>` sheets,
+  `<image>`, clip paths, masks, filters, patterns, markers and animation). w and h take the viewBox by its
+  preserveAspectRatio, and `slice` clips to them. Colours are read as SVG reads them (CSS names, hex, `rgb()`,
+  `hsl()`, `currentColor`), so `red` is `#ff0000`, and styles inherit as in a browser. Shapes gain `fillRule`:
+  `evenodd` leaves holes where a path's outlines overlap. A group whose layers all hold still is drawn once into a picture
+  and played back, to the same bytes: `svg-500`, a new stress scene of 500 pieces, draws in 1.5 ms a frame on the
+  GPU against 6.9 ms piece by piece. Path data takes arc flags run into the numbers after them (`a1 1 0 011 1`),
+  as drawing programs save them. `examples/svg.json` brings an emblem on piece by piece.
 - SVG files: an image layer with an `.svg` src draws it as vectors, sharp at any size. Its own size is its width and
   height (in px, pt, mm, cm or in), the viewBox's shape for a missing one and the viewBox's size for both, as a
   browser sizes an svg in an `<img>`; what lies outside it is cut off. A faded svg fades as one drawing. Sheets, image
