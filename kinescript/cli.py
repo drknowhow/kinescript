@@ -76,7 +76,10 @@ def main(argv=None) -> int:
     pr = sub.add_parser("probe", help="resolved timeline and layer boxes at --at; or, for a media file, "
                                       "its duration, size, fps and audio")
     pr.add_argument("scene")
-    pr.add_argument("--at", type=float)
+    when = pr.add_mutually_exclusive_group()
+    when.add_argument("--at", type=float)
+    when.add_argument("--curve", metavar="ID.KEY", help="a layer's key at every frame and how fast it changes, where "
+                      "it holds still and its fastest frame, such as title.x")
 
     v = sub.add_parser("voice", help="speak each sound's text into its file and time its words (only the ones "
                                      "whose text changed, unless --force)")
@@ -210,6 +213,10 @@ def _run(a) -> int:
         from .verify import probe, probe_media
         if Path(a.scene).suffix.lower() != ".json" and Path(a.scene).exists():
             _emit(probe_media(a.scene))
+            return 0
+        if a.curve:
+            from .verify import curve
+            _emit(curve(a.scene, a.curve))
             return 0
         _emit(probe(a.scene, a.at))
         return 0

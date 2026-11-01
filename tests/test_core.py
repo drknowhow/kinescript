@@ -1897,6 +1897,29 @@ def test_look_draws_trails_and_onion_skins(tmp_path):
     assert np.abs(still).max() <= 1  # the same on the GPU, a level off at most where the CPU blends it
     assert contact_sheet(spec, str(tmp_path / "n.png"), count=1, width=320, trails=True)["trails"] == ["dot"]
     assert probe(spec, at=0.5)["visible"]["dot"]["pos"] == [160.0, 90.0]
+def test_probe_curve_samples_a_key_and_its_speed():
+    from kinescript.mcp import call
+    from kinescript.verify import curve
+    spec = scene([{"id": "a", "type": "rect", "w": 10, "h": 10, "y": 90,
+                   "x": [[0, 0], [1, 100, "linear"], [1.5, 100], [2, 40, "linear"]],
+                   "fill": [[0, "#000000"], [1, "#ffffff"]]},
+                  {"id": "g", "type": "group", "speed": 2,
+                   "children": [{"id": "kid", "type": "rect", "w": 10, "h": 10, "x": [[0, 0], [1, 100, "linear"]]}]}],
+                 duration=2)
+    c = curve(spec, "a.x")
+    assert c["frames"] == 60 and c["value"][15] == 50 and c["speed"][15] == 100 and c["speed"][0] is None
+    assert c["stops"] == [{"from": 1.0, "to": 1.5, "frames": [30, 45], "value": 100}]
+    assert round(c["fastest"]["speed"]) == -120 and c["fastest"]["frame"] > 45 and c["range"] == [0, 100]
+    kid = curve(spec, "kid.x")  # its group's clock runs twice as fast, and it ends at the group's second second
+    assert kid["value"][15] == 100 and kid["speed"][5] == 200 and kid["value"][30] is None
+    fill = curve(spec, "a.color")
+    assert fill["curve"] == "a.fill" and fill["kind"] == "colour" and fill["value"][0] == "#000000"
+    assert fill["value"][30] == "#ffffff" and fill["speed"][15] > 0 and fill["stops"][0]["from"] == 1.0
+    assert curve(spec, "a.position")["value"][15] == [50, 90] and curve(spec, "a.opacity")["fastest"] is None
+    for bad, says in (("b.x", "no layer 'b'"), ("a.wobble", "has no wobble"), ("a", "such as title.x")):
+        with pytest.raises(ValueError, match=says):
+            curve(spec, bad)
+    assert json.loads(call("kine_probe", {"scene": spec, "curve": "a.x"})[0]["text"])["speed"][15] == 100
 
 
 def test_look_draws_the_sound_and_returns_its_measurements(mix_media, tmp_path):

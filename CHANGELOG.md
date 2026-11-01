@@ -107,6 +107,10 @@
   twice. `kine probe --at` gives each visible layer's `pos`, its anchor on the frame. The trails draw every frame
   at a quarter of the thumbnails' scale: 5 to 6 ms a frame on the GPU and 4 to 8 ms on the CPU for the `glow-text`
   and `masks-50` stress scenes.
+- `kine probe scene.json --curve title.x` gives a key's value at every frame, read as the renderer reads it through
+  eases, expressions and group clocks, and how fast it changes a second: signed for a number, and a distance for a
+  colour (in 0-255 channels) or for `position` (x and y as a point). It also lists the spans where the value holds
+  still for 2 frames or more, and the fastest frame. `kine_probe` takes `curve` the same way.
 - `kine check` warns `strobe` where a layer moves more than 40 px a frame at 1080p for five frames running in a
   scene without motion blur, where the eye sees separate copies instead of one moving thing.
 - 2D frames cost less Python: keyframes find their segment by bisection, expressions compile once to a function,

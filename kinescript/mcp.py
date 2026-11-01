@@ -49,9 +49,11 @@ TOOLS = [
                                                       "scale": {"type": "number", "default": 0.5}},
                      "required": ["scene", "at"]}},
     {"name": "kine_probe", "description": "Resolved timeline (every layer's in/out) and, with `at`, every visible "
-     "layer's screen box, anchor position (pos), alpha and text at that time. Given a media file instead of a scene, its duration, size, "
-     "fps and audio.",
-     "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"}, "at": {"type": "number"}},
+     "layer's screen box, anchor position (pos), alpha and text at that time. With `curve` (\"title.x\") "
+     "instead, that key's value at every frame and how fast it changes, where it holds still and its fastest "
+     "frame. Given a media file instead of a scene, its duration, size, fps and audio.",
+     "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"}, "at": {"type": "number"},
+                                                      "curve": {"type": "string"}},
                      "required": ["scene"]}},
     {"name": "kine_voice", "description": "Speak each sound's `text` into its file (voice/<id>.wav unless it has a "
      "src) and write its word times, so layers can cue from words (\"vo1:render\") and captions can follow it. Only "
@@ -120,6 +122,9 @@ def call(name: str, args: dict) -> list[dict]:
         sc = _need(args, "scene")
         if isinstance(sc, str) and Path(sc).suffix.lower() != ".json" and Path(sc).is_file():
             return [_text(probe_media(sc))]
+        if args.get("curve"):
+            from .verify import curve
+            return [_text(curve(_scene(args), args["curve"]))]
         return [_text(probe(_scene(args), args.get("at")))]
     if name == "kine_look":
         from .verify import contact_sheet

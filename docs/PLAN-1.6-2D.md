@@ -272,6 +272,9 @@ blur or shadow, the estimate came within 2% below to 35% above the measured time
   matrices, which on the CPU took a stress frame from 24 to 38 ms down to 4 to 8.
 - `kine probe scene.json --curve title.x` samples a value and its speed at every frame, with stops and the fastest
   frame, as JSON.
+  Status (2026-11-01): in its own PR. It reads the key without drawing, through group clocks as the renderer does;
+  stops are spans where the value is the same for 2 frames or more. Enters, exits and along move a layer on top of
+  its keys, which it notes; `look --trails` shows where the layer is drawn.
 - Examples: `logo.json` (an SVG logo draws on, morphs into a wordmark and glows), `kinetic.json` (stagger orders,
   `rise-mask`, `scramble`, text on a path), `explainer.json` (rough shapes, a dashed route with a dot riding it,
   masks), `confetti.json` (a burst over a counter).

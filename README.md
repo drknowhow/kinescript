@@ -173,6 +173,7 @@ An agent cannot watch a video, so Kinescript gives it things it can read:
 | `kine look scene.json --trails --onion 3` | the same frames with each moving layer's path, a dot a frame, so the spacing shows its speed, eases and stops, and the three frames before each one drawn fainter over it |
 | `kine look scene.json --audio` | the same frames with the sound under them: a lane per role and the mix, the duck and issues, plus each sound's measured loudness |
 | `kine probe scene.json --at 3.2` | resolved in/out of every layer and each visible layer's screen box and anchor |
+| `kine probe scene.json --curve title.x` | the value and its speed at every frame, where it holds still and its fastest frame |
 | `kine still` / `kine render` | a frame, a range (`--from/--to`), a draft (`-q draft --scale 0.5`) or the final file |
 | `kine watch scene.json` | the contact sheet, made again every time the file is saved |
 | `kine voice scene.json` | each sound with text spoken into its file, with its word times, skipping what has not changed |

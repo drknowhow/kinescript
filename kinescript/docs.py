@@ -684,6 +684,11 @@ COMMANDS
                                   draws the last frame, with a note. --scale 0.5 halves the size.
   kine probe scene.json --at 2    every layer's and sound's start and end, and at 2 s each visible
                                   layer's screen box and anchor (pos)
+  kine probe scene.json --curve title.x
+                                  title's x at every frame, through eases, expressions and group
+                                  clocks, and its speed a second (signed; a distance for position,
+                                  x and y as a point, or a colour), where it holds still and its
+                                  fastest frame. An enter, exit or along moves a layer as well.
   kine probe clip.mp4             a media file's kind (video, audio or image), duration, w and h as
                                   shown (after rotation), fps, audio, alpha and rotation; a note
                                   when it lists a video stream with no frames in it. A model file
