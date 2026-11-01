@@ -42,6 +42,13 @@
   `kine check` warns about a dash with no stroke and a corner on a smooth line. The `strokes-300` stress scene
   (100 marching dashed paths that draw on, 100 stars whose corners round as it plays, 100 tabs whose four radii
   animate) draws a 1080p frame in 6.2 ms on the GPU, 3.2 ms more than the same layers without those keys.
+- `rough` wobbles a shape's outline as if drawn by hand: `"rough": {"amount": 3, "seed": 1, "boil": 8}` moves
+  points `length` px apart (12 by default) up to `amount` px, the same way for the same seed, and `boil` draws it
+  anew that many times a second for a hand-drawn flicker. `true` takes the defaults and a number is the amount.
+  Fill, stroke and `draw` follow the wobbled line, and an arrow's head is wobbled where the smooth line puts it.
+  The seed for each boil comes from the layer's time, so a frame is still a function of its time alone. The
+  `rough-200` stress scene (100 outlined cards boiling 8 times a second, 100 rough lines drawing on) draws a 1080p
+  frame in 4.1 ms on the GPU, 1.6 ms more than without `rough`.
 - `kine check` warns `strobe` where a layer moves more than 40 px a frame at 1080p for five frames running in a
   scene without motion blur, where the eye sees separate copies instead of one moving thing.
 - 2D frames cost less Python: keyframes find their segment by bisection, expressions compile once to a function,

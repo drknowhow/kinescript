@@ -163,12 +163,14 @@ frames of the docs' outCubic bar recipe. The remap key is `timeRemap`, because `
   (`{"sweep": [0.5, 0.5], "stops": [...]}`), `angle` in degrees for a linear one, and gradients that animate: a fill
   keyframed between two gradient objects with the same number of stops mixes their points and colours.
 
-Status (2026-11-01): gradients (#89) and strokes in the PR after. Changes from the bullets above: a gradient
+Status (2026-11-01): gradients (#89), then strokes and `rough` in the PRs after. Changes from the bullets above: a gradient
 animates into one of the same kind as well as the same stop count, since a linear and a sweep gradient have no
 points in common to mix. `dash` marks out the strokes of images and videos too, and `radius` takes four values on
 groups, images and videos as well as rects. `strokes-300` draws in 6.2 ms a frame on the GPU, 3.2 ms more than its
 layers without dash, corner and four radii: about 1.2 ms for each 100 marching dashes, 1.2 ms for each 100
 corners that animate (a constant corner is cached and costs 0.1 ms) and 0.5 ms for each 100 animated radii.
+`rough` takes a `length` too, the spacing of the points that stray; `rough-200` draws in 4.1 ms, 1.6 ms more than
+without it, since a layer keeps its last wobbled path while its seed and outline stay the same.
 
 ### Phase 3: masks, mattes and effects
 

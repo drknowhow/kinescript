@@ -133,6 +133,19 @@ def strokes_300() -> dict:  # 100 dashed paths that march and draw on, 100 stars
     return _scene(out)
 
 
+def rough_200() -> dict:  # 100 outlined cards boiling 8 times a second, and 100 rough lines that draw on
+    out = []
+    for n in range(100):
+        x, y = 100 + (n % 10) * 180, 70 + (n // 10) * 46
+        out.append({"id": f"card{n}", "type": "rect", "x": x, "y": y, "w": 120, "h": 34, "radius": 6,
+                    "fill": "#ffd25a", "stroke": "#14171c", "strokeWidth": 3,
+                    "rough": {"amount": 2.5, "seed": n, "boil": 8}})
+        out.append({"id": f"scrawl{n}", "type": "line", "points": [[x - 60, y + 560], [x, y + 540], [x + 60, y + 560]],
+                    "stroke": "#e8e2d0", "strokeWidth": 3, "rough": {"amount": 2, "length": 8, "seed": n},
+                    "draw": [[0, 0], [3, 1]]})
+    return _scene(out)
+
+
 def counters() -> dict:
     return _scene([{"id": f"c{n}", "type": "counter", "x": 120 + (n % 10) * 180, "y": 80 + (n // 10) * 100,
                     "size": 40, "value": {"from": 0, "to": 10 ** (1 + n % 6), "dur": 3.5}, "format": "{:,.0f}"}
@@ -408,6 +421,7 @@ SCENES = {
     "counters": (counters, ".mp4", "100 counters formatting every frame"),
     "along-100": (along_100, ".mp4", "100 layers riding paths: 60 on 6 path layers that draw on, 40 round closed paths"),
     "strokes-300": (strokes_300, ".mp4", "100 marching dashed paths that draw on, 100 stars rounding, 100 four-corner tabs"),
+    "rough-200": (rough_200, ".mp4", "100 outlined cards boiling 8 times a second, 100 rough lines drawing on"),
     "shaders": (shaders, ".mp4", "4 full-frame SkSL presets blended, grain and vignette"),
     "uhd-4k": (uhd_4k, ".mp4", "3840x2160: shader, split text, stroke draw, shadow, grade"),
     "long-120s": (long_120s, ".mp4", "3600 frames: worker split, segment joins"),

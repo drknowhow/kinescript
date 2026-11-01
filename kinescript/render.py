@@ -572,6 +572,7 @@ class Renderer:
         self._fonts: dict = {}
         self._shaped: dict = {}  # (typeface, size, text, rtl) -> how _draw_pieces draws it (_pieces)
         self._paths: dict = {}
+        self._roughs: dict = {}  # layer id: (seed, the path it wobbled, the wobbled path), the last one made
         self._routes: dict[str, tuple] = {}  # an along's path by layer (data) or route id: (path, measure, length)
         self._group_T: dict[str, float] = {}  # a group with a clock: the scene time it is drawn at, for its kids
         self._solid: dict[int, skia.Paint] = {}  # an antialiased fill paint for each colour (_fill_paint)
@@ -1219,7 +1220,7 @@ class Renderer:
                 c.clipRect(skia.Rect(*clip), doAntiAlias=True)
         reveal = mods.reveal if not mods.wipe else 1.0
         draw = getattr(self, "_draw_" + L.type)
-        self._ink, self._alpha, self._cf = None, paint_alpha, cf
+        self._ink, self._alpha, self._cf, self._t = None, paint_alpha, cf, t
         drawn = draw(c, L, t, T, g, box, reveal, mods)  # a model returns its projected bounds
         if self.track and (box is not None or drawn):
             m = c.getTotalMatrix()
@@ -1465,8 +1466,26 @@ class Renderer:
         else:
             self._ink.join(r)
 
+    def _rough(self, L: Layer, path: skia.Path) -> skia.Path:
+        """path wobbled as by hand: points `length` px apart moved up to `amount` px, the same for the same seed. boil
+        picks a new seed that many times a second of the layer's time, so the frame stays a function of its time."""
+        amount, length, seed, boil = L.rough
+        if boil:
+            seed += int(math.floor(self._t * boil + 1e-9))
+        hit = self._roughs.get(L.id)
+        if hit is not None and hit[0] == seed and hit[1] == path:  # the same path object, so the GPU's work is kept
+            return hit[2]
+        out = skia.Path()
+        # As a hairline: a fill paint makes Skia measure an open path as closed, adding a stroke back to its start
+        skia.Paint(Style=skia.Paint.kStroke_Style, StrokeWidth=0,
+                   PathEffect=skia.DiscretePathEffect.Make(length, amount, seed)).getFillPath(path, out)
+        self._roughs[L.id] = (seed, skia.Path(path), out)
+        return out
+
     def _shape(self, c, L, g, path: skia.Path, box, reveal):
         """Fill then stroke. 'draw' (0..1) trims the stroke and fades the fill with it."""
+        if L.rough is not None:
+            path = self._rough(L, path)
         amt = max(0.0, min(1.0, float(g("draw")) * reveal))
         has_stroke = L.raw.get("stroke") is not None
         fp = self._fill_paint(L, g, box, alpha=amt * self._alpha,
@@ -1665,12 +1684,15 @@ class Renderer:
                 self._note_ink(c, full, sp)
         if amt <= 0.0005:
             return
+        hp = head_at(amt)  # on the smooth line, so a rough arrow still points where it goes
+        if L.rough is not None:
+            path = self._rough(L, path)
+            hp = None if hp is None else self._rough(L, hp)
         shaft = sp
         if "dash" in L.raw:  # the head stays whole
             shaft = skia.Paint(sp)
             self._dash(L, g, shaft)
         c.drawPath(self._trim(path, amt), shaft)
-        hp = head_at(amt)
         if hp is not None:
             c.drawPath(hp, sp)
 
