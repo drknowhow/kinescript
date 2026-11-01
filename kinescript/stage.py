@@ -293,6 +293,19 @@ class Stage:
                 dof = (r._focused, top)
                 r.slow_dof = r.slow_dof or not self.gpu
         self._finish(c, render3d.fog(r, T), self._sun(r, T, shadows) if self.casters else None, dof)
+        if r.depth_view and not r._insets:
+            r.depths.append(self.depth_image())
+
+    def depth_image(self) -> np.ndarray:
+        """The merged depth at the frame's resolution, as stored (1/w over QMAX, 0 where nothing is): the nearest of
+        each frame pixel's samples. For kine look --depth."""
+        if self.gpu:
+            px = self.accd.makeImageSnapshot().toarray(colorType=skia.kRGBA_8888_ColorType).astype(np.int64)
+            d = (px[..., 3] > 0) * ((px[..., 0] << 16) | (px[..., 1] << 8) | px[..., 2]) / 16777215.0
+        else:
+            d = self.outd.astype(float)
+        ss = self.ss
+        return d.reshape(self.h // ss, ss, self.w // ss, ss).max(axis=(1, 3))
 
     def depth(self, xy: np.ndarray, q: np.ndarray, tris: np.ndarray):
         """Draw the depth of triangles tris, whose corners are at xy (stage px) with 1/w q, in order: each one

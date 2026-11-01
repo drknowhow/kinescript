@@ -1035,6 +1035,13 @@ def _lines(r, L, m, T, ids, front, w, cos: float, exact: bool) -> tuple:
     return va, vb, np.maximum(top[ends[e, 0]], top[ends[e, 1]])
 
 
+def wire(xy: np.ndarray, T: np.ndarray) -> np.ndarray:
+    """Each edge of triangles T once, as its two ends at points xy: what kine look --wire draws."""
+    e = np.sort(T[:, [[0, 1], [1, 2], [2, 0]]].reshape(-1, 2), axis=1).astype(np.int64)
+    e = np.unique(e[:, 0] * len(xy) + e[:, 1])
+    return np.stack([xy[e // len(xy)], xy[e % len(xy)]], 1).astype(np.float32)
+
+
 def _topology(r, L, m) -> tuple:
     """mesh.edges of the model's mesh, kept while its triangles are (a size that animates keeps them)."""
     hit = r._models.get(("edges", L.id))
@@ -1141,7 +1148,7 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
     U = None if U is None else U[used]
     nv = N @ np.linalg.inv(view[:3, :3])  # normals into camera space
     nv /= np.linalg.norm(nv, axis=1, keepdims=True)
-    edge, wv = None, w[used]
+    edge, wv, faces = None, w[used], T
     if lines is not None and len(lines[0]):
         # Each line a quad of four vertices of its own, in the sort after every face at its ends.
         va, vb, after = lines
@@ -1157,6 +1164,8 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
     else:
         X, Y = X[used], Y[used]
     X, Y = X * r.scale, Y * r.scale  # device pixels
+    if r.wire and not r._insets:
+        r.wires.append(wire(np.stack([X, Y], 1), faces))
     lo, hi = (X.min(), Y.min()), (X.max(), Y.max())
     bounds = [float(lo[0]), float(lo[1]), float(hi[0]), float(hi[1])]
     x0, y0 = max(0, math.floor(lo[0]) - 2), max(0, math.floor(lo[1]) - 2)

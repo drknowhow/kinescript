@@ -58,6 +58,9 @@ def main(argv=None) -> int:
     lk.add_argument("--width", type=int, default=480, help="width of each thumbnail")
     lk.add_argument("--at", nargs="*", help="explicit times instead of even spacing, read as still reads --at")
     lk.add_argument("--boxes", action="store_true", help="outline every layer with its id")
+    lk.add_argument("--wire", action="store_true", help="draw every model's drawn triangles over the frames")
+    lk.add_argument("--depth", action="store_true", help="show each stage's depth image, nearer brighter, over "
+                    "the frames dimmed")
     lk.add_argument("--audio", action="store_true", help="draw the sound under the frames (a lane per role and the "
                     "mix, with levels, the duck and issues) and print its measurements")
     lk.add_argument("-o", "--out")
@@ -187,7 +190,8 @@ def _run(a) -> int:
     if a.cmd == "look":
         from .verify import contact_sheet
         out = a.out or _default_out(a.scene, "_sheet.png")
-        _emit(dict(ok=True, **contact_sheet(a.scene, out, a.count, a.cols, a.width, a.at, a.boxes, a.audio)))
+        _emit(dict(ok=True, **contact_sheet(a.scene, out, a.count, a.cols, a.width, a.at, a.boxes, a.audio,
+                                            wire=a.wire, depth=a.depth)))
         return 0
     if a.cmd == "voice":
         from .voice import generate
