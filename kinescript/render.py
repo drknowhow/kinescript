@@ -10,6 +10,7 @@ import sys
 import time
 import unicodedata
 from collections import deque
+from itertools import repeat
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,7 +23,7 @@ from . import media, render3d, space, stage, svgpath
 from . import morph as M
 from . import presets as P
 from .presets import IDENT, Mods
-from .props import length, noise
+from .props import COPY_PAINT, length, noise
 from .scene import Layer, Scene, uses_depth
 
 ANCHORS = {"center": (0.5, 0.5), "topleft": (0, 0), "top": (0.5, 0), "topright": (1, 0), "left": (0, 0.5),
@@ -182,6 +183,7 @@ def _read_back(job: list, rows: int, res) -> None:
 # Layer types drawn from their props, enter and exit alone, which Renderer._holds reads. Footage is one: a sub-frame
 # shows its frame's picture (_draw_video). Shaders, captions and models follow the clock in other ways.
 HOLDS = {"rect", "circle", "ellipse", "polygon", "path", "line", "arrow", "image", "video", "text", "counter", "group"}
+SHAPED = {"rect", "circle", "ellipse", "polygon", "path", "line"}  # drawn by _shape alone
 
 BACKENDS = ("auto", "gpu", "cpu")
 
@@ -653,6 +655,10 @@ class Renderer:
         self._ink: skia.Rect | None = None  # track: device bounds of the strokes the layer being drawn made
         self._alpha = 1.0  # the opacity of the layer being drawn when its paint carries it (_one_draw), else 1
         self._cf: skia.ColorFilter | None = None  # likewise its fog
+        self._copy: tuple | None = None  # while a layer's copies draw (_copies): (the layer, the copy's own colours)
+        self._ops: list | None = None  # while a shape's copies are made ready: what _shape would draw
+        self._copying = 0  # how many layers' copies are drawing, one inside another: their boxes join (_note)
+        self._tinted: dict[tuple, tuple] = {}  # (layer id, fill or stroke) -> its copies' still colours (_tints)
         cm = color_matrix({k: v for k, v in scene.grade.items() if k not in ("vignette", "grain")})
         self.grade_filter = skia.ColorFilters.Matrix(cm) if cm else None
         self._videos = [L for L in scene.all_layers() if L.type == "video"]
@@ -786,7 +792,7 @@ class Renderer:
         props, its enter and exit, and its children's."""
         if not L.visible(F):
             return True
-        if L.type not in HOLDS or L.clock is not None:
+        if L.type not in HOLDS or L.clock is not None or (L.copies is not None and L.copies.moves()):
             return False
         end = math.nextafter(L.t_out, -math.inf)
         lo, hi = min(max(lo, L.t_in), end), min(max(hi, L.t_in), end)  # as _layer clamps a sub-frame
@@ -1283,35 +1289,32 @@ class Renderer:
         if box is not None:
             bx, by, bw, bh = box
             if mods.wipe and mods.reveal < 1:
+                if L.copies is not None and L.type != "model":  # its copies wipe on as one
+                    bx, by, bw, bh = self._copies_box(L, t, T, box)
                 r = max(0.0, mods.reveal)
                 clip = {"right": (bx, by, bx + bw * r, by + bh), "left": (bx + bw * (1 - r), by, bx + bw, by + bh),
                         "down": (bx, by, bx + bw, by + bh * r), "up": (bx, by + bh * (1 - r), bx + bw, by + bh)}[mods.wipe]
                 c.clipRect(skia.Rect(*clip), doAntiAlias=True)
         reveal = mods.reveal if not mods.wipe else 1.0
-        draw = getattr(self, "_draw_" + L.type)
         self._ink, self._alpha, self._cf, self._t = None, paint_alpha, cf, t
-        drawn = draw(c, L, t, T, g, box, reveal, mods)  # a model returns its projected bounds
+        if L.copies is not None and L.type != "model":  # a model's copies are merged into its mesh (render3d)
+            self._copies(c, L, t, T, g, box, reveal, mods, alpha, parent_alpha, facing)
+        else:
+            self._body(c, L, t, T, g, box, reveal, mods, alpha, parent_alpha, facing)
+        if layered == 2:
+            c.restore()
+        if layered:
+            c.restore()
+        c.restore()
+        self._m3d = outer
+        if self.stop_after == L.id:
+            self._stopped = True
+
+    def _body(self, c, L: Layer, t, T, g, box, reveal, mods, alpha, parent_alpha, facing):
+        """L drawn on c in the space _layer set up, its box noted (track), then its children if it is a group."""
+        drawn = getattr(self, "_draw_" + L.type)(c, L, t, T, g, box, reveal, mods)  # a model gives its bounds
         if self.track and (box is not None or drawn):
-            m = c.getTotalMatrix()
-            r = skia.Rect(*drawn) if drawn else m.mapRect(skia.Rect.MakeXYWH(*box))
-            if self._ink is not None:  # a stroke reaches half its width past the shape, an arrow's head further
-                r.join(self._ink)
-            sc = 1.0 if drawn else math.sqrt(abs(m.getScaleX() * m.getScaleY())) or abs(m.getSkewX())
-            o = m.mapXY(0, 0)  # its anchor, where x and y put it
-            info = {"rect": [round(r.left(), 1), round(r.top(), 1), round(r.right(), 1), round(r.bottom(), 1)],
-                    "pos": [round(o.x(), 1), round(o.y(), 1)], "alpha": round(alpha * parent_alpha, 3),
-                    "type": L.type, "scale": round(sc, 4)}
-            if L.type in ("text", "counter", "captions"):
-                # The colour _draw_text uses, so checks see default-coloured text too.
-                fill = (g("fill") if "fill" in L.props else None if isinstance(L.raw.get("fill"), dict)
-                        else C.parse(self.s.theme.get("paper", "#f2f0e8")))
-                info.update(size=float(g("size", 64)), fill=list(fill) if isinstance(fill, tuple) else None,
-                            text=self._last_text if hasattr(self, "_last_text") else "")
-            if not facing:
-                info["mirrored"] = True
-            if self._matte is not None:
-                info["mask"] = True
-            self.boxes[L.id] = info
+            self._note(c, L, g, box, drawn, alpha, parent_alpha, facing)
         if L.type == "group":
             kids = L.children
             frame_t = self._frame_t
@@ -1336,14 +1339,240 @@ class Renderer:
                 if L.raw.get("combine"):
                     self._combine(c, L, t, g, box, reveal, outer_capture)
             self._frame_t = frame_t
-        if layered == 2:
-            c.restore()
-        if layered:
-            c.restore()
-        c.restore()
-        self._m3d = outer
-        if self.stop_after == L.id:
-            self._stopped = True
+
+    def _note(self, c, L: Layer, g, box, drawn, alpha, parent_alpha, facing, rect: skia.Rect | None = None):
+        """For boxes (track): where L landed on the frame, its anchor, opacity and scale; rect, when given, is where
+        it landed. Copies of it (_copies) join their boxes into one."""
+        m = c.getTotalMatrix()
+        if rect is not None:
+            r = rect
+        else:
+            r = skia.Rect(*drawn) if drawn else m.mapRect(skia.Rect.MakeXYWH(*box))
+            if self._ink is not None:  # a stroke reaches half its width past the shape, an arrow's head further
+                r.join(self._ink)
+        if self._copying and L.id in self.boxes:  # another copy of it: one box holds them all
+            r.join(skia.Rect(*self.boxes[L.id]["rect"]))
+        sc = 1.0 if drawn else math.sqrt(abs(m.getScaleX() * m.getScaleY())) or abs(m.getSkewX())
+        o = m.mapXY(0, 0)  # its anchor, where x and y put it
+        info = {"rect": [round(r.left(), 1), round(r.top(), 1), round(r.right(), 1), round(r.bottom(), 1)],
+                "pos": [round(o.x(), 1), round(o.y(), 1)], "alpha": round(alpha * parent_alpha, 3),
+                "type": L.type, "scale": round(sc, 4)}
+        if L.type in ("text", "counter", "captions"):
+            # The colour _draw_text uses, so checks see default-coloured text too.
+            fill = (g("fill") if "fill" in L.props else None if isinstance(L.raw.get("fill"), dict)
+                    else C.parse(self.s.theme.get("paper", "#f2f0e8")))
+            info.update(size=float(g("size", 64)), fill=list(fill) if isinstance(fill, tuple) else None,
+                        text=self._last_text if hasattr(self, "_last_text") else "")
+        if not facing:
+            info["mirrored"] = True
+        if self._matte is not None:
+            info["mask"] = True
+        self.boxes[L.id] = info
+
+    def _copies(self, c, L: Layer, t, T, g, box, reveal, mods, alpha, parent_alpha, facing):
+        """L's "repeat": L drawn once for each copy, moved by the copy's x, y, rotate and scale in L's space and in
+        the copy's own fill, stroke and opacity. A shape's path and paints are made once and drawn for every copy in
+        one loop, recoloured. Anything else is recorded once and replayed for each copy while the copies keep L's
+        colours, and drawn once for each copy when they do not."""
+        cols = L.copy_columns(t, T)
+        n = L.copies.n
+        zero = [0.0] * n
+        xs, ys, rs, ss = cols.get("x", zero), cols.get("y", zero), cols.get("rotate"), cols.get("scale")
+        fades = cols.get("opacity")
+        own = {k: cols[k] for k in COPY_PAINT if k in cols}
+        if L.type in SHAPED and self._capture is None and not (L.type == "rect" and L.raw.get("dimOutside")):
+            self._copy_shapes(c, L, t, T, g, box, reveal, mods, xs, ys, rs, ss, fades, own)
+            seen = [i for i in range(n) if fades is None or fades[i] > 0.002]
+            if self.track and box is not None and seen:
+                base, inv = c.getTotalMatrix(), skia.Matrix()
+                if base.invert(inv):
+                    local = skia.Rect.MakeXYWH(*box)
+                    if self._ink is not None:  # its stroke, in L's space
+                        local.join(inv.mapRect(self._ink))
+                    r = self._spread(base, local, seen, xs, ys, rs, ss)
+                    if r is not None:
+                        self._note(c, L, g, box, None, alpha, parent_alpha, facing, r)
+            return
+        a0, cf = self._alpha, self._cf
+        if not own and self._m3d is None and self._capture is None and not self.track and self.stop_at is None \
+                and self.stop_after is None:
+            # Recorded once, where L lands, as far round as any copy reaches into the frame, and replayed moved by
+            # each copy's place: in the frame's space, L's matrix times the copy's times L's inverse.
+            base, inv = c.getTotalMatrix(), skia.Matrix()
+            clip = c.getDeviceClipBounds()
+            live = [i for i in range(n) if (fades is None or fades[i] > 0.002) and (ss is None or ss[i])]
+            if not live or clip.isEmpty() or not base.invert(inv):
+                return
+            reach = self._spread(base, inv.mapRect(skia.Rect.Make(clip)), live, xs, ys, rs, ss, inverse=True)
+            if reach is None:
+                return
+            reach.join(skia.Rect.Make(clip))
+            rec = skia.PictureRecorder()
+            rc = rec.beginRecording(reach, skia.RTreeFactory()())
+            rc.setMatrix(c.getLocalToDevice())
+            work = self.filtered
+            self._body(rc, L, t, T, g, box, reveal, mods, alpha, parent_alpha, facing)
+            self.filtered += (self.filtered - work) * (len(live) - 1)
+            pic = rec.finishRecordingAsPicture()
+            if pic.cullRect().isEmpty():
+                return
+            for i in live:
+                a = 1.0 if fades is None else min(1.0, fades[i])
+                m = skia.Matrix.Translate(xs[i], ys[i])
+                if rs is not None and rs[i]:
+                    m.preRotate(rs[i])
+                if ss is not None and ss[i] != 1:
+                    m.preScale(ss[i], ss[i])
+                c.save()
+                c.setMatrix(skia.Matrix.Concat(base, skia.Matrix.Concat(m, inv)))
+                c.drawPicture(pic, None, skia.Paint(Alphaf=a) if a < 0.999 else None)
+                c.restore()
+            return
+        one = self._one_draw(L, True)  # a copy's opacity goes in the paint of its one draw
+        was = self._copy
+        self._copying += 1
+        try:
+            for i in range(n):
+                if self._stopped:
+                    break
+                a = 1.0 if fades is None else min(1.0, max(0.0, fades[i]))
+                if a <= 0.002:
+                    continue
+                c.save()
+                c.translate(xs[i], ys[i])
+                if rs is not None and rs[i]:
+                    c.rotate(rs[i])
+                if ss is not None and ss[i] != 1:
+                    c.scale(ss[i], ss[i])
+                self._copy = (L, {k: v[i] for k, v in own.items()}) if own else None
+                self._ink, self._alpha, self._cf, self._t = None, a0 * a if one else a0, cf, t
+                if a < 0.999 and not one:  # it fades in a layer as large as it draws
+                    pic = self._record(c, lambda rc: self._body(rc, L, t, T, g, box, reveal, mods, alpha,
+                                                                parent_alpha, facing))
+                    if pic is not None:
+                        c.save()
+                        c.resetMatrix()  # the picture was recorded where it lands on this canvas
+                        c.drawPicture(pic, None, skia.Paint(Alphaf=a))
+                        c.restore()
+                else:
+                    self._body(c, L, t, T, g, box, reveal, mods, alpha, parent_alpha, facing)
+                c.restore()
+        finally:
+            self._copy = was
+            self._copying -= 1
+
+    def _copy_shapes(self, c, L: Layer, t, T, g, box, reveal, mods, xs, ys, rs, ss, fades, own: dict):
+        """A shape's copies: the paths and paints _shape draws, made once with the first copy's colours, then drawn
+        for each copy in one loop, each paint recoloured with the copy's own fill or stroke. A lone fill takes a
+        copy's opacity in its paint; a fill and a stroke fade together in a layer of the copy's own."""
+        was, self._copy = self._copy, (L, {k: v[0] for k, v in own.items()}) if own else None
+        self._ops = []
+        try:
+            getattr(self, "_draw_" + L.type)(c, L, t, T, g, box, reveal, mods)
+        finally:
+            ops, self._ops, self._copy = self._ops, None, was
+        base, inv = c.getTotalMatrix(), skia.Matrix()
+        if not ops or not base.invert(inv):
+            return
+        one = len(ops) == 1 and ops[0][2] == "fill"
+        kept = []  # (path, paint, each copy's colour as the paint takes it or None, the paint's alpha)
+        for path, paint, role, mul, m in ops:
+            if m != base:  # drawn moved within L's space (an anchored path)
+                path = skia.Path(path)
+                path.transform(skia.Matrix.Concat(inv, m))
+            p = skia.Paint(paint)  # a kept solid paint is shared; a copy's own colour made it solid
+            col = own.get(role)
+            kept.append((path, p, None if col is None else self._tints(L, role, col, mul, fades if one else None),
+                         p.getAlphaf()))
+        save, restore, translate, rotate, scale, draw = c.save, c.restore, c.translate, c.rotate, c.scale, c.drawPath
+        if fades is None and rs is None and ss is None and len(kept) == 1:  # copies that only move, in a loop of its own
+            path, p, ints, _ = kept[0]
+            tint = p.setColor
+            for x, y, v in zip(xs, ys, ints or repeat(None)):
+                save()
+                translate(x, y)
+                if v is not None:
+                    tint(v)
+                draw(path, p)
+                restore()
+            return
+        bounds = None
+        dev = math.sqrt(abs(base.getScaleX() * base.getScaleY() - base.getSkewX() * base.getSkewY()))
+        for i in range(len(xs)):
+            a = 1.0 if fades is None else min(1.0, max(0.0, fades[i]))
+            if a <= 0.002:
+                continue
+            save()
+            translate(xs[i], ys[i])
+            if rs is not None and rs[i]:
+                rotate(rs[i])
+            k = 1.0
+            if ss is not None and ss[i] != 1:
+                k = ss[i]
+                scale(k, k)
+            alone = a < 0.999 and not one
+            if alone:
+                if bounds is None:
+                    bounds = skia.Rect.MakeEmpty()
+                    for path, p, *_ in kept:
+                        bounds.join(p.computeFastBounds(path.getBounds()))
+                pad = 1.5 / max(dev * abs(k), 1e-3)  # a pixel and a half, past the edge's antialiasing
+                c.saveLayer(bounds.makeOutset(pad, pad), skia.Paint(Alphaf=a))
+            for path, p, ints, alpha in kept:
+                if ints is not None:
+                    p.setColor(ints[i])
+                elif one and fades is not None:
+                    p.setAlphaf(alpha * a)
+                draw(path, p)
+            if alone:
+                restore()
+            restore()
+
+    def _tints(self, L: Layer, role: str, col: list, mul: float, fades: list | None) -> list[int]:
+        """Each copy's own fill or stroke as a paint takes it, at mul of its alpha (and its opacity, from fades). A
+        still column is the same list from frame to frame (Copies), so its colours are kept while mul holds."""
+        argb = C.to_argb_int
+        if fades is not None:
+            return [argb(v, mul * min(1.0, max(0.0, a))) for v, a in zip(col, fades)]
+        hit = self._tinted.get((L.id, role))
+        if hit is None or hit[0] is not col or hit[1] != mul:
+            hit = self._tinted[(L.id, role)] = (col, mul, [argb(v, mul) for v in col])
+        return hit[2]
+
+    def _copies_box(self, L: Layer, t, T, box) -> tuple:
+        """The box round all of L's copies (_copies), in L's space."""
+        cols, n = L.copy_columns(t, T), L.copies.n
+        zero = [0.0] * n
+        r = self._spread(skia.Matrix(), skia.Rect.MakeXYWH(*box), range(n), cols.get("x", zero), cols.get("y", zero),
+                         cols.get("rotate"), cols.get("scale"))
+        return box if r is None else (r.left(), r.top(), r.width(), r.height())
+
+    @staticmethod
+    def _spread(base: skia.Matrix, rect: skia.Rect, which: list, xs, ys, rs, ss,
+                inverse: bool = False) -> skia.Rect | None:
+        """Where rect, in a layer's space, lands on the device (by base) moved as each copy in `which` moves it; with
+        inverse, moved back by each one's move: what of the layer each one brings to rect."""
+        q = np.array([[rect.left(), rect.top()], [rect.right(), rect.top()], [rect.right(), rect.bottom()],
+                      [rect.left(), rect.bottom()]])
+        w = np.asarray(which)
+        x, y = np.asarray(xs, float)[w, None], np.asarray(ys, float)[w, None]
+        ang = np.radians(np.asarray(rs, float)[w, None]) if rs is not None else np.zeros((len(w), 1))
+        s = np.asarray(ss, float)[w, None] if ss is not None else np.ones((len(w), 1))
+        cs, sn = np.cos(ang), np.sin(ang)
+        if inverse:
+            dx, dy = q[:, 0] - x, q[:, 1] - y
+            with np.errstate(divide="ignore", invalid="ignore"):
+                u, v = (dx * cs + dy * sn) / s, (dy * cs - dx * sn) / s
+        else:
+            px, py = q[:, 0] * s, q[:, 1] * s
+            u, v = px * cs - py * sn + x, px * sn + py * cs + y
+        m = base.get9()
+        W = m[6] * u + m[7] * v + m[8]
+        ok = np.isfinite(u) & np.isfinite(v) & (W > 1e-9)
+        if not ok.any():
+            return None
+        X, Y = ((m[0] * u + m[1] * v + m[2]) / W)[ok], ((m[3] * u + m[4] * v + m[5]) / W)[ok]
+        return skia.Rect(float(X.min()), float(Y.min()), float(X.max()), float(Y.max()))
 
     def _looks(self, L: Layer, g, t: float) -> tuple[skia.ImageFilter | None, float, float]:
         """L's innerShadow, outline and glow, in that order, as one image filter on its offscreen layer, so both
@@ -1608,19 +1837,21 @@ class Renderer:
         return hit
 
     @staticmethod
-    def _one_draw(L: Layer) -> bool:
+    def _one_draw(L: Layer, copy: bool = False) -> bool:
         """Whether the layer draws in a single call, so its opacity can go in that call's paint. Two draws that
         overlap, faded one by one, darken where they meet: a stroke over a fill, an arrow's head on its shaft, a
-        rect's dimOutside, a stroke around a picture, glyphs that touch. So does a stroke alone once it is thin enough
-        to draw as a hairline, at its joints. Strokes, groups, text, shaders (whose output an offscreen layer clamps
-        before it fades) and models keep the offscreen layer."""
+        rect's dimOutside, a stroke around a picture, glyphs that touch, copies (repeat). So does a stroke alone once
+        it is thin enough to draw as a hairline, at its joints. Strokes, groups, text, shaders (whose output an
+        offscreen layer clamps before it fades) and models keep the offscreen layer. With `copy`: whether one of its
+        copies draws in a single call, its own stroke counting as the layer's."""
         ty, raw = L.type, L.raw
-        if L.children:
+        if L.children or (L.copies is not None and not copy):
             return False
+        own = copy and "stroke" in L.copies.keys  # a copy's own stroke
         if ty in ("rect", "circle", "ellipse", "path", "polygon"):  # the fill (_shape)
-            return raw.get("stroke") is None and not (ty == "rect" and raw.get("dimOutside"))
+            return raw.get("stroke") is None and not own and not (ty == "rect" and raw.get("dimOutside"))
         if ty in ("image", "video"):  # the picture (_content)
-            return raw.get("stroke") is None
+            return raw.get("stroke") is None and not own
         return False
 
     @staticmethod
@@ -1707,8 +1938,14 @@ class Renderer:
         return skia.GradientShader.MakeLinear([skia.Point(x + a[0] * w, y + a[1] * h), skia.Point(x + b[0] * w, y + b[1] * h)],
                                               colors, pos)
 
+    def _own(self, L: Layer, key: str):
+        """A copy's own fill or stroke, as (r, g, b, a), while L's copies draw (_copies); else None."""
+        cp = self._copy
+        return None if cp is None or cp[0] is not L else cp[1].get(key)
+
     def _fill_paint(self, L: Layer, g, box, alpha=1.0, key="fill", default=None):
-        raw = L.raw.get(key, default)
+        own = self._own(L, key)
+        raw = L.raw.get(key, default) if own is None else own
         if raw is None:
             return None
         if isinstance(raw, dict) and key not in L.props:  # a gradient; a colour tween is compiled into props
@@ -1716,7 +1953,8 @@ class Renderer:
             bx, by, bw, bh = box
             p.setShader(self._gradient(raw, bx, by, bw, bh, alpha))
         else:
-            col = g(key) if key in L.props else C.parse(raw) if isinstance(raw, str) else raw
+            col = (own if own is not None else g(key) if key in L.props else C.parse(raw) if isinstance(raw, str)
+                   else raw)
             if isinstance(col, C.Gradient):  # one that animates
                 p = skia.Paint(AntiAlias=True)
                 p.setShader(self._gradient(col.spec(), *box, alpha))
@@ -1730,14 +1968,15 @@ class Renderer:
         return p
 
     def _stroke_paint(self, L: Layer, g, box, alpha=1.0):
-        raw = L.raw.get("stroke")
+        own = self._own(L, "stroke")
+        raw = L.raw.get("stroke") if own is None else own
         if raw is None:
             return None
         p = skia.Paint(AntiAlias=True, Style=skia.Paint.kStroke_Style, StrokeWidth=float(g("strokeWidth", 4)))
         if isinstance(raw, dict) and "stroke" not in L.props:  # a gradient
             p.setShader(self._gradient(raw, *box, alpha))
         else:
-            col = g("stroke") if "stroke" in L.props else C.parse(raw)
+            col = own if own is not None else g("stroke") if "stroke" in L.props else C.parse(raw)
             if isinstance(col, C.Gradient):  # one that animates
                 p.setShader(self._gradient(col.spec(), *box, alpha))
             else:
@@ -1811,7 +2050,7 @@ class Renderer:
         if L.rough is not None:
             path = self._rough(L, path)
         amt = max(0.0, min(1.0, float(g("draw")) * reveal))
-        has_stroke = L.raw.get("stroke") is not None
+        has_stroke = L.raw.get("stroke") is not None or self._own(L, "stroke") is not None
         fp = self._fill_paint(L, g, box, alpha=amt * self._alpha,
                               default=None if has_stroke else self.s.theme.get("paper", "#f2f0e8"))
         if self._capture is not None:  # a combining group takes its fill's outline, or its stroke's
@@ -1828,7 +2067,10 @@ class Renderer:
             fp = skia.Paint(fp)  # a kept solid paint is shared
             fp.setColorFilter(self._cf)
         if fp is not None and amt > 0:
-            c.drawPath(path, fp)
+            if self._ops is not None:  # its copies draw it (_copy_shapes)
+                self._ops.append((path, fp, "fill", amt * self._alpha, c.getTotalMatrix()))
+            else:
+                c.drawPath(path, fp)
         sp = self._stroke_paint(L, g, box)
         if sp is not None:
             self._note_ink(c, path, sp)  # the whole stroke, as the box is the whole shape while it draws on
@@ -1836,7 +2078,10 @@ class Renderer:
                 start = float(g("drawStart", 0.0))
                 if "dash" in L.raw:
                     self._dash(L, g, sp, path, start)
-                c.drawPath(self._trim(path, amt, start), sp)
+                if self._ops is not None:
+                    self._ops.append((self._trim(path, amt, start), sp, "stroke", 1.0, c.getTotalMatrix()))
+                else:
+                    c.drawPath(self._trim(path, amt, start), sp)
 
     # ---- layer types ----------------------------------------------------------------------
     def _draw_group(self, c, L, t, T, g, box, reveal, mods):
@@ -2627,8 +2872,9 @@ class Renderer:
             c.drawRRect(skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(*box), r, r),
                         skia.Paint(AntiAlias=True, Color=_argb(bs.get("fill", "#000000b0"))))
         ox, oy = bx + pad[1], by + pad[0]
-        fill = (g("fill") if "fill" in L.props else L.raw["fill"] if isinstance(L.raw.get("fill"), dict)
-                else C.parse(self.s.theme.get("paper", "#f2f0e8")))
+        fill = self._own(L, "fill") or (g("fill") if "fill" in L.props else L.raw["fill"]
+                                        if isinstance(L.raw.get("fill"), dict)
+                                        else C.parse(self.s.theme.get("paper", "#f2f0e8")))
         gpaint = None  # a gradient fill, across the text as a shape's goes across its box; emphasis stays a colour
         if isinstance(fill, (dict, C.Gradient)):
             gpaint = skia.Paint(AntiAlias=True, Shader=self._gradient(fill if isinstance(fill, dict) else fill.spec(),

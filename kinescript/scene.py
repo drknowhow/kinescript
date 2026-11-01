@@ -85,7 +85,7 @@ class Layer:
         self.ahead: tuple[tuple[int, int], media.VideoSource] | None = None
         self.ctx: Ctx | None = None
         self.parts: list[dict[str, Prop]] = []  # a model's parts' keys, each compiled like a layer's
-        self.copies: Copies | None = None  # a model's "repeat"
+        self.copies: Copies | None = None  # its "repeat"
         self.xf: tuple[list, list] | None = None  # placed(): the constant values, and which of PLACED change
         self.along: tuple[str, bool] | None = None  # the path it rides (data or "#id") and whether it turns with it;
         # how far along is props["along"]
@@ -138,6 +138,13 @@ class Layer:
         """Each of the model's copies' placement and fill at the layer's time t (Copies.at)."""
         try:
             return self.copies.at(t, self.dur, T)
+        except (ArithmeticError, ValueError, TypeError) as e:
+            raise SceneError(f"layer '{self.id}': {e} at t={t:.3f}s (scene {T:.3f}s)", layer=self.id) from e
+
+    def copy_columns(self, t: float, T: float = 0.0) -> dict[str, list]:
+        """Each of the 2D layer's copies' values at the layer's time t (Copies.columns)."""
+        try:
+            return self.copies.columns(t, self.dur, T)
         except (ArithmeticError, ValueError, TypeError) as e:
             raise SceneError(f"layer '{self.id}': {e} at t={t:.3f}s (scene {T:.3f}s)", layer=self.id) from e
 
@@ -584,7 +591,7 @@ class Scene:
                                                                        or isinstance(v, C.Gradient)):
                     self._bad_colour(v, f"{name} at t={t:.2f}s (frame {n})", layer.id)
                     break
-        for layer in self.all_layers():  # a model's repeat: every copy, at every few frames past the budget
+        for layer in self.all_layers():  # a layer's repeat: every copy, at every few frames past the budget
             c = layer.copies
             if c is None:
                 continue
@@ -596,13 +603,13 @@ class Scene:
                 T = n / self.fps
                 t = T - layer.t_in
                 try:
-                    fills = c.at(t, layer.dur, T)[1]
+                    fills = c.columns(t, layer.dur, T).get("fill")
                 except (ArithmeticError, ValueError, TypeError) as e:
                     self.note("error", "bad-expression", layer.id, f"{e} at t={t:.2f}s (frame {n})",
                               "guard the expression, e.g. max(…, 0.001) under a division")
                     break
                 most = max(most, len(set(fills or ())))
-            if most > schema.COPY_SLOTS:
+            if most > schema.COPY_SLOTS and layer.type == "model":
                 self.note("warning", "repeat-colours", layer.id, f"repeat fill gives {most} different colours at "
                           f"once; a model draws at most {schema.COPY_SLOTS}, so copies take the nearest of those",
                           "fewer steps of colour, e.g. hsl(floor(i / n * 32) * 11, 0.7, 0.55)")
@@ -801,8 +808,8 @@ class Scene:
                 if ltype == "model":
                     layer.parts = [{k: compile_prop(k, v, pctx) for k, v in p.items() if k not in PART_STRUCT}
                                    for p in raw.get("parts") or [] if isinstance(p, dict)]
-                    if isinstance(raw.get("repeat"), dict):
-                        layer.copies = Copies(raw["repeat"], pctx)
+                if isinstance(raw.get("repeat"), dict):
+                    layer.copies = Copies(raw["repeat"], pctx)
                 d = raw.get("d")
                 if ltype == "path" and isinstance(d, list) and d:  # morphing: its key, eased, as a number
                     layer.morph = [svgpath.parse(k[1]) for k in d]

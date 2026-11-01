@@ -229,6 +229,10 @@ Status (2026-11-01): moves to 1.6.1 (decision 1).
   "=hsl(i * 6)"}`. Copies draw in one loop under the layer's transform with kept paints; a constant group draws
   once into a picture and replays per copy. Up to 10,000. Target: `repeat-10k` (10,000 circles moving) 30 fps on
   the GPU.
+  Status (2026-11-01): in its own PR. Every 2D layer but captions takes it; `z`, `rotateX` and `rotateY` stay a
+  model's, as a 2D layer's copies lie in its plane. A shape's copies draw in one loop, recoloured. Text, images and
+  groups are recorded once each frame, whether they move or not, and replayed for each copy, and drawn copy by copy
+  when the copies change their fill or stroke. `repeat-10k` renders at 39 to 41 fps on the GPU.
 - `particles` layer: an emitter with `rate` or `burst`, `life`, `speed`, `angle`, `gravity`, `drag`, `size` and
   `opacity` over life (keyframes over 0..1 of a particle's life), `spin`, `fill` (a list taken in turn), `shape`
   (circle, rect, star, a character, or an image), `emitter` (point, line, rect or circle) and `seed`. Each particle's

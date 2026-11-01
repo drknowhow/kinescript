@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- `repeat` works on 2D layers: shapes, text, counters, images, video, shaders and groups take `{"count": 60,
+  "rotate": "=i * 6", "x": "=cos(i * 0.1047) * 300", "fill": "=hsl(i * 6)"}`, up to 10,000 copies. A copy is the
+  layer moved by its own x, y, rotate and scale in the layer's space, in its own fill, stroke and opacity; the
+  layer's keys, enter, exit, effects and mask act on all its copies as one picture, and its box in `kine check` and
+  `kine look --boxes` holds every copy. A shape's path and paints are made once and drawn for every copy in one
+  loop. Other layers are recorded once a frame and replayed for each copy, or drawn copy by copy when the copies
+  change their colours. The new `repeat-10k` stress scene, one circle's 10,000 copies each moved by two
+  expressions, renders at 39 to 41 fps on the GPU and draws a frame in 83 ms on the CPU. `z`, `rotateX` and `rotateY`
+  stay a model's.
+- Copies' expressions take a finite float as it is, without the checks a value of another kind goes through: two
+  expressions over 10,000 copies take 5.4 ms a frame, from 7.5. A model's copies come out the same.
+
 ## 1.6.0 (2026-11-01)
 
 - The 1.6 stress report is in `docs/stress-test-1.6/`: the Phase 0 and 2D stress scenes and the three new examples,

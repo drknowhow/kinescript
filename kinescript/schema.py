@@ -117,8 +117,11 @@ ANIMATION_ALIAS = {"clip": "name", "track": "name", "rate": "speed", "timeScale"
 MODEL_FILES = (".glb", ".gltf", ".obj")
 # A model's copies: how many, and each one's place and fill (a number or colour, a list in turn, an expression of i).
 REPEAT = {"count", "x", "y", "z", "rotateX", "rotateY", "rotate", "scale", "fill"}
+# A 2D layer's: placed in its own plane, with their own fill, stroke and opacity where the layer has them.
+REPEAT_2D = {"count", "x", "y", "rotate", "scale", "opacity", "fill", "stroke"}
 REPEAT_ALIAS = {"n": "count", "copies": "count", "number": "count", "times": "count", "amount": "count",
                 "color": "fill", "colour": "fill", "colors": "fill", "colours": "fill", "rotation": "rotate",
+                "alpha": "opacity", "strokeColor": "stroke", "strokeColors": "stroke", "strokes": "stroke",
                 "rotationX": "rotateX", "rotationY": "rotateY", "rotationZ": "rotate", "rotateZ": "rotate"}
 MAX_COPIES = 10_000
 COPY_SLOTS = 64  # the materials a model with copies draws: its own, and one per copy fill for those without a fill
@@ -163,21 +166,21 @@ TEXT = {"text", "size", "weight", "font", "italic", "fill", "emph", "align", "ma
 MEDIA = {"src", "w", "h", "fit", "zoom", "focus", "focusX", "focusY", "radius", "stroke", "strokeWidth", "cap", "join",
          "dash", "dashOffset"}
 TYPES: dict[str, set[str]] = {
-    "rect": SHAPE | {"w", "h", "radius", "dimOutside"},
-    "circle": SHAPE | {"r"},
-    "ellipse": SHAPE | {"w", "h"},
-    "polygon": SHAPE | {"sides", "r", "inner", "corner"},
-    "path": SHAPE | {"d", "points", "smooth", "closed", "corner"},
-    "line": SHAPE | {"points", "smooth", "closed", "corner"},
-    "arrow": SHAPE | {"x1", "y1", "x2", "y2", "bend", "head"},
-    "text": TEXT,
-    "counter": TEXT | {"value", "format"},
-    "image": MEDIA,
-    "video": MEDIA | {"trim", "speed", "volume", "loop", "fadeIn", "fadeOut"},
+    "rect": SHAPE | {"w", "h", "radius", "dimOutside", "repeat"},
+    "circle": SHAPE | {"r", "repeat"},
+    "ellipse": SHAPE | {"w", "h", "repeat"},
+    "polygon": SHAPE | {"sides", "r", "inner", "corner", "repeat"},
+    "path": SHAPE | {"d", "points", "smooth", "closed", "corner", "repeat"},
+    "line": SHAPE | {"points", "smooth", "closed", "corner", "repeat"},
+    "arrow": SHAPE | {"x1", "y1", "x2", "y2", "bend", "head", "repeat"},
+    "text": TEXT | {"repeat"},
+    "counter": TEXT | {"value", "format", "repeat"},
+    "image": MEDIA | {"repeat"},
+    "video": MEDIA | {"trim", "speed", "volume", "loop", "fadeIn", "fadeOut", "repeat"},
     "captions": TEXT | {"src", "cues", "mode", "active", "voice"},
-    "shader": {"preset", "uniforms", "sksl", "w", "h"},
+    "shader": {"preset", "uniforms", "sksl", "w", "h", "repeat"},
     "group": {"children", "layers", "w", "h", "clip", "radius", "fill", "sort", "shadows", "speed", "loop",
-              "timeRemap", "combine"} | SHAPE,
+              "timeRemap", "combine", "repeat"} | SHAPE,
     "model": PART - {"x", "y", "z", "rotateX", "rotateY", "rotate", "scale"} | {"detail", "parts", "explode",
                                                                               "draw", "light", "lights", "env",
                                                                               "src", "ground", "edges",
@@ -215,7 +218,7 @@ ALIAS = {"color": "fill", "colour": "fill", "fillColor": "fill", "backgroundColo
          "items": "children", "elements": "children", "visible": None, "zIndex": None,
          "rotationX": "rotateX", "rotationY": "rotateY", "rotateZ": "rotate", "rotationZ": "rotate",
          "translateZ": "z", "backfaceVisibility": "backface", "sfx": "sound", "audio": "sound",
-         "soundEffect": "sound"}
+         "soundEffect": "sound", "copies": "repeat", "instances": "repeat", "clones": "repeat", "repeater": "repeat"}
 TYPE_ALIASES = {
     "rect": {"corner": "radius"},
     "circle": {"radius": "r", "size": "r"}, "polygon": {"radius": "r", "points": "sides"},
@@ -911,6 +914,7 @@ def _layer(raw, rep: Report, path: str, comps: dict):
     _mask(raw, rep, lid)
     _looks(raw, rep, lid, t)
     _layer_sound(raw, rep, lid)
+    _repeat(raw, rep, lid, t)
     if "text" in TYPES[t]:
         _text(raw, rep, lid)
     _box(raw, rep, lid)
@@ -1730,9 +1734,11 @@ def _animation(raw: dict, rep: Report, lid):
                 "clip repeats) or false (it holds its last pose)")
 
 
-def _repeat(raw: dict, rep: Report, lid):
-    """`repeat` draws `count` copies of the model, each placed by x, y, z, rotateX, rotateY, rotate and scale and
-    coloured by fill: a number (a colour), a list taken in turn, or an expression of i (the copy, from 0) and n."""
+def _repeat(raw: dict, rep: Report, lid, t: str):
+    """`repeat` draws `count` copies of the layer. A model's are placed by x, y, z, rotateX, rotateY, rotate and
+    scale and coloured by fill; a 2D layer's are placed by x, y, rotate and scale in its own plane and take fill,
+    stroke and opacity where the layer has them. Each is a number (a colour), a list taken in turn, or an expression
+    of i (the copy, from 0) and n."""
     if "repeat" not in raw:
         return
     v = raw["repeat"]
@@ -1744,24 +1750,32 @@ def _repeat(raw: dict, rep: Report, lid):
         rep.add("error", "bad-value", lid, f"repeat is {_show(v)}; it is an object: how many copies and where each "
                 "one goes", example)
         return
-    _keys(v, REPEAT, REPEAT_ALIAS, rep, lid, "repeat: ")
+    allowed = REPEAT
+    if t != "model":
+        for k in ("z", "rotateX", "rotateY"):
+            if k in v:
+                del v[k]
+                rep.add("error", "unknown-key", lid, f"repeat {k} places a model's copies in depth; a 2D layer's "
+                        "copies lie in its own plane", "place them with x, y, rotate and scale")
+        allowed = {k for k in REPEAT_2D if k not in ("fill", "stroke") or k in TYPES[t]}
+    _keys(v, allowed, REPEAT_ALIAS, rep, lid, "repeat: ")
     c = v.get("count")
     if isinstance(c, float) and c.is_integer():
         v["count"] = c = int(c)
     if "count" not in v:
-        rep.add("error", "missing-key", lid, "repeat needs a count: how many copies of the model to draw", example)
+        rep.add("error", "missing-key", lid, "repeat needs a count: how many copies of the layer to draw", example)
     elif isinstance(c, bool) or not isinstance(c, int) or not 1 <= c <= MAX_COPIES:
         rep.add("error", "bad-value", lid, f"repeat count is {_show(c)}; it is a whole number from 1 to "
                 f"{MAX_COPIES:,}")
-    for k in sorted(REPEAT - {"count"}):
+    for k in sorted(allowed - {"count"}):
         x = v.get(k)
         if x is None or (isinstance(x, str) and x.startswith("=")):
             continue
         items = x if isinstance(x, list) and x else [x]
-        if k == "fill":
+        if k in ("fill", "stroke"):
             if all(isinstance(y, str) for y in items):
                 for y in items:
-                    _colour(y, "repeat fill", rep, lid)
+                    _colour(y, f"repeat {k}", rep, lid)
                 continue
             what = "a colour, a list of colours taken in turn, or an expression of i such as \"=hsl(i * 30)\""
         elif all(_finite(y) for y in items):
@@ -1774,7 +1788,6 @@ def _repeat(raw: dict, rep: Report, lid):
 
 def _model(raw: dict, rep: Report, lid):
     _animation(raw, rep, lid)
-    _repeat(raw, rep, lid)
     _light(raw, rep, lid)
     _outline(raw, rep, lid)
     _texture(raw, rep, lid)
