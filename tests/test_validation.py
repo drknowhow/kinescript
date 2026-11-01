@@ -357,6 +357,34 @@ def test_rough_is_checked(rough, words):
     assert words in one_error(scene([rect(rough=rough, fill="#fff")]), "r")["message"]
 
 
+LENS = {"id": "lens", "type": "circle", "r": 20}
+
+
+@pytest.mark.parametrize("mask, code, words", [
+    (5, "bad-value", "mask is 5"), ({"mode": "luma"}, "missing-key", "mask names no layer"),
+    ({"layer": 3}, "bad-value", "layer is 3"), ({"layer": "lens", "mode": "multiply"}, "bad-value", "mask mode"),
+    ({"layer": "lens", "feather": -1}, "bad-value", "mask feather is -1"),
+    ("lnes", "mask-unknown", "did you mean 'lens'"), ("r", "bad-mask", "the layer itself"),
+])
+def test_mask_is_checked(mask, code, words):
+    e = one_error(scene([LENS, rect(mask=mask)]), "r")
+    assert e["code"] == code and words in e["message"] + e["fix"], e
+
+
+def test_a_mask_stands_beside_its_layer_and_masks_take_no_ring():
+    e = one_error(scene([LENS, {"id": "g", "type": "group", "children": [rect(mask="lens")]}]), "r")
+    assert e["code"] == "bad-mask" and "another group" in e["message"], e
+    e = one_error(scene([{"id": "g", "type": "group", "mask": "inner", "children": [dict(LENS, id="inner")]}]), "g")
+    assert e["code"] == "bad-mask" and "inside the layer it masks" in e["message"], e
+    e = one_error(scene([dict(LENS, mask="r"), rect(mask="lens")]), "lens")
+    assert e["code"] == "bad-mask" and "masked in turn" in e["message"], e
+    issues, s = load(scene([LENS, rect(mask="#lens"), dict(RECT, id="q", mask={"source": "lens", "mode": "Luma",
+                                                                               "softness": 8})]))
+    assert s.by_id["r"].mask == (s.by_id["lens"], "alpha", 0.0) and s.mattes == {"lens"}, issues
+    assert s.by_id["q"].mask == (s.by_id["lens"], "luma", 8.0), issues
+    assert {i["code"] for i in issues} == {"renamed-key", "renamed-value"}, issues
+
+
 def test_rough_takes_true_or_an_amount_and_warns_when_it_does_nothing():
     _, s = load(scene([rect(rough=True), dict(LINE, rough=2.5), dict(LINE, id="m", rough=False)]))
     assert s.by_id["r"].rough == (3.0, 12.0, 0, 0.0) and s.by_id["l"].rough == (2.5, 12.0, 0, 0.0)

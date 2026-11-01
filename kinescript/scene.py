@@ -23,7 +23,7 @@ STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "children", "laye
           "allowOffscreen", "style", "audio", "shadow", "box", "fx", "fill", "stroke", "emph", "active",
           "sksl", "preset", "uniforms", "caret", "case", "italic", "smooth", "closed", "focus", "use",
           "backface", "fixed", "sort", "shape", "detail", "parts", "light", "span", "sound", "voice",
-          "fadeIn", "fadeOut", "sequence", "animation", "repeat", "profile", "along", "dash", "rough"}
+          "fadeIn", "fadeOut", "sequence", "animation", "repeat", "profile", "along", "dash", "rough", "mask"}
 PART_STRUCT = {"shape", "texture", "text", "font", "d", "italic", "profile"}  # a part's keys that never animate
 # Property defaults by name; everything not listed defaults to None.
 DEFAULTS = {"x": 0.0, "y": 0.0, "opacity": 1.0, "scale": 1.0, "scaleX": 1.0, "scaleY": 1.0, "rotate": 0.0,
@@ -70,7 +70,7 @@ def _where(owner, message: str) -> str:
 class Layer:
     __slots__ = ("id", "type", "raw", "t_in", "t_out", "props", "enter", "exit", "children", "parent",
                  "index", "src", "video", "ahead", "ctx", "parts", "copies", "xf", "along", "turn", "clock",
-                 "rough", "morph")
+                 "rough", "morph", "mask")
 
     def __init__(self, lid: str, ltype: str, raw: dict, parent: "Layer | None", index: int):
         self.id, self.type, self.raw, self.parent, self.index = lid, ltype, raw, parent, index
@@ -92,6 +92,7 @@ class Layer:
         self.clock: tuple[float, float] | None = None  # a group's speed and loop for its children (timeRemap in props)
         self.rough: tuple[float, float, int, float] | None = None  # rough's amount, length, seed and boil
         self.morph: list | None = None  # a path's d keyframes, parsed; props["morph"] is how far through them it is
+        self.mask: tuple["Layer", str, float] | None = None  # the layer that masks it, the mode and the feather in px
 
     @property
     def dur(self) -> float:
@@ -200,6 +201,7 @@ class Scene:
         self._compile_lights()
         self.audio = self._build_audio()
         self._check_media()
+        self._check_masks()
         self._raise_errors()
         try:
             self.duration = self.timeline.solve(cv.get("duration"))
@@ -392,6 +394,41 @@ class Scene:
         elif r.along:
             self.note("error", "bad-route", layer.id, f"along '#{rid}' rides a path itself",
                       f"give '{layer.id}' the path '{r.along[0]}' as well, or take along off '{rid}'")
+
+    def _check_masks(self):
+        """Each mask names a layer beside the one it masks, in the same group: not the layer itself, nor one inside it,
+        and layers do not mask one another in a ring. A layer named by a mask draws only as one (Renderer._cut)."""
+        self.mattes: set[str] = set()  # layers that draw only as masks
+        for layer in self.all_layers():
+            spec = layer.raw.get("mask")
+            if not isinstance(spec, dict) or not isinstance(spec.get("layer"), str):
+                continue
+            mid = spec["layer"]
+            m = self.by_id.get(mid)
+            if m is None:
+                close = schema.suggest(mid, list(self.by_id))
+                self.note("error", "mask-unknown", layer.id, f"mask '{mid}' names no layer",
+                          (f"did you mean '{close}'? " if close else "") + "give the layer that masks it that id")
+            elif m is layer:
+                self.note("error", "bad-mask", layer.id, f"mask '{mid}' is the layer itself",
+                          "name another layer beside it, the shape to show it through")
+            elif m.parent is not layer.parent:
+                inside = any(x is layer for x in _lineage(m))
+                self.note("error", "bad-mask", layer.id, f"mask '{mid}' is " + (
+                    "inside the layer it masks" if inside else "in another group, where it stands somewhere else"),
+                    f"put '{mid}' beside '{layer.id}' in the same group")
+            else:
+                layer.mask = (m, spec.get("mode", "alpha"), float(spec.get("feather", 0)))
+                self.mattes.add(mid)
+        for layer in self.all_layers():
+            seen, m = {layer.id}, layer.mask
+            while m is not None and m[0].id not in seen:
+                seen.add(m[0].id)
+                m = m[0].mask
+            if m is not None and m[0] is layer:
+                self.note("error", "bad-mask", layer.id, f"'{layer.id}' is masked by '{layer.mask[0].id}', which is "
+                          "masked in turn by the layers it masks, so none of them could be drawn",
+                          "take the mask off one of them")
 
     def _check_surface(self, layer: Layer, gid: str):
         """A "#groupId" texture on model `layer` names a group that does not hold the model."""

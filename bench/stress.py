@@ -171,6 +171,26 @@ def morph_200() -> dict:  # 200 paths morphing triangle, circle, star and back, 
     return _scene(out)
 
 
+def masks_50() -> dict:  # 50 masked layers: 25 gradient cards seen through words, 25 through a moving lens
+    out = []
+    for n in range(50):
+        x, y = 190 + (n % 5) * 385, 100 + (n // 5) * 98
+        if n % 2:
+            out.append({"id": f"lens{n}", "type": "circle", "r": 40, "y": y,
+                        "x": [[0, x - 150], [4, x + 150, "inOutSine"]]})
+            card = {"id": f"card{n}", "type": "rect", "x": x, "y": y, "w": 340, "h": 84, "radius": 12,
+                    "mask": {"layer": f"lens{n}", "feather": 16},
+                    "fill": {"angle": 90, "stops": ["#ff5a36", "#4a7dff"]}}
+        else:
+            out.append({"id": f"word{n}", "type": "text", "text": WORDS[n % len(WORDS)].upper(), "x": x, "y": y,
+                        "size": 64, "weight": 800})
+            card = {"id": f"card{n}", "type": "rect", "x": x, "y": y, "w": 340, "h": 84, "mask": f"word{n}",
+                    "fill": [[0, {"angle": 0, "stops": ["#ffd166", "#ef476f"]}],
+                             [4, {"angle": 360, "stops": ["#ffd166", "#ef476f"]}, "linear"]]}
+        out.append(card)
+    return _scene(out)
+
+
 def counters() -> dict:
     return _scene([{"id": f"c{n}", "type": "counter", "x": 120 + (n % 10) * 180, "y": 80 + (n // 10) * 100,
                     "size": 40, "value": {"from": 0, "to": 10 ** (1 + n % 6), "dur": 3.5}, "format": "{:,.0f}"}
@@ -449,6 +469,7 @@ SCENES = {
     "rough-200": (rough_200, ".mp4", "100 outlined cards boiling 8 times a second, 100 rough lines drawing on"),
     "combine-60": (combine_60, ".mp4", "60 badges with a word cut out, 30 with a hole moving through them too"),
     "morph-200": (morph_200, ".mp4", "200 paths morphing triangle, circle, star and back"),
+    "masks-50": (masks_50, ".mp4", "50 masked cards: 25 seen through words, 25 through a moving lens"),
     "shaders": (shaders, ".mp4", "4 full-frame SkSL presets blended, grain and vignette"),
     "uhd-4k": (uhd_4k, ".mp4", "3840x2160: shader, split text, stroke draw, shadow, grade"),
     "long-120s": (long_120s, ".mp4", "3600 frames: worker split, segment joins"),
