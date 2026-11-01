@@ -14,10 +14,10 @@ import numpy as np
 import skia
 
 from . import color as C
-from . import listen, media, models, stage
+from . import listen, media, models, schema, stage
 from .props import HOLD
 from .render import CPU_BLUR_S, FONT_DIR, Renderer, _argb, joining, loop_end
-from .scene import Scene, SceneError, load
+from .scene import DEFAULTS, PLACED, Scene, SceneError, load
 
 # Model triangles one frame may draw before check warns. 100,000 took 71 ms a frame at 1080p on
 # the GPU in the 3D spike (2026-10-29), against about 15 ms at 20,000.
@@ -398,6 +398,104 @@ def probe(src, at: float | None = None) -> dict:
         out["visible"] = r.boxes
     scene.close()
     return out
+
+
+def _drawn_at(L, T: float) -> float | None:
+    """The scene time layer L is drawn at when the scene is at T, through the clocks of the groups it is in, as the
+    renderer finds it; None where it or a group it is in is not shown then."""
+    groups = []
+    G = L.parent
+    while G is not None:
+        groups.append(G)
+        G = G.parent
+    for G in reversed(groups):
+        if not G.visible(T):
+            return None
+        if G.clock is not None:
+            T = Renderer._inner(G, T - G.t_in, T)
+    return T if L.visible(T) else None
+
+
+def _hex(c) -> str:
+    r, g, b, a = (round(min(max(float(x), 0.0), 1.0) * 255) for x in c)
+    return f"#{r:02x}{g:02x}{b:02x}" + (f"{a:02x}" if a < 255 else "")
+
+
+def curve(src, spec: str) -> dict:
+    """Layer id.key's value at every frame, as the renderer reads it through eases, expressions and group clocks, and
+    how fast it changes: per second from the frame before, signed for a number, and as a distance for a position (x
+    and y as a point) or a colour (in 0-255 channels). Also the spans where it holds still for 2 frames or more, and
+    its fastest frame. A layer's enter, exit, along and groups move it on top of its own keys."""
+    scene = load(src)
+    try:
+        lid, dot, key = str(spec).rpartition(".")
+        if not dot or not lid or not key:
+            raise ValueError(f"curve takes a layer's id and one of its keys, such as title.x, got {spec!r}")
+        L = scene.by_id.get(lid)
+        if L is None:
+            ids = [x.id for x in scene.all_layers()]
+            raise ValueError(f"curve {spec!r}: there is no layer '{lid}'; the layers are " + ", ".join(ids[:12])
+                             + (f" and {len(ids) - 12} more" if len(ids) > 12 else ""))
+        key = schema.ALIAS.get(key) or key  # rotation is rotate, alpha opacity, color fill
+        names = ("x", "y") if key == "position" else (key,)
+        if not all(k in L.props or k in DEFAULTS for k in names):
+            raise ValueError(f"curve {spec!r}: layer '{lid}' has no {key}; it has " + ", ".join(sorted(L.props))
+                             + ", and position samples x and y as a point")
+        fps, raw = scene.fps, []
+        for n in range(scene.frames):
+            T = _drawn_at(L, n / fps)
+            raw.append(None if T is None else [L.get(k, T - L.t_in, T) for k in names])
+
+        def vec(v: list) -> tuple:
+            v = v[0] if len(v) == 1 and isinstance(v[0], tuple) else v  # a colour
+            if all(isinstance(a, (int, float)) and not isinstance(a, bool) for a in v):
+                return tuple(float(a) for a in v)
+            raise ValueError(f"curve {spec!r}: {key} is {v[0]!r}; curve samples numbers, positions and colours")
+        vs = [None if v is None else vec(v) for v in raw]
+        kind = "position" if key == "position" else "colour" if any(v is not None and len(v) == 4 for v in vs) \
+            else "number"
+
+        def shown(v):
+            if v is None:
+                return None
+            return _hex(v) if kind == "colour" else round(v[0], 4) if kind == "number" else [round(a, 2) for a in v]
+        speed: list[float | None] = [None] * len(vs)
+        for n in range(1, len(vs)):
+            a, b = vs[n - 1], vs[n]
+            if a is not None and b is not None:
+                speed[n] = (b[0] - a[0]) * fps if kind == "number" else \
+                    math.dist(a, b) * (255 if kind == "colour" else 1) * fps
+        stops, start = [], None
+        for n in range(1, len(vs) + 1):
+            still = n < len(vs) and speed[n] is not None and abs(speed[n]) <= 1e-9
+            if still and start is None:
+                start = n - 1
+            elif not still and start is not None:
+                stops.append({"from": round(start / fps, 3), "to": round((n - 1) / fps, 3), "frames": [start, n - 1],
+                              "value": shown(vs[start])})
+                start = None
+        moving = [n for n, s in enumerate(speed) if s is not None and abs(s) > 1e-9]
+        top = max(moving, key=lambda n: (abs(speed[n]), -n)) if moving else None
+        out = {"ok": True, "curve": f"{lid}.{key}", "kind": kind, "fps": fps, "frames": scene.frames,
+               "value": [shown(v) for v in vs], "speed": [None if s is None else round(s, 3) for s in speed],
+               "stops": stops, "fastest": None if top is None else {
+                   "frame": top, "t": round(top / fps, 3), "speed": round(speed[top], 3), "value": shown(vs[top])}}
+        on = [v[0] for v in vs if v is not None]
+        if kind == "number" and on:
+            out["range"] = [round(min(on), 4), round(max(on), 4)]
+        notes = []
+        if not on:
+            notes.append(f"'{lid}' is not shown at any frame")
+        elif top is None:
+            notes.append(f"{key} holds still at every frame '{lid}' is shown")
+        if (L.enter or L.exit or L.along is not None) and set(names) & {*PLACED, "opacity"}:
+            notes.append(f"its enter, exit or along changes how it is drawn as well: this is {key} as its keys set "
+                         "it; kine look --trails shows where it is drawn")
+        if notes:
+            out["notes"] = notes
+        return out
+    finally:
+        scene.close()
 
 
 def _chars(chars: list[str], most: int = 8) -> str:
