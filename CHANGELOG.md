@@ -66,6 +66,8 @@
   different numbers of pieces. The `morph-200` stress scene (200 paths morphing triangle, circle, star and back)
   draws a 1080p frame in 2.2 ms on the GPU, 1.0 ms more than the same paths standing still; matching its 600
   pairs takes 0.7 s once.
+- Blend modes `hardLight`, `colorDodge`, `colorBurn`, `exclusion`, `hue`, `saturation` and `luminosity`, as
+  CSS's mix-blend-mode draws them; `luminosity` lays a layer's light and shade over the colours below it.
 - `mask` on any layer shows it through another layer beside it in the same group: `"mask": "lens"`, or
   `{"layer": "lens", "mode": "alpha", "feather": 12}` with mode `alpha` (shown where the mask is opaque), `luma`
   (where it is bright), `alphaInvert` or `lumaInvert`. The mask layer draws only as a mask, on its own clock and by

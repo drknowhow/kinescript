@@ -67,6 +67,48 @@ def test_a_grade_keeps_top_level_blends_blending_with_the_background(backend, bl
             assert np.abs(_renderer(spec, backend).frame(0) - graded).max() <= 2, (grade, blur)
 
 
+def _lum(c):
+    return c @ np.array([0.3, 0.59, 0.11])
+
+
+def _set_lum(c, lum):
+    """W3C compositing's SetLum, with its ClipColor."""
+    c = c + (lum - _lum(c))
+    lo, hi, mid = c.min(), c.max(), _lum(c)
+    if lo < 0:
+        c = mid + (c - mid) * mid / (mid - lo)
+    if hi > 1:
+        c = mid + (c - mid) * (1 - mid) / (hi - mid)
+    return c
+
+
+def _set_sat(c, sat):
+    out, span = np.zeros(3), c.max() - c.min()
+    if span > 0:
+        out = (c - c.min()) * sat / span
+    return out
+
+
+W3C = {  # backdrop b, source s in 0..1, from the W3C compositing spec
+    "hardLight": lambda b, s: np.where(s <= 0.5, b * 2 * s, b + (2 * s - 1) - b * (2 * s - 1)),
+    "colorDodge": lambda b, s: np.where(b == 0, 0, np.where(s >= 1, 1, np.minimum(1, b / np.maximum(1e-9, 1 - s)))),
+    "colorBurn": lambda b, s: np.where(b >= 1, 1, np.where(s <= 0, 0, 1 - np.minimum(1, (1 - b) / np.maximum(s, 1e-9)))),
+    "exclusion": lambda b, s: b + s - 2 * b * s,
+    "hue": lambda b, s: _set_lum(_set_sat(s, b.max() - b.min()), _lum(b)),
+    "saturation": lambda b, s: _set_lum(_set_sat(b, s.max() - s.min()), _lum(b)),
+    "luminosity": lambda b, s: _set_lum(b, _lum(s)),
+}
+
+
+@pytest.mark.parametrize("backend", ["cpu", "gpu"])
+@pytest.mark.parametrize("blend", list(W3C))
+def test_the_newer_blend_modes_mix_as_the_w3c_formulas_do(backend, blend):
+    b, s = np.array([48, 128, 255]) / 255, np.array([255, 160, 64]) / 255  # backdrop #3080ff, layer #ffa040
+    layers = [{"id": "m", "type": "rect", "x": 160, "y": 90, "w": 100, "h": 100, "fill": "#ffa040", "blend": blend}]
+    got = _renderer(scene(layers, bg="#3080ff"), backend).frame(0)[90, 160, :3].astype(float)
+    assert np.abs(got - np.round(W3C[blend](b, s) * 255)).max() <= 2, (got, W3C[blend](b, s) * 255)
+
+
 @pytest.mark.parametrize("backend", ["cpu", "gpu"])
 def test_a_grade_with_a_blend_on_a_see_through_canvas(backend):
     layers = [{"id": "m", "type": "rect", "x": 160, "y": 90, "w": 100, "h": 100, "fill": "#808080",

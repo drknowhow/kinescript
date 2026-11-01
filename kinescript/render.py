@@ -40,7 +40,10 @@ COMBINE = {"union": skia.PathOp.kUnion_PathOp, "subtract": skia.PathOp.kDifferen
 BLENDS = {"normal": skia.BlendMode.kSrcOver, "multiply": skia.BlendMode.kMultiply, "screen": skia.BlendMode.kScreen,
           "overlay": skia.BlendMode.kOverlay, "add": skia.BlendMode.kPlus, "lighten": skia.BlendMode.kLighten,
           "darken": skia.BlendMode.kDarken, "softLight": skia.BlendMode.kSoftLight,
-          "difference": skia.BlendMode.kDifference, "color": skia.BlendMode.kColor}
+          "difference": skia.BlendMode.kDifference, "color": skia.BlendMode.kColor,
+          "hardLight": skia.BlendMode.kHardLight, "colorDodge": skia.BlendMode.kColorDodge,
+          "colorBurn": skia.BlendMode.kColorBurn, "exclusion": skia.BlendMode.kExclusion, "hue": skia.BlendMode.kHue,
+          "saturation": skia.BlendMode.kSaturation, "luminosity": skia.BlendMode.kLuminosity}
 SAMPLING = skia.SamplingOptions(skia.FilterMode.kLinear, skia.MipmapMode.kNone)
 # Video frames arrive at source size and upscale here. Catmull-Rom interpolates (a 1:1 draw is
 # exact); Mitchell, used before, blurred every native-size frame (mean error 14.8 vs 4.7 on a sharp clip).
