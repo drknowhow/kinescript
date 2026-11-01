@@ -216,6 +216,9 @@ adds `unknown-texture` and `bad-texture` (a layer that is not a group, or a grou
 material's picture is now a small runtime shader: skia-python's `Shaders.Blend` took 99 ms a call with a 1080p
 video frame on the GPU, and the same bytes come out for image textures. Changes from the bullets above: a missing or unreadable texture is `media-missing` or
 `bad-media`, as for other files, not `texture-missing`. `.obj` files' `vt` and `map_Kd` are read too.
+The pictures of a model's materials are drawn in one call a pass, a shader picking each material's by an offset
+on its texture coordinates (branch `textured-materials`, not merged): one call a run of a material in the sort
+took 48 s a frame on a glTF can whose label and steel alternate in depth.
 `"texture": false` draws the fill (on a part, instead of the layer's texture; on a model file, its mean colour).
 Cylinder and cone ends take the image flat. On the GPU the picture, the light on a white surface and the added
 light (highlights, rim, reflection) are drawn on three surfaces and combined per pixel; on the CPU the picture is

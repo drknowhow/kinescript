@@ -96,6 +96,30 @@ def test_a_part_takes_its_own_texture_and_the_others_their_fill(tmp_path):
 
 
 @pytest.mark.parametrize("backend", ["cpu", "gpu"])
+def test_materials_taking_turns_in_the_sort_draw_their_pictures_at_once(tmp_path, backend, monkeypatch):
+    """A textured ball in a tilted ring of another material: the sort goes back and forth between the two, and
+    each pass draws every picture at once, as drawing each run of a material on its own did."""
+    from kinescript import render3d
+    img = quadrants(tmp_path / "q.png", size=256)
+    spec = scene([{"id": "m", "type": "model", "x": 160, "y": 90, "light": "studio", "rotateX": 70, "parts": [
+        {"shape": "sphere", "r": 50, "texture": {"src": img, "repeat": [3, 2]}},
+        {"shape": "torus", "r": 75, "tube": 10, "fill": "#ffffff"}]}])
+    draws, vertices = [], render3d._vertices
+    monkeypatch.setattr(render3d, "_vertices", lambda *a: draws.append(len(a[2])) or vertices(*a))
+    try:
+        once = frame(spec, backend=backend)
+    except RuntimeError:
+        pytest.skip("no GPU")
+    one = len(draws)
+    monkeypatch.setattr(render3d, "_picked", lambda *a: None)
+    draws.clear()
+    runs = frame(spec, backend=backend)
+    assert one <= 3 and len(draws) > 100  # a draw a pass, against one a run: 412 runs
+    assert np.abs(once - runs).max() <= 1
+    assert near(once[90, 160], YELLOW, 24) and once[90, 235].min() > 220  # the ball's picture and the white ring
+
+
+@pytest.mark.parametrize("backend", ["cpu", "gpu"])
 def test_perspective_does_not_slide_the_image(tmp_path, backend):
     """A plane tipped far back, with few triangles: the line between the image's halves stays on the plane's
     middle, which is where the layer is, as Skia's even spread across each triangle would not put it."""

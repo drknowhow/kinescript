@@ -116,6 +116,16 @@ half4 main(float2 p) {
     return half4(c.rgb * tint, c.a) + fill * (1.0 - c.a);
 }
 """
+# Every material's picture in one shader: material k's coordinates come (k + 0.5) strides to the right (_picked).
+_PICK = """
+uniform float stride;
+{children}
+half4 main(float2 p) {{
+    float k = floor(p.x / stride);
+    float2 q = float2(p.x - (k + 0.5) * stride, p.y);
+{branches}
+}}
+"""
 _EFFECTS: dict[tuple, skia.RuntimeEffect] = {}
 
 
@@ -752,6 +762,28 @@ def _compact(T: np.ndarray, n: int) -> tuple[np.ndarray, np.ndarray]:
     return np.flatnonzero(keep), (np.cumsum(keep) - 1)[T]
 
 
+def _picked(looks: list, uv: np.ndarray, M: np.ndarray) -> tuple | None:
+    """One shader for the pictures looks (one per material) and coordinates uv (each vertex's, in pixels of its
+    material's image, M its material) moved to pick them: material k's go (k + 0.5) strides right, a stride being
+    a power of two at least twice as wide as any of them and 2 px more. A model whose materials take turns in the
+    sort is then one draw, not one per run of a material: a textured glTF can of two materials took 15,000 a frame.
+    None for more than 32 materials, or strides too long for float32 to place a coordinate within 1/32 px."""
+    n = len(looks)
+    stride = 2.0 ** math.ceil(math.log2(2 * float(np.abs(uv[:, 0]).max(initial=0.0)) + 2))
+    if n > 32 or n * stride > 2 ** 18:
+        return None
+    if ("pick", n) not in _EFFECTS:
+        _EFFECTS[("pick", n)] = skia.RuntimeEffect.MakeForShader(_PICK.format(
+            children="\n".join(f"uniform shader look{i};" for i in range(n)),
+            branches="".join(f"    if (k < {i}.5) {{ return look{i}.eval(q); }}\n" for i in range(n - 1)) +
+            f"    return look{n - 1}.eval(q);"))
+    b = skia.RuntimeShaderBuilder(_EFFECTS[("pick", n)])
+    b.setUniform("stride", stride)
+    for i, look in enumerate(looks):
+        b.setChild(f"look{i}", look)
+    return b.makeShader(), uv + np.stack([(M + 0.5) * stride, np.zeros(len(M))], 1)
+
+
 def _path_bytes(word: int, xy: np.ndarray) -> bytes:
     """Points xy as SkPath::writeToMemory lays out a move and then lines: four int32s (version and fill type,
     then the point, conic weight and verb counts), the points as float32 pairs, a byte per verb, zeros to 4."""
@@ -853,9 +885,15 @@ def _vertices(cv: skia.Canvas, q: np.ndarray, T: np.ndarray, uv, colors, paint: 
     mode combining the colours with its shader. Skia indexes vertices with 16 bits, and converts each one it is
     given: draw in sorted chunks, each with only the vertices its triangles use (one chunk uses them all).
     Indices go as a memoryview of uint16, which Skia reads 30% faster than a list and 4 times as fast as a numpy
-    array."""
+    array. A few triangles of many vertices take only theirs."""
     for k in range(0, len(T), 20000):
-        sel, idx = (slice(None), T) if len(T) <= 20000 else _compact(T[k:k + 20000], len(q))
+        if len(T) <= 20000 and 3 * len(T) >= len(q):
+            sel, idx = slice(None), T
+        elif len(T) <= 20000:
+            sel = np.unique(T)
+            idx = np.searchsorted(sel, T)
+        else:
+            sel, idx = _compact(T[k:k + 20000], len(q))
         tex = None if uv is None else _points(uv[sel])
         verts = skia.Vertices.MakeCopy(skia.Vertices.kTriangles_VertexMode, _points(q[sel]), tex,
                                        None if colors is None else colors[sel].tolist(),
@@ -948,7 +986,10 @@ def _textured(r, L, cv: skia.Canvas, region: skia.Rect, q, T, nv, M, U, mats, te
         c.save()
         c.clipRect(region)
         c.clear(skia.ColorTRANSPARENT)
-        for a, b in runs if by_material else [(0, len(T))]:
+        one = _picked(looks, coords, M) if by_material and len(runs) > 1 else None
+        if one is not None:
+            _vertices(c, q, T, one[1], colors, skia.Paint(Shader=one[0]), mode)
+        for a, b in [] if one is not None else runs if by_material else [(0, len(T))]:
             _vertices(c, q, T[a:b], coords, colors, paint if paint is not None else
                       skia.Paint(Shader=looks[slot[a]]), mode)
         c.restore()
@@ -976,7 +1017,10 @@ def _textured(r, L, cv: skia.Canvas, region: skia.Rect, q, T, nv, M, U, mats, te
         cv.drawPaint(skia.Paint(Shader=b.makeShader(), BlendMode=skia.BlendMode.kSrc))
     else:
         light, add = _shade(nv, M, mats, *lt, more, env, split=True, edge=edge)
-        for a, b in runs:
+        one = _picked(looks, uv, M) if len(runs) > 1 else None
+        if one is not None:
+            _vertices(cv, q, T, one[1], light, skia.Paint(Shader=one[0]), skia.BlendMode.kModulate)
+        for a, b in [] if one is not None else runs:
             _vertices(cv, q, T[a:b], uv, light, skia.Paint(Shader=looks[slot[a]]), skia.BlendMode.kModulate)
         glow = None if shines is None else apart(4, None, coords=shines[1], by_material=True, looks=shines[0])
         for img, mode, cf in ((apart(2, skia.Paint(), add), skia.BlendMode.kPlus, None),
