@@ -417,6 +417,14 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
             add("warning", "light-behind", lid, T, "the key light is behind this model as the camera sees it, so "
                 "its front shows only ambient and rim light", "turn the light toward the camera: an azimuth between "
                 "-90 and 90, or \"follow\": \"camera\"")
+        if r.unfocused:
+            add("warning", "focus-on-nothing", "camera", T, "the camera's focus plane is nearer or farther than every "
+                "layer it moves, so nothing is sharp", "focus on a layer id, or a z between the layers'")
+        if r.slow_dof:
+            add("warning", "slow-depth-of-field", "camera", T, "a stage blurs per pixel for depth of field, which on "
+                "the CPU takes about five times as long as the stage (0.8 s a 960x540 frame of examples/focus.json, "
+                "against 0.17)",
+                "render on a GPU, or leave aperture off while drafting")
         if r.tris > TRIANGLE_BUDGET:
             add("warning", "triangle-budget", None, T, f"{r.tris:,} model triangles in one frame; renders slow "
                 f"down past {TRIANGLE_BUDGET:,} (about 70 ms a frame at 100,000 on a GPU)",

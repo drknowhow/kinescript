@@ -155,12 +155,19 @@ animate yet. That completes Phase 2.
   the size at z 0, so animating `fov` alone does it.
 - Check rules: `camera-inside-model`, `focus-on-nothing` (the focus plane is nearer or farther than every layer).
 
-Status (2026-10-31): camera moves (branch `camera`): `target`, `shake`, the `kine docs` recipes and
-`camera-inside-model` are built; depth of field and `focus-on-nothing` come next. Changes from the bullets above:
+Status (2026-10-31): camera moves (#62, merged): `target`, `shake`, the `kine docs` recipes and
+`camera-inside-model`. Depth of field (branch `depth-of-field`): `aperture`, `focus`, `focus-on-nothing` and
+`slow-depth-of-field` are built, not merged. Changes from the bullets above:
 x and y still pan from the target. A layer target follows the layer's keys and its parents', not its enter and exit
 motions, and keyframes pan between points and layer ids. `shake` turns the camera on its own spot, so near and far
 layers move alike, with a roll that moves the corners half as far; `amount` animates, `speed` and `seed` do not.
 `camera-inside-model` counts crossings of three rays from the camera, so a camera in a ring's hole is outside it.
+The blur is a lens's, `aperture` / 1000 x |D - Df| x Df / D for distances D from the camera and Df to the focus
+plane, at most 48 px: in proportion near the plane as planned, but bounded far behind it. `focus` as a z is
+measured from the target. A stage mixes the sharp frame and four copies (1/8, 1/4, 1/2 and all of its most blur),
+each copy holding only what is at least half as blurred as it; a plain mix let a sharp layer glow onto a blurred
+one in front of it. On the CPU the stage blurs at halved sizes and mixes in numpy (an SkSL mix took 900 ms at
+1080p); a 1080p frame of `examples/focus.json` takes 3.1 s against 0.58 s without depth of field, 21 ms on the GPU.
 
 ### Phase 4: textures and surface looks
 

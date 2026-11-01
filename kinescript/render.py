@@ -559,6 +559,11 @@ class Renderer:
         self.unlit: set[str] = set()  # models drawn this frame with the key light behind them
         self.fogged: set[str] = set()  # layers drawn this frame wholly hidden by fog
         self.inside: set[str] = set()  # models the camera is inside this frame
+        self.unfocused = False  # the camera's focus plane was nearer or farther than every layer this frame
+        self.slow_dof = False  # a stage blurred per pixel on the CPU this frame
+        self._dof = None  # (focus distance, aperture, z 0's distance) while the camera blurs (render3d.defocus)
+        self._focused = None  # _dof while drawing a layer the camera moves, else None
+        self._span = [math.inf, 0.0]  # the least and most w of what the camera moves, drawn this frame
         self._lit: dict = {}  # light objects with their tweening keys compiled (render3d.at)
         self._cam: np.ndarray | None = None  # the camera matrix of the top-level layer being drawn
         self._lens: np.ndarray | None = None  # camera space to canvas, for lighting models
@@ -803,6 +808,8 @@ class Renderer:
         s = self.s
         self.boxes = {}
         self.culled, self.unlit, self.fogged, self.inside = set(), set(), set(), set()
+        self.unfocused = self.slow_dof = False
+        self._dof, self._span = None, [math.inf, 0.0]
         self.tris = 0
         self.stop_at, self.stop_after, self._stopped = stop_at, stop_after, False
         self._frame_t = frame_t
@@ -841,6 +848,7 @@ class Renderer:
                 elif layer.id in s.depth:
                     m = cams[1]
             self._m3d = self._cam = m
+            self._focused = self._dof if m is not None and m is cams[0] and s.camera is not None else None
             if m is None:
                 self._layer(c, layer, T, 1.0)
             else:
@@ -848,7 +856,10 @@ class Renderer:
                 c.concat(space.to_skia(m))
                 self._layer(c, layer, T, 1.0)
                 c.restore()
-        self._m3d = None
+        self._m3d = self._focused = None
+        if self._dof is not None and self._span[1] > 0:
+            near = self._dof[0] / self._dof[2]
+            self.unfocused = near < self._span[0] * 0.99 or near > self._span[1] * 1.01
         if self.grade_filter:
             c.restore()
         if not (stop_at or stop_after) and frame_t is None:
@@ -893,26 +904,44 @@ class Renderer:
         if cam is None:
             return fixed, fixed
         g = lambda k: float(cam.get(k, T, T))  # noqa: E731
-        target = self._target(cam, T) if "target" in cam.props else None
+        target = self._aim(cam, "target", T, lambda v: self._spot(v, T)) if "target" in cam.props else None
         sway = self._shake(cam, T, fov) if "shake" in cam.props else None
-        return space.camera(s.w, s.h, fov, g("x"), g("y"), g("z"), g("rotateX"), g("rotateY"), g("rotate"),
-                            target, sway), fixed
+        m = space.camera(s.w, s.h, fov, g("x"), g("y"), g("z"), g("rotateX"), g("rotateY"), g("rotate"), target, sway)
+        aperture = float(cam.get("aperture", T, T, 0, 0.0))
+        if aperture > 0:
+            f0 = space.focus(s.h, fov)
+            back = f0 + g("z")  # how far the camera is from what it looks at
 
-    def _target(self, cam: Layer, T: float) -> np.ndarray:
-        """The point the camera looks at and orbits at T, in canvas px. Keyframes were compiled with each key's
-        index for its value (Scene._target), so here the two keys either side are placed and mixed: a camera can
-        pan from a point to a layer, or from one moving layer to another."""
-        p, d = cam.props["target"], cam.dur
+            def far(v):
+                """A focus value as a distance from the camera: a z (px toward the camera from what it looks at),
+                or a layer id, the distance of that layer's middle."""
+                if isinstance(v, str) and v in s.by_id:
+                    return float((m @ np.append(self._spot(v, T), 1.0))[3]) * f0
+                return back - float(length(v, "z", s.ctx))
+            near = self._aim(cam, "focus", T, far) if "focus" in cam.props else back
+            self._dof = (max(float(near), 1.0), aperture, f0)
+        return m, fixed
+
+    def _aim(self, cam: Layer, key: str, T: float, place):
+        """The camera's target (a point in canvas px) or focus (a distance from the camera) at T: `place` turns one
+        of its values, a layer id among them, into that. Keyframes were compiled with each key's index for its value
+        (Scene._aim), so here the two keys either side are placed and mixed: a camera can pan or pull focus from a
+        point to a layer, or from one moving layer to another."""
+        p, d = cam.props[key], cam.dur
         if p.keys is None:
-            return self._spot(p.at(T, d, T), T)
-        pts, raw = p.keys(d), cam.raw["target"]
+            return place(p.at(T, d, T))
+        pts, raw = p.keys(d), cam.raw[key]
         if T <= pts[0][0]:
-            return self._spot(raw[pts[0][1]][1], T)
+            return place(raw[pts[0][1]][1])
         for (t0, i0, _), (t1, i1, e1) in zip(pts, pts[1:]):
             if T < t1:
-                a, b = self._spot(raw[i0][1], T), self._spot(raw[i1][1], T)
+                a, b = place(raw[i0][1]), place(raw[i1][1])
                 return a + (b - a) * e1((T - t0) / (t1 - t0) if t1 > t0 else 1.0)
-        return self._spot(raw[pts[-1][1]][1], T)
+        return place(raw[pts[-1][1]][1])
+
+    def _reach(self, w: np.ndarray):
+        """Widen the range of w drawn this frame, which kine check holds the focus plane to."""
+        self._span[0], self._span[1] = min(self._span[0], float(w.min())), max(self._span[1], float(w.max()))
 
     def _spot(self, v, T: float) -> np.ndarray:
         """A target as a point in canvas px: [x, y] or [x, y, z] (lengths as a layer's x, y and z take them), or a
@@ -1027,6 +1056,7 @@ class Renderer:
         sc = float(g("scale")) * mods.scale
         sx, sy = sc * float(g("scaleX")), sc * float(g("scaleY"))
         outer, tilt, facing = self._m3d, None, True
+        defocus = 0.0  # the blur the camera's depth of field gives this layer, in its own px
         fg, fogf = None, 0.0  # the fog, and how much of it covers this layer
         if outer is not None:
             z, rx, ry = float(g("z")) + mods.dz, float(g("rotateX")) + mods.rx, float(g("rotateY")) + mods.ry
@@ -1043,12 +1073,28 @@ class Renderer:
                 facing = space.facing(xy)
                 if not facing and L.raw.get("backface") == "hidden":
                     return
+                if self._focused is not None:
+                    self._reach(w)
+                    if self._stage is None and not L.children:
+                        # Skia scales a layer's blur as the layer is scaled on screen: in its own px, the blur is
+                        # the one wanted on screen over that scale (the root of its area's).
+                        (x0, y0), (x1, y1), (x2, y2), (x3, y3) = xy
+                        area = abs((x0 - x2) * (y1 - y3) - (x1 - x3) * (y0 - y2)) / 2
+                        defocus = float(render3d.defocus(self._focused, w.mean())) / max(
+                            math.sqrt(area / ((box[2] or 1.0) * (box[3] or 1.0))), 0.05)
                 if self.s.fog is not None and self._stage is None and not L.children and L.type != "model":
                     # A flat layer is fogged as a whole, by the depth of its middle; a model by each vertex's.
                     fg = render3d.fog(self, T)
                     fogf = 0.0 if fg is None else float(render3d.fogged(fg, w.mean()))
                     if fogf >= 0.999:
                         self.fogged.add(L.id)
+            elif L.type == "model" and self._focused is not None and self._stage is None:
+                # A model blurs whole, by the depth of its middle, scaled as its own px are there.
+                o = m @ np.array([[0.0, 0.0, 0.0, 1.0], [1.0, 0.0, 0.0, 1.0], [0.0, 1.0, 0.0, 1.0]]).T
+                if o[3].min() > space.NEAR:
+                    (ax, ay), (bx, by), (cx, cy) = (o[:2] / o[3]).T
+                    sc = math.sqrt(abs((bx - ax) * (cy - ay) - (by - ay) * (cx - ax)))
+                    defocus = float(render3d.defocus(self._focused, o[3, 0])) / max(sc, 0.05)
             self._m3d, self._outer = m, outer
             if self._stage is not None and self._stage.child is L:
                 self._stage.m = m
@@ -1061,6 +1107,8 @@ class Renderer:
         if sx != 1 or sy != 1:
             c.scale(sx, sy)
         blur = float(g("blur")) + mods.blur
+        if defocus > 0.05:
+            blur = math.hypot(blur, defocus)
         shadow = L.raw.get("shadow")
         fx = L.raw.get("fx")
         blend = L.raw.get("blend")

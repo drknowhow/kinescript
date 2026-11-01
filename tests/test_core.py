@@ -10,7 +10,7 @@ import pytest
 import kinescript as k
 from kinescript import ease, media, svgpath
 from kinescript.props import Ctx, compile_prop
-from kinescript.render import Renderer
+from kinescript.render import _GL, Renderer
 from kinescript.timing import Timeline, TimingError
 from kinescript.verify import check, probe
 
@@ -719,6 +719,93 @@ def test_check_warns_when_the_camera_is_inside_a_model():
         return {i["code"] for i in check(spec)["issues"]}
     assert "camera-inside-model" in codes({"id": "ball", "type": "model", "shape": "sphere", "r": 60})
     assert "camera-inside-model" not in codes({"id": "ring", "type": "model", "shape": "torus", "r": 80, "tube": 20})
+
+
+CARDS = [{"id": "near", "type": "rect", "x": 100, "y": 50, "z": 80, "w": 50, "h": 36, "fill": "#ffffff"},
+         {"id": "mid", "type": "rect", "x": 160, "y": 130, "w": 60, "h": 40, "fill": "#ffffff"},
+         {"id": "far", "type": "rect", "x": 260, "y": 60, "z": -400, "w": 120, "h": 80, "fill": "#ffffff"}]
+
+
+def _edges(camera, T=0.0, backend="cpu"):
+    """How many px each card's left edge takes to rise from 10% to 90% white, seen through camera (320x180)."""
+    spec = scene(CARDS, bg="#000000", duration=2)
+    spec["camera"] = camera
+    img = _frame(spec, round(T * 30), backend)[..., 0].astype(float)
+    out = {}
+    for lid, row, x0, x1 in (("near", 30, 0, 80), ("mid", 130, 100, 160), ("far", 78, 160, 200)):
+        p = img[row, x0:x1]
+        out[lid] = int(np.flatnonzero(p > 229.5)[0] - np.flatnonzero(p > 25.5)[0]) if p.max() > 229.5 else 99
+    return out
+
+
+def test_depth_of_field_blurs_layers_by_their_distance_from_the_focus():
+    sharp = _edges({})
+    assert max(sharp.values()) <= 1
+    soft = _edges({"aperture": 20})
+    assert soft["mid"] <= 1 and soft["near"] >= 4 and soft["far"] >= 4  # z 0 is the focus plane by default
+    far = _edges({"aperture": 20, "focus": "far"})
+    assert far["far"] <= 1 and far["mid"] >= 4 and far["near"] > soft["near"]
+    assert _edges({"aperture": 20, "focus": -400}) == far  # the far card's z, as a number
+    plain = scene(CARDS, bg="#000000")
+    plain["camera"] = {"rotateY": 10}
+    off = scene(CARDS, bg="#000000")
+    off["camera"] = {"rotateY": 10, "aperture": 0, "focus": "far"}
+    assert _frame(plain, 0).tobytes() == _frame(off, 0).tobytes()
+
+
+def test_focus_keys_pull_focus_from_one_layer_to_another():
+    pull = {"aperture": 20, "focus": [[0, "near"], [1, "far", "linear"]]}
+    start, end = _edges(pull, 0), _edges(pull, 1.5)
+    assert start["near"] <= 1 and start["far"] >= 4
+    assert end["far"] <= 1 and end["near"] >= 4
+
+
+def _focus_stage(camera):
+    kids = [{"id": "front", "type": "model", "shape": "cube", "w": 40, "x": -70, "z": 60, "fill": "#ffffff",
+             "light": "flat"},
+            {"id": "back", "type": "model", "shape": "cube", "w": 70, "x": 70, "z": -300, "fill": "#ffffff",
+             "light": "flat"},
+            {"id": "card", "type": "rect", "y": 70, "w": 300, "h": 30, "fill": "#808080"}]
+    spec = scene([{"id": "g", "type": "group", "x": 160, "y": 90, "sort": "pixel", "children": kids}],
+                 bg="#000000", duration=1)
+    spec["camera"] = camera
+    return spec
+
+
+def test_a_stage_blurs_each_pixel_by_its_own_depth():
+    def edge(img, row, x0, x1):
+        p = img[row, x0:x1, 0].astype(float)
+        return int(np.flatnonzero(p > 229.5)[0] - np.flatnonzero(p > 25.5)[0]) if p.max() > 229.5 else 99
+    flat = _frame(_focus_stage({}), 0)
+    back = _frame(_focus_stage({"aperture": 25, "focus": "back"}), 0)
+    front = _frame(_focus_stage({"aperture": 25, "focus": "front"}), 0)
+    # front's left edge is at x 27 and back's at x 175: each is sharp only while focused
+    assert edge(flat, 90, 0, 60) <= 1 and edge(flat, 90, 160, 200) <= 1
+    assert edge(back, 90, 160, 200) <= 1 and edge(back, 90, 0, 60) >= 4
+    assert edge(front, 90, 0, 60) <= 2 and edge(front, 90, 160, 200) >= 4  # its face is 20 px before its middle
+    assert _frame(_focus_stage({"aperture": 0}), 0).tobytes() == flat.tobytes()
+
+
+def test_gpu_and_cpu_agree_on_depth_of_field():
+    for spec in (_focus_stage({"aperture": 25, "focus": "front"}), dict(scene(CARDS, bg="#000000"),
+                                                                       camera={"aperture": 20})):
+        cpu = _frame(spec, 0, "cpu").astype(int)
+        try:
+            gpu = _frame(spec, 0, "gpu").astype(int)
+        except RuntimeError:
+            pytest.skip("no GPU")
+        assert np.abs(cpu - gpu).mean() < 1.0
+
+
+def test_check_warns_about_focus_on_nothing_and_slow_depth_of_field(monkeypatch):
+    def codes(camera):
+        return {i["code"] for i in check(_focus_stage(camera))["issues"]}
+    assert "focus-on-nothing" not in codes({"aperture": 25, "focus": "back"})
+    assert "focus-on-nothing" in codes({"aperture": 25, "focus": -5000})
+    assert "focus-on-nothing" in codes({"aperture": 25, "focus": 240})  # 7 px from the camera
+    monkeypatch.setitem(_GL, "ctx", None)  # as on a machine with no GPU
+    assert "slow-depth-of-field" in codes({"aperture": 25})
+    assert "slow-depth-of-field" not in codes({})
 
 
 def test_check_warns_about_a_stage_with_many_children():

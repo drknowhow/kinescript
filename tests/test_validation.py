@@ -449,6 +449,21 @@ def test_camera_target_and_shake_are_checked():
     assert e["message"].startswith("shake speed"), e
 
 
+def test_focus_and_aperture_are_checked():
+    dot = {"id": "dot", "type": "circle", "r": 10}
+    issues, s = load(dict(scene([dot]), camera={"focusOn": [[0, -200], [1, "dot"]], "bokeh": 12}))
+    assert s is not None and {i["code"] for i in issues} == {"renamed-key"}, issues
+    assert {"focus", "aperture"} <= set(s.camera.props)
+    e = one_error(dict(scene([dot]), camera={"aperture": 10, "focus": "dott"}), "camera")
+    assert "Did you mean 'dot'" in e["message"], e
+    e = one_error(dict(scene([dot]), camera={"aperture": 10, "focus": [1, 2]}), "camera")
+    assert e["message"].startswith("focus is"), e
+    e = one_error(dict(scene([dot]), camera={"aperture": -3}), "camera")
+    assert e["message"].startswith("aperture is"), e
+    issues, s = load(dict(scene([dot]), camera={"focus": "dot"}))
+    assert s is not None and [i["code"] for i in issues] == ["ignored-key"], issues
+
+
 def test_shadows_and_ground_from_are_checked():
     ball = {"id": "m", "type": "model", "shape": "sphere", "ground": {"from": "light", "y": 300}}
     stage = {"id": "g", "type": "group", "sort": "pixel", "shadows": {"opacity": 0.4, "soft": 2}, "children": [ball]}

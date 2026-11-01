@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- `camera` takes `aperture` and `focus` for depth of field. `aperture` is px of blur per 1000 px from the focus
+  plane, and the blur grows as a lens's does: in proportion near the plane, never past `aperture` times the focus
+  distance over 1000 however far behind it, faster toward the camera, and at most 48 px. `focus` is a z (px toward
+  the camera from the target, or from z 0) or a layer id, the depth of that layer's middle; keyframes between them
+  pull focus. A flat layer or a model outside a stage blurs whole through the layer blur. A stage blurs each pixel
+  by its own depth: it mixes the sharp frame with four copies blurred by 1/8, 1/4, 1/2 and all of the most any of
+  its pixels blurs. A copy holds only what is at least half as blurred as it, so a sharp cube does not glow onto the
+  blurred floor in front of it, and the blur of what is nearer than the focus plane spreads over what is behind it.
+  `kine check` warns when the focus plane is nearer or farther than every layer (`focus-on-nothing`), and when a
+  stage blurs per pixel on the CPU (`slow-depth-of-field`). A 1080p frame of `examples/focus.json` takes 21 ms on
+  the GPU with or without `aperture`, and 3.1 s on the CPU against 0.58 s. Scenes without `aperture` draw the same
+  bytes: `bench/same.py` finds no difference against main on ten 3D examples and `hello.json`, on either backend.
 - `camera` takes `target`: a point `[x, y, z]` or a layer id that the camera looks at and orbits in place of the
   canvas centre, framed as z 0 is. A layer id makes the camera follow the layer through its groups, by its keys and
   not its enter and exit motions, so a layer that rises in still rises on screen. Keyframes between points and ids

@@ -67,11 +67,13 @@ MIX_ALIAS = {"lufs": "loudness", "target": "loudness", "ceiling": "peak", "trueP
 DUCK = {"by", "under", "depth", "attack", "hold", "release"}
 DUCK_ALIAS = {"amount": "depth", "db": "depth", "key": "by", "trigger": "by", "targets": "under", "duck": "under"}
 MOTION_BLUR = {"samples", "shutter"}
-CAMERA = {"x", "y", "z", "rotateX", "rotateY", "rotate", "fov", "target", "shake"}
+CAMERA = {"x", "y", "z", "rotateX", "rotateY", "rotate", "fov", "target", "shake", "focus", "aperture"}
 CAMERA_ALIAS = {"rotationX": "rotateX", "rotationY": "rotateY", "rotateZ": "rotate", "rotationZ": "rotate",
                 "rotation": "rotate", "roll": "rotate", "orbit": "rotateY", "tilt": "rotateX", "dolly": "z",
                 "fieldOfView": "fov", "lookAt": "target", "follow": "target", "subject": "target",
-                "handheld": "shake", "wobble": "shake"}
+                "handheld": "shake", "wobble": "shake", "focusDistance": "focus", "focalPlane": "focus",
+                "focusOn": "focus", "dof": "aperture", "defocus": "aperture", "bokeh": "aperture",
+                "lensBlur": "aperture"}
 SHAKE = {"amount", "speed", "seed"}
 SHAKE_ALIAS = {"strength": "amount", "intensity": "amount", "px": "amount", "frequency": "speed", "freq": "speed",
                "hz": "speed", "rate": "speed"}
@@ -1137,6 +1139,31 @@ def _target(cam: dict, rep: Report):
             return
 
 
+def _focus(cam: dict, rep: Report):
+    """camera focus: a z in px or a layer id (Scene checks that it is one), an expression, or keyframes of them;
+    aperture: px, or keyframes of them."""
+    v = cam.get("focus")
+    if v is not None:
+        keys = [k[1] for k in v] if _keyframes(v) else [v]
+        for x in keys:
+            if not (isinstance(x, str) or _finite(x)):
+                rep.add("error", "bad-value", "camera", f"focus is {_show(x)}; it takes a z in px, a layer id, or "
+                        "keyframes of them", '"focus": -300 or "focus": "logo"')
+                cam.pop("focus")
+                break
+    v = cam.get("aperture")
+    if v is not None and not _tweens(v):
+        rep.add("error", "bad-value", "camera", f"aperture is {_show(v)}; it takes px of blur per 1000 px from the "
+                "focus plane, or keyframes of them", '"aperture": 12')
+        cam.pop("aperture")
+    elif isinstance(v, (int, float)) and v < 0:
+        rep.add("error", "bad-value", "camera", f"aperture is {_show(v)}; it must be 0 or more")
+        cam.pop("aperture")
+    elif cam.get("focus") is not None and v is None:
+        rep.add("warning", "ignored-key", "camera", "focus does nothing without aperture",
+                '"aperture": 12 blurs what is 1000 px from the focus plane by 12 px')
+
+
 def _shake(cam: dict, rep: Report):
     """camera shake: px (a number, or keyframes of them), true, or {amount, speed, seed}."""
     v = cam.get("shake")
@@ -1454,6 +1481,7 @@ def normalize(spec) -> tuple[dict, Report]:
         _values(cam, "camera", rep, "camera")
         _target(cam, rep)
         _shake(cam, rep)
+        _focus(cam, rep)
         fov = cam.get("fov")
         if isinstance(fov, (int, float)) and not isinstance(fov, bool) and not 5 <= fov <= 150:
             rep.add("error", "bad-value", "camera", f"fov is {fov:g}; it must be between 5 and 150 degrees",
