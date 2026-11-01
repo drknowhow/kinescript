@@ -146,6 +146,19 @@ def rough_200() -> dict:  # 100 outlined cards boiling 8 times a second, and 100
     return _scene(out)
 
 
+def combine_60() -> dict:  # 60 badges with a word cut out, half of them with a hole moving through as well
+    out = []
+    for n in range(60):
+        kids = [{"id": f"plate{n}", "type": "rect", "w": 240, "h": 96, "radius": 24},
+                {"id": f"word{n}", "type": "text", "text": WORDS[n % len(WORDS)].upper(), "size": 40, "weight": 800}]
+        if n % 2:
+            kids.append({"id": f"hole{n}", "type": "circle", "r": 22, "y": 30,
+                         "x": [[0, -110], [4, 110, "linear"]]})
+        out.append({"id": f"badge{n}", "type": "group", "x": 260 + (n % 6) * 280, "y": 110 + (n // 6) * 96,
+                    "combine": "subtract", "fill": "$accent", "children": kids})
+    return _scene(out)
+
+
 def counters() -> dict:
     return _scene([{"id": f"c{n}", "type": "counter", "x": 120 + (n % 10) * 180, "y": 80 + (n // 10) * 100,
                     "size": 40, "value": {"from": 0, "to": 10 ** (1 + n % 6), "dur": 3.5}, "format": "{:,.0f}"}
@@ -422,6 +435,7 @@ SCENES = {
     "along-100": (along_100, ".mp4", "100 layers riding paths: 60 on 6 path layers that draw on, 40 round closed paths"),
     "strokes-300": (strokes_300, ".mp4", "100 marching dashed paths that draw on, 100 stars rounding, 100 four-corner tabs"),
     "rough-200": (rough_200, ".mp4", "100 outlined cards boiling 8 times a second, 100 rough lines drawing on"),
+    "combine-60": (combine_60, ".mp4", "60 badges with a word cut out, 30 with a hole moving through them too"),
     "shaders": (shaders, ".mp4", "4 full-frame SkSL presets blended, grain and vignette"),
     "uhd-4k": (uhd_4k, ".mp4", "3840x2160: shader, split text, stroke draw, shadow, grade"),
     "long-120s": (long_120s, ".mp4", "3600 frames: worker split, segment joins"),
