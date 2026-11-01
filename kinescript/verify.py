@@ -514,8 +514,8 @@ def probe_media(src: str) -> dict:
     """What `kine probe` says about a file that is not a scene: {"ok", "src", "kind": video|audio|image|model,
     ...}. A media file gives its duration, displayed w and h, fps, audio, alpha and rotation; a model its triangles,
     vertices, materials, size, animations (each with its duration in seconds), skins (with their joint counts),
-    morph targets, textures and texture coordinate sets. Raises MediaError or ValueError, naming the file, for one
-    it cannot read."""
+    morph targets, textures and texture coordinate sets; an svg the size it is drawn at, and the kinds of element in
+    it that are left out (undrawn). Raises MediaError or ValueError, naming the file, for one it cannot read."""
     if Path(src).suffix.lower() in models.EXTENSIONS:
         imp = models.load(src)
         about = imp.about or {}
@@ -527,6 +527,14 @@ def probe_media(src: str) -> dict:
         if about.get("crowded"):
             out["note"] = (f"{about['crowded']} vertices are moved by more than four joints; each follows the four "
                            "in JOINTS_0")
+        return out
+    if Path(src).suffix.lower() == ".svg":  # read by skia, not ffmpeg
+        v = media.vector(src)
+        out = {"ok": True, "src": src, "kind": "image", "duration": 0.0, "w": round(v.w, 3), "h": round(v.h, 3),
+               "fps": 0.0, "audio": False, "video": False, "image": True, "codec": "svg", "alpha": True, "rotation": 0,
+               "start": 0.0, "pix_fmt": "", "color_space": "", "undrawn": list(v.undrawn)}
+        if v.undrawn:
+            out["note"] = "left out when it is drawn: " + "; ".join(media.SVG_FIX[k] for k in v.undrawn)
         return out
     info = media.probe(src)
     kind = "image" if info["image"] else "video" if info["video"] else "audio" if info["audio"] else "other"

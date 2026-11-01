@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- SVG files: an image layer with an `.svg` src draws it as vectors, sharp at any size. Its own size is its width and
+  height (in px, pt, mm, cm or in), the viewBox's shape for a missing one and the viewBox's size for both, as a
+  browser sizes an svg in an `<img>`; what lies outside it is cut off. A faded svg fades as one drawing. Sheets, image
+  sequences (a folder of `.svg` frames too), sequence clips, model textures and particle sprites take `.svg`; a
+  texture or a sprite gets it as pixels, drawn at a whole multiple of its size that takes the longer side to at least
+  512 px (at most 4096). skia's svg reader leaves out text, `<style>` sheets, `<symbol>`, `<image>`, markers,
+  `<switch>`, `feDropShadow` and an svg's own animation: `kine check` names them (`svg-unsupported`) with a fix for
+  each, and `kine probe logo.svg` gives the size and the same list. SVG 2's plain `href` (on a `<use>`, or a
+  gradient taking another's stops) is read as `xlink:href`, which is all the reader follows. A file that is not an
+  svg is an error at load. `examples/vector.json` grows an emblem from its own 120 px to 600 and plays a spinner
+  from an svg sheet.
 - Per-unit paint: `unitFill` colours each unit of a split text and `unitBlur` blurs it, beside `unitX`, `unitY`,
   `unitRotate`, `unitScale` and `unitOpacity`. Unit expressions now see `n`, how many units there are, as well as
   `i`, and the new helper `sweep(i, n, p, soft)` is 1 for the units a sweep has passed and 0 for the rest, eased over

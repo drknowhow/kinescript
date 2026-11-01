@@ -10,6 +10,7 @@ import shutil
 import queue
 import subprocess
 import threading
+import xml.etree.ElementTree as ET
 from functools import lru_cache
 from pathlib import Path
 from typing import NamedTuple
@@ -231,22 +232,133 @@ def yuv_matrix(info: dict):
 
 
 def image(src: str) -> skia.Image:
-    """The decoded image, once per file version."""
+    """The decoded image, once per file version. An svg comes as pixels: drawn at its own size times the whole number
+    that takes its longer side to 512 px or more (at most 4096), for a model's texture or a particle's sprite."""
     return _image(*_version(src))
 
 
 @lru_cache(maxsize=64)
 def _image(src: str, mtime: int, size: int) -> skia.Image:
+    if src.lower().endswith(".svg"):
+        v = vector(src)
+        longest = max(v.w, v.h)
+        k = min(max(1, math.ceil(512 / longest)), 4096 / longest)
+        surf = skia.Surface.MakeRaster(skia.ImageInfo.MakeN32Premul(max(1, round(v.w * k)), max(1, round(v.h * k))))
+        c = surf.getCanvas()
+        c.scale(surf.width() / v.w, surf.height() / v.h)
+        c.drawPicture(v.picture)
+        return surf.makeImageSnapshot()
     data = Path(src).read_bytes() if Path(src).exists() else None
     if data is None:
         raise MediaError(f"image not found: {src}")
     img = skia.Image.MakeFromEncoded(skia.Data.MakeWithCopy(data))
     if img is None:
-        raise MediaError(f"cannot decode image {src} (png, jpg, webp, gif, bmp are supported)")
+        raise MediaError(f"cannot decode image {src} (png, jpg, webp, gif, bmp and svg are supported)")
     return img
 
 
-FRAME_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif")  # the files a folder of frames is read for
+def still(src: str) -> skia.Image | Vector:
+    """What an image layer draws from src: its vector drawing for an svg, else the decoded image."""
+    return vector(src) if src.lower().endswith(".svg") else image(src)
+
+
+class Vector:
+    """An svg file as a vector drawing: its picture, drawn at the file's own size w x h, and `undrawn`, the kinds of
+    element in it that skia's svg reader leaves out, in SVG_FIX's order."""
+    __slots__ = ("picture", "w", "h", "undrawn")
+
+    def __init__(self, picture: skia.Picture, w: float, h: float, undrawn: tuple):
+        self.picture, self.w, self.h, self.undrawn = picture, w, h, undrawn
+
+    def width(self) -> float:
+        return self.w
+
+    def height(self) -> float:
+        return self.h
+
+
+# Elements skia's svg reader does not draw, by kind; each kind's fix is in SVG_FIX. The reader draws shapes, paths,
+# strokes, gradients, patterns, clip paths, masks, opacity, transforms, <use> of a shape and most filters.
+SVG_UNDRAWN = {"text": "text", "tspan": "text", "textPath": "text", "style": "style", "symbol": "symbol",
+               "image": "image", "marker": "marker", "switch": "switch", "foreignObject": "foreignObject",
+               "feDropShadow": "feDropShadow", "animate": "animation", "animateTransform": "animation",
+               "animateMotion": "animation", "set": "animation"}
+SVG_FIX = {"text": "turn text into paths (Inkscape: Path > Object to Path; Illustrator: Type > Create Outlines)",
+           "style": "write fill and stroke on the elements instead of in a <style> sheet (Illustrator: Styling: "
+                    "Presentation Attributes)",
+           "symbol": "put the shapes of each <symbol> where it is used",
+           "image": "show a picture in an image layer of its own",
+           "marker": "turn the stroke and its markers into paths (Inkscape: Path > Stroke to Path)",
+           "switch": "keep the one branch of the <switch> you want",
+           "foreignObject": "draw it with svg shapes",
+           "feDropShadow": "drop the filter and give the layer a shadow",
+           "animation": "an svg's own animation does not play: animate the layer instead"}
+_LENGTH = re.compile(r"\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)\s*(px|pt|pc|in|cm|mm|em|ex|%)?\s*", re.I)
+_PX = {"px": 1, "pt": 4 / 3, "pc": 16, "in": 96, "cm": 96 / 2.54, "mm": 96 / 25.4, "em": 16, "ex": 8}
+_START_TAG = re.compile(rb"<[A-Za-z][^>]*>")
+_HREF = re.compile(rb"(\s)href(\s*=)")
+
+
+def _svg_length(v) -> float | None:
+    """An svg width or height in px (96 to the inch), or None for one missing, a percentage or not above 0."""
+    m = _LENGTH.fullmatch(v or "")
+    if m is None or m.group(2) == "%":
+        return None
+    x = float(m.group(1)) * _PX[(m.group(2) or "px").lower()]
+    return x if 0 < x < math.inf else None
+
+
+def _svg_size(root: ET.Element) -> tuple[float, float]:
+    """The size an svg is drawn at, as a browser shows it in an <img>: its width and height; the viewBox's shape for
+    a missing one; the viewBox's size for both; 300 x 150 for what is still missing."""
+    w, h = _svg_length(root.get("width")), _svg_length(root.get("height"))
+    try:
+        vb = [float(x) for x in re.split(r"[\s,]+", (root.get("viewBox") or "").strip())]
+    except ValueError:
+        vb = []
+    if not (w and h) and len(vb) == 4 and vb[2] > 0 and vb[3] > 0:
+        aspect = vb[2] / vb[3]
+        return (w, w / aspect) if w else (h * aspect, h) if h else (vb[2], vb[3])
+    return w or 300.0, h or 150.0
+
+
+def _xlink(tag: re.Match) -> bytes:
+    t = tag.group(0)
+    return t if b"xlink:href" in t else _HREF.sub(rb"\1xlink:href\2", t, count=1)
+
+
+def vector(src: str) -> Vector:
+    """The svg file src as a vector drawing, once per file version."""
+    return _vector(*_version(src))
+
+
+@lru_cache(maxsize=64)
+def _vector(src: str, mtime: int, size: int) -> Vector:
+    data = Path(src).read_bytes() if Path(src).exists() else None
+    if data is None:
+        raise MediaError(f"svg not found: {src}")
+    try:
+        root = ET.fromstring(data)
+    except ET.ParseError as e:
+        raise MediaError(f"cannot read svg {src}: {e}") from None
+    if root.tag.rsplit("}", 1)[-1] != "svg":
+        raise MediaError(f"cannot read svg {src}: it is <{root.tag.rsplit('}', 1)[-1]}>, not <svg>")
+    found = {SVG_UNDRAWN.get(el.tag.rsplit("}", 1)[-1]) for el in root.iter() if isinstance(el.tag, str)}
+    undrawn = tuple(k for k in SVG_FIX if k in found)
+    w, h = _svg_size(root)
+    # The reader follows xlink:href only; SVG 2 writes href (a <use>, a gradient taking another's stops).
+    dom = skia.SVGDOM.MakeFromStream(skia.MemoryStream(skia.Data.MakeWithCopy(_START_TAG.sub(_xlink, data))))
+    if dom is None:
+        raise MediaError(f"cannot read svg {src}")
+    dom.setContainerSize(skia.Size(w, h))
+    rec = skia.PictureRecorder()
+    c = rec.beginRecording(skia.Rect.MakeWH(w, h))
+    c.clipRect(skia.Rect.MakeWH(w, h))  # what lies outside its viewport is not shown, as in a browser
+    dom.render(c)
+    return Vector(rec.finishRecordingAsPicture(), w, h, undrawn)
+
+
+FRAME_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".svg")  # the files a folder of frames is read for
 SEQUENCE_FPS = 12  # frames a second of a sequence or sheet without fps: hand-drawn animation's usual rate
 _NUMBER = re.compile(r"%0?\d*d|#+")  # the number in a pattern: run_%03d.png (as ffmpeg writes it) or run_####.png
 

@@ -301,6 +301,20 @@ class Scene:
                       fix + " (paths are relative to the scene file)")
             return True
 
+        def svg(src: str, owner, what: str):
+            """A bad svg fails here; elements in it that are not drawn warn."""
+            try:
+                v = media.vector(src)
+            except media.MediaError as e:
+                self.note("error", "bad-media", owner, f"{what} {e}", "save it again as svg from a drawing program, "
+                          "or as .png")
+                return
+            if v.undrawn:
+                names = ", ".join(f"<{k}>" for k, kind in media.SVG_UNDRAWN.items() if kind in v.undrawn
+                                  and k not in ("tspan", "textPath", "animateTransform", "animateMotion", "set"))
+                self.note("warning", "svg-unsupported", owner, f"{what} {Path(src).name} has {names}, left out "
+                          "when it is drawn", "; ".join(media.SVG_FIX[k] for k in v.undrawn))
+
         self.surfaces: set[str] = set()  # groups drawn as a texture, and so not where they stand
         for layer in self.all_layers():
             q = layer.seq
@@ -310,17 +324,22 @@ class Scene:
                         break
             if q is not None and q.files is None and Path(layer.src).is_file():
                 try:
-                    img = media.image(layer.src)
+                    img = media.still(layer.src)
                 except media.MediaError as e:
-                    self.note("error", "bad-media", layer.id, f"sheet {e}", "save it again as .png")
+                    if not layer.src.lower().endswith(".svg"):  # an svg's is reported with its src
+                        self.note("error", "bad-media", layer.id, f"sheet {e}", "save it again as .png")
                 else:
                     w, h = img.width(), img.height()
                     if w % q.cols or h % q.rows:
-                        self.note("warning", "sheet-grid", layer.id, f"sheet {Path(layer.src).name} is {w} x {h} px, "
+                        self.note("warning", "sheet-grid", layer.id, f"sheet {Path(layer.src).name} is "
+                                  f"{w:g} x {h:g} px, "
                                   f"which {q.cols} column{'s' * (q.cols > 1)} and {q.rows} row{'s' * (q.rows > 1)} do "
                                   "not divide evenly, so its frames cut through pixels and drift",
                                   "check cols and rows against the sheet")
-            if layer.src and not missing(layer.src, layer.id, f"{layer.type} src") and layer.type == "model":
+            here = bool(layer.src) and not missing(layer.src, layer.id, f"{layer.type} src")
+            if here and layer.type != "model" and layer.src.lower().endswith(".svg"):
+                svg(layer.src, layer.id, f"{layer.type} src")
+            if here and layer.type == "model":
                 try:
                     imp = models.load(layer.src)
                 except ValueError as e:
@@ -364,6 +383,8 @@ class Scene:
                     self._check_surface(layer, src[1:])
                 elif missing(self.path(src), layer.id, "texture"):
                     continue
+                elif kind == "image" and src.lower().endswith(".svg"):
+                    svg(self.path(src), layer.id, "texture")
                 elif kind == "image":
                     try:
                         media.image(self.path(src))
@@ -711,7 +732,7 @@ class Scene:
             folder = p if p.is_dir() else p.parent
             near = sorted(x.name for x in folder.iterdir() if x.is_file()) if folder.is_dir() else []
             self.note("error", "media-missing", layer.id, f"frames {spec} match no files" + (
-                " (a folder of frames is read for .png, .jpg, .webp, .bmp and .gif)" if p.is_dir() else ""),
+                " (a folder of frames is read for .png, .jpg, .webp, .bmp, .gif and .svg)" if p.is_dir() else ""),
                 (f"files in {folder}: {', '.join(near[:12])}" if near else f"folder {folder} does not exist"
                  if not folder.is_dir() else f"folder {folder} is empty") + " (paths are relative to the scene file)")
             return

@@ -291,7 +291,7 @@ def expand(raw, user: dict, theme: dict, scene=None):
 _CLIP_KEYS = ("fit", "volume", "w", "h", "x", "y", "anchor")
 TRANSITION_DUR = 0.5  # seconds, when a transition gives a type but no dur
 _ENTERS = {"fade": "fade", "wipe": "wipe-right", "slide": "left", "zoom": "zoom", "blur": "blur"}
-_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp")  # as schema.IMAGE_EXTS
+_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".svg")  # as schema.IMAGE_EXTS
 
 
 def _sequence(raw: dict) -> dict:
