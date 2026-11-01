@@ -465,6 +465,14 @@ def repeat_1000() -> dict:  # one model of 1000 cubes, each moved, turned and co
                   camera={"rotateX": 32}, light="studio")
 
 
+def repeat_10k() -> dict:  # one circle's 10,000 copies, each moved by two expressions every frame
+    return _scene([{"id": "swarm", "type": "circle", "r": 5, "x": "50%", "y": "50%",
+                    "repeat": {"count": 10000,
+                               "x": "=cos(i * 2.39996 + t * (0.2 + (i % 7) * 0.05)) * sqrt(i) * 5.2",
+                               "y": "=sin(i * 2.39996 + t * (0.2 + (i % 7) * 0.05)) * sqrt(i) * 5.2",
+                               "fill": "=hsl(i * 0.036, 0.7, 0.6)"}}])
+
+
 def captions_600() -> dict:
     cues = [[round(n * 0.05, 2), round(n * 0.05 + 0.05, 2), _sentence(n, 3)] for n in range(600)]
     return _scene([{"id": "cc", "type": "captions", "mode": "karaoke", "cues": cues},
@@ -525,6 +533,7 @@ SCENES = {
     "dof-stage": (dof_stage, ".mp4", "a stage of 10 models and 3 cards with floor shadows and focus pulls"),
     "skinned": (skinned, ".mp4", "6 skinned glTF tubes of 24 joints and 23k triangles and 12 arms, posed every frame"),
     "repeat-1000": (repeat_1000, ".mp4", "one model of 1000 cubes moved, turned and coloured by expressions, with edges"),
+    "repeat-10k": (repeat_10k, ".mp4", "one circle repeated 10,000 times, each copy moved by expressions every frame"),
     "captions-600": (captions_600, ".mp4", "600 karaoke cues and 200 pop cues in 30 s"),
     "odd-size": (odd_size, ".mp4", "1365x767 canvas into H.264 (even rounding)"),
     "gif": (gif_out, ".gif", "hello.json to GIF"),

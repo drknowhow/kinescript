@@ -431,6 +431,8 @@ def test_frame_is_pure_function_of_index():
          "mask": {"layer": "lens", "feather": 6}},
         {"id": "heat", "type": "text", "text": "heat", "x": 260, "y": 30, "size": 28, "fill": "#ffd166",
          "glow": {"size": "=6+4*sin(t*3)"}, "outline": 2, "displace": {"amount": 3, "scale": 20, "speed": 2}},
+        {"id": "ring", "type": "circle", "r": 4, "x": 160, "y": 90,
+         "repeat": {"count": 12, "x": "=cos(i*0.5236+t)*70", "y": "=sin(i*0.5236+t)*40", "fill": "=hsl(i*30+t*90)"}},
     ], duration=2)
     r = Renderer(k.Scene(spec), backend="cpu")
     sequential = [r.frame(n).copy() for n in range(0, 30)]

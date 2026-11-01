@@ -1,5 +1,5 @@
 """A model's "repeat": copies of its mesh, each placed and coloured by a number, a list or an expression of i, merged
-into one mesh that sorts as one model."""
+into one mesh that sorts as one model. A 2D layer's is in test_copies."""
 import numpy as np
 import pytest
 
@@ -171,7 +171,7 @@ def test_repeat_keys_are_read_the_way_agents_write_them():
         with pytest.raises(k.SceneError, match=words):
             k.Scene(scene([{"id": "a", "type": "model", "shape": "cube", "repeat": bad}]))
     with pytest.raises(k.SceneError, match="unknown key 'repeat'"):
-        k.Scene(scene([{"id": "t", "type": "text", "text": "Hi", "repeat": {"count": 2}}]))
+        k.Scene(scene([{"id": "t", "type": "captions", "cues": [[0, 1, "Hi"]], "repeat": {"count": 2}}]))
 
 
 def test_a_model_files_materials_take_the_copies_fill(tmp_path):

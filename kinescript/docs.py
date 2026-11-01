@@ -121,6 +121,18 @@ KEYS EVERY LAYER HAS
                 not). feather blurs the mask's edge, in px. The mask layer draws only as a mask, on its
                 own clock, placed by its own x and y in the group, so it can move over a layer that
                 holds still. Video inside a word is a video layer masked by a text layer.
+  repeat        copies of the layer, up to 10,000: {"count": 60, "rotate": "=i * 6", "x": "=cos(i *
+                0.1047) * 300", "y": "=sin(i * 0.1047) * 300", "fill": "=hsl(i * 6)", "opacity": 0.8}.
+                A copy is the layer moved by its x, y, rotate and scale in the layer's own space, so
+                copies turn and scale round the layer's x and y. fill and stroke recolour the layer's
+                (on the layers that take them; a stroke a copy brings is strokeWidth [4] wide), and
+                opacity fades each copy. A key is a number (fill, stroke: a colour), a list taken in
+                turn (copy i takes item i, round again) or an expression of i (the copy, from 0), n
+                (the count) and the layer's t, d, p and T; keys that read no time are worked out
+                once. The layer's own keys, enter, exit, effects and mask act on all its copies as
+                one picture. A shape's copies draw in one loop: 10,000 circles, each moved by two
+                expressions, render at 1080p at about 40 fps on an RTX 5060 Ti. Captions do not
+                repeat; a model's repeat is under 3D MODELS.
   shadow        {"x": 0, "y": 6, "blur": 16, "color": "#00000099"}   (those are the defaults)
   fx            {"brightness": 0, "contrast": 1, "saturate": 1, "hue": 0, "exposure": 0,
                  "temperature": 0, "tint": 0, "gray": 0, "invert": 0}. brightness adds to every
