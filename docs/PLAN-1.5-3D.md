@@ -136,7 +136,11 @@ pixel (the shader has no position), and roughness is a blend toward the environm
 times it). Changes from the bullet above: on the GPU a model's fog is per vertex too, carried in vertex colours and
 blended with `kDstATop` over the shading, since the shader has no position. A stage fogs at 1x on the GPU (one pass
 reading the merged colour and depth) and at 2x on the CPU, in float32 over the pixels that hold something.
-Still to come: shadows (`ground` `"from": "light"`, stage `shadows`).
+Shadows (branch `shadows`): `ground` `"from": "light"` and stage `shadows` are built. Changes from the bullets
+above: the map holds the faces turned from the light (second-depth shadow mapping), and a pixel whose surface turns
+from the light, judged from its neighbours' depths, takes no shadow; together they keep surfaces from shading
+themselves in stripes. Flat layers receive but do not cast. `shadows` takes `opacity` and `soft`, which do not
+animate yet. That completes Phase 2.
 
 ### Phase 3: camera
 

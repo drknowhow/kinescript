@@ -583,6 +583,79 @@ def test_stage_gpu_and_cpu_agree_roughly():
     assert np.abs(cpu - gpu).mean() < 1.0
 
 
+SIDE = {"azimuth": -70, "elevation": 40, "follow": "world"}  # a key light from the left
+
+
+def _hovering(ground, light=SIDE):
+    """A ball over a grey background, whose ground shadow lies 15 px below it."""
+    ball = {"id": "ball", "type": "model", "shape": "sphere", "r": 30, "x": 160, "y": 70, "fill": "#ff0000"}
+    if ground is not None:
+        ball["ground"] = ground
+    spec = scene([ball], bg="#808080", duration=1)
+    spec["light"], spec["camera"] = light, {"rotateX": 30}
+    return spec
+
+
+def test_ground_from_the_light_falls_away_from_it():
+    def middle(light):
+        bare = _frame(_hovering(None), 0).astype(int)
+        dark = (bare - _frame(_hovering({"y": 115, "from": "light", "opacity": 0.8}, light), 0).astype(int))[..., :3]
+        ys, xs = np.nonzero(dark.min(2) > 8)
+        return xs.mean()
+    assert middle(SIDE) > 175 and middle(dict(SIDE, azimuth=70)) < 145  # the ball's middle is at x 160
+    assert _frame(_hovering({"y": 115}), 0).tobytes() == _frame(_hovering({"y": 115, "from": "above"}), 0).tobytes()
+
+
+def _lit_stage(shadows, light=SIDE, **ball):
+    """A ball over a floor in a stage, lit from the left."""
+    kids = [dict({"id": "ball", "type": "model", "shape": "sphere", "r": 30, "y": -20, "fill": "#ff0000"}, **ball),
+            {"id": "floor", "type": "rect", "w": 300, "h": 300, "y": 40, "rotateX": 90, "fill": "#808080"}]
+    group = {"id": "g", "type": "group", "x": 160, "y": 90, "sort": "pixel", "children": kids}
+    if shadows is not None:
+        group["shadows"] = shadows
+    spec = scene([group], bg="#000000", duration=1)
+    spec["light"], spec["camera"] = light, {"rotateX": 35}
+    return spec
+
+
+def test_stage_shadows_fall_on_the_floor_away_from_the_light():
+    bare = _frame(_lit_stage(None), 0).astype(int)
+    shaded = _frame(_lit_stage({"opacity": 0.6}), 0).astype(int)
+    dark = (bare - shaded)[..., :3].min(2) > 20
+    ys, xs = np.nonzero(dark)
+    assert len(xs) > 300 and xs.mean() > 175  # on the floor, to the right of the ball (x 160)
+    assert np.array_equal(bare[150:, :40], shaded[150:, :40])  # the floor in the light is as it was
+
+
+def test_a_lone_ball_does_not_shadow_itself():
+    def ball(shadows):
+        spec = _lit_stage(shadows)
+        spec["layers"][0]["children"].pop()  # no floor
+        return _frame(spec, 0).astype(int)[40:100, 120:200]
+    assert np.abs(ball(None) - ball(True)).mean() < 0.5
+
+
+def test_stage_shadows_need_a_key_light_and_a_model():
+    off = _frame(_lit_stage(None), 0).tobytes()
+    assert _frame(_lit_stage(True, light="flat"), 0).tobytes() == _frame(_lit_stage(None, light="flat"), 0).tobytes()
+    flat = _lit_stage(True)
+    flat["layers"][0]["children"][0] = {"id": "card", "type": "rect", "w": 60, "h": 60, "fill": "#ff0000"}
+    plain = _lit_stage(None)
+    plain["layers"][0]["children"][0] = flat["layers"][0]["children"][0]
+    assert _frame(flat, 0).tobytes() == _frame(plain, 0).tobytes()  # only models cast
+    assert off != _frame(_lit_stage(True), 0).tobytes()
+
+
+def test_gpu_and_cpu_agree_on_shadows():
+    for spec in (_lit_stage(True), _hovering({"y": 115, "from": "light"})):
+        cpu = _frame(spec, 0, "cpu").astype(int)
+        try:
+            gpu = _frame(spec, 0, "gpu").astype(int)
+        except RuntimeError:
+            pytest.skip("no GPU")
+        assert np.abs(cpu - gpu).mean() < 1.0
+
+
 def test_check_warns_about_a_stage_with_many_children():
     kids = [{"type": "rect", "x": 10 * i, "y": 0, "w": 8, "h": 8, "z": i} for i in range(17)]
     spec = scene([{"id": "g", "type": "group", "x": 80, "y": 90, "sort": "pixel", "children": kids}], duration=0.5)

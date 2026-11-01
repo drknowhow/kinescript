@@ -199,6 +199,10 @@ DEPTH AND CAMERA (3D)
               model is as deep as its triangles; any other child lies flat in its own plane (a group
               child too). Each child costs a merge (check warns past 16), and a blend inside a stage
               has nothing under it. Stages do not nest.
+  shadows     on a stage: true or {"opacity": 0.5, "soft": 3}. The stage's models cast shadows from
+              the scene's key light onto every child, models and flat layers alike: a rect turned 90
+              on rotateX is a floor that takes them. opacity is how much a shadow darkens, soft its
+              edge in px. Flat layers do not cast, and a surface turned from the light takes none.
   camera      top level. Every key animates, and all default to 0 except fov:
               {"x": 0, "y": 0, "z": 0, "rotateX": 0, "rotateY": 0, "rotate": 0, "fov": 40}
               x and y pan (px). z moves the camera back; negative moves it in. rotateY orbits it
@@ -267,10 +271,12 @@ DEPTH AND CAMERA (3D)
             keeping its shape, else its longest side is 300 px. Node transforms apply; animation,
             skins and textures do not (a texture gives its mean colour). Long triangles are cut to
             1/24 of its size for the depth sort. Draco- or meshopt-compressed files are not read.
-  ground    true or {"opacity": 0.5, "blur": px, "y": px}: a soft shadow on a level floor under the
-            model, as if lit from above, fainter as the model rises. The floor sits at the model's
-            lowest point before it turns, or at y in the layer's parent space (canvas px at the top
-            level): give y when the model moves up and down.
+  ground    true or {"opacity": 0.5, "blur": px, "y": px, "from": "above"}: a soft shadow on a level
+            floor under the model, as if lit from above, fainter as the model rises. The floor sits at
+            the model's lowest point before it turns, or at y in the layer's parent space (canvas px
+            at the top level): give y when the model moves up and down. "from": "light" casts it along
+            the model's key light instead, so it moves as the light does (none when the light is
+            below the floor). For shadows on other layers, use a stage's shadows.
   explode   0..1: faces fly out along their normals.
   draw      0..1, or "enter": "build": triangles appear from the bottom up.
   light     top level, or on one model: studio (default) | soft | dramatic | flat (no shading),

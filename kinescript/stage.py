@@ -14,6 +14,7 @@ from . import render3d, space
 
 QMAX = 1.0 / space.NEAR  # the largest 1/w a drawn point has
 CHILDREN = 16  # check warns past this many children: each one is drawn and merged on its own
+SUN = 1024  # the side of a stage's shadow map, in texels
 
 _PACK = """
 half4 main(float2 uv) {
@@ -38,6 +39,9 @@ half4 main(float2 p) {
 }
 """
 _KID = "uniform shader kid;"
+# The depth at a frame pixel: the nearest of its samples, so its edges go with it.
+_NEAREST = """max(max(dep(accd.eval(p + float2(-0.25, -0.25))), dep(accd.eval(p + float2(0.25, -0.25)))),
+                  max(dep(accd.eval(p + float2(-0.25, 0.25))), dep(accd.eval(p + float2(0.25, 0.25)))))"""
 # The merged stage at 1x, each pixel mixed toward the fog by how far away its depth puts it: dist = k / depth.
 _FOG = _DEP + """
 uniform shader acc;
@@ -46,16 +50,79 @@ uniform half3 fogCol;
 uniform float4 fog;  // near, far - near, amount, k
 half4 main(float2 p) {
     half4 c = acc.eval(p);
-    // the nearest of the frame pixel's samples, so its edges are fogged with it
-    float d = max(max(dep(accd.eval(p + float2(-0.25, -0.25))), dep(accd.eval(p + float2(0.25, -0.25)))),
-                  max(dep(accd.eval(p + float2(-0.25, 0.25))), dep(accd.eval(p + float2(0.25, 0.25)))));
+    float d = NEAREST;
     if (d <= 0.0) {
         return c;
     }
     half f = half(clamp((fog.w / d - fog.x) / fog.y, 0.0, 1.0) * fog.z);
     return half4(c.rgb * (1.0 - f) + fogCol * (f * c.a), c.a);
 }
-"""
+""".replace("NEAREST", _NEAREST)
+# The merged stage at 1x, darkened where the shadow map has something nearer the key light: each pixel's place in
+# camera space from its depth, then across, up and toward the light, compared with the map where it falls and, if
+# that is in shadow, at 9 taps round it for a soft edge. A surface turned from the light, which its depths and its
+# neighbours' show, takes no shadow: it has no key light to lose, and tested against itself in the map an edge-on
+# face shaded itself in stripes.
+_SUN = _DEP + """
+uniform shader acc;
+uniform shader accd;
+uniform shader sun;
+uniform float4 cam;  // canvas px per frame px, half the canvas width and height, the camera's distance from z 0
+uniform float3 su;
+uniform float3 sv;
+uniform float3 sl;
+uniform float4 box;  // the map's corner across and up, its texels per px, the spacing of its taps in texels
+uniform float4 dz;  // the map's least depth toward the light and its range, the bias, opacity
+uniform float kq;  // w is kq over the packed depth
+uniform float sub;  // frame px per depth pixel
+float3 place(float2 p, float d) {
+    float w = kq / d;
+    return float3((p.x * cam.x - cam.y) * w, (p.y * cam.x - cam.z) * w, cam.w * (1.0 - w));
+}
+// From the point at p (depth d, place P) to the one along e, on the side that goes on most smoothly: the same
+// surface rather than the gap to another. 0 when neither side has depth.
+float3 along(float2 p, float2 e, float d, float3 P) {
+    float a = dep(accd.eval(p + e));
+    float b = dep(accd.eval(p - e));
+    if (a > 0.0 && (b <= 0.0 || abs(a - d) <= abs(b - d))) {
+        return place(p + e, a) - P;
+    }
+    if (b > 0.0) {
+        return P - place(p - e, b);
+    }
+    return float3(0.0);
+}
+half4 main(float2 p) {
+    half4 c = acc.eval(p);
+    float d = NEAREST;
+    float2 o = p - float2(0.5 - 0.5 * sub);  // the middle of the frame pixel's first depth pixel
+    float e = dep(accd.eval(o));
+    if (d <= 0.0 || e <= 0.0) {
+        return c;
+    }
+    float3 Q = place(o, e);
+    if (dot(cross(along(o, float2(sub, 0.0), e, Q), along(o, float2(0.0, sub), e, Q)), sl) <= 0.0) {
+        return c;
+    }
+    float3 P = place(p, d);
+    float2 t = float2(dot(P, su) - box.x, dot(P, sv) - box.y) * box.z;
+    float toward = dot(P, sl) + dz.z;
+    float m = dep(sun.eval(t)) / 16777215.0;
+    if (m <= 0.0 || toward >= dz.x + (m - 0.001) / 0.998 * dz.y) {
+        return c;
+    }
+    float n = 0.0;
+    for (int i = -1; i <= 1; i++) {
+        for (int j = -1; j <= 1; j++) {
+            m = dep(sun.eval(t + float2(float(i), float(j)) * box.w)) / 16777215.0;
+            if (m > 0.0 && toward < dz.x + (m - 0.001) / 0.998 * dz.y) {
+                n += 1.0;
+            }
+        }
+    }
+    return half4(c.rgb * half(1.0 - dz.w * n / 9.0), c.a);
+}
+""".replace("NEAREST", _NEAREST)
 _SKSL = {
     "pack": _PACK,
     # the child's depth, kept only where it drew (drawn with kDstIn)
@@ -65,6 +132,7 @@ _SKSL = {
     "under": _KID + _NEAR.replace("RESULT", "return near ? half4(0.0) : kid.eval(p);"),
     "depth": _NEAR.replace("RESULT", "return near ? d : accd.eval(p);"),
     "fog": _FOG,
+    "sun": _SUN,
 }
 _EFFECTS: dict[str, skia.RuntimeEffect] = {}
 
@@ -89,10 +157,12 @@ class Stage:
         self.k = r.scale * self.ss  # canvas px to stage px
         self.gpu = r.backend == "gpu"
         self.child = None  # the child being drawn
+        self.casters = None  # (camera-space corners, triangles) of the models that cast shadows, when they are on
+        self.sun = self.sund = None  # the shadow map, made on first use; on the CPU, its pixels
         self.m = None  # its world-to-canvas matrix, set by Renderer._layer once it draws
         info = skia.ImageInfo.Make(self.w, self.h, skia.kRGBA_8888_ColorType, skia.kPremul_AlphaType)
         if self.gpu:
-            ctx = r.surface.recordingContext()
+            ctx = self.ctx = r.surface.recordingContext()
             self.kid, self.kidd, self.acc, self.accd = (
                 skia.Surface.MakeRenderTarget(ctx, skia.Budgeted.kNo, info, 0) for _ in range(4))
             self.paint = skia.Paint(Shader=_effect("pack").makeShader(None), BlendMode=skia.BlendMode.kSrc)
@@ -111,8 +181,10 @@ class Stage:
             self.dirty = None  # of dep, written since the last child
 
     # ---- drawing a stage ----------------------------------------------------------------------------------------
-    def draw(self, r, c: skia.Canvas, kids, T: float, alpha: float):
-        """Draw kids, the children of a stage, onto c: each on its own, then merged by depth."""
+    def draw(self, r, c: skia.Canvas, kids, T: float, alpha: float, shadows=None):
+        """Draw kids, the children of a stage, onto c: each on its own, then merged by depth, with the shadows of its
+        models from the key light if shadows is true or {"opacity", "soft"}."""
+        self.casters = [] if shadows else None
         if self.gpu:
             self.acc.getCanvas().clear(skia.ColorTRANSPARENT)
             self.accd.getCanvas().clear(skia.ColorTRANSPARENT)
@@ -139,15 +211,22 @@ class Stage:
                 self._clear(box)
         finally:
             r._stage, r._dev, self.child = None, 1.0, None
-        self._finish(c, render3d.fog(r, T))
+        self._finish(c, render3d.fog(r, T), self._sun(r, T, shadows) if self.casters else None)
 
     def depth(self, xy: np.ndarray, q: np.ndarray, tris: np.ndarray):
         """Draw the depth of triangles tris, whose corners are at xy (stage px) with 1/w q, in order: each one
         replaces what is under it, so give them far to near."""
         if not len(tris):
             return
-        uv = np.stack([q / QMAX, np.zeros(len(q))], 1)
-        cv = self.kidd.getCanvas()
+        self._values(self.kidd.getCanvas(), xy, q / QMAX, tris)
+        if not self.gpu:
+            at = xy[tris.ravel()]
+            (x0, y0), (x1, y1) = np.floor(at.min(0)).astype(int), np.ceil(at.max(0)).astype(int)
+            self.dirty = _union(self.dirty, _clip((y0 - 1, y1 + 1, x0 - 1, x1 + 1), self.h, self.w))
+
+    def _values(self, cv: skia.Canvas, xy: np.ndarray, vals: np.ndarray, tris: np.ndarray):
+        """Draw triangles tris, corners at xy, each point holding its value (0..1) as a depth image holds it."""
+        uv = np.stack([vals, np.zeros(len(vals))], 1)
         for k in range(0, len(tris), 20000):  # Skia indexes vertices with 16 bits
             t = tris[k:k + 20000]
             keep = np.zeros(len(xy), bool)
@@ -157,10 +236,129 @@ class Stage:
             v = skia.Vertices.MakeCopy(skia.Vertices.kTriangles_VertexMode, _points(xy[sel]), _points(uv[sel]),
                                        None, memoryview(idx.astype(np.uint16).ravel()))
             cv.drawVertices(v, self.paint, skia.BlendMode.kDst)
-        if not self.gpu:
-            at = xy[tris.ravel()]
-            (x0, y0), (x1, y1) = np.floor(at.min(0)).astype(int), np.ceil(at.max(0)).astype(int)
-            self.dirty = _union(self.dirty, _clip((y0 - 1, y1 + 1, x0 - 1, x1 + 1), self.h, self.w))
+
+    # ---- shadows ------------------------------------------------------------------------------------------------
+    def cast(self, P: np.ndarray, tris: np.ndarray):
+        """Keep a model's triangles, corners P in camera space, to cast shadows if the stage has them."""
+        if self.casters is not None and len(tris):
+            self.casters.append((P, tris))
+
+    def _sun(self, r, T: float, spec) -> dict | None:
+        """Draw the shadow map: how near the key light each triangle the models cast is, seen along the light
+        (orthographic) and fitted round them, nearer drawn over farther. Returns what _finish needs, or None."""
+        key, amount = render3d.sun(r, T)
+        if amount <= 0:
+            return None
+        sl = np.asarray(key, float) / np.linalg.norm(key)
+        su = np.cross([0.0, 1.0, 0.0] if abs(sl[1]) < 0.9 else [1.0, 0.0, 0.0], sl)
+        su /= np.linalg.norm(su)
+        sv = np.cross(sl, su)
+        P = np.concatenate([p for p, _ in self.casters])
+        start = np.cumsum([0] + [len(p) for p, _ in self.casters[:-1]])
+        tris = np.concatenate([t + o for (_, t), o in zip(self.casters, start)])
+        # Only the faces turned from the light: a lit surface then lies well in front of what the map holds, and
+        # does not shadow itself in stripes (a turned face is unlit by its shading anyway).
+        e1, e2 = P[tris[:, 1]] - P[tris[:, 0]], P[tris[:, 2]] - P[tris[:, 0]]
+        tris = tris[np.cross(e1, e2) @ sl <= 0]  # corners run so the cross product points out of the model
+        if not len(tris):
+            return None
+        a, b, d = P @ su, P @ sv, P @ sl
+        per = (SUN - 4) / max(float(np.ptp(a)), float(np.ptp(b)), 1.0)  # texels per px
+        a0, b0, d0, dr = a.min() - 2 / per, b.min() - 2 / per, d.min(), max(float(np.ptp(d)), 1.0)
+        if self.sun is None:
+            info = skia.ImageInfo.Make(SUN, SUN, skia.kRGBA_8888_ColorType, skia.kPremul_AlphaType)
+            if self.gpu:
+                self.sun = skia.Surface.MakeRenderTarget(self.ctx, skia.Budgeted.kNo, info, 0)
+            else:
+                self.sund = np.zeros((SUN, SUN, 4), np.float32)
+                self.sun = skia.Surface.MakeRasterDirect(info.makeColorType(skia.kRGBA_F32_ColorType), self.sund,
+                                                         SUN * 16)
+        cv = self.sun.getCanvas()
+        cv.clear(skia.ColorTRANSPARENT)
+        tris = tris[np.argsort(d[tris].mean(1), kind="stable")]  # farthest from the light first
+        self._values(cv, np.stack([(a - a0) * per, (b - b0) * per], 1), 0.001 + 0.998 * (d - d0) / dr, tris)
+        spec = spec if isinstance(spec, dict) else {}
+        soft = max(0.0, float(spec.get("soft", 4.0)))
+        return {"su": su, "sv": sv, "sl": sl, "a0": a0, "b0": b0, "per": per, "tap": soft * per / 2, "d0": d0,
+                "dr": dr, "bias": 2 / per + 0.5 * soft + 1.0, "opacity": float(spec.get("opacity", 0.5)),
+                "cam": [1 / r.scale, r.s.w / 2, r.s.h / 2, -1.0 / r._lens[3, 2]]}
+
+    def _sun_gpu(self, colour: skia.Shader, depth: skia.Shader, sun: dict) -> skia.Shader:
+        b = skia.RuntimeShaderBuilder(_effect("sun"))
+        b.setChild("acc", colour)
+        b.setChild("accd", depth)
+        b.setChild("sun", self.sun.makeImageSnapshot().makeShader(skia.TileMode.kDecal, skia.TileMode.kDecal,
+                                                                  skia.SamplingOptions()))
+        b.setUniform("cam", sun["cam"])
+        for k in ("su", "sv", "sl"):
+            b.setUniform(k, sun[k].tolist())
+        b.setUniform("box", [sun["a0"], sun["b0"], sun["per"], sun["tap"]])
+        b.setUniform("dz", [sun["d0"], sun["dr"], sun["bias"], sun["opacity"]])
+        b.setUniform("kq", 16777215.0 / QMAX)
+        b.setUniform("sub", 1.0 / self.ss)
+        return b.makeShader()
+
+    def _sun_cpu(self, px: np.ndarray, depth: np.ndarray, y0: int, x0: int, sun: dict):
+        """Darken premultiplied RGBA pixels px, whose top left is stage pixel (x0, y0), where the shadow map hides
+        them from the key light, as the GPU's pass does: once a frame pixel, from the nearest of its depths, and only
+        as far as each test needs. Over the whole stage at 2x, every test took 2 s a CPU frame at 1080p."""
+        ss = self.ss
+        h, w = depth.shape[0] // ss, depth.shape[1] // ss
+        near = depth.reshape(h, ss, w, ss).max((1, 3)).ravel()
+        hit = np.flatnonzero(near > 0)
+        if not len(hit):
+            return
+        rows, cols = np.divmod(hit, w)
+        cx, cy, focus = (np.float32(v) for v in sun["cam"][1:])
+        k = np.float32(1 / self.k)
+
+        def place(sy, sx, q):
+            """Camera space of stage px (sx, sy) from the stage's top left, at depth q."""
+            wv = np.float32(1 / QMAX) / np.where(q > 0, q, 1)
+            P = np.empty((len(q), 3), np.float32)
+            P[:, 0] = ((sx + np.float32(x0)) * k - cx) * wv
+            P[:, 1] = ((sy + np.float32(y0)) * k - cy) * wv
+            P[:, 2] = focus * (1 - wv)
+            return P
+        half = np.float32(ss / 2)
+        P = place(rows * np.float32(ss) + half, cols * np.float32(ss) + half, near[hit])
+        sl, per = sun["sl"].astype(np.float32), np.float32(sun["per"])
+        ta = (P @ sun["su"].astype(np.float32) - np.float32(sun["a0"])) * per
+        tb = (P @ sun["sv"].astype(np.float32) - np.float32(sun["b0"])) * per
+        toward = P @ sl + np.float32(sun["bias"])
+        lit, tap = self.sund[..., 0], np.float32(sun["tap"])
+
+        def shadowed(sel, da, db):
+            ia, ib = np.floor(ta[sel] + da).astype(np.int32), np.floor(tb[sel] + db).astype(np.int32)
+            inside = (ia >= 0) & (ia < SUN) & (ib >= 0) & (ib < SUN)
+            m = np.where(inside, lit[np.clip(ib, 0, SUN - 1), np.clip(ia, 0, SUN - 1)], 0)
+            return (m > 0) & (toward[sel] < sun["d0"] + (m - 0.001) / 0.998 * sun["dr"])
+        sel = np.flatnonzero(shadowed(slice(None), 0, 0))
+        if not len(sel):
+            return
+        # Facing the light: from the depth of each pixel's first sample and its neighbours'.
+        D = np.pad(depth, 1).ravel()  # no depth round the edge
+        wide = depth.shape[1] + 2
+        sy, sx = rows[sel] * ss, cols[sel] * ss
+        at = (sy + 1) * wide + sx + 1
+        e = D[at]
+        Q = place(sy + np.float32(0.5), sx + np.float32(0.5), e)
+
+        def along(dy, dx):
+            a, b = D[at + dy * wide + dx], D[at - dy * wide - dx]
+            fore = (a > 0) & ((b <= 0) | (np.abs(a - e) <= np.abs(b - e)))
+            back = ~fore & (b > 0)
+            ahead = place(sy + np.float32(0.5 + dy), sx + np.float32(0.5 + dx), a) - Q
+            behind = Q - place(sy + np.float32(0.5 - dy), sx + np.float32(0.5 - dx), b)
+            return np.where(fore[:, None], ahead, np.where(back[:, None], behind, 0))
+        sel = sel[(e > 0) & (np.cross(along(0, 1), along(1, 0)) @ sl > 0)]
+        if not len(sel):
+            return
+        n = sum(shadowed(sel, i * tap, j * tap).astype(np.float32) for i in (-1, 0, 1) for j in (-1, 0, 1))
+        blocks = px.reshape(h, ss, w, ss, 4)
+        r, c = rows[sel], cols[sel]
+        dark = (1 - sun["opacity"] * n / 9)[:, None, None, None]
+        blocks[r, :, c, :, :3] = np.rint(blocks[r, :, c, :, :3] * dark).astype(np.uint8)
 
     def plane(self, m: np.ndarray, corners: np.ndarray, bias: float = 1.0):
         """Draw the depth of the plane z 0 of world-to-canvas matrix m over the quad `corners` (4 x 2 stage px:
@@ -246,8 +444,9 @@ class Stage:
             for a in arrays:
                 a[y0:y1, x0:x1] = 0
 
-    def _finish(self, c: skia.Canvas, fg=None):
-        """Lay the merged children on c at the frame's resolution, through fog fg if there is one."""
+    def _finish(self, c: skia.Canvas, fg=None, sun=None):
+        """Lay the merged children on c at the frame's resolution, darkened where shadows fall (sun, from _sun) and
+        through fog fg, when there are any."""
         sampling = skia.SamplingOptions(skia.FilterMode.kLinear) if self.ss > 1 else skia.SamplingOptions()
         ss = self.ss
         if self.gpu:
@@ -261,6 +460,8 @@ class Stage:
             y0, x0 = y0 - y0 % ss, x0 - x0 % ss
             y1, x1 = min(self.h, y1 + -y1 % ss), min(self.w, x1 + -x1 % ss)
             px = np.ascontiguousarray(self.out[y0:y1, x0:x1]).view(np.uint8).reshape(y1 - y0, x1 - x0, 4)
+            if sun is not None:
+                self._sun_cpu(px, self.outd[y0:y1, x0:x1], y0, x0, sun)
             if fg is not None:
                 self._fog_cpu(px, self.outd[y0:y1, x0:x1], fg)
             img = skia.Image.fromarray(px, skia.kRGBA_8888_ColorType, skia.kPremul_AlphaType)
@@ -268,16 +469,22 @@ class Stage:
         c.save()
         c.resetMatrix()
         dst = skia.Rect(x0 / ss, y0 / ss, x1 / ss, y1 / ss)
-        if self.gpu and fg is not None:
+        if self.gpu and (fg is not None or sun is not None):
             to = skia.Matrix.Scale(1 / ss, 1 / ss)
-            b = skia.RuntimeShaderBuilder(_effect("fog"))
-            b.setChild("acc", img.makeShader(skia.TileMode.kClamp, skia.TileMode.kClamp, sampling, to))
-            b.setChild("accd", self.accd.makeImageSnapshot().makeShader(skia.TileMode.kClamp, skia.TileMode.kClamp,
-                                                                       skia.SamplingOptions(), to))
-            col, near, far, amt, focus = fg
-            b.setUniform("fogCol", col)
-            b.setUniform("fog", [near, max(far - near, 1e-6), amt, focus * 16777215.0 / QMAX])
-            c.drawRect(dst, skia.Paint(Shader=b.makeShader()))
+            colour = img.makeShader(skia.TileMode.kClamp, skia.TileMode.kClamp, sampling, to)
+            depth = self.accd.makeImageSnapshot().makeShader(skia.TileMode.kClamp, skia.TileMode.kClamp,
+                                                             skia.SamplingOptions(), to)
+            if sun is not None:
+                colour = self._sun_gpu(colour, depth, sun)
+            if fg is not None:
+                b = skia.RuntimeShaderBuilder(_effect("fog"))
+                b.setChild("acc", colour)
+                b.setChild("accd", depth)
+                col, near, far, amt, focus = fg
+                b.setUniform("fogCol", col)
+                b.setUniform("fog", [near, max(far - near, 1e-6), amt, focus * 16777215.0 / QMAX])
+                colour = b.makeShader()
+            c.drawRect(dst, skia.Paint(Shader=colour))
         else:
             c.drawImageRect(img, src, dst, sampling)
         c.restore()

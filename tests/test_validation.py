@@ -431,3 +431,18 @@ def test_fog_is_checked():
     assert e["message"].startswith("fog far (1000) must be past near"), e
     e = one_error(dict(scene([cube]), fog={"color": [[0, "#ff0000"], [1, "nope"]]}))
     assert e["message"].startswith("fog color"), e
+
+
+def test_shadows_and_ground_from_are_checked():
+    ball = {"id": "m", "type": "model", "shape": "sphere", "ground": {"from": "light", "y": 300}}
+    stage = {"id": "g", "type": "group", "sort": "pixel", "shadows": {"opacity": 0.4, "soft": 2}, "children": [ball]}
+    issues, s = load(scene([stage]))
+    assert s is not None and not issues, issues
+    e = one_error(scene([dict(stage, shadows="yes")]), "g")
+    assert e["message"].startswith("shadows is"), e
+    e = one_error(scene([dict(stage, shadows={"soft": "big"})]), "g")
+    assert e["message"].startswith("shadows soft"), e
+    issues, s = load(scene([dict(stage, sort="depth")]))
+    assert s is not None and [i["code"] for i in issues] == ["ignored-key"], issues
+    e = one_error(scene([dict(ball, ground={"from": "sun"})]), "m")
+    assert e["message"].startswith("ground from"), e
