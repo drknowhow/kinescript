@@ -560,6 +560,7 @@ class Renderer:
         self._fonts: dict = {}
         self._shaped: dict = {}  # (typeface, size, text, rtl) -> how _draw_pieces draws it (_pieces)
         self._paths: dict = {}
+        self._routes: dict[str, tuple] = {}  # an along's path by layer (data) or route id: (path, measure, length)
         self._solid: dict[int, skia.Paint] = {}  # an antialiased fill paint for each colour (_fill_paint)
         self._shaders: dict = {}
         self.stop_at: str | None = None
@@ -745,6 +746,9 @@ class Renderer:
                 return False
         if L.exit and d - b < L.exit.dur:
             return False
+        route = self.s.by_id[L.along[0][1:]] if L.along and L.along[0].startswith("#") else None
+        if route is not None and not all(p.static for p in route.props.values()):
+            return False  # it rides a path that moves
         return all(p.held(a, b, d) for p in L.props.values()) and all(self._holds(k, lo, hi, F) for k in L.children)
 
     @property
@@ -1080,6 +1084,11 @@ class Renderer:
         x, y, rot, sc, sx, sy, blur = L.placed(t, T)
         x, y = float(x) + mods.dx, float(y) + mods.dy
         rot = float(rot) + mods.rotate
+        if L.along is not None:
+            ax, ay, turn = self._along(L, t, T)
+            x, y = x + ax, y + ay
+            if L.along[1]:
+                rot += turn
         sc = float(sc) * mods.scale
         sx, sy = sc * float(sx), sc * float(sy)
         outer, tilt, facing = self._m3d, None, True
@@ -1429,6 +1438,46 @@ class Renderer:
 
     def _draw_ellipse(self, c, L, t, T, g, box, reveal, mods):
         self._draw_circle(c, L, t, T, g, box, reveal, mods)
+
+    def _along(self, L: Layer, t: float, T: float) -> tuple[float, float, float]:
+        """Where L's along puts its anchor at t, as an offset from its x and y, and the path's direction there in
+        degrees. The path's first contour is ridden: an open one stops at its ends, a closed one goes round again."""
+        d = L.along[0]
+        route = self.s.by_id[d[1:]] if d.startswith("#") else None
+        if route is None:
+            hit = self._routes.get(L.id)
+            if hit is None:
+                path = svgpath.parse(d)
+                meas = skia.PathMeasure(path, False)
+                hit = self._routes[L.id] = (path, meas, meas.getLength())
+        else:
+            rt = T - route.t_in
+            rg = lambda name, default=None: route.get(name, rt, T, 0, default)  # noqa: E731
+            path = self._path(route, rt, T, rg)
+            hit = self._routes.get(route.id)
+            if hit is None or hit[0] is not path:
+                meas = skia.PathMeasure(path, False)
+                hit = self._routes[route.id] = (path, meas, meas.getLength())
+        path, meas, n = hit
+        p = float(L.get("along", t, T))
+        p = p % 1.0 if meas.isClosed() else min(max(p, 0.0), 1.0)
+        pt = meas.getPosTan(p * n) if n > 0 else None
+        if not pt:
+            return 0.0, 0.0, 0.0
+        pos, tan = pt
+        px, py, tx, ty = pos.x(), pos.y(), tan.x(), tan.y()
+        if route is not None:  # where the route draws it: _draw_path's anchor shift, then the route's own placing
+            if "anchor" in route.raw:
+                box, b = self._box(route, rt, T, rg), path.computeTightBounds()
+                px, py = px + box[0] - b.left(), py + box[1] - b.top()
+            x, y, rot, sc, sx, sy, _ = route.placed(rt, T)
+            sx, sy = float(sc) * float(sx), float(sc) * float(sy)
+            px, py, tx, ty = px * sx, py * sy, tx * sx, ty * sy
+            if rot:
+                co, si = math.cos(math.radians(float(rot))), math.sin(math.radians(float(rot)))
+                px, py, tx, ty = px * co - py * si, px * si + py * co, tx * co - ty * si, tx * si + ty * co
+            px, py = px + float(x), py + float(y)
+        return px, py, math.degrees(math.atan2(ty, tx))
 
     def _path(self, L: Layer, t, T, g) -> skia.Path:
         ty = L.type

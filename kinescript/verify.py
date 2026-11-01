@@ -57,6 +57,43 @@ def stops(layer) -> list[tuple[str, float]]:
     return out
 
 
+STROBE = 40 / 1080  # px a frame, as a share of the canvas's short side, past which a move shows as copies
+STROBE_RUN = 5  # frames running that make it a move: not a cut, nor the first frames of a quick ease out
+
+
+def strobes(scene: Scene, r: Renderer) -> list[tuple[str, float, float]]:
+    """(layer id, time, px a frame) where a layer's anchor, moved by its x, y and along, goes further than STROBE each
+    frame for STROBE_RUN frames running. Motion blur smears such a move, so a scene with it has none."""
+    if int((scene.motion_blur or {}).get("samples", 0)) >= 2:
+        return []
+    fps, limit, out = scene.fps, STROBE * min(scene.w, scene.h), []
+    for L in scene.all_layers():
+        if L.along is None and all(L.props[k].static for k in ("x", "y") if k in L.props):
+            continue
+        prev, run, fast = None, 0, 0.0
+        try:
+            for f in range(math.ceil(L.t_in * fps), min(scene.frames, math.ceil(L.t_out * fps))):
+                T = f / fps
+                t = T - L.t_in
+                x, y = L.placed(t, T)[:2]
+                x, y = float(x), float(y)
+                if L.along is not None:
+                    ax, ay, _ = r._along(L, t, T)
+                    x, y = x + ax, y + ay
+                step = 0.0 if prev is None else math.hypot(x - prev[0], y - prev[1])
+                prev = (x, y)
+                if step <= limit:
+                    run, fast = 0, 0.0
+                    continue
+                run, fast = run + 1, max(fast, step)
+                if run == STROBE_RUN:
+                    out.append((L.id, (f - STROBE_RUN) / fps, fast))
+                    break
+        except (SceneError, ArithmeticError, ValueError, TypeError):
+            continue  # an expression that fails is reported where the frame is drawn
+    return out
+
+
 def _times(scene: Scene, count: int, times=None) -> list[float]:
     if times:  # as still reads them: negative counts from the end, and the scene's ends clamp
         from .output import frame_at
@@ -611,6 +648,9 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
                 + (f"; it overlaps '{under}'" if under else ""),
                 f"move it clear of '{under}', or add a box or a shadow" if under
                 else "add a box, a shadow, or change the colour")
+    for lid, T, px in strobes(scene, r):
+        add("warning", "strobe", lid, T, f"moves {px:.0f} px a frame, fast enough to show as separate copies of "
+            "itself instead of one moving thing", "add \"motionBlur\": {\"samples\": 8} to the scene, or slow the move")
     for layer in scene.all_layers():
         for k, t in stops(layer):
             add("warning", "stop-and-go", layer.id, layer.t_in + t,

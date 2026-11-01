@@ -21,7 +21,8 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 SCENES = ["examples/3d.json", "examples/model.json", "examples/title3d.json", "examples/import.json",
           "examples/hello.json", "examples/edit.json", "marketing/promo.json", "stress:layers-2000",
-          "stress:groups-deep", "stress:text-split", "stress:expressions", "stress:keys-dense", "stress:counters"]
+          "stress:groups-deep", "stress:text-split", "stress:expressions", "stress:keys-dense", "stress:counters",
+          "stress:along-100"]
 SAMPLES = 5  # frames a scene, spread over its length
 
 # Run by each tree's own Python path: writes every sampled frame of every scene to one .npz.
@@ -35,7 +36,10 @@ from kinescript.render import Renderer
 assert Path(k.__file__).resolve().is_relative_to(Path(sys.argv[1]).resolve()), k.__file__
 out, frames = {}, int(sys.argv[3])
 for path in sys.argv[4:]:
-    s = k.load(path)
+    try:
+        s = k.load(path)
+    except k.SceneError:  # it uses something this tree does not have
+        continue
     r = Renderer(s)
     for n in sorted({round(i * (s.frames - 1) / max(1, frames - 1)) for i in range(frames)}):
         out[f"{path}@{n}"] = r.frame(n).copy()
@@ -76,9 +80,12 @@ def main() -> int:
             for be in backends:
                 old = draw(base, scenes, be, Path(tmp) / f"old-{be}.npz")
                 new = draw(ROOT, scenes, be, Path(tmp) / f"new-{be}.npz")
-                for key in old:
-                    d = np.abs(old[key].astype(int) - new[key].astype(int))
+                for key in new:
                     name = Path(key.split("@")[0]).name + "@" + key.split("@")[1]
+                    if key not in old:
+                        print(f"{be} {name}: new, {a.rev} does not load it")
+                        continue
+                    d = np.abs(old[key].astype(int) - new[key].astype(int))
                     if d.any():
                         differ += 1
                         print(f"{be} {name}: differs by up to {d.max()} levels in {int(d.any(2).sum())} pixels")

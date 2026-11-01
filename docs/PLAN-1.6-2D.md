@@ -129,7 +129,7 @@ constant groups to replay. Frame times on the GPU, frames 50 to 89: `layers-2000
 - `along` moves a layer along a path: `"along": {"d": "M0 0 C 300 -200 600 200 900 0", "p": [[0, 0], [2, 1]],
   "orient": true}`. `p` is the share of the path's length (eased like any key), `orient` turns the layer to the
   path's direction, and `d` may be `"#routeId"` to follow a path layer, so a dashed route draws on while a dot rides
-  it. x and y place the path's start.
+  it. x and y move the path, as they move a path layer, and move a rider off a path layer it follows.
 - Stagger on groups and in any order. A group's enter with a stagger enters each child in turn instead of the group
   as one picture: `"enter": {"name": "rise", "stagger": 0.08}`. `order` sets who goes first, for groups and split
   text: `start` (default), `end`, `center`, `edges`, `random` (with `seed`).

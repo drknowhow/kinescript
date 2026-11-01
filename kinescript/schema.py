@@ -95,6 +95,9 @@ TEXTURE = {"src", "repeat", "offset", "loop", "trim", "speed"}
 CLIP_KEYS = ("loop", "trim", "speed")  # a video texture's, as on a video layer
 TEXTURE_ALIAS = {"image": "src", "file": "src", "path": "src", "url": "src", "tile": "repeat", "tiles": "repeat",
                  "tiling": "repeat", "shift": "offset", "position": "offset"}
+ALONG = {"d", "p", "orient"}
+ALONG_ALIAS = {"path": "d", "route": "d", "progress": "p", "autoRotate": "orient", "autoOrient": "orient",
+               "rotate": "orient"}
 PART = MATERIAL | {"shape", "w", "h", "depth", "r", "tube", "x", "y", "z", "rotateX", "rotateY", "rotate", "scale",
                    "text", "size", "font", "weight", "italic", "letterSpacing", "lineHeight", "d", "strokeWidth",
                    "bevel", "profile"}
@@ -129,7 +132,7 @@ GROUND_ALIAS = {"alpha": "opacity", "strength": "opacity", "softness": "blur", "
 
 COMMON = {"id", "type", "at", "dur", "until", "x", "y", "anchor", "opacity", "scale", "scaleX", "scaleY", "rotate",
           "blur", "blend", "shadow", "fx", "enter", "exit", "hidden", "allowOffscreen", "z", "rotateX", "rotateY",
-          "backface", "fixed", "sound"}
+          "backface", "fixed", "sound", "along"}
 SHAPE = {"fill", "stroke", "strokeWidth", "draw", "drawStart", "cap", "join"}
 TEXT = {"text", "size", "weight", "font", "italic", "fill", "emph", "align", "maxWidth", "lineHeight",
         "letterSpacing", "stroke", "strokeWidth", "box", "case", "textCase", "caret", "split",
@@ -242,7 +245,7 @@ REQUIRED = {"text": ("text",), "image": ("src",), "video": ("src",), "path": ("d
             "captions": ("cues", "src", "voice"), "shader": ("preset", "sksl"), "model": ("shape", "parts", "src")}
 # Keys whose value is an object of their own: never a tween, even with a "from" key (a light's direction).
 OBJECTS = {"light", "lights", "env", "ground", "shadow", "shadows", "box", "fx", "uniforms", "sound", "enter", "exit",
-           "parts", "transition", "texture", "edges", "animation", "repeat"}
+           "parts", "transition", "texture", "edges", "animation", "repeat", "along"}
 # Props that cannot be below 0, and the least each may be.
 AT_LEAST = {"radius": 0, "r": 0, "sides": 3, "blur": 0, "strokeWidth": 0, "size": 0}
 COLOUR_FIX = f"write {C.FORMATS}"
@@ -502,7 +505,7 @@ def _prop(k: str, v, rep: Report, lid):
 def _constant(k: str, x, where: str, rep: Report, lid):
     if isinstance(x, str) and x.startswith(("=", "$")):
         return
-    if k in SCALAR:
+    if k in SCALAR or k == "along p":
         if isinstance(x, bool):
             rep.add("error", "bad-value", lid, f"{k}{where} is {str(x).lower()}, which is not a number", "use a number")
         elif isinstance(x, (int, float)):
@@ -827,6 +830,7 @@ def _layer(raw, rep: Report, path: str, comps: dict):
         _volume(raw, rep, lid)
     _values(raw, t, rep, lid)
     _structure(raw, t, rep, lid)
+    _along(raw, rep, lid)
     _effects(raw, rep, lid)
     _layer_sound(raw, rep, lid)
     if "text" in TYPES[t]:
@@ -1256,6 +1260,32 @@ def _more_lights(obj: dict, rep: Report, lid, most: int):
         if x.get("type", "directional") not in ("directional", "point"):
             rep.add("error", "bad-value", lid, f"{where}type is {x['type']!r}; it takes \"directional\" or \"point\"")
         _light_values(x, ("azimuth", "elevation", "x", "y", "z", "intensity", "range"), rep, lid, where)
+
+
+def _along(raw: dict, rep: Report, lid):
+    """along: the path a layer rides, as path data or "#id" of a path layer, the share p of its length it is at, and
+    whether it turns with the path."""
+    a = raw.get("along")
+    if a is None:
+        return
+    example = "\"along\": {\"d\": \"M0 0 C300 -200 600 200 900 0\", \"p\": [[0, 0], [2, 1]], \"orient\": true}"
+    if isinstance(a, str):
+        raw["along"] = a = {"d": a}
+        rep.add("info", "renamed-value", lid, f"along {_show(a['d'])} read as its d", f"write \"along\": {{\"d\": ...}}")
+    if not isinstance(a, dict):
+        rep.add("error", "bad-value", lid, f"along is {_show(a)}; it is an object with the path in d", example)
+        return
+    _keys(a, ALONG, ALONG_ALIAS, rep, lid, "along: ")
+    d = a.get("d")
+    if not (isinstance(d, str) and d.strip()):
+        rep.add("error", "missing-key", lid, "along needs d: SVG path data, or \"#id\" of a path layer to ride",
+                example)
+    elif not d.startswith("#"):
+        _path_data(d, "along d", rep, lid)
+    if a.get("p") is not None:
+        _prop("along p", a["p"], rep, lid)
+    if a.get("orient") is not None and not isinstance(a["orient"], bool):
+        rep.add("error", "bad-value", lid, f"along orient is {_show(a['orient'])}; it is true or false", example)
 
 
 def _path_data(d, what: str, rep: Report, lid):
