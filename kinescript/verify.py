@@ -15,6 +15,7 @@ import skia
 
 from . import color as C
 from . import listen, media, models, stage
+from .props import HOLD
 from .render import FONT_DIR, Renderer, _argb, joining, loop_end
 from .scene import Scene, SceneError, load
 
@@ -28,6 +29,32 @@ MEDIA_OFF_FOR = 1.0
 # Seconds a text of one or two words needs on screen; shorter, and it is a flash nobody reads. Quick kinetic type
 # (the kinetic component's default is 0.6 s a word) stays above it.
 FLASH = 0.4
+
+
+MOVES = ("x", "y", "z", "rotate", "rotateX", "rotateY", "scale", "scaleX", "scaleY")  # keys whose stops stop-and-go finds
+
+
+def _at_rest(ease, end: bool) -> bool:
+    """Whether the ease's speed is near zero at its start (or end): next to 1% of a linear ease's."""
+    return (1.0 - ease(0.999) if end else ease(0.001)) < 1e-5
+
+
+def stops(layer) -> list[tuple[str, float]]:
+    """(key, time) of each inner keyframe where a moving key of the layer comes to rest between two moves the same
+    way, because the ease into the key slows to it and the ease out of it starts from rest."""
+    out = []
+    for k in MOVES:
+        p = layer.props.get(k)
+        if p is None or p.keys is None or isinstance(layer.raw.get(k), dict) and layer.raw[k].get("smooth"):
+            continue
+        pts = p.keys(layer.dur)
+        for (t0, v0, _), (t1, v1, e1), (t2, v2, e2) in zip(pts, pts[1:], pts[2:]):
+            if not (isinstance(v1, (int, float)) and t0 < t1 < t2 and (v1 - v0) * (v2 - v1) > 0) or HOLD in (e1, e2):
+                continue
+            if _at_rest(e1, True) and _at_rest(e2, False):
+                out.append((k, t1))
+                break
+    return out
 
 
 def _times(scene: Scene, count: int, times=None) -> list[float]:
@@ -585,6 +612,11 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
                 f"move it clear of '{under}', or add a box or a shadow" if under
                 else "add a box, a shadow, or change the colour")
     for layer in scene.all_layers():
+        for k, t in stops(layer):
+            add("warning", "stop-and-go", layer.id, layer.t_in + t,
+                f"{k} comes to a stop at its keyframe at {t:g}s between two moves the same way: the ease into the key "
+                "slows to it and the ease out of it starts from rest",
+                f"pass through the key: \"{k}\": {{\"keys\": [...], \"smooth\": true}}; or a linear ease on the key")
         n = len(layer.children)
         if layer.type == "group" and layer.raw.get("sort") == "pixel" and n > stage.CHILDREN:
             add("warning", "stage-cost", layer.id, layer.t_in,

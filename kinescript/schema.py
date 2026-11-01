@@ -49,7 +49,7 @@ BOX_ALIAS = {"color": "fill", "colour": "fill", "background": "fill", "bg": "fil
 MOTION = {"name", "dur", "ease", "stagger", "dist", "from", "amount", "deg"}
 MOTION_ALIAS = {"type": "name", "preset": "name", "duration": "dur", "easing": "ease", "distance": "dist",
                 "delay": "stagger"}
-TWEEN = {"from", "to", "dur", "delay", "ease", "keys"}
+TWEEN = {"from", "to", "dur", "delay", "ease", "keys", "smooth"}
 TWEEN_ALIAS = {"duration": "dur", "easing": "ease", "start": "from", "end": "to", "begin": "from"}
 GRADIENT = {"linear", "radial", "stops"}
 AUDIO = {"src", "at", "trim", "gain", "volume", "fadeIn", "fadeOut", "id", "role", "dur", "until", "loop", "pan",
@@ -456,6 +456,15 @@ def _prop(k: str, v, rep: Report, lid):
         return
     if isinstance(v, dict):
         _keys(v, TWEEN, TWEEN_ALIAS, rep, lid, f"{k} tween: ")
+        if "smooth" in v:
+            if not isinstance(v["smooth"], bool) or "keys" not in v:
+                rep.add("error", "bad-value", lid, f"{k}: smooth is true or false, beside keys",
+                        f"\"{k}\": {{\"keys\": [[0, 0], [1, 100], [2, 300]], \"smooth\": true}}")
+                return
+            if v["smooth"] and k in COLOR_KEYS:
+                rep.add("error", "bad-value", lid, f"{k}: smooth moves numbers through their keys; colours mix key "
+                        "to key", "leave smooth out")
+                return
         if "keys" in v:
             if not _keyframes(v["keys"]):
                 rep.add("error", "bad-value", lid, f"{k} tween: keys is {_show(v['keys'])}; it is keyframes, a list of "
@@ -788,15 +797,15 @@ def _layer(raw, rep: Report, path: str, comps: dict):
     pos = raw.get(key)
     if pos is not None and "x" not in raw and "y" not in raw:
         del raw[key]
-        if isinstance(pos, (list, tuple)) and len(pos) in (2, 3):
-            pos = dict(zip("xyz", pos))
-        if isinstance(pos, dict) and pos and set(pos) <= {"x", "y", "z"} and not ("z" in pos and "z" in raw):
-            raw.update(pos)
-            rep.add("info", "renamed-key", lid, f"'{key}' read as {' and '.join(sorted(pos))}",
-                    " and ".join(f"write \"{k}\"" for k in sorted(pos)))
+        axes = _position(pos)
+        if axes is not None and not ("z" in axes and "z" in raw):
+            raw.update(axes)
+            rep.add("info", "renamed-key", lid, f"'{key}' read as {' and '.join(sorted(axes))}",
+                    " and ".join(f"write \"{k}\"" for k in sorted(axes)))
         else:
             rep.add("error", "bad-value", lid, f"{key} is {_show(pos)}; it is read as x and y only when it is "
-                    "[x, y], [x, y, z] or {\"x\": ..., \"y\": ...}", "write \"x\" and \"y\"")
+                    "[x, y], [x, y, z], {\"x\": ..., \"y\": ...}, or keyframes of points such as "
+                    "[[0, [100, 300]], [2, [540, 60]]]", "write \"x\" and \"y\"")
     # "animation" plays a clip of a model file; on any other layer it is read as "enter", as before.
     _keys(raw, COMMON | TYPES[t] - (set() if _model_file(raw) else {"animation"}), lalias, rep, lid, "")
     _timing(raw, rep, lid)
@@ -845,6 +854,30 @@ def _layer(raw, rep: Report, path: str, comps: dict):
     if t == "group" and isinstance(kids, list):
         for i, k in enumerate(kids):
             _layer(k, rep, f"{lid}.children[{i}]", comps)
+
+
+def _point(v) -> bool:
+    return isinstance(v, (list, tuple)) and len(v) in (2, 3) and not any(isinstance(c, (list, tuple, dict)) for c in v)
+
+
+def _position(pos) -> dict | None:
+    """A layer's position as its x, y and z keys: from [x, y], [x, y, z] or {"x": ..., "y": ...}, from keyframes of
+    points, or from a tween or keys object of points. None when it is none of these."""
+    if _point(pos):
+        return dict(zip("xyz", pos))
+    if isinstance(pos, dict) and pos and set(pos) <= {"x", "y", "z"}:
+        return dict(pos)
+    keys = pos.get("keys") if isinstance(pos, dict) else pos
+    if _keyframes(keys) and all(_point(k[1]) for k in keys) and len({len(k[1]) for k in keys}) == 1:
+        axes = {a: [[k[0], k[1][j], *k[2:]] for k in keys] for j, a in enumerate("xyz"[:len(keys[0][1])])}
+        return {a: dict(pos, keys=v) for a, v in axes.items()} if isinstance(pos, dict) else axes
+    if isinstance(pos, dict) and "keys" not in pos and _point(pos.get("to")):
+        n = len(pos["to"])
+        if "from" in pos and not (_point(pos["from"]) and len(pos["from"]) == n):
+            return None
+        return {a: dict(pos, to=pos["to"][j], **({"from": pos["from"][j]} if "from" in pos else {}))
+                for j, a in enumerate("xyz"[:n])}
+    return None
 
 
 def _shadows(raw: dict, rep: Report, lid):

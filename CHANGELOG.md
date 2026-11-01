@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- Smooth keyframes: `"x": {"keys": [[0, 200], [1, 700], [2, 960]], "smooth": true}` passes through each key without
+  stopping, on a monotone cubic through the keys (Fritsch-Butland), so no value overshoots its neighbours. It is at
+  rest only at the first and last key, at a turn, and around a `hold` key; other eases on the keys are ignored. It
+  takes numbers only, and `kine check` says so for a colour.
+- `position` takes keyframes of points, `[[0, [200, 540]], [2, [960, 300]]]`, a keys object of them (smooth too) and
+  a tween of points, each read as x and y (and z). A two-item list of keyframes such as `[[0, 10], [1, 20]]` was read
+  as x `[0, 10]` and y `[1, 20]`; it is an error now.
+- `kine check` warns `stop-and-go` where an inner key brings a layer's move to rest between two moves the same way,
+  which the default inOutCubic does at every key, and suggests smooth keys or a linear ease.
+- 2D frames cost less Python: keyframes find their segment by bisection, expressions compile once to a function,
+  layers keep their constant placement values and solid fills reuse one paint per colour. Draw time per frame on the
+  development machine's GPU fell from 15.8 to 12.5 ms for 2,000 layers, 7.3 to 5.4 ms for 600 layers of four
+  expressions each and 9.1 to 5.8 ms for 300 layers of 121 keyframes. Frames are byte-identical to 1.5.1 (`bench/same.py`).
+
 ## 1.5.1 (2026-11-01)
 
 - Compressed model files are read. Meshopt-compressed buffer views (`EXT_meshopt_compression` and

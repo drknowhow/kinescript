@@ -83,6 +83,35 @@ def test_keys_at_the_same_time_jump_and_any_key_count_interpolates_its_own_segme
         assert dense.at(t, 12) == pytest.approx(keys[j][1] + (keys[j + 1][1] - keys[j][1]) * u)
 
 
+def test_smooth_keys_pass_through_each_key_without_stopping_or_overshooting():
+    ctx = Ctx(100, 100, 30)
+    p = compile_prop("x", {"keys": [[0, 0], [1, 100, "outBack"], [2, 300], [3, 300], [4, 0]], "smooth": True}, ctx)
+    v = [p.at(n / 100, 4) for n in range(401)]
+    assert (v[0], v[100], v[200], v[300], v[400]) == (0, pytest.approx(100), pytest.approx(300), 300, 0)
+    assert v[101] - v[99] > 2  # moving through the key at 1 s; the outBack on it is ignored
+    assert all(b >= a for a, b in zip(v[:200], v[1:201])) and max(v) == pytest.approx(300) and min(v) == 0
+    assert v[1] - v[0] < 0.1 and v[201] - v[199] < 0.1  # at rest where the run starts and where it turns
+    held = compile_prop("x", {"keys": [[0, 0], [1, 100], [2, 200, "hold"], [3, 300], [3, 0], [4, 50]],
+                              "smooth": True}, ctx)
+    assert [held.at(t, 4) for t in (1.5, 1.99, 2.0, 3.0)] == [100, 100, 200, 0]  # a hold, and keys at one time jump
+    assert 200 < held.at(2.5, 4) < 300
+    with pytest.raises(ValueError, match="smooth"):
+        compile_prop("fill", {"keys": [[0, "#000000"], [1, "#ffffff"]], "smooth": True}, ctx)
+
+
+def test_check_warns_of_a_key_that_stops_a_move_and_smooth_or_linear_keys_clear_it():
+    def issues(x):
+        spec = scene([{"id": "dot", "type": "circle", "r": 10, "y": 90, "x": x}], duration=3)
+        return [i for i in check(spec)["issues"] if i["code"] == "stop-and-go"]
+    (hit,) = issues([[0, 20], [1, 120], [2, 300]])
+    assert (hit["layer"], hit["from"]) == ("dot", 1) and "smooth" in hit["fix"]
+    assert not issues({"keys": [[0, 20], [1, 120], [2, 300]], "smooth": True})
+    assert not issues([[0, 20], [1, 120, "linear"], [2, 300]])  # moving into the key
+    assert not issues([[0, 20], [1, 120], [2, 20]])  # a turn stops it anyway
+    assert not issues([[0, 20], [1, 120], [1.5, 120], [2.5, 300]])  # a pause written as a held key
+    assert not issues([[0, 20], [1, 120], [2, 300, "hold"]])
+
+
 def test_percent_lengths_use_matching_axis():
     ctx = Ctx(1920, 1080, 30)
     assert compile_prop("x", "50%", ctx).value == 960
