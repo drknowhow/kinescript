@@ -286,7 +286,7 @@ nine rounds: a floor reaching to just in front of the camera took eight.
   `edges.json` keep their bytes. `letterSpacing` still draws characters one by one, unshaped, and
   `unshaped-3d-text` warns about that and about colour emoji.
 - `EXT_meshopt_compression` decoded in numpy. Draco per decision 2.
-  Built on branch `meshopt-draco`. `meshopt.py` follows meshoptimizer's reference decoder: vertex codec versions
+  Merged (#82). `meshopt.py` follows meshoptimizer's reference decoder: vertex codec versions
   0 and 1, triangle and index-sequence codecs, and the four filters; `KHR_meshopt_compression` is the same format
   and is read too. Checked against the WASM decoder of meshoptimizer 1.3.0 on 60 random buffers: every byte
   matches but 3 of 2,664 values of the 16-bit octahedral and quaternion filters, which round halves the other
@@ -337,6 +337,8 @@ nine rounds: a floor reaching to just in front of the camera took eight.
   A 3D shot in the launch video is optional and means re-measuring the promo.
   Built on branch `release-1.5.0`: the README's model files and limits, the site's 3D section rewritten for 1.5
   with a product turntable demo, version 1.5.0. The launch video is unchanged, so its numbers stand.
+  Merged (#74), tagged v1.5.0. Phases 5 and 6 followed in 1.5.1 (branch `release-1.5.1`): the site's 3D section
+  names the new shapes, `repeat`, animated parts, shaped 3D text, file animation and compressed files.
 
 ## Out of scope
 
@@ -360,7 +362,7 @@ nine rounds: a floor reaching to just in front of the camera took eight.
 2. Draco as an optional extra, `pip install kinescript[draco]` (DracoPy), keeping today's error that names the file
    when the extra is missing.
 3. 1.5.0 ships with Phases 0 to 4 and 7. Phases 5 and 6 go in if they pass their checks by then, otherwise in
-   1.5.1.
+   1.5.1. They went in 1.5.1.
 
 Byte identity is checked with `bench/same.py`, which draws sampled frames at this tree and at a git revision on
 both backends, instead of committed frame hashes: CI renders on Linux's CPU backend, whose bytes differ from a
