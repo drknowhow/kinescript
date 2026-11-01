@@ -11,7 +11,7 @@ import math
 import random
 import re
 import zlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from . import ease as E
 
@@ -40,6 +40,9 @@ class Mods:
     count: int = 0           # strips of blinds
     step: int = 0            # which random pick glitch and scramble show, with seed
     seed: int = 0
+    matte: object = None     # what a luma wipe reads: an image file or a gradient object
+    soft: float = 0.0        # how far its edge spreads, 0..1 of the map's brightness
+    solid: bool = False      # "fade": false: never see-through, so a whip's blur stays inside its box
 
     def combine(self, o: "Mods") -> "Mods":
         return Mods(self.alpha * o.alpha, self.dx + o.dx, self.dy + o.dy, self.scale * o.scale,
@@ -47,7 +50,9 @@ class Mods:
                     o.wipe or self.wipe, self.track + o.track, self.rx + o.rx, self.ry + o.ry, self.dz + o.dz,
                     self.sx * o.sx, self.sy * o.sy, self.hinge + o.hinge, o.pivot or self.pivot,
                     self.smear + o.smear, max(self.glitch, o.glitch), max(self.scramble, o.scramble),
-                    o.count or self.count, o.step or self.step, o.seed or self.seed)
+                    o.count or self.count, o.step or self.step, o.seed or self.seed,
+                    self.matte if o.matte is None else o.matte, self.soft if o.matte is None else o.soft,
+                    self.solid or o.solid)
 
 
 IDENT = Mods()
@@ -176,6 +181,11 @@ def _whip(p, o):
     return Mods(alpha=min(1.0, p * 3), dx=(1 - p) * o.get("dist", 400), smear=(1 - p) * o.get("amount", 48))
 
 
+def _luma(p, o):
+    """A wipe through the map's brightness: its darkest parts show first and its lightest last."""
+    return Mods(reveal=p, wipe="luma", matte=o.get("map") or {"angle": 90}, soft=float(o.get("soft", 0.2)))
+
+
 def _shown(kind):
     return lambda p, o: Mods(reveal=p, wipe=kind, count=int(o.get("count", 6)) if kind == "blinds" else 0)
 
@@ -223,7 +233,7 @@ PRESETS = {
     "flip": _flip, "flip-up": _flip_up, "tumble": _tumble, "push": _push,
     "land": _land, "squash": _squash, "elastic": _elastic, "swing": _swing, "stretch": _stretch,
     "iris": _shown("iris"), "clock": _shown("clock"), "blinds": _shown("blinds"), "rise-mask": _shown("rise"),
-    "scramble": _scramble, "glitch": _glitch, "whip": _whip,
+    "scramble": _scramble, "glitch": _glitch, "whip": _whip, "luma": _luma,
 }
 # Motions that turn or move a layer in depth; a scene using one gets a camera.
 DEPTH = {"flip", "flip-up", "tumble", "push"}
@@ -246,7 +256,8 @@ ALIASES = {"typewriter": "type", "typing": "type", "slide": "left", "scale": "po
            "radial": "clock", "radialwipe": "clock", "clockwipe": "clock", "venetian": "blinds", "shutters": "blinds",
            "mask": "rise-mask", "masked": "rise-mask", "linereveal": "rise-mask", "risemask": "rise-mask",
            "decode": "scramble", "shuffle": "scramble", "rgbsplit": "glitch", "chromatic": "glitch",
-           "swish": "whip", "whippan": "whip", "smear": "whip"}
+           "swish": "whip", "whippan": "whip", "smear": "whip", "lumawipe": "luma", "matte": "luma",
+           "gradientwipe": "luma"}
 
 
 def canonical(name: str) -> str | None:
@@ -281,7 +292,7 @@ class Motion:
         for n in self.names:
             e = E.get(self.ease or DEFAULT_EASE.get(n, "outCubic"))
             out = out.combine(PRESETS[n](e(max(0.0, min(1.0, p))), self.opts))
-        return out
+        return replace(out, alpha=1.0, solid=True) if self.opts.get("fade") is False else out  # it stays opaque
 
 
 ORDERS = ("start", "end", "center", "edges", "random")
@@ -310,7 +321,7 @@ NUMBERS = {"dur": "seconds, 0 or more", "stagger": "seconds between units, 0 or 
            "amount": "px (blur, track, whip), a scale step (snap, pulse, heartbeat, wobble, tada), how far squash "
                      "flattens or how far flash dims", "deg": "degrees",
            "from": "the start scale", "bounces": "a whole number from 0 to 20",
-           "count": "a whole number from 1 to 100"}
+           "count": "a whole number from 1 to 100", "soft": "0 to 1, how far a luma wipe's edge spreads"}
 
 
 # ---- emphasis: each maps u, how far through one cycle (0..1), onto modifiers that are at rest at both ends
@@ -476,12 +487,18 @@ def option_problem(key: str, v) -> str | None:
         return None if v is None or v in ORDERS else f"order is {v!r}; it takes {', '.join(ORDERS)}"
     if key == "seed" and v is not None and not (isinstance(v, int) and not isinstance(v, bool)):
         return f"seed is {v!r}; it takes a whole number"
+    if key == "fade" and v is not None and not isinstance(v, bool):
+        return f"fade is {v!r}; it takes false (it moves but stays opaque) or true"
+    if key == "map" and v is not None and not (isinstance(v, str) and v.strip() or isinstance(v, dict)):
+        return f"map is {v!r}; it takes an image file or a gradient like {{\"radial\": [0.5, 0.5, 0.7]}}"
     if key not in NUMBERS or v is None:  # null is the default
         return None
     try:
         ok = not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v)
     except OverflowError:  # an int past the float range
         ok = False
+    if ok and key == "soft":
+        ok = 0 <= v <= 1
     if ok and key in ("bounces", "count"):
         lo, hi = (0, 20) if key == "bounces" else (1, 100)
         ok = float(v).is_integer() and lo <= v <= hi

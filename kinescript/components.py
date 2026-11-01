@@ -245,7 +245,7 @@ def expand(raw, user: dict, theme: dict, scene=None):
     if not isinstance(raw, dict):
         return raw
     if raw.get("type") == "sequence":
-        return _sequence(raw)
+        return _sequence(raw, scene)
     if raw.get("type") == "svg":
         return _svg(raw, scene)
     name = raw.get("use")
@@ -292,7 +292,8 @@ def expand(raw, user: dict, theme: dict, scene=None):
 
 _CLIP_KEYS = ("fit", "volume", "w", "h", "x", "y", "anchor")
 TRANSITION_DUR = 0.5  # seconds, when a transition gives a type but no dur
-_ENTERS = {"fade": "fade", "wipe": "wipe-right", "slide": "left", "zoom": "zoom", "blur": "blur"}
+_ENTERS = {"fade": "fade", "wipe": "wipe-right", "slide": "left", "zoom": "zoom", "blur": "blur", "iris": "iris",
+           "luma": "luma", "glitch": "glitch"}
 _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".svg")  # as schema.IMAGE_EXTS
 
 
@@ -331,14 +332,35 @@ def _svg(raw: dict, scene) -> dict:
     return group
 
 
-def _sequence(raw: dict) -> dict:
+def _joining(kind: str, overlap: float, tr: dict, width: float) -> tuple[dict, dict | None]:
+    """A transition's motions: the enter of the clip that comes in, and the exit of the one that goes out, if it has
+    one. A push moves both clips a frame width to the left, side by side; a whip does too, faster and blurred across.
+    In a glitch the outgoing clip breaks up over the first half, and the incoming one comes in broken up and settles."""
+    if kind in ("push", "whip"):
+        smear = round(width * 0.04, 2)
+        move = ({"name": "left", "dur": overlap, "ease": "inOutCubic", "fade": False} if kind == "push" else
+                {"name": "whip", "dur": overlap, "ease": "inOutQuart", "fade": False, "amount": smear})
+        # Side by side, overlapping so the background does not show between their antialiased edges: by 2 px, which
+        # holds down to half size, and a whip by 4, since its blur stays inside each clip from a pixel in (fade false).
+        dist = width - (2 if kind == "push" else 4)
+        return dict(move, dist=dist), dict(move, dist=-dist)
+    enter = {"name": _ENTERS.get(kind, "fade"), "dur": overlap, "ease": "inOutSine", "dist": 120}
+    if kind == "luma":
+        enter.update({k: tr[k] for k in ("map", "soft") if tr.get(k) is not None})
+    if kind == "glitch":
+        enter = {"name": "glitch", "dur": overlap, "ease": "inQuart"}
+        return enter, dict(enter, fade=False, seed=1)
+    return enter, None
+
+
+def _sequence(raw: dict, scene=None) -> dict:
     """Cut list -> a group of back-to-back video layers, timed within the sequence. The group has the sequence's
     id and ends with its last clip, so "cut.out" works as a cue. Its other layer keys (opacity, blur, fx, enter, ...)
     apply to the whole cut; fit, volume, w, h, x, y and anchor go to each clip.
     "transition": {"type": "fade", "dur": 0.4} overlaps the clips: the incoming clip enters over the outgoing one,
-    and their sound crossfades over the same time (the outgoing clip's fadeOut, the incoming one's fadeIn). A cut
-    never overlaps. The group's "sequence" key records each join it timed, so the scene can check that every
-    transition is shorter than the clips it joins."""
+    and their sound crossfades over the same time (the outgoing clip's fadeOut, the incoming one's fadeIn); push, whip
+    and glitch move the outgoing clip too (_joining). A cut never overlaps. The group's "sequence" key records each
+    join it timed, so the scene can check that every transition is shorter than the clips it joins."""
     tr = raw.get("transition") or {}
     kind = (tr.get("type") or "fade") if tr else "cut"
     try:
@@ -349,7 +371,13 @@ def _sequence(raw: dict) -> dict:
     if not (math.isfinite(overlap) and overlap >= 0):
         raise ValueError(f"sequence '{raw.get('id', 'seq')}': transition dur is {overlap!r}; it is seconds, a number "
                          "above 0")
+    from .scene import _num
     base = raw.get("id", "seq")
+    width = float(scene.w if scene is not None else 1920)
+    try:
+        width = _num(raw.get("w"), width)
+    except (TypeError, ValueError):
+        pass  # the scene notes a w it cannot read
     clips = raw.get("clips") or []
     if not isinstance(clips, list):
         raise ValueError(f"sequence '{base}': clips must be a list of files or objects with 'src'")
@@ -369,8 +397,10 @@ def _sequence(raw: dict) -> dict:
             c["at"] = f"{prev['id']}.out-{overlap!r}" if overlap else f"{prev['id']}.out"
             if overlap:
                 joins.append([prev["id"], c["id"]])
-                c.setdefault("enter", {"name": _ENTERS.get(kind, "fade"), "dur": overlap, "ease": "inOutSine",
-                                       "dist": 120})
+                enter, leave = _joining(kind, overlap, tr, width)
+                c.setdefault("enter", enter)
+                if leave:
+                    prev.setdefault("exit", leave)
                 c.setdefault("fadeIn", overlap)  # the sound crossfades with the picture
                 prev.setdefault("fadeOut", overlap)
         out.append(c)

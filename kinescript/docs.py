@@ -304,12 +304,21 @@ LAYER TYPES (defaults in brackets)
             gives its letters' outlines, a shaped script's letter by letter. Children that hold
             still are merged once; moving ones each frame.
   sequence  clips [{"src": "a.mp4", "trim": [0, 4]}, ...] (an image clip needs dur) and transition
-            {"type": "fade", "dur": 0.4} (fade|wipe|slide|zoom|blur|cut; dur defaults to 0.5, cut
-            takes none, and no transition is a cut). Becomes a group of back-to-back layers named
-            <id>-1, <id>-2, ... that ends with its last clip, so "<id>.out" is a cue. Each
-            transition overlaps the clips it joins, so 3 s + 3 s with a 0.5 s fade lasts 5.5 s, and
-            must be shorter than both. Their sound crossfades over it: the clip before fades out
-            as the next fades in.
+            {"type": "fade", "dur": 0.4} (fade|wipe|slide|zoom|blur|iris|push|whip|luma|glitch|cut;
+            dur defaults to 0.5, cut takes none, and no transition is a cut). Becomes a group of
+            back-to-back layers named <id>-1, <id>-2, ... that ends with its last clip, so
+            "<id>.out" is a cue. Each transition overlaps the clips it joins, so 3 s + 3 s with a
+            0.5 s fade lasts 5.5 s, and must be shorter than both. Their sound crossfades over it:
+            the clip before fades out as the next fades in. fade, wipe (wipe-right), slide (left),
+            zoom, blur, iris and luma bring the next clip in with the enter of that name; iris
+            opens it in a circle from the middle. push moves both clips left a frame width, side
+            by side (the sequence's w, else the canvas's; the push enter moves in depth instead);
+            whip does too, faster, blurred across inside each clip. glitch breaks the clip before
+            up, then the next comes in broken up and settles. luma shows the
+            next clip where map is dark first and where it is light last: map is a gradient as a
+            fill takes ({"radial": [0.5, 0.5, 0.7]}, {"angle": 90, "stops": ["#000", "#fff",
+            "#000"]}) or an image file, stretched over the clip [a left-to-right gradient], and soft
+            [0.2] (0 to 1) is how far the edge spreads.
             fit, volume, w, h, x, y and anchor go to every clip; opacity, blur, fx, enter and the
             other layer keys apply to the whole cut.
 
@@ -590,7 +599,10 @@ ENTER AND EXIT
   and squash [160], whip [400; below 0 it comes from the left]), from (start scale of pop
   [0.4], zoom [1.25] and elastic [0]), amount (blur px [24], track px [40], whip's blur px
   [48], how far squash flattens [0.35]), deg (swing's first swing [60]), bounces (land [3],
-  squash [2]), count (strips of blinds [6]), seed (scramble's and glitch's random picks).
+  squash [2]), count (strips of blinds [6]), seed (scramble's and glitch's random picks),
+  map and soft (luma's, as for a sequence's luma transition), fade (false keeps the layer
+  opaque while it moves: {"name": "left", "dist": 1920, "fade": false} slides it in solid,
+  and a whip's blur stays inside its box).
   With "split" on text, each unit enters in turn: unit k starts k x stagger seconds after the
   layer starts, so the whole reveal takes dur + (units - 1) x stagger. On a group, an enter
   with a stagger, such as {"name": "rise", "stagger": 0.08}, enters its children in turn the
@@ -608,8 +620,9 @@ ENTER AND EXIT
   blinds opens in strips, rise-mask rises from behind its own bottom edge (with "split":
   "lines", each line from behind its own: the usual title reveal). scramble settles text from
   random letters and digits, left to right. glitch splits the colours and jumps slices of the
-  layer sideways. whip slides in fast from the right, blurred along the way. With split, each
-  unit wipes, rises or glitches in its own box. none is no motion.
+  layer sideways. whip slides in fast from the right, blurred along the way. luma wipes it on
+  through a map's brightness, dark parts first; on a split text it wipes the whole text. With
+  split, each unit wipes, rises or glitches in its own box. none is no motion.
 
 EMPHASIS
   "emphasis": "pulse"   or   [{"name": "pulse", "at": 1.2, "repeat": 2}, {"name": "float", "loop": true}]

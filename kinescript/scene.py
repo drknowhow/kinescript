@@ -318,6 +318,16 @@ class Scene:
 
         self.surfaces: set[str] = set()  # groups drawn as a texture, and so not where they stand
         for layer in self.all_layers():
+            for m in (layer.enter, layer.exit):
+                src = m.opts.get("map") if m else None
+                if isinstance(src, str) and not missing(src, layer.id, "luma map"):
+                    if src.lower().endswith(".svg"):
+                        svg(src, layer.id, "luma map")
+                        continue
+                    try:
+                        media.image(src)
+                    except media.MediaError as e:
+                        self.note("error", "bad-media", layer.id, f"luma map {e}", "save it again as .png or .jpg")
             q = layer.seq
             if q is not None and q.files is not None and isinstance(layer.raw.get("frames"), list):
                 for f in dict.fromkeys(q.files[1:]):
@@ -980,6 +990,9 @@ class Scene:
                         layer.props["u_" + un] = compile_prop("u_" + un, uv, pctx)
                 layer.enter = P.parse(raw.get("enter"), key="enter")
                 layer.exit = P.parse(raw.get("exit"), key="exit")
+                for m in (layer.enter, layer.exit):
+                    if m and isinstance(m.opts.get("map"), str):  # a luma wipe's image, from the scene's folder
+                        m.opts["map"] = self.path(m.opts["map"])
                 layer.emphasis = P.parse_emphasis(raw.get("emphasis"))
             except (ValueError, SyntaxError) as e:
                 raise SceneError(f"layer '{lid}': {e}", layer=lid) from e

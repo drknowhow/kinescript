@@ -1214,6 +1214,9 @@ class Renderer:
         mods = IDENT
         if L.enter and not split and t < L.enter.dur and not (L.type == "group" and L.enter.stagger):
             mods = L.enter.mods(t / L.enter.dur)
+        elif split and L.enter and t < L.enter.dur and "luma" in L.enter.names:  # wipes the whole text, by its time
+            m = L.enter.mods(t / L.enter.dur)
+            mods = Mods(reveal=m.reveal, wipe="luma", matte=m.matte, soft=m.soft)
         if L.turn is not None:  # its group's enter, from its turn, on the group's own time
             m = L.parent.enter
             p = (self._group_T.get(L.parent.id, T) - L.parent.t_in - L.turn) / m.dur if m.dur else 1.0
@@ -1308,8 +1311,9 @@ class Renderer:
         # A masked or displaced layer blends once it is cut (_masked) or warped (_warped).
         blend = None if L is self._cutting or L is self._warping else L.raw.get("blend")
         glitch = mods.glitch if mods.glitch > 0.01 and box is not None else 0.0
+        luma = mods.wipe == "luma" and mods.reveal < 1 and box is not None  # a matte drawn over it in its own layer
         effects = (blur > 0.05 or shadow or fx or (blend and blend != "normal") or L.looks or mods.smear > 0.05
-                   or glitch)
+                   or glitch or luma)
         cf = None
         if fogf > 0.002:
             if not effects and self._one_draw(L):
@@ -1332,7 +1336,16 @@ class Renderer:
         elif layered:
             paint = skia.Paint(Alphaf=alpha)
             filt, work, reach = self._looks(L, g, t) if L.looks else (None, 0.0, 0.0)
-            if blur > 0.05 or mods.smear > 0.05:  # a whip smears it across
+            if mods.solid and mods.smear > 0.05 and box is not None:
+                # A whip that stays opaque smears inside its box, from edges a pixel in from the drawn ones, as a
+                # shot's motion blur does: its edges stay solid where a decal blur would let the background through.
+                ex, ey, ew, eh = box
+                far = int(ew + eh) + 1
+                crop = skia.IRect.MakeLTRB(math.ceil(ex) + 1, math.floor(ey) - far, math.floor(ex + ew) - 1,
+                                           math.ceil(ey + eh) + far)
+                filt = skia.ImageFilters.Blur(blur + mods.smear, blur, skia.TileMode.kClamp, filt, crop)
+                work, reach = work + 1, max(reach, 3 * blur)
+            elif blur > 0.05 or mods.smear > 0.05:  # a whip smears it across
                 filt = skia.ImageFilters.Blur(blur + mods.smear, blur, skia.TileMode.kDecal, filt)
                 work, reach = work + 1, max(reach, 3 * (blur + mods.smear))
             if shadow:
@@ -1377,6 +1390,8 @@ class Renderer:
             self._copies(c, L, t, T, g, box, reveal, mods, alpha, parent_alpha, facing)
         else:
             self._body(c, L, t, T, g, box, reveal, mods, alpha, parent_alpha, facing)
+        if luma:
+            self._luma(c, mods, bx, by, bw, bh)
         if layered == 2:
             c.restore()
         if layered:
@@ -1400,6 +1415,8 @@ class Renderer:
         """c clipped to what a wipe has shown of the box so far; a rise-mask also moves what is drawn up into it from
         below its bottom edge."""
         r, w = max(0.0, mods.reveal), mods.wipe
+        if w == "luma":  # a matte, drawn over what the layer draws (_luma)
+            return
         if w in ("right", "left", "down", "up"):
             clip = {"right": (bx, by, bx + bw * r, by + bh), "left": (bx + bw * (1 - r), by, bx + bw, by + bh),
                     "down": (bx, by, bx + bw, by + bh * r), "up": (bx, by + bh * (1 - r), bx + bw, by + bh)}[w]
@@ -1422,6 +1439,31 @@ class Renderer:
                 for k in range(n):
                     path.addRect(skia.Rect.MakeXYWH(bx, by + bh * k / n, bw, bh / n * r))
             c.clipPath(path, doAntiAlias=True)
+
+    def _luma(self, c, mods, bx, by, bw, bh):
+        """Keeps what a luma wipe has shown of the layer drawn so far: where its map, stretched over the box, is darker
+        than the wipe has reached, fading out over soft above it. The map's alpha comes from its brightness through a
+        colour matrix and is drawn in over the layer's own (DstIn)."""
+        s = max(1e-3, mods.soft)
+        k = 1 / s
+        m = mods.matte
+        paint = skia.Paint(BlendMode=skia.BlendMode.kDstIn)
+        img = None
+        if isinstance(m, str):
+            try:
+                img = media.image(m)
+            except media.MediaError:  # check reports it (media-missing, bad-media); it wipes by the gradient instead
+                m = None
+        if img is not None:
+            fit = skia.Matrix.MakeRectToRect(skia.Rect.MakeWH(img.width(), img.height()),
+                                             skia.Rect.MakeXYWH(bx, by, bw, bh), skia.Matrix.kFill_ScaleToFit)
+            paint.setShader(img.makeShader(skia.TileMode.kClamp, skia.TileMode.kClamp,
+                                           skia.SamplingOptions(skia.FilterMode.kLinear), fit))
+        else:
+            paint.setShader(self._gradient(m if isinstance(m, dict) else {"angle": 90}, bx, by, bw, bh, 1.0))
+        paint.setColorFilter(skia.ColorFilters.Matrix([0] * 15 + [-0.2126 * k, -0.7152 * k, -0.0722 * k, 0,
+                                                                  mods.reveal * (1 + s) * k]))
+        c.drawPaint(paint)
 
     @staticmethod
     def _glitch(key: str, box, mods, amount, src):
