@@ -554,6 +554,9 @@ def glsl_to_sksl(src: str) -> str:
 # Largest frame side. 16384 is the biggest texture most GPUs take, and a 16384-pixel square is 1 GB of RGBA;
 # --scale 100 on 1080p asked for 192000x108000 and failed inside Skia.
 MAX_SIDE = 16384
+# What the CPU takes to blur one pixel of an offscreen layer with this Skia wheel: 0.44 s for a 1080p layer.
+# Renderer.filtered counts the pixels a frame's offscreen effects blur, or do as much work as blurring would.
+CPU_BLUR_S = 0.44 / (1920 * 1080)
 
 
 def frame_size(w: int, h: int, scale) -> tuple[int, int]:
@@ -626,6 +629,7 @@ class Renderer:
         self.swim: set[str] = set()  # textured models whose triangles stayed too large to map the image this frame
         self.unfocused = False  # the camera's focus plane was nearer or farther than every layer this frame
         self.slow_dof = False  # a stage blurred per pixel on the CPU this frame
+        self.filtered = 0.0  # px blurred by offscreen effects this frame, or their like in work (CPU_BLUR_S)
         self._dof = None  # (focus distance, aperture, z 0's distance) while the camera blurs (render3d.defocus)
         self._focused = None  # _dof while drawing a layer the camera moves, else None
         self._span = [math.inf, 0.0]  # the least and most w of what the camera moves, drawn this frame
@@ -891,6 +895,7 @@ class Renderer:
         self.boxes = {}
         self.culled, self.unlit, self.fogged, self.inside, self.swim = set(), set(), set(), set(), set()
         self.unfocused = self.slow_dof = False
+        self.filtered = 0.0
         self._dof, self._span = None, [math.inf, 0.0]
         self.tris = 0
         self.wires, self.depths = [], []
@@ -1247,14 +1252,16 @@ class Renderer:
             layered, paint_alpha = False, alpha
         elif layered:
             paint = skia.Paint(Alphaf=alpha)
-            filt = self._looks(L, g, t) if L.looks else None
+            filt, work, reach = self._looks(L, g, t) if L.looks else (None, 0.0, 0.0)
             if blur > 0.05:
                 filt = skia.ImageFilters.Blur(blur, blur, skia.TileMode.kDecal, filt)
+                work, reach = work + 1, max(reach, 3 * blur)
             if shadow:
                 sh = shadow if isinstance(shadow, dict) else {}
                 sig = float(sh.get("blur", 16)) / 2
-                filt = skia.ImageFilters.DropShadow(float(sh.get("x", 0)), float(sh.get("y", 6)), sig, sig,
-                                                    _argb(sh.get("color", "#00000099")), filt)
+                dx, dy = float(sh.get("x", 0)), float(sh.get("y", 6))
+                filt = skia.ImageFilters.DropShadow(dx, dy, sig, sig, _argb(sh.get("color", "#00000099")), filt)
+                work, reach = work + 1.2, max(reach, 3 * sig + max(abs(dx), abs(dy)))  # a blur, moved and merged
             if filt:
                 paint.setImageFilter(filt)
             if fx:
@@ -1267,8 +1274,11 @@ class Renderer:
             if blend:
                 paint.setBlendMode(BLENDS.get(blend, skia.BlendMode.kSrcOver))
             if L is self._looking:  # _looked opens the layer, as large as what is drawn now
-                self._look, layered = (paint, c.getTotalMatrix()), False
+                self._look, layered = (paint, c.getTotalMatrix(), work, reach), False
             else:
+                if work:  # a layer the size of the clip, which is the frame unless a group clips it
+                    clip = c.getDeviceClipBounds()
+                    self.filtered += work * clip.width() * clip.height()
                 c.saveLayer(None, paint)
         if box is not None:
             bx, by, bw, bh = box
@@ -1333,12 +1343,14 @@ class Renderer:
         if self.stop_after == L.id:
             self._stopped = True
 
-    def _looks(self, L: Layer, g, t: float) -> skia.ImageFilter | None:
+    def _looks(self, L: Layer, g, t: float) -> tuple[skia.ImageFilter | None, float, float]:
         """L's innerShadow, outline and glow, in that order, as one image filter on its offscreen layer, so both
         backends draw them: the layer shaded inside its edge, outlined, and over a blurred copy of itself (in the
-        glow's colour, if it has one). Their sizes are in the layer's own px."""
+        glow's colour, if it has one). Their sizes are in the layer's own px. Also their work, in blurs of the layer
+        (CPU_BLUR_S), and how far past the layer they reach, in its px."""
         F, CF, looks = skia.ImageFilters, skia.ColorFilters, L.looks
         f = None  # the layer as drawn
+        work = reach = 0.0
         s = looks.get("innerShadow")
         sig = float(g("innerShadow blur", s.get("blur", 12))) / 2 if s else 0.0
         if s:
@@ -1348,6 +1360,7 @@ class Renderer:
             gap = F.Offset(float(g("innerShadow x", s.get("x", 0))), float(g("innerShadow y", s.get("y", 4))), gap)
             if sig > 0.05:
                 gap = F.Blur(sig, sig, skia.TileMode.kDecal, gap)
+                work += 1
             f = F.Merge([f, F.Xfermode(skia.BlendMode.kSrcIn, f, gap)])
         o = looks.get("outline")
         w = float(g("outline width", o.get("width", 4))) if o else 0.0
@@ -1362,6 +1375,7 @@ class Renderer:
                            for j in range(n)]
             ring = F.ColorFilter(CF.Blend(_argb(o.get("color", "#000000")), skia.BlendMode.kSrcIn), F.Merge(copies))
             f = F.Merge([ring, f])
+            work, reach = work + len(copies) / 20, max(reach, w)  # 20 copies take about as long as a blur
         gl = looks.get("glow")
         size = float(g("glow size", gl.get("size", 24))) if gl else 0.0
         strength = float(g("glow amount", gl.get("amount", 1))) if gl else 0.0
@@ -1372,7 +1386,8 @@ class Renderer:
             if strength != 1:
                 halo = F.ColorFilter(CF.Matrix([1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, strength, 0]), halo)
             f = F.Merge([halo, f])
-        return f
+            work, reach = work + 1, max(reach, 1.5 * size)
+        return f, work, reach
 
     def _looked(self, c, L: Layer, T: float, parent_alpha: float):
         """L with its glow, outline or inner shadow, in an offscreen layer only as large as what L draws. A layer the
@@ -1388,7 +1403,10 @@ class Renderer:
             self._looking, self._look = was
         if body is None or look is None:
             return
-        paint, m = look
+        paint, m, work, reach = look
+        cull = body.cullRect()
+        out = reach * math.sqrt(abs(m.getScaleX() * m.getScaleY() - m.getSkewX() * m.getSkewY()))  # on the frame
+        self.filtered += work * (cull.width() + 2 * out) * (cull.height() + 2 * out)
         inv = skia.Matrix()
         # What L drew, in its own space: the layer's filters spread it from there.
         bounds = inv.mapRect(body.cullRect()) if not m.hasPerspective() and m.invert(inv) else None
@@ -1430,6 +1448,7 @@ class Renderer:
         if not dst.intersect(c.getDeviceClipBounds()):
             c.restore()
             return
+        self.filtered += dst.width() * dst.height()  # drawing it again through the shader is about one blur's work
         surf = self.surface.makeSurface(self.info.makeWH(src.width(), src.height()))
         sc = surf.getCanvas()
         sc.clear(skia.ColorTRANSPARENT)
@@ -1499,6 +1518,7 @@ class Renderer:
             paint.setColorFilter(skia.LumaColorFilter.Make())  # premultiplied: half-clear white keeps half
         if sigma > 0:
             paint.setImageFilter(skia.ImageFilters.Blur(sigma, sigma))
+        self.filtered += (0.4 + (sigma > 0)) * area.width() * area.height()  # two layers to clear and cut, a blur
         c.save()
         c.resetMatrix()  # the pictures were recorded where they land on this canvas
         c.saveLayer(area, mix)

@@ -1322,6 +1322,36 @@ def test_gpu_and_cpu_agree_on_depth_of_field():
         assert np.abs(cpu - gpu).mean() < 1.0
 
 
+def test_check_warns_about_slow_effects_on_the_cpu(monkeypatch):
+    import kinescript.verify as V
+    soft = scene([{"id": "soft", "type": "rect", "x": 160, "y": 90, "w": 40, "h": 40, "blur": 4}], duration=1)
+    glowing = scene([{"id": "g", "type": "text", "text": "Hi", "x": 160, "y": 90, "size": 40, "glow": 12}], duration=1)
+    plain = scene([{"id": "p", "type": "rect", "x": 160, "y": 90, "w": 40, "h": 40}], duration=1)
+    monkeypatch.setattr(V, "SLOW_EFFECTS", 0.0005)  # 320x180 frames are too small to be slow
+    try:
+        on_gpu = {i["code"] for i in check(soft)["issues"]}
+    except RuntimeError:
+        on_gpu = set()
+    assert "slow-effects" not in on_gpu or _GL.get("ctx") is None
+    monkeypatch.setitem(_GL, "ctx", None)  # as on a machine with no GPU
+    warned = [i for i in check(soft)["issues"] if i["code"] == "slow-effects"]
+    assert warned and "0.44 s for a 1080p layer" in warned[0]["message"], warned
+    assert any(i["code"] == "slow-effects" for i in check(glowing)["issues"])
+    assert not any(i["code"] == "slow-effects" for i in check(plain)["issues"])
+
+
+def test_effects_are_counted_by_the_pixels_they_blur():
+    def filtered(layer):
+        r = Renderer(k.Scene(scene([dict({"id": "a", "type": "rect", "x": 160, "y": 90, "w": 40, "h": 40}, **layer)],
+                                   duration=1)), backend="cpu")
+        r.draw(0)
+        return r.filtered
+    assert filtered({}) == 0 and filtered({"blur": 4}) == 320 * 180  # blur's layer is the frame
+    small = filtered({"glow": 8})  # glow's is the rect and 1.5 times its size round it
+    assert (40 + 24) ** 2 <= small <= (42 + 26) ** 2, small
+    assert filtered({"outline": 3}) < filtered({"outline": 9})
+
+
 def test_check_warns_about_focus_on_nothing_and_slow_depth_of_field(monkeypatch):
     def codes(camera):
         return {i["code"] for i in check(_focus_stage(camera))["issues"]}

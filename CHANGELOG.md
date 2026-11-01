@@ -89,6 +89,11 @@
   scene (a 220 px title with glow and outline over 12 lines with one effect each) draws a 1080p frame in 8.0 ms on
   the GPU, against 4.8 ms without the effects, and in 0.31 s on the CPU, against 0.01 s; the title's glow alone adds
   0.6 ms on the GPU.
+- `kine check` warns `slow-effects` where it draws on the CPU and a frame's offscreen effects (blur, shadow, glow,
+  outline, inner shadow, masks and their feathers, displace) would take more than 0.25 s. Skia's CPU blur takes
+  0.44 s for a 1080p layer, and a layer's `blur` or `shadow` blurs one the size of the frame. The estimate counts the
+  pixels each effect blurs; on `glow-text`, `masks-50` and layers with blur or shadow it came within 2% below to 35%
+  above the measured time.
 - `kine check` warns `strobe` where a layer moves more than 40 px a frame at 1080p for five frames running in a
   scene without motion blur, where the eye sees separate copies instead of one moving thing.
 - 2D frames cost less Python: keyframes find their segment by bisection, expressions compile once to a function,

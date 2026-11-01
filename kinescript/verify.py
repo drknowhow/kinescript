@@ -16,12 +16,13 @@ import skia
 from . import color as C
 from . import listen, media, models, stage
 from .props import HOLD
-from .render import FONT_DIR, Renderer, _argb, joining, loop_end
+from .render import CPU_BLUR_S, FONT_DIR, Renderer, _argb, joining, loop_end
 from .scene import Scene, SceneError, load
 
 # Model triangles one frame may draw before check warns. 100,000 took 71 ms a frame at 1080p on
 # the GPU in the 3D spike (2026-10-29), against about 15 ms at 20,000.
 TRIANGLE_BUDGET = 60_000
+SLOW_EFFECTS = 0.25  # s a frame on the CPU for offscreen effects, past which check warns slow-effects
 # Layers check warns about when more than half of one stays off the canvas for MEDIA_OFF_FOR seconds; a slide or
 # a transition passes through faster.
 MEDIA = ("video", "image", "shader")
@@ -492,6 +493,7 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
     cuts: dict[str, list] = {}  # masked layer id -> [times it is drawn at, times its mask overlaps it at]
     shown: dict[str, int] = {}  # other layer id -> samples it is visible at
     gone: dict[str, list] = {}  # other layer id -> times it is visible but entirely off the canvas
+    slow: list[tuple[float, float]] = []  # (time, s its offscreen effects take on the CPU) past SLOW_EFFECTS
 
     def add(level, code, lid, T, msg, fix="", until=None):
         key = (code, lid)
@@ -552,6 +554,8 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
                 "the CPU takes about five times as long as the stage (0.8 s a 960x540 frame of examples/focus.json, "
                 "against 0.17)",
                 "render on a GPU, or leave aperture off while drafting")
+        if r.backend == "cpu" and r.filtered * CPU_BLUR_S > SLOW_EFFECTS:
+            slow.append((T, r.filtered * CPU_BLUR_S))
         if r.tris > TRIANGLE_BUDGET:
             add("warning", "triangle-budget", None, T, f"{r.tris:,} model triangles in one frame; renders slow "
                 f"down past {TRIANGLE_BUDGET:,} (about 70 ms a frame at 100,000 on a GPU)",
@@ -671,6 +675,12 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
                 + (f"; it overlaps '{under}'" if under else ""),
                 f"move it clear of '{under}', or add a box or a shadow" if under
                 else "add a box, a shadow, or change the colour")
+    if slow:
+        add("warning", "slow-effects", None, slow[0][0], "the blurs, shadows, glows, outlines, inner shadows, mask "
+            f"feathers and displace drawn offscreen take about {max(s for _, s in slow):.1f} s a frame on the CPU. "
+            "Skia's CPU blur takes 0.44 s for a 1080p layer, and a layer's blur or shadow blurs one the size of the frame",
+            "render on a GPU; draft with --scale 0.5 (a quarter of the pixels); or blur fewer layers",
+            until=slow[-1][0])
     for lid, T, px in strobes(scene, r):
         add("warning", "strobe", lid, T, f"moves {px:.0f} px a frame, fast enough to show as separate copies of "
             "itself instead of one moving thing", "add \"motionBlur\": {\"samples\": 8} to the scene, or slow the move")

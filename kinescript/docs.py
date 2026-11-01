@@ -135,7 +135,9 @@ KEYS EVERY LAYER HAS
                 The sizes of all four (glow size and amount, outline width, innerShadow x, y and
                 blur, displace amount) animate like any key; each draws the layer offscreen, as blur does.
                 On a model, glow and outline keep their 3D meanings (its material's glow, its edges):
-                put the model in a group to glow or outline it.
+                put the model in a group to glow or outline it. On the CPU, effects drawn offscreen are
+                slow: blur and shadow blur a layer the size of the frame (0.44 s at 1080p), the rest one as
+                large as the layer, and check warns slow-effects past 0.25 s a frame.
   enter, exit   a motion (see ENTER AND EXIT)
   hidden        true skips the layer (and its sound)
   sound         a file played when the layer starts, timed by the layer (see SOUND)
