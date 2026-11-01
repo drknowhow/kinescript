@@ -209,6 +209,22 @@ def glow_text() -> dict:  # a glowing title over lines that glow, are outlined, 
     return _scene(out)
 
 
+def _example(name: str) -> dict:
+    return json.loads((ROOT / "examples" / f"{name}.json").read_text(encoding="utf-8"))
+
+
+def logo() -> dict:
+    return _example("logo")
+
+
+def kinetic() -> dict:
+    return _example("kinetic")
+
+
+def explainer() -> dict:
+    return _example("explainer")
+
+
 def counters() -> dict:
     return _scene([{"id": f"c{n}", "type": "counter", "x": 120 + (n % 10) * 180, "y": 80 + (n // 10) * 100,
                     "size": 40, "value": {"from": 0, "to": 10 ** (1 + n % 6), "dur": 3.5}, "format": "{:,.0f}"}
@@ -490,6 +506,9 @@ SCENES = {
     "masks-50": (masks_50, ".mp4", "50 masked cards: 25 seen through words, 25 through a moving lens"),
     "glow-text": (glow_text, ".mp4", "a 220 px title glowing and outlined over 12 lines with glow, outline, inner "
                                       "shadow or displace"),
+    "logo": (logo, ".mp4", "examples/logo.json: the mark draws on and morphs, the word slides out through a mask"),
+    "kinetic": (kinetic, ".mp4", "examples/kinetic.json: stagger orders, a combined badge, a mask, marching dashes"),
+    "explainer": (explainer, ".mp4", "examples/explainer.json: boiling rough boxes, a dot riding a route, a lens mask"),
     "shaders": (shaders, ".mp4", "4 full-frame SkSL presets blended, grain and vignette"),
     "uhd-4k": (uhd_4k, ".mp4", "3840x2160: shader, split text, stroke draw, shadow, grade"),
     "long-120s": (long_120s, ".mp4", "3600 frames: worker split, segment joins"),

@@ -1,0 +1,11 @@
+# GPU ms a frame, 1.5.1 (9d38e2d) against 1.6 (068499f) · one renderer, 1080p, 40 frames spread over the scene
+# draw: drawn and flushed, no readback · wall: drawn and read back as RGBA (Renderer.frame) · best of 3 passes in
+# each of 2 alternating runs · Intel Core Ultra 7 265, NVIDIA RTX 5060 Ti, Windows 11, Python 3.14.4, 2026-11-01
+scene         draw 1.5.1   1.6   change   wall 1.5.1   1.6
+layers-2000        15.65  14.00     -11%        19.75  18.10
+groups-deep        10.35   9.71      -6%        15.52  15.01
+text-split         42.18  39.22      -7%        69.31  66.58
+text-wrap           4.64   4.67      +1%         8.65   8.69
+expressions         7.92   5.75     -27%        11.81  10.05
+keys-dense          9.10   5.75     -37%        12.89  10.16
+counters            3.30   3.05      -8%         7.82   7.23

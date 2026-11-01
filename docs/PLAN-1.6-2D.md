@@ -285,6 +285,10 @@ counted, they bring its estimates to 1% to 21% below the measured time.
   morphs its arms, and kinetic's mask reveal is a text masked by a rect. `confetti` waits for particles.
 - The 1.6 stress report: every Phase 0 stress scene and the four 2D scenes above, GPU and CPU, frame time and peak
   memory, as 1.5's table.
+  Status (2026-11-01): in `docs/stress-test-1.6/`, with `logo`, `kinetic` and `explainer` as the 2D examples, since
+  `confetti` waits for particles. `vs-1.5.1.txt` times GPU frames of the Phase 0 scenes against 1.5.1 in alternating
+  runs. `text-split` times out on the CPU at 900 s: its letters blur in layers from the frame's corner, up to 179 s a
+  frame, which decision 3 keeps and `slow-effects` reports since #102.
 - README's 2D section and its limits (the stale shaping line fixed), `kine docs`, site/, CHANGELOG with measured
   numbers, version 1.6.0. A 2D shot in the launch video is optional and means re-measuring the promo.
 
