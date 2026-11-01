@@ -150,6 +150,15 @@ def test_along_is_checked_and_its_route_is_a_path_in_the_same_group():
     assert "renamed-key" in got and s.by_id["dot"].along == ("M0 0 L9 9", True)
 
 
+def test_stagger_order_is_checked_and_needs_a_stagger_to_order():
+    assert "bad-value" in codes(scene([{"type": "group", "enter": {"name": "rise", "stagger": 0.1, "order": "middle"}}]))[0]
+    assert "bad-value" in codes(scene([{"type": "group", "enter": {"name": "rise", "stagger": 0.1, "seed": 0.5}}]))[0]
+    got, s = codes(scene([{"type": "group", "enter": {"name": "rise", "order": "center"}}]))
+    assert s is not None and "ignored-key" in got
+    got, s = codes(scene([{"type": "text", "text": "Hi", "split": "chars", "enter": {"name": "rise", "order": "end"}}]))
+    assert s is not None and "ignored-key" not in got  # split text staggers 0.04 s unless told
+
+
 def test_flat_list_is_not_keyframes():
     assert "flat-keyframes" in codes(scene([{"type": "rect", "x": [0, 100]}]))[0]
 

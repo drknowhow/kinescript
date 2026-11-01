@@ -9,6 +9,7 @@ import pytest
 
 import kinescript as k
 from kinescript import ease, media, svgpath
+from kinescript.presets import turns
 from kinescript.props import Ctx, compile_prop
 from kinescript.render import _GL, Renderer
 from kinescript.timing import Timeline, TimingError
@@ -215,6 +216,41 @@ def test_check_warns_of_a_move_too_fast_to_follow_unless_motion_blur_smears_it()
                  duration=2)
     assert strobes(spec) == {("zip", 0.5), ("rider", 0)}
     assert not strobes(dict(spec, motionBlur={"samples": 4}))
+
+
+def test_stagger_orders_put_each_unit_in_its_turn():
+    assert turns(5, "start") == [0, 1, 2, 3, 4] and turns(5, "end") == [4, 3, 2, 1, 0]
+    assert turns(5, "center") == [2, 1, 0, 1, 2] and turns(4, "center") == [1, 0, 0, 1]
+    assert turns(5, "edges") == [0, 1, 2, 1, 0] and turns(4, "edges") == [0, 1, 1, 0]
+    shuffled = turns(8, "random", seed=3)
+    assert sorted(shuffled) == list(range(8)) and shuffled == turns(8, "random", seed=3) != turns(8, "random", 4)
+
+
+def test_a_group_with_a_staggered_enter_brings_its_children_in_one_by_one():
+    def lit(order, n):
+        kids = [{"id": f"k{j}", "type": "rect", "x": 60 + j * 100, "y": 90, "w": 40, "h": 40, "fill": "#ffffff"}
+                for j in range(3)]
+        spec = scene([{"id": "row", "type": "group", "children": kids,
+                       "enter": {"name": "fade", "dur": 0.2, "stagger": 0.3, "order": order}}], bg="#000000",
+                     duration=1)
+        img = _frame(spec, n)
+        return [int(img[90, 60 + j * 100, 0] > 128) for j in range(3)]
+    assert lit("start", 8) == [1, 0, 0] and lit("start", 17) == [1, 1, 0] and lit("start", 26) == [1, 1, 1]
+    assert lit("end", 8) == [0, 0, 1] and lit("center", 8) == [0, 1, 0] and lit("edges", 8) == [1, 0, 1]
+    s = k.Scene(scene([{"id": "g", "type": "group", "enter": {"name": "rise", "dur": 0.2, "stagger": 0.3},
+                        "children": [{"type": "rect"}, {"type": "rect"}, {"type": "rect"}]}], duration=2))
+    r = Renderer(s, backend="cpu")
+    assert not r._holds(s.by_id["g"], 0.5, 0.52, 0.51) and r._holds(s.by_id["g"], 0.9, 0.92, 0.91)
+
+
+def test_split_text_enters_in_the_order_given():
+    def middle_of_ink(order):
+        spec = scene([{"id": "t", "type": "text", "text": "ABCDE", "x": 160, "y": 90, "size": 40, "split": "chars",
+                       "fill": "#ffffff", "enter": {"name": "fade", "dur": 0.1, "stagger": 0.2, "order": order}}],
+                     bg="#000000", duration=1)
+        cols = np.nonzero(_frame(spec, 3)[:, :, 0].max(0) > 128)[0]
+        return (cols.min() + cols.max()) / 2
+    assert middle_of_ink("start") < 135 and 150 < middle_of_ink("center") < 170 and middle_of_ink("end") > 185
 
 
 def _middle(r, lid):

@@ -69,7 +69,7 @@ def _where(owner, message: str) -> str:
 
 class Layer:
     __slots__ = ("id", "type", "raw", "t_in", "t_out", "props", "enter", "exit", "children", "parent",
-                 "index", "src", "video", "ahead", "ctx", "parts", "copies", "xf", "along")
+                 "index", "src", "video", "ahead", "ctx", "parts", "copies", "xf", "along", "turn")
 
     def __init__(self, lid: str, ltype: str, raw: dict, parent: "Layer | None", index: int):
         self.id, self.type, self.raw, self.parent, self.index = lid, ltype, raw, parent, index
@@ -87,6 +87,7 @@ class Layer:
         self.xf: tuple[list, list] | None = None  # placed(): the constant values, and which of PLACED change
         self.along: tuple[str, bool] | None = None  # the path it rides (data or "#id") and whether it turns with it;
         # how far along is props["along"]
+        self.turn: float | None = None  # seconds after its group starts that the group's staggered enter reaches it
 
     @property
     def dur(self) -> float:
@@ -774,6 +775,10 @@ class Scene:
                     raise SceneError(str(e)) from e
                 kids = [x for k in kids for x in (k if isinstance(k, list) else [k])]
                 self._build(kids, layer, layer.children)
+                if layer.enter and layer.enter.stagger:  # the group enters child by child, not as one picture
+                    m = layer.enter
+                    for kid, k in zip(layer.children, P.turns(len(layer.children), m.order, m.seed)):
+                        kid.turn = k * m.stagger
             prev = lid
 
     def _camera(self, raw) -> Layer | None:
