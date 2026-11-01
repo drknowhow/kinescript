@@ -67,10 +67,14 @@ MIX_ALIAS = {"lufs": "loudness", "target": "loudness", "ceiling": "peak", "trueP
 DUCK = {"by", "under", "depth", "attack", "hold", "release"}
 DUCK_ALIAS = {"amount": "depth", "db": "depth", "key": "by", "trigger": "by", "targets": "under", "duck": "under"}
 MOTION_BLUR = {"samples", "shutter"}
-CAMERA = {"x", "y", "z", "rotateX", "rotateY", "rotate", "fov"}
+CAMERA = {"x", "y", "z", "rotateX", "rotateY", "rotate", "fov", "target", "shake"}
 CAMERA_ALIAS = {"rotationX": "rotateX", "rotationY": "rotateY", "rotateZ": "rotate", "rotationZ": "rotate",
                 "rotation": "rotate", "roll": "rotate", "orbit": "rotateY", "tilt": "rotateX", "dolly": "z",
-                "fieldOfView": "fov"}
+                "fieldOfView": "fov", "lookAt": "target", "follow": "target", "subject": "target",
+                "handheld": "shake", "wobble": "shake"}
+SHAKE = {"amount", "speed", "seed"}
+SHAKE_ALIAS = {"strength": "amount", "intensity": "amount", "px": "amount", "frequency": "speed", "freq": "speed",
+               "hz": "speed", "rate": "speed"}
 LIGHT = {"preset", "key", "fill", "ambient", "rim", "from", "color", "azimuth", "elevation", "follow"}
 LIGHT_ALIAS = {"colour": "color", "direction": "from", "dir": "from", "position": "from", "intensity": "key",
                "ambience": "ambient", "name": "preset", "angle": "azimuth", "height": "elevation",
@@ -1112,6 +1116,45 @@ def _fog(spec: dict, rep: Report):
                 "far is where the fog hides everything, near where it starts")
 
 
+def _target(cam: dict, rep: Report):
+    """camera target: a point [x, y] or [x, y, z] in px or lengths, a layer id (Scene checks that it is one), an
+    expression, or keyframes of them."""
+    v = cam.get("target")
+    if v is None:
+        return
+
+    def spot(x) -> bool:
+        if isinstance(x, str):
+            return True
+        return isinstance(x, list) and 2 <= len(x) <= 3 and all(
+            _finite(e) or (isinstance(e, str) and _lengthish(e)) for e in x)
+    keys = [k[1] for k in v] if not spot(v) and _keyframes(v) else [v]
+    for x in keys:
+        if not spot(x):
+            rep.add("error", "bad-value", "camera", f"target is {_show(x)}; it takes a point [x, y, z], a layer id, "
+                    "or keyframes of them", '"target": [960, 540, -200] or "target": "logo"')
+            cam.pop("target")
+            return
+
+
+def _shake(cam: dict, rep: Report):
+    """camera shake: px (a number, or keyframes of them), true, or {amount, speed, seed}."""
+    v = cam.get("shake")
+    if v is None or isinstance(v, bool):
+        return
+    if isinstance(v, dict) and not _tween(v):
+        _keys(v, SHAKE, SHAKE_ALIAS, rep, "camera", "camera shake: ")
+        if "amount" in v and not _tweens(v["amount"]):
+            rep.add("error", "bad-value", "camera", f"shake amount is {_show(v['amount'])}; it takes px, or keyframes "
+                    "of them")
+        _numbers(v, ("speed",), "shake ", rep, "camera", least=0)
+        _numbers(v, ("seed",), "shake ", rep, "camera")
+    elif not _tweens(v):
+        rep.add("error", "bad-value", "camera", f"shake is {_show(v)}; it takes px, true, or an object like "
+                "{\"amount\": 8, \"speed\": 1.5}")
+        cam.pop("shake")
+
+
 def _more_lights(obj: dict, rep: Report, lid, most: int):
     v = obj.get("lights")
     if isinstance(v, dict):
@@ -1409,6 +1452,8 @@ def normalize(spec) -> tuple[dict, Report]:
     if isinstance(cam, dict):
         _keys(cam, CAMERA, CAMERA_ALIAS, rep, "camera", "camera: ")
         _values(cam, "camera", rep, "camera")
+        _target(cam, rep)
+        _shake(cam, rep)
         fov = cam.get("fov")
         if isinstance(fov, (int, float)) and not isinstance(fov, bool) and not 5 <= fov <= 150:
             rep.add("error", "bad-value", "camera", f"fov is {fov:g}; it must be between 5 and 150 degrees",

@@ -433,6 +433,22 @@ def test_fog_is_checked():
     assert e["message"].startswith("fog color"), e
 
 
+def test_camera_target_and_shake_are_checked():
+    dot = {"id": "dot", "type": "circle", "r": 10}
+    ok = dict(scene([dot]), camera={"lookAt": [[0, [100, 50]], [1, "dot"]], "handheld": {"intensity": 4, "hz": 2}})
+    issues, s = load(ok)
+    assert s is not None and {i["code"] for i in issues} == {"renamed-key"}, issues
+    assert set(s.camera.props) == {"target", "shake"} and s.camera.raw["shake"] == {"amount": 4, "speed": 2}
+    e = one_error(dict(scene([dot]), camera={"target": "dott"}), "camera")
+    assert "Did you mean 'dot'" in e["message"], e
+    e = one_error(dict(scene([dot]), camera={"target": [1, 2, 3, 4]}), "camera")
+    assert e["message"].startswith("target is"), e
+    e = one_error(dict(scene([dot]), camera={"shake": "lots"}), "camera")
+    assert e["message"].startswith("shake is"), e
+    e = one_error(dict(scene([dot]), camera={"shake": {"speed": -1}}), "camera")
+    assert e["message"].startswith("shake speed"), e
+
+
 def test_shadows_and_ground_from_are_checked():
     ball = {"id": "m", "type": "model", "shape": "sphere", "ground": {"from": "light", "y": 300}}
     stage = {"id": "g", "type": "group", "sort": "pixel", "shadows": {"opacity": 0.4, "soft": 2}, "children": [ball]}

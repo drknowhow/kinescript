@@ -12,7 +12,7 @@ from . import components, media, models, schema
 from . import presets as P
 from . import voice as V
 from . import words as W
-from .props import Ctx, Prop, compile_prop
+from .props import Ctx, Prop, compile_prop, is_keyframes
 from .timing import Timeline, parse_clock
 
 LAYER_TYPES = {"rect", "circle", "ellipse", "path", "line", "arrow", "polygon", "text", "counter",
@@ -49,6 +49,7 @@ class SceneError(ValueError):
         return cls(msg, issues)
 
 
+SHAKE = 8.0  # px a camera shake moves the view, at most, when its amount is not given
 # Parts of a scene that are not layers; an issue there reads "canvas: ...", not "layer 'canvas': ...".
 SECTIONS = ("canvas", "markers", "theme", "grade", "motionBlur", "mix", "camera", "light", "lights", "env", "fog",
             "components")
@@ -622,10 +623,31 @@ class Scene:
             return None
         cam = Layer("camera", "camera", raw, None, -1)
         try:
-            cam.props = {k: compile_prop(k, v, self.ctx) for k, v in raw.items()}
+            cam.props = {k: compile_prop(k, v, self.ctx) for k, v in raw.items() if k not in ("target", "shake")}
+            if raw.get("target") is not None:
+                cam.props["target"] = self._target(raw["target"])
+            shake = raw.get("shake")
+            if shake is not None and shake is not False:
+                amount = SHAKE if shake is True else shake
+                if isinstance(shake, dict) and not ("to" in shake or "keys" in shake):  # {amount, speed, seed}
+                    amount = shake.get("amount", SHAKE)
+                cam.props["shake"] = compile_prop("shake", amount, self.ctx)
         except (ValueError, SyntaxError) as e:
             raise SceneError(f"camera: {e}", layer="camera") from e
         return cam
+
+    def _target(self, v) -> Prop:
+        """The camera's target: a point or a layer id as given, an expression, or keyframes between them, compiled
+        with each key's index in place of its value (Renderer._target looks the value up and mixes the places)."""
+        keys = v if is_keyframes(v) else [[0, v]]
+        for k in keys:
+            if isinstance(k[1], str) and not k[1].startswith("=") and k[1] not in self.by_id:
+                close = schema.suggest(k[1], list(self.by_id))
+                raise ValueError(f"target '{k[1]}' is not a layer id or a point [x, y, z]."
+                                 + (f" Did you mean '{close}'?" if close else ""))
+        if keys is not v:
+            return compile_prop("target", v, self.ctx) if isinstance(v, str) and v.startswith("=") else Prop(True, v)
+        return compile_prop("target", [[k[0], i, *k[2:]] for i, k in enumerate(v)], self.ctx)
 
     def _compile_lights(self):
         """Compile the keys of every light that tween, so a bad expression stops the load rather than a frame."""

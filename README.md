@@ -54,7 +54,8 @@ Depth and models are drawn by the same Skia renderer as everything else, with no
 no depth draw exactly as before.
 
 - **Camera and depth on any layer.** Every layer takes `z`, `rotateX`, `rotateY` and `backface`. A top-level
-  `camera` pans, dollies, orbits and rolls with perspective; `fixed` layers ignore its moves, and a group with
+  `camera` pans, dollies, orbits and rolls with perspective, looks at and follows a `target` point or layer, and
+  can `shake` like a handheld camera; `fixed` layers ignore its moves, and a group with
   `"sort": "depth"` draws its children far to near. The `flip`, `flip-up`, `tumble` and `push` motions work on
   whole layers and per letter with `split`. A two-sided card is a group with `"backface": "hidden"` on each side.
   `fog` fades far layers into the background colour, or a colour of your own.
@@ -249,6 +250,8 @@ More scenes in [`examples/`](https://github.com/drknowhow/kinescript/tree/main/e
   into fog as the camera walks in and a ball comes out of it, 6 s.
 - [`shadows.json`](https://github.com/drknowhow/kinescript/blob/main/examples/shadows.json): a cone, a ring and a
   cube in a stage, their shadows swinging across the floor and up the wall as the key light moves, 6 s.
+- [`camera.json`](https://github.com/drknowhow/kinescript/blob/main/examples/camera.json): a handheld camera
+  that follows a ring past posts at several depths, orbiting it, then pans to a word, 6 s.
 - [`voiceover.json`](https://github.com/drknowhow/kinescript/blob/main/examples/voiceover.json): titles cued from
   the words of a voice-over, karaoke captions of it, and a music bed that dips under it, 5.4 s.
 - [`narrated.json`](https://github.com/drknowhow/kinescript/blob/main/examples/narrated.json): the same idea

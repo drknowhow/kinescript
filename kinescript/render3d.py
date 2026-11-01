@@ -493,6 +493,25 @@ def _hull(p: np.ndarray) -> np.ndarray:
     return h[np.argsort(np.arctan2(h[:, 1] - mid[1], h[:, 0] - mid[0]))]
 
 
+def _within(eye: np.ndarray, P: np.ndarray, T: np.ndarray) -> bool:
+    """Whether the point eye is inside the mesh (P, T): two of three rays from it, each a little off an axis so it
+    misses edges, cross the surface an odd number of times. A camera in a torus's hole is outside it."""
+    a = P[T[:, 0]] - eye
+    e1, e2 = P[T[:, 1]] - eye - a, P[T[:, 2]] - eye - a
+    odd = 0
+    for d in np.eye(3) + [0.0011, 0.0023, 0.0037]:
+        pv = np.cross(d, e2)
+        det = (e1 * pv).sum(1)
+        ok = np.abs(det) > 1e-12
+        inv = 1.0 / np.where(ok, det, 1.0)
+        u = -(a * pv).sum(1) * inv
+        qv = np.cross(-a, e1)
+        v = (qv @ d) * inv
+        hit = ok & (u >= 0) & (v >= 0) & (u + v <= 1) & ((qv * e2).sum(1) * inv > 0)
+        odd += int(hit.sum()) % 2
+    return odd >= 2
+
+
 def _ground(r, c: skia.Canvas, spec, rest: np.ndarray, pts: np.ndarray, fg=None, key=None):
     """A soft shadow under the model, as if lit from straight above (or with "from": "light", along key, the key
     light's direction in camera space): the footprint of its points on a level floor, darkest where it touches
@@ -691,6 +710,9 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
         T = np.arange(len(P), dtype=np.int32).reshape(-1, 3)
     foot = P if amt >= 1.0 or ex > 0 else P[T.ravel()]  # what casts the ground shadow: what is drawn
     view = np.linalg.inv(r._lens) @ r._m3d  # the layer matrix without the lens: into camera space
+    eye = np.linalg.solve(view, [0.0, 0.0, -1.0 / r._lens[3, 2], 1.0])[:3]  # the camera, in the model's space
+    if len(T) and (eye > P.min(0)).all() and (eye < P.max(0)).all() and _within(eye, P, T):
+        r.inside.add(L.id)
     if r._stage is not None and r._stage.casters is not None:  # every triangle drawn casts, facing the camera or not
         r._stage.cast(P @ view[:3, :3].T + view[:3, 3], T)
     hom = P @ r._m3d[:3, :3].T + r._m3d[:3, 3]

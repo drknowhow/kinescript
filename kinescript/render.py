@@ -19,6 +19,7 @@ import skia
 from . import color as C
 from . import media, render3d, space, stage, svgpath
 from .presets import IDENT, Mods
+from .props import length, noise
 from .scene import Layer, Scene
 
 ANCHORS = {"center": (0.5, 0.5), "topleft": (0, 0), "top": (0.5, 0), "topright": (1, 0), "left": (0, 0.5),
@@ -557,6 +558,7 @@ class Renderer:
         self.culled: set[str] = set()  # layers skipped this frame because they cross the camera plane
         self.unlit: set[str] = set()  # models drawn this frame with the key light behind them
         self.fogged: set[str] = set()  # layers drawn this frame wholly hidden by fog
+        self.inside: set[str] = set()  # models the camera is inside this frame
         self._lit: dict = {}  # light objects with their tweening keys compiled (render3d.at)
         self._cam: np.ndarray | None = None  # the camera matrix of the top-level layer being drawn
         self._lens: np.ndarray | None = None  # camera space to canvas, for lighting models
@@ -800,7 +802,7 @@ class Renderer:
         only they draw, ungraded; `under` is an image of that, which the sub-frame starts from in their place."""
         s = self.s
         self.boxes = {}
-        self.culled, self.unlit, self.fogged = set(), set(), set()
+        self.culled, self.unlit, self.fogged, self.inside = set(), set(), set(), set()
         self.tris = 0
         self.stop_at, self.stop_after, self._stopped = stop_at, stop_after, False
         self._frame_t = frame_t
@@ -891,7 +893,62 @@ class Renderer:
         if cam is None:
             return fixed, fixed
         g = lambda k: float(cam.get(k, T, T))  # noqa: E731
-        return space.camera(s.w, s.h, fov, g("x"), g("y"), g("z"), g("rotateX"), g("rotateY"), g("rotate")), fixed
+        target = self._target(cam, T) if "target" in cam.props else None
+        sway = self._shake(cam, T, fov) if "shake" in cam.props else None
+        return space.camera(s.w, s.h, fov, g("x"), g("y"), g("z"), g("rotateX"), g("rotateY"), g("rotate"),
+                            target, sway), fixed
+
+    def _target(self, cam: Layer, T: float) -> np.ndarray:
+        """The point the camera looks at and orbits at T, in canvas px. Keyframes were compiled with each key's
+        index for its value (Scene._target), so here the two keys either side are placed and mixed: a camera can
+        pan from a point to a layer, or from one moving layer to another."""
+        p, d = cam.props["target"], cam.dur
+        if p.keys is None:
+            return self._spot(p.at(T, d, T), T)
+        pts, raw = p.keys(d), cam.raw["target"]
+        if T <= pts[0][0]:
+            return self._spot(raw[pts[0][1]][1], T)
+        for (t0, i0, _), (t1, i1, e1) in zip(pts, pts[1:]):
+            if T < t1:
+                a, b = self._spot(raw[i0][1], T), self._spot(raw[i1][1], T)
+                return a + (b - a) * e1((T - t0) / (t1 - t0) if t1 > t0 else 1.0)
+        return self._spot(raw[pts[-1][1]][1], T)
+
+    def _spot(self, v, T: float) -> np.ndarray:
+        """A target as a point in canvas px: [x, y] or [x, y, z] (lengths as a layer's x, y and z take them), or a
+        layer id: the middle of that layer where its keys and its parents put it at T. Its enter and exit motions
+        are left out, so a layer that rises in rises on screen rather than taking the camera with it."""
+        if not isinstance(v, str):
+            v = list(v) + [0.0] * (3 - len(v))
+            return np.array([float(length(x, k, self.s.ctx)) for x, k in zip(v, ("x", "y", "z"))])
+        L = self.s.by_id[v]
+        m = np.eye(4)
+        for A in reversed(list(_lineage(L))):
+            t = min(max(T - A.t_in, 0.0), A.dur)
+            g = lambda name, default=None, A=A, t=t: A.get(name, t, T, 0, default)  # noqa: E731
+            sc = float(g("scale"))
+            m = (m @ space.translate(float(g("x")), float(g("y"))) @ space.tilt(float(g("z")), float(g("rotateX")),
+                 float(g("rotateY"))) @ space.rotate_z(float(g("rotate")))
+                 @ space.scale(sc * float(g("scaleX")), sc * float(g("scaleY"))))
+        box = self._box(L, t, T, g)
+        mid = (0.0, 0.0) if box is None else (box[0] + box[2] / 2, box[1] + box[3] / 2)
+        return (m @ np.array([mid[0], mid[1], 0.0, 1.0]))[:3]
+
+    def _shake(self, cam: Layer, T: float, fov: float):
+        """The camera's handheld turn at T, in degrees (rx, ry, rz): smooth noise of the scene time, `speed` wobbles
+        a second, that moves the view up to about `amount` px, with a little roll. A pure function of T."""
+        amount = float(cam.get("shake", T, T))
+        if amount <= 0:
+            return None
+        spec = cam.raw["shake"] if isinstance(cam.raw["shake"], dict) else {}
+        speed, seed = float(spec.get("speed", 1.5)), float(spec.get("seed", 0)) * 7
+        a = amount / space.focus(self.s.h, fov)  # radians that move z 0 by amount px
+        roll = 0.5 * amount / math.hypot(self.s.w / 2, self.s.h / 2)  # the corners move by half of it
+
+        def wave(k):
+            u = T * speed
+            return 0.7 * noise(u, seed + k) + 0.3 * noise(u * 2.3 + 17.0, seed + k + 3)
+        return tuple(math.degrees(r * wave(k)) for k, r in enumerate((a, a, roll)))
 
     def _far(self, L: Layer, T: float) -> float:
         """Sort key that puts the child farthest from the camera first."""

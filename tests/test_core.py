@@ -656,6 +656,71 @@ def test_gpu_and_cpu_agree_on_shadows():
         assert np.abs(cpu - gpu).mean() < 1.0
 
 
+DOT = {"id": "dot", "type": "circle", "x": 60, "y": 40, "r": 10, "fill": "#ff0000"}
+
+
+def _filmed(camera, *layers, T=0.0):
+    """Where the red dot is, at T, seen through camera."""
+    spec = scene(list(layers) or [DOT], bg="#000000", duration=2)
+    spec["camera"] = camera
+    img = _frame(spec, round(T * 30)).astype(int)
+    ys, xs = np.nonzero((img[..., 0] > 128) & (img[..., 1] < 100))
+    return np.array([xs.mean(), ys.mean()])
+
+
+def test_camera_target_puts_a_point_or_a_layer_in_the_middle():
+    middle = np.array([159.5, 89.5])
+    assert np.abs(_filmed({}) - [59.5, 39.5]).max() < 0.6
+    assert np.abs(_filmed({"target": [60, 40]}) - middle).max() < 0.6
+    assert np.abs(_filmed({"target": ["18.75%", "22.2%", 0]}) - middle).max() < 0.6
+    assert np.abs(_filmed({"target": "dot", "rotateY": 30, "rotateX": -20}) - middle).max() < 1.0
+    plain = scene([DOT], bg="#000000")
+    plain["camera"] = {"rotateY": 20}
+    centred = scene([DOT], bg="#000000")
+    centred["camera"] = {"rotateY": 20, "target": [160, 90, 0]}
+    assert _frame(plain, 0).tobytes() == _frame(centred, 0).tobytes()  # the canvas centre is the default
+
+
+def test_camera_follows_a_layer_through_its_group():
+    moving = dict(DOT, x=[[0, 40], ["end", 280]], z=[[0, -200], ["end", 150]])
+    for T in (0, 0.9, 1.9):
+        assert np.abs(_filmed({"target": "dot"}, moving, T=T) - [159.5, 89.5]).max() < 1.0
+    group = {"id": "g", "type": "group", "x": 100, "y": 20, "rotate": 90, "scale": 1.5, "children": [dict(DOT, x=30, y=0)]}
+    assert np.abs(_filmed({"target": "dot"}, group) - [159.5, 89.5]).max() < 1.0
+    # A layer that comes in with a motion moves on screen; the camera follows its keys, not the motion.
+    rising = dict(DOT, enter={"name": "rise", "dur": 1})
+    assert _filmed({"target": "dot"}, rising, T=0.2)[1] > 92
+
+
+def test_camera_target_keys_pan_from_a_point_to_a_layer():
+    spot = _filmed({"target": [[0, [160, 90]], [1, "dot", "linear"]]}, T=0.5)
+    assert np.abs(spot - [109.5, 64.5]).max() < 1.0  # halfway: the dot is halfway from where it was to the middle
+    assert np.abs(_filmed({"target": [[0, [160, 90]], [1, "dot", "linear"]]}, T=1.5) - [159.5, 89.5]).max() < 0.6
+
+
+def test_camera_shake_is_smooth_noise_of_the_scene_time():
+    still = _filmed({})
+    path = np.array([_filmed({"shake": 6}, T=n / 30) for n in range(0, 60, 3)])
+    moved = np.abs(path - still).max(1)
+    assert moved.max() > 2 and moved.max() < 7  # about amount px at most
+    assert np.abs(np.diff(path, axis=0)).max() < 3  # smooth: a tenth of a second moves it little
+    other = _filmed({"shake": {"amount": 6, "seed": 3}}, T=0.5)
+    assert np.abs(other - path[5]).max() > 0.3
+    spec = scene([DOT], bg="#000000", duration=2)
+    spec["camera"] = {"shake": [[0, 0], [1, 0], [1.5, 6]]}
+    calm = dict(spec, camera={})
+    assert _frame(spec, 15).tobytes() == _frame(calm, 15).tobytes()  # amount 0: no shake
+
+
+def test_check_warns_when_the_camera_is_inside_a_model():
+    def codes(model):
+        spec = scene([dict(model, x=160, y=90)], duration=1)
+        spec["camera"] = {"z": -247}  # at z 0, where the model's middle is (320x180, fov 40)
+        return {i["code"] for i in check(spec)["issues"]}
+    assert "camera-inside-model" in codes({"id": "ball", "type": "model", "shape": "sphere", "r": 60})
+    assert "camera-inside-model" not in codes({"id": "ring", "type": "model", "shape": "torus", "r": 80, "tube": 20})
+
+
 def test_check_warns_about_a_stage_with_many_children():
     kids = [{"type": "rect", "x": 10 * i, "y": 0, "w": 8, "h": 8, "z": i} for i in range(17)]
     spec = scene([{"id": "g", "type": "group", "x": 80, "y": 90, "sort": "pixel", "children": kids}], duration=0.5)

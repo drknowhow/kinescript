@@ -45,19 +45,33 @@ def tilt(z: float, rx: float, ry: float) -> np.ndarray:
 
 
 def camera(w: float, h: float, fov: float = DEFAULT_FOV, x: float = 0.0, y: float = 0.0, z: float = 0.0,
-           rx: float = 0.0, ry: float = 0.0, rz: float = 0.0) -> np.ndarray:
+           rx: float = 0.0, ry: float = 0.0, rz: float = 0.0, target=None, sway=None) -> np.ndarray:
     """World to canvas. The default camera looks at the canvas centre from the distance at which
     `fov` (vertical, degrees) spans the canvas height, so z=0 maps to itself. x, y pan the camera
-    (and the point it orbits); z moves it back; ry orbits it right, rx up (looking down), rz rolls it."""
+    (and the point it orbits); z moves it back; ry orbits it right, rx up (looking down), rz rolls it.
+    target, a point [x, y, z] in canvas px, is what it looks at and orbits in place of the canvas centre,
+    framed as z 0 is; sway turns the camera on its own spot by (rx, ry, rz) degrees, for a handheld shake."""
     orbit = rotate_z(-rz) @ rotate_x(-rx) @ rotate_y(-ry)
-    return lens(w, h, fov) @ translate(0, 0, -z) @ orbit @ translate(-w / 2 - x, -h / 2 - y)
+    if target is None:
+        m = translate(0, 0, -z) @ orbit @ translate(-w / 2 - x, -h / 2 - y)
+    else:
+        m = translate(0, 0, -z) @ orbit @ translate(-target[0] - x, -target[1] - y, -target[2])
+    if sway is not None:
+        f = focus(h, fov)
+        turn = rotate_z(-sway[2]) @ rotate_x(-sway[0]) @ rotate_y(-sway[1])
+        m = translate(0, 0, f) @ turn @ translate(0, 0, -f) @ m
+    return lens(w, h, fov) @ m
+
+
+def focus(h: float, fov: float = DEFAULT_FOV) -> float:
+    """The camera's distance from z 0, in px: where `fov` spans the canvas height."""
+    return (h / 2) / math.tan(math.radians(min(max(fov, 1.0), 179.0)) / 2)
 
 
 def lens(w: float, h: float, fov: float = DEFAULT_FOV) -> np.ndarray:
     """The projection part of `camera`: camera space (origin at the canvas centre) to canvas."""
-    focus = (h / 2) / math.tan(math.radians(min(max(fov, 1.0), 179.0)) / 2)
     persp = np.eye(4)
-    persp[3, 2] = -1.0 / focus
+    persp[3, 2] = -1.0 / focus(h, fov)
     return translate(w / 2, h / 2) @ persp
 
 

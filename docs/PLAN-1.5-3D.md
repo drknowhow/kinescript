@@ -155,6 +155,13 @@ animate yet. That completes Phase 2.
   the size at z 0, so animating `fov` alone does it.
 - Check rules: `camera-inside-model`, `focus-on-nothing` (the focus plane is nearer or farther than every layer).
 
+Status (2026-10-31): camera moves (branch `camera`): `target`, `shake`, the `kine docs` recipes and
+`camera-inside-model` are built; depth of field and `focus-on-nothing` come next. Changes from the bullets above:
+x and y still pan from the target. A layer target follows the layer's keys and its parents', not its enter and exit
+motions, and keyframes pan between points and layer ids. `shake` turns the camera on its own spot, so near and far
+layers move alike, with a roll that moves the corners half as far; `amount` animates, `speed` and `seed` do not.
+`camera-inside-model` counts crossings of three rays from the camera, so a camera in a ring's hole is outside it.
+
 ### Phase 4: textures and surface looks
 
 - Texture coordinates: every primitive makes them (cube per face, sphere and cylinder wrapped, plane 0..1,
