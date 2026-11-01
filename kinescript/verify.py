@@ -664,6 +664,14 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
             continue
         if not b.get("fill") or layer.raw.get("box"):
             continue
+        if layer.mask is not None and layer.mask[1] in ("alpha", "luma"):  # it shows only inside its mask's box
+            m = boxes.get(layer.mask[0].id)
+            if m is None:
+                continue
+            l, t = max(l, int(m["rect"][0])), max(t, int(m["rect"][1]))
+            rr, bb = min(rr, math.ceil(m["rect"][2])), min(bb, math.ceil(m["rect"][3]))
+            if rr - l < 2 or bb - t < 2:
+                continue
         patch = buf[t:bb, l:rr, :3].reshape(-1, 3).astype(np.float32) / 255
         lin = np.where(patch <= 0.04045, patch / 12.92, ((patch + 0.055) / 1.055) ** 2.4)
         lum = lin @ np.array([0.2126, 0.7152, 0.0722], np.float32)
