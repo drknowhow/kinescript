@@ -215,6 +215,9 @@ LAYER TYPES (defaults in brackets)
             aspect), fit [cover] (cover|contain|stretch), zoom [1] (zooms inside the frame),
             focus [[0.5, 0.5]] (the point zoom moves toward), radius, stroke, strokeWidth,
             pixelated (true scales it with hard pixel edges, for pixel art).
+            An .svg src draws as vectors, sharp at any size; its own size is its width and height,
+            or its viewBox's. Text, <style> sheets, <symbol>, <image>, markers and an svg's own
+            animation are left out (check warns svg-unsupported): turn text into paths when saving.
             Frame by frame: frames in place of src, a pattern with the frame number in it
             ("run/run_%03d.png" or "run/run_####.png"), a glob ("run/*.png"), a folder of images
             or a list of files; or sheet {"src": "walk.png", "cols": 8, "rows": 2, "count": 14},
@@ -405,7 +408,7 @@ DEPTH AND CAMERA (3D)
             glow however it is lit: neon, screens, lamps)   transparency 0..1 [0] (see-through: the far
             side and what is behind show, faces drawn far to near; a model with a texture draws solid,
             check warns). These animate. opacity fades the drawn model as a whole, as on any layer.
-  texture   an image (png, jpg, webp, gif, bmp) or video file drawn on the surface, "#groupId", or
+  texture   an image (png, jpg, webp, gif, bmp, svg) or video file drawn on the surface, "#groupId", or
             an object: {"src": "wood.jpg", "repeat": 2 or [across, down], "offset": [across, down]
             (in images, toward the right and down)}. A video plays on the model's clock, with "loop", "trim" and
             "speed" as on a video layer. "#groupId" draws that group on the surface at each frame's
@@ -710,8 +713,9 @@ COMMANDS
                                   (read-time), a character no installed font has
                                   (missing-glyph), Arabic drawn letter by letter
                                   (unjoined-letters), colour emoji or spaced-out letters
-                                  in 3D text (unshaped-3d-text), or a video, image or shader
-                                  more than half off the canvas for 1 s or more
+                                  in 3D text (unshaped-3d-text), an svg with parts that are
+                                  not drawn, such as text (svg-unsupported), or a video, image
+                                  or shader more than half off the canvas for 1 s or more
                                   (media-offscreen).
                                   With sound (it is
                                   mixed and measured, see SOUND): a voice cut off (audio-cut), two
@@ -753,7 +757,8 @@ COMMANDS
                                   when it lists a video stream with no frames in it. A model file
                                   (.glb, .gltf, .obj): its triangles, vertices, materials, size,
                                   animations with their durations, skins, morph targets, textures
-                                  and texture coordinate sets.
+                                  and texture coordinate sets. An .svg: the w and h it is drawn
+                                  at and the kinds of element left out of it (undrawn).
   kine render scene.json -o out.mp4 -q draft|standard|high
                                   standard is the default, draft the fastest, high the best.
                                   Also .mov or .webm (with --transparent for no background),

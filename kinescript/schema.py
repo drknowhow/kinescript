@@ -199,7 +199,7 @@ TRANSITION_ALIAS = {"name": "type", "kind": "type", "style": "type", "duration":
 TRANSITIONS = ("fade", "wipe", "slide", "zoom", "blur", "cut")
 TRANSITION_VALUE_ALIAS = {"dissolve": "fade", "crossfade": "fade", "crossdissolve": "fade", "xfade": "fade",
                           "mix": "fade", "none": "cut", "hard": "cut", "hardcut": "cut", "push": "slide"}
-IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp")  # a sequence clip with one of these is an image
+IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".svg")  # a sequence clip with one of these is an image
 TYPE_ALIAS = {"rectangle": "rect", "square": "rect", "box": "rect", "shape": "rect", "txt": "text", "label": "text",
               "title": "text", "heading": "text", "string": "text", "img": "image", "picture": "image",
               "photo": "image", "oval": "ellipse", "caption": "captions", "subtitles": "captions",

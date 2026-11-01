@@ -345,9 +345,12 @@ More scenes in [`examples/`](https://github.com/drknowhow/kinescript/tree/main/e
 - [`sweep.json`](https://github.com/drknowhow/kinescript/blob/main/examples/sweep.json): a highlight runs across a
   line, a word's letters take the colours of a turning wheel, and words come into focus one by one, all by unit
   expressions of `i`, `n` and `sweep`, 6 s.
+- [`vector.json`](https://github.com/drknowhow/kinescript/blob/main/examples/vector.json): an SVG emblem grows from
+  its own 120 px to 600, sharp all the way, beside a spinner played from an eight-cell SVG sheet, 6 s.
 
 `edit.json`, `import.json`, `textures.json`, `screens.json`, `edges.json`, `product.json`, `voiceover.json`,
-`narrated.json` and `flipbook.json` read sample media: run `python examples/make_media.py` first to generate it.
+`narrated.json`, `flipbook.json` and `vector.json` read sample media: run `python examples/make_media.py` first to
+generate it.
 
 ## Performance
 

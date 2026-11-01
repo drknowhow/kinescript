@@ -2371,7 +2371,7 @@ class Renderer:
             c.drawPath(hp, sp)
 
     def _draw_image(self, c, L, t, T, g, box, reveal, mods):
-        img = media.image(L.src)
+        img = media.still(L.src)
         if L.seq is None:
             self._content(c, L, g, box, img, img.width(), img.height())
             return
@@ -2380,7 +2380,7 @@ class Renderer:
         q = L.seq
         k = q.at(t, float(L.raw.get("fps", media.SEQUENCE_FPS)), L.raw.get("loop", True))
         if q.files is not None:
-            img = media.image(q.files[k])
+            img = media.still(q.files[k])
             self._content(c, L, g, box, img, img.width(), img.height())
             return
         w, h = img.width() / q.cols, img.height() / q.rows
@@ -2388,14 +2388,16 @@ class Renderer:
 
     @staticmethod
     def _natural(L: Layer) -> tuple[float, float]:
-        """Image layer L's own size: its image's, its first frame's, or a cell of its sheet."""
-        img = media.image(L.src)
+        """Image layer L's own size: its image's (an svg's from its width, height and viewBox), its first frame's, or
+        a cell of its sheet."""
+        img = media.still(L.src)
         if L.seq is not None and L.seq.files is None:
             return img.width() / L.seq.cols, img.height() / L.seq.rows
         return img.width(), img.height()
 
     def _content(self, c, L, g, box, img, iw, ih, src: skia.Rect | None = None):
-        """img (iw x ih, or the part of it in src) drawn in box by L's fit, zoom and focus, with its stroke."""
+        """img (iw x ih, or the part of it in src) drawn in box by L's fit, zoom and focus, with its stroke. An svg's
+        media.Vector is drawn as vectors, sharp at any size."""
         bx, by, bw, bh = box
         zoom = float(g("zoom"))
         fx, fy = (L.raw.get("focus") or [0.5, 0.5]) if not isinstance(L.raw.get("focus"), str) else (0.5, 0.5)
@@ -2417,7 +2419,16 @@ class Renderer:
         cy0 = by + (bh - ch) / 2
         px, py = bx + fx * bw, by + fy * bh
         dst = skia.Rect.MakeXYWH(px + (cx0 - px) * zoom, py + (cy0 - py) * zoom, cw * zoom, ch * zoom)
-        if img is not None:
+        if isinstance(img, media.Vector):
+            sr = src or skia.Rect.MakeWH(iw, ih)
+            if src is not None:  # a sheet's cell, without its neighbours
+                c.clipRect(dst, doAntiAlias=True)
+            c.translate(dst.left(), dst.top())
+            c.scale(dst.width() / sr.width(), dst.height() / sr.height())
+            c.translate(-sr.left(), -sr.top())
+            fade = self._alpha < 1 or self._cf is not None  # drawn on a layer of its own, so overlaps do not show
+            c.drawPicture(img.picture, None, skia.Paint(Alphaf=self._alpha, ColorFilter=self._cf) if fade else None)
+        elif img is not None:
             how = CUBIC if L.type == "video" else NEAREST if L.raw.get("pixelated") else SAMPLING
             paint = skia.Paint(AntiAlias=True, Alphaf=self._alpha, ColorFilter=self._cf)
             if src is None:

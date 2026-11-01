@@ -276,6 +276,11 @@ Status (2026-11-01): moves to 1.6.1 (decision 1).
   file's ids, so `draw`, a staggered enter, morphing and masks work on each piece. What it skips (CSS in `<style>`,
   filters, `<text>`, clip paths) is listed by `kine check` as `svg-unsupported`. Constant pieces replay from a
   picture (Phase 0). Target: `svg-500` (a 500-element drawing, static) under 2 ms a frame on the GPU.
+  Status (2026-11-01): split in two. `.svg` in image layers is in its own PR, with `vector.json`. skia-python's
+  `SVGDOM` draws shapes, strokes, gradients, patterns, clip paths, masks and most filters, but no `<text>`, `<style>`,
+  `<symbol>`, `<image>`, markers or `<switch>`, and follows `xlink:href` only, so plain `href` is rewritten to it;
+  `svg-unsupported` names what it leaves out. Textures and particle sprites take the svg as pixels. The `svg` layer,
+  the picture cache and `svg-500` come in the second PR.
 
 ### Phase 6: motion library
 
