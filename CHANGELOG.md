@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.5.1 (2026-11-01)
 
 - Compressed model files are read. Meshopt-compressed buffer views (`EXT_meshopt_compression` and
   `KHR_meshopt_compression`, as `gltfpack -c` writes them) are decoded in numpy, with their octahedral,

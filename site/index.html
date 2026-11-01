@@ -183,12 +183,12 @@ kine render voice.json -o voice.mp4</code></pre>
     <dl class="features">
       <div><dt>Camera and depth</dt><dd>Any layer takes <code>z</code>, <code>rotateX</code> and <code>rotateY</code>. A scene <code>camera</code> pans, dollies, orbits and rolls with perspective, follows a <code>target</code>, shakes like a handheld camera and pulls focus with depth of field; <code>fixed</code> layers ignore it, and <code>fog</code> fades far layers.</dd></div>
       <div><dt>Stages</dt><dd>A group with <code>"sort": "pixel"</code> shows the nearest of its layers at each pixel, so models and cards pass through each other with a clean edge. With <code>"shadows"</code> its models cast shadows on the floor, the walls and each other.</dd></div>
-      <div><dt>Lit models</dt><dd>Cubes, spheres, cylinders, cones, tori and planes, or several merged as <code>parts</code>. Materials take <code>shine</code>, <code>metal</code>, <code>rim</code>, toon <code>bands</code>, <code>glow</code> and <code>transparency</code>. Lights come as presets or your own amounts, with up to three more <code>lights</code> and an <code>env</code> to reflect; <code>edges</code> draws outlines and creases.</dd></div>
+      <div><dt>Lit models</dt><dd>Cubes (rounded with <code>r</code>), spheres, cylinders, cones, capsules, tori and planes, a <code>lathe</code> turned from a profile and a <code>tube</code> along a path, or several merged as <code>parts</code> that animate. <code>repeat</code> draws copies of a model, each placed and coloured by an expression of its number. Materials take <code>shine</code>, <code>metal</code>, <code>rim</code>, toon <code>bands</code>, <code>glow</code> and <code>transparency</code>. Lights come as presets or your own amounts, with up to three more <code>lights</code> and an <code>env</code> to reflect; <code>edges</code> draws outlines and creases.</dd></div>
       <div><dt>Textures</dt><dd>An image, a video that plays on the model, or a group of layers drawn on it at each frame's time, wrapped round any shape with <code>repeat</code> and <code>offset</code>.</dd></div>
-      <div><dt>Extruded text and paths</dt><dd>Letters in any font and SVG path data, filled or stroked, pushed out to a <code>depth</code> with an optional <code>bevel</code>.</dd></div>
-      <div><dt>Model files</dt><dd><code>.glb</code>, <code>.gltf</code> and <code>.obj</code> with their colours, textures, emission, transparency, metal and roughness, and a soft <code>ground</code> shadow under any model.</dd></div>
+      <div><dt>Extruded text and paths</dt><dd>Letters in any font, shaped as a text layer is so Arabic joins and right-to-left runs read in order, and SVG path data, filled or stroked, pushed out to a <code>depth</code> with an optional <code>bevel</code>.</dd></div>
+      <div><dt>Model files</dt><dd><code>.glb</code>, <code>.gltf</code> and <code>.obj</code> with their colours, textures, emission, transparency, metal and roughness, and a soft <code>ground</code> shadow under any model. <code>animation</code> plays a glTF file's clips, skins and morph targets on the layer's clock. Meshopt-compressed files are read as they are, Draco-compressed ones with the <code>draco</code> extra.</dd></div>
     </dl>
-    <p class="note">Triangles are sorted by depth within each model rather than drawn through a depth buffer: separate layers hide each other per pixel only inside a stage, and parts of one model that cut through each other meet at a stepped seam. Model files' skeletal animation is not played.</p>
+    <p class="note">Triangles are sorted by depth within each model rather than drawn through a depth buffer: separate layers hide each other per pixel only inside a stage, and parts of one model that cut through each other meet at a stepped seam.</p>
 
     <article class="demo" id="card-flip">
       <div class="demo-head">
@@ -478,7 +478,7 @@ kine render scene.json -o scene.mp4</code></pre>
   </main>
 
   <footer>
-    <span class="brand"><img src="assets/mark.svg" alt="" width="200" height="200">Kinescript 1.5.0, MIT licence</span>
+    <span class="brand"><img src="assets/mark.svg" alt="" width="200" height="200">Kinescript 1.5.1, MIT licence</span>
     <nav aria-label="Project links">
       <a href="https://github.com/drknowhow/kinescript">Source</a>
       <a href="https://pypi.org/project/kinescript/">PyPI</a>
