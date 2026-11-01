@@ -562,6 +562,7 @@ class Renderer:
         self._shaped: dict = {}  # (typeface, size, text, rtl) -> how _draw_pieces draws it (_pieces)
         self._paths: dict = {}
         self._routes: dict[str, tuple] = {}  # an along's path by layer (data) or route id: (path, measure, length)
+        self._group_T: dict[str, float] = {}  # a group with a clock: the scene time it is drawn at, for its kids
         self._solid: dict[int, skia.Paint] = {}  # an antialiased fill paint for each colour (_fill_paint)
         self._shaders: dict = {}
         self.stop_at: str | None = None
@@ -731,7 +732,7 @@ class Renderer:
         props, its enter and exit, and its children's."""
         if not L.visible(F):
             return True
-        if L.type not in HOLDS:
+        if L.type not in HOLDS or L.clock is not None:
             return False
         end = math.nextafter(L.t_out, -math.inf)
         lo, hi = min(max(lo, L.t_in), end), min(max(hi, L.t_in), end)  # as _layer clamps a sub-frame
@@ -1078,9 +1079,9 @@ class Renderer:
         mods = IDENT
         if L.enter and not split and t < L.enter.dur and not (L.type == "group" and L.enter.stagger):
             mods = L.enter.mods(t / L.enter.dur)
-        if L.turn is not None:  # its group's enter, from its turn
+        if L.turn is not None:  # its group's enter, from its turn, on the group's own time
             m = L.parent.enter
-            p = (T - L.parent.t_in - L.turn) / m.dur if m.dur else 1.0
+            p = (self._group_T.get(L.parent.id, T) - L.parent.t_in - L.turn) / m.dur if m.dur else 1.0
             if p < 1:
                 mods = mods.combine(m.mods(p))
         if L.exit and d - t < L.exit.dur:
@@ -1227,6 +1228,12 @@ class Renderer:
             self.boxes[L.id] = info
         if L.type == "group":
             kids = L.children
+            frame_t = self._frame_t
+            if L.clock is not None:  # the children run on the group's clock, a motion-blur sub-frame's frame too
+                self._group_T[L.id] = T
+                T = self._inner(L, t, T)
+                if frame_t is not None:
+                    self._frame_t = self._inner(L, frame_t - L.t_in, frame_t)
             if self._m3d is not None and L.raw.get("sort") == "depth":
                 kids = sorted(kids, key=lambda k: self._far(k, T))
             if self._m3d is not None and L.raw.get("sort") == "pixel" and self._stage is None:
@@ -1236,6 +1243,7 @@ class Renderer:
                     if self._stopped:
                         break
                     self._layer(c, child, T, parent_alpha * alpha)
+            self._frame_t = frame_t
         if layered == 2:
             c.restore()
         if layered:
@@ -1244,6 +1252,16 @@ class Renderer:
         self._m3d = outer
         if self.stop_after == L.id:
             self._stopped = True
+
+    @staticmethod
+    def _inner(L: Layer, t: float, T: float) -> float:
+        """The scene time group L's children see at its time t: timeRemap's seconds, or t at its speed, from its start,
+        and round again every loop seconds."""
+        speed, loop = L.clock
+        u = float(L.get("timeRemap", t, T)) if "timeRemap" in L.props else t * speed
+        if loop > 0:
+            u %= loop
+        return L.t_in + u
 
     def _blends_inside(self, L: Layer) -> bool:
         hit = self._blended.get(L.id)

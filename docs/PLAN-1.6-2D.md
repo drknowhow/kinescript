@@ -138,6 +138,13 @@ constant groups to replay. Frame times on the GPU, frames 50 to 89: `layers-2000
 - Check rules: `stop-and-go` (an inner key stops a layer between two moves the same way: add `smooth`) and `strobe`
   (a layer moves more than about 40 px a frame at 1080p without `motionBlur`, naming the time).
 
+Status (2026-11-01): smooth keys, position keyframes and `stop-and-go` merged (#85); `along` and `strobe` (#86);
+group stagger and `order`, then group clocks, in the two PRs after. Changes from the bullets above: smooth keys are
+at rest at the first and last key whatever their eases. x and y move an `along` path as they move a path layer, so
+a path's data rides the same route in both. `strobe` needs five fast frames running, since three flagged the first
+frames of the docs' outCubic bar recipe. The remap key is `timeRemap`, because `time` already reads as `at`.
+`along-100` draws in 5.6 ms a frame on the GPU, 0.7 ms more than the same layers standing still.
+
 ### Phase 2: vector shapes
 
 - Morphing: `d` takes keyframes, `"d": [[0, "M0 0 L100 0 L50 90 Z"], [1, "M50 0 A50 50 0 1 1 49.9 0 Z"]]`. Any two

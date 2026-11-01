@@ -23,6 +23,10 @@
   picture. `order` sets who goes first, for groups and split text: `start` (the default, as before), `end`, `center`
   (from the middle out), `edges` (from both ends in) or `random`, with a whole-number `seed` picking the shuffle.
   `kine check` warns when `order` has no stagger to order.
+- A group runs its children on a clock of its own: `speed` (2 runs them twice as fast), `loop` (seconds after which
+  they start again, so a looping icon is one group with `"loop": 1.2`) and `timeRemap` (keyframes or an expression
+  giving their time at the group's time; a number freezes them). The group's own keys, enter and exit keep the
+  scene's time, and so do sounds. `time` stays an alias of `at`, so the remap is named as in After Effects.
 - `kine check` warns `strobe` where a layer moves more than 40 px a frame at 1080p for five frames running in a
   scene without motion blur, where the eye sees separate copies instead of one moving thing.
 - 2D frames cost less Python: keyframes find their segment by bisection, expressions compile once to a function,

@@ -69,7 +69,7 @@ def _where(owner, message: str) -> str:
 
 class Layer:
     __slots__ = ("id", "type", "raw", "t_in", "t_out", "props", "enter", "exit", "children", "parent",
-                 "index", "src", "video", "ahead", "ctx", "parts", "copies", "xf", "along", "turn")
+                 "index", "src", "video", "ahead", "ctx", "parts", "copies", "xf", "along", "turn", "clock")
 
     def __init__(self, lid: str, ltype: str, raw: dict, parent: "Layer | None", index: int):
         self.id, self.type, self.raw, self.parent, self.index = lid, ltype, raw, parent, index
@@ -88,6 +88,7 @@ class Layer:
         self.along: tuple[str, bool] | None = None  # the path it rides (data or "#id") and whether it turns with it;
         # how far along is props["along"]
         self.turn: float | None = None  # seconds after its group starts that the group's staggered enter reaches it
+        self.clock: tuple[float, float] | None = None  # a group's speed and loop for its children (timeRemap in props)
 
     @property
     def dur(self) -> float:
@@ -415,7 +416,8 @@ class Scene:
                               f"wholly outside {within} ({lo:.3f}s to {hi:.3f}s), so it is never shown",
                               "move at into that span, or set \"hidden\": true to keep it off on purpose")
                     continue
-                walk(L.children, max(lo, L.t_in), min(hi, L.t_out), f"its group '{L.id}'")
+                if L.clock is None:  # a group with a clock of its own shows its children at other times
+                    walk(L.children, max(lo, L.t_in), min(hi, L.t_out), f"its group '{L.id}'")
 
         walk(self.layers, 0.0, self.duration, "the scene")
         sounds = {s.id for s in self.audio if not s.layer}
@@ -775,6 +777,8 @@ class Scene:
                     raise SceneError(str(e)) from e
                 kids = [x for k in kids for x in (k if isinstance(k, list) else [k])]
                 self._build(kids, layer, layer.children)
+                if any(raw.get(k) is not None for k in ("speed", "loop", "timeRemap")):
+                    layer.clock = (float(raw.get("speed") or 1), float(raw.get("loop") or 0))
                 if layer.enter and layer.enter.stagger:  # the group enters child by child, not as one picture
                     m = layer.enter
                     for kid, k in zip(layer.children, P.turns(len(layer.children), m.order, m.seed)):

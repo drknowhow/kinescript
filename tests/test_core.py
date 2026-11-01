@@ -243,6 +243,37 @@ def test_a_group_with_a_staggered_enter_brings_its_children_in_one_by_one():
     assert not r._holds(s.by_id["g"], 0.5, 0.52, 0.51) and r._holds(s.by_id["g"], 0.9, 0.92, 0.91)
 
 
+def test_a_group_runs_its_children_on_its_own_clock():
+    kid = {"id": "kid", "type": "rect", "w": 10, "h": 10, "y": 90, "x": [[0, 0], [1, 100, "linear"]]}
+
+    def x(T, **clock):
+        spec = scene([dict({"id": "g", "type": "group", "children": [kid]}, **clock)], duration=3)
+        return _middle(_boxes(spec, T), "kid")
+    assert (50, 90, 10) == x(0.25, speed=2) and (50, 90, 10) == x(1.5, loop=1) and (50, 90, 10) == x(2.5, loop=1)
+    assert (75, 90, 10) == x(2.0, timeRemap=0.75)  # a number freezes them
+    assert (25, 90, 10) == x(1.0, timeRemap=[[0, 0], [2, 0.5, "linear"]])
+    assert (60, 90, 10) == x(1.0, timeRemap="=t * 0.6", speed=4)  # timeRemap wins over speed
+    looped = scene([{"id": "g", "type": "group", "loop": 1, "children": [dict(kid, dur=1)]}], duration=3,
+                   bg="#000000")
+    for spec in (looped, dict(looped, motionBlur={"samples": 4})):  # a sub-frame sees the group's clock too
+        assert _frame(spec, 75).max() > 0  # 2.5 s: the kid's 0.5 s again
+        r = Renderer(k.Scene(spec), backend="cpu")
+        sequential = [r.frame(n).copy() for n in range(0, 80, 5)]
+        assert np.array_equal(sequential[-1], _frame(spec, 75))
+
+
+def test_a_frozen_group_still_staggers_in_and_its_late_children_are_not_called_unseen():
+    spec = scene([{"id": "g", "type": "group", "timeRemap": 0, "enter": {"name": "fade", "dur": 0.1, "stagger": 0.5},
+                   "children": [{"id": f"k{j}", "type": "rect", "x": 60 + j * 100, "y": 90, "w": 40, "h": 40,
+                                 "fill": "#ffffff"} for j in range(2)]}], duration=2, bg="#000000")
+    img = _frame(spec, 30)
+    assert img[90, 60, 0] > 128 and img[90, 160, 0] > 128
+    late = scene([{"id": "g", "type": "group", "dur": 1, "speed": 3,
+                   "children": [{"id": "late", "type": "rect", "at": 2, "dur": 0.5, "w": 10, "h": 10}]}], duration=2)
+    assert "never-shown" not in [i["code"] for i in check(late)["issues"]]
+    assert "late" in _boxes(late, 0.75).boxes
+
+
 def test_split_text_enters_in_the_order_given():
     def middle_of_ink(order):
         spec = scene([{"id": "t", "type": "text", "text": "ABCDE", "x": 160, "y": 90, "size": 40, "split": "chars",
