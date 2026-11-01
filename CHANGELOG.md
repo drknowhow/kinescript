@@ -11,6 +11,15 @@
   as x `[0, 10]` and y `[1, 20]`; it is an error now.
 - `kine check` warns `stop-and-go` where an inner key brings a layer's move to rest between two moves the same way,
   which the default inOutCubic does at every key, and suggests smooth keys or a linear ease.
+- `along` moves a layer along a path: `"along": {"d": "M0 0 C300 -200 600 200 900 0", "p": [[0, 0], [2, 1]],
+  "orient": true}`. `p` is the share of the path's length, a key like any other (0 to 1 over the layer by default);
+  a closed path goes round again past 1. `orient` turns the layer with the path. `d` is path data moved by x and y,
+  or `"#id"` of a path, line, arrow or polygon in the same group, ridden where that layer is drawn, so a dot can ride
+  a route that draws on. `kine check` names a route that is missing, in another group or not a path. The
+  `along-100` stress scene (100 riders, 60 of them on path layers) draws a 1080p frame in 5.6 ms on the GPU,
+  0.7 ms more than with the riders standing still.
+- `kine check` warns `strobe` where a layer moves more than 40 px a frame at 1080p for five frames running in a
+  scene without motion blur, where the eye sees separate copies instead of one moving thing.
 - 2D frames cost less Python: keyframes find their segment by bisection, expressions compile once to a function,
   layers keep their constant placement values and solid fills reuse one paint per colour. Draw time per frame on the
   development machine's GPU fell from 15.8 to 12.5 ms for 2,000 layers, 7.3 to 5.4 ms for 600 layers of four

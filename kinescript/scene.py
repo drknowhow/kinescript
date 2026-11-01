@@ -23,13 +23,14 @@ STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "children", "laye
           "allowOffscreen", "style", "audio", "shadow", "box", "fx", "fill", "stroke", "emph", "active",
           "sksl", "preset", "uniforms", "caret", "case", "italic", "smooth", "closed", "focus", "use",
           "backface", "fixed", "sort", "shape", "detail", "parts", "light", "span", "sound", "voice",
-          "fadeIn", "fadeOut", "sequence", "animation", "repeat", "profile"}
+          "fadeIn", "fadeOut", "sequence", "animation", "repeat", "profile", "along"}
 PART_STRUCT = {"shape", "texture", "text", "font", "d", "italic", "profile"}  # a part's keys that never animate
 # Property defaults by name; everything not listed defaults to None.
 DEFAULTS = {"x": 0.0, "y": 0.0, "opacity": 1.0, "scale": 1.0, "scaleX": 1.0, "scaleY": 1.0, "rotate": 0.0,
             "blur": 0.0, "draw": 1.0, "zoom": 1.0, "z": 0.0, "rotateX": 0.0, "rotateY": 0.0}
 DEPTH_PROPS = ("z", "rotateX", "rotateY")
 PLACED = ("x", "y", "rotate", "scale", "scaleX", "scaleY", "blur")  # what Layer.placed gives, in this order
+ROUTES = ("path", "line", "arrow", "polygon")  # the layers an along "#id" rides
 
 
 class SceneError(ValueError):
@@ -68,7 +69,7 @@ def _where(owner, message: str) -> str:
 
 class Layer:
     __slots__ = ("id", "type", "raw", "t_in", "t_out", "props", "enter", "exit", "children", "parent",
-                 "index", "src", "video", "ahead", "ctx", "parts", "copies", "xf")
+                 "index", "src", "video", "ahead", "ctx", "parts", "copies", "xf", "along")
 
     def __init__(self, lid: str, ltype: str, raw: dict, parent: "Layer | None", index: int):
         self.id, self.type, self.raw, self.parent, self.index = lid, ltype, raw, parent, index
@@ -84,6 +85,8 @@ class Layer:
         self.parts: list[dict[str, Prop]] = []  # a model's parts' keys, each compiled like a layer's
         self.copies: Copies | None = None  # a model's "repeat"
         self.xf: tuple[list, list] | None = None  # placed(): the constant values, and which of PLACED change
+        self.along: tuple[str, bool] | None = None  # the path it rides (data or "#id") and whether it turns with it;
+        # how far along is props["along"]
 
     @property
     def dur(self) -> float:
@@ -270,6 +273,8 @@ class Scene:
                                   "by more than four joints; each follows the four in JOINTS_0, and the weights of "
                                   "the others are dropped",
                                   "export it again with at most four joint influences per vertex")
+            if layer.along and layer.along[0].startswith("#"):
+                self._check_route(layer, layer.along[0][1:])
             if layer.type != "model":
                 continue
             for spec in [layer.raw.get("texture")] + [p.get("texture") for p in layer.raw.get("parts") or []
@@ -361,6 +366,25 @@ class Scene:
                         self.note("error", "bad-value", layer.id, f"{name} is {v!r} at t={t:.2f}s; expected a number",
                                   "use a number, a percentage like '50%', or an expression starting with '='")
                         break
+
+    def _check_route(self, layer: Layer, rid: str):
+        """An along "#pathId" on `layer` names a path, line, arrow or polygon in its group that rides no path."""
+        r = self.by_id.get(rid)
+        if r is None:
+            close = schema.suggest(rid, list(self.by_id))
+            self.note("error", "unknown-route", layer.id, f"along '#{rid}' names no layer",
+                      (f"did you mean '#{close}'? " if close else "") + "give the path it rides that id, or write "
+                      "the path data in d")
+        elif r.type not in ROUTES or r is layer:
+            what = "the layer itself" if r is layer else f"a {r.type} layer"
+            self.note("error", "bad-route", layer.id, f"along '#{rid}' is {what}; it rides a path, line, arrow or "
+                      "polygon", "name a path layer, or write the path data in d")
+        elif r.parent is not layer.parent:
+            self.note("error", "bad-route", layer.id, f"along '#{rid}' is in another group, where its points are "
+                      "somewhere else", f"put '{rid}' and '{layer.id}' in the same group")
+        elif r.along:
+            self.note("error", "bad-route", layer.id, f"along '#{rid}' rides a path itself",
+                      f"give '{layer.id}' the path '{r.along[0]}' as well, or take along off '{rid}'")
 
     def _check_surface(self, layer: Layer, gid: str):
         """A "#groupId" texture on model `layer` names a group that does not hold the model."""
@@ -730,6 +754,10 @@ class Scene:
                                    for p in raw.get("parts") or [] if isinstance(p, dict)]
                     if isinstance(raw.get("repeat"), dict):
                         layer.copies = Copies(raw["repeat"], pctx)
+                along = raw.get("along")
+                if isinstance(along, dict) and isinstance(along.get("d"), str):
+                    layer.along = (along["d"], along.get("orient") is True)
+                    layer.props["along"] = compile_prop("along", along.get("p", [[0, 0], ["end", 1]]), pctx)
                 for un, uv in (raw.get("uniforms") or {}).items():
                     if not isinstance(uv, (int, float, str)) or (isinstance(uv, str) and uv.startswith("=")):
                         layer.props["u_" + un] = compile_prop("u_" + un, uv, pctx)

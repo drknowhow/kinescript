@@ -66,7 +66,8 @@ SCENE (top level)
   motionBlur  {"samples": 6, "shutter": 0.5}   (slower: renders 6 sub-frames per frame). A layer
               blurs only inside its own time, so its first and last frames are whole; grain is
               added once, to the blended frame. Still layers below every moving one are drawn once
-              a frame, not once a sub-frame, so list still layers first.
+              a frame, not once a sub-frame, so list still layers first. Without it, check warns
+              "strobe" where a layer moves more than 40 px a frame at 1080p for 5 frames running.
   camera      moves and turns the view in depth (see DEPTH AND CAMERA).
   fog         far layers fade into a colour (see DEPTH AND CAMERA).
   light       how model layers are lit (see 3D MODELS).
@@ -96,7 +97,13 @@ KEYS EVERY LAYER HAS
                 w and h), "50%-120", "10vw", "5vh", or an expression. "position": [x, y],
                 [x, y, z] or {"x": ..., "y": ...} is read as x and y (and z); so are keyframes of
                 points, [[0, [200, 540]], [2, [960, 300]]], and smooth keys or a tween of points.
-  anchor        center (default) | topleft | top | topright | left | right | bottomleft | bottom |
+  along         a path the layer rides: {"d": "M0 0 C300 -200 600 200 900 0", "p": [[0, 0], [2, 1]],
+                "orient": true}. d is SVG path data, moved by x and y as a path layer's is, or the
+                "#id" of a path, line, arrow or polygon in the same group, ridden where it is drawn
+                (x and y then move the layer off it). p is the share of the path's length, a key
+                like any other [from 0 at the layer's start to 1 at its end]; past 1 a closed path
+                goes round again. orient turns the layer with the path, adding to rotate.
+  anchor       center (default) | topleft | top | topright | left | right | bottomleft | bottom |
                 bottomright. Video and shader default to topleft, even with x and y set; an image
                 defaults to topleft without x and to center with it.
   opacity       0..1 (default 1). A group fades as one picture; layers in it with a blend still

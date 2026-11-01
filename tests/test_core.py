@@ -205,6 +205,54 @@ def _boxes(spec, T=0.0):
     return r
 
 
+def test_check_warns_of_a_move_too_fast_to_follow_unless_motion_blur_smears_it():
+    def strobes(spec):
+        return {(i["layer"], i["from"]) for i in check(spec)["issues"] if i["code"] == "strobe"}
+    spec = scene([{"id": "zip", "type": "circle", "r": 5, "y": 90, "x": [[0.5, 0], [1, 320, "linear"]]},  # 21 px/f
+                  {"id": "cut", "type": "circle", "r": 5, "y": 40, "x": [[0, 20], [1, 20], [1, 300]]},
+                  {"id": "drift", "type": "circle", "r": 5, "y": 140, "x": [[0, 20], [2, 300, "linear"]]},
+                  {"id": "rider", "type": "circle", "r": 5, "along": {"d": "M0 0 L320 180", "p": "=t * 2"}}],
+                 duration=2)
+    assert strobes(spec) == {("zip", 0.5), ("rider", 0)}
+    assert not strobes(dict(spec, motionBlur={"samples": 4}))
+
+
+def _middle(r, lid):
+    left, top, right, bottom = r.boxes[lid]["rect"]
+    return pytest.approx(((left + right) / 2, (top + bottom) / 2, right - left), abs=0.5)
+
+
+def test_a_layer_rides_its_path_round_a_corner_and_turns_with_it():
+    def at(T, along, **kw):
+        return _boxes(scene([dict({"id": "a", "type": "rect", "w": 20, "h": 6, "along": along}, **kw)], duration=2), T)
+    line = {"d": "M40 40 L140 40 L140 140", "p": [[0, 0], [2, 1, "linear"]], "orient": True}  # 200 px long
+    assert (90, 40, 20) == _middle(at(0.5, line), "a")
+    assert (140, 90, 6) == _middle(at(1.5, line), "a")  # down the second side, turned to it
+    assert (150, 85, 20) == _middle(at(1.5, dict(line, orient=False), x=10, y=-5), "a")  # x and y move the path
+    assert (140, 140, 6) == _middle(at(0, dict(line, p=1.5)), "a")  # an open path stops at its end
+    assert (140, 40, 20) == _middle(at(1, {"d": line["d"]}), "a")  # p runs 0 to 1 over the layer by default
+    square = {"d": "M100 60 L140 60 L140 100 L100 100 Z", "p": 1.25}  # closed, 160 px: round again past 1
+    assert (140, 60, 20) == _middle(at(0, square), "a")
+
+
+def test_a_layer_rides_a_path_layer_where_it_is_drawn():
+    route = {"id": "route", "type": "path", "d": "M0 0 L100 0", "anchor": "center", "x": 160, "y": 90, "rotate": 90,
+             "scale": 0.5, "stroke": "#ffffff"}  # drawn from (160, 65) down to (160, 115)
+
+    def at(p, **kw):
+        dot = dict({"id": "dot", "type": "rect", "w": 20, "h": 6, "along": {"d": "#route", "p": p, "orient": True}},
+                   **kw)
+        return _boxes(scene([route, dot]))
+    assert (160, 65, 6) == _middle(at(0), "dot")
+    assert (165, 115, 6) == _middle(at(1, x=5), "dot")
+    moving = scene([dict(route, x=[[0, 100], [2, 200]]), {"id": "dot", "type": "circle", "r": 6,
+                                                          "along": {"d": "#route", "p": 0.5}}], duration=2)
+    r = Renderer(k.Scene(moving), backend="cpu")
+    assert not r._holds(r.s.by_id["dot"], 0.9, 1.1, 1.0)  # its path moves under it
+    sequential = [r.frame(n).copy() for n in range(0, 40, 3)]
+    assert np.array_equal(sequential[-1], _frame(moving, 39))
+
+
 def test_depth_frame_is_pure_function_of_index():
     spec = scene([
         {"id": "t", "type": "text", "text": "Flip", "x": "50%", "y": "40%", "size": 40, "split": "chars",

@@ -133,6 +133,23 @@ def test_smooth_is_a_boolean_beside_keys_on_numbers():
     assert "bad-value" in codes(scene([{"type": "rect", "x": {"keys": [0, 100]}}]))[0]  # keys object still checked
 
 
+def test_along_is_checked_and_its_route_is_a_path_in_the_same_group():
+    path = {"id": "route", "type": "path", "d": "M0 0 L100 0"}
+    group = {"id": "g", "type": "group", "children": [{"id": "inner", "type": "path", "d": "M0 0 L10 0"}]}
+    box = {"id": "box", "type": "rect", "w": 10, "h": 10}
+    for along, code in (({"d": "#rout"}, "unknown-route"), ({"d": "#box"}, "bad-route"),
+                        ({"d": "#inner"}, "bad-route"), ({"d": "#dot"}, "bad-route"), ({"p": 0.5}, "missing-key"),
+                        ({"d": "M0 0 Lx"}, "bad-value"), ({"d": "M0 0 L1 1", "orient": "yes"}, "bad-value"),
+                        ({"d": "M0 0 L1 1", "p": [[0, 0], [1, "far"]]}, "bad-value")):
+        got = codes(scene([path, group, box, {"id": "dot", "type": "circle", "r": 5, "along": along}]))[0]
+        assert code in got, (along, got)
+    got, s = codes(scene([path, {"id": "dot", "type": "circle", "r": 5, "along": "#route"}]))
+    assert "renamed-value" in got and s.by_id["dot"].along == ("#route", False)
+    aliased = {"route": "M0 0 L9 9", "autoRotate": True}
+    got, s = codes(scene([{"id": "dot", "type": "circle", "r": 5, "along": aliased}]))
+    assert "renamed-key" in got and s.by_id["dot"].along == ("M0 0 L9 9", True)
+
+
 def test_flat_list_is_not_keyframes():
     assert "flat-keyframes" in codes(scene([{"type": "rect", "x": [0, 100]}]))[0]
 

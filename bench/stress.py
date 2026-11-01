@@ -103,6 +103,23 @@ def keys_dense() -> dict:
     return _scene(out)
 
 
+def along_100() -> dict:  # 60 darts on 6 paths that draw on, and 40 bars round closed paths of their own
+    out = []
+    for n in range(6):
+        y = 140 + n * 150
+        out.append({"id": f"route{n}", "type": "path", "d": f"M80 {y} C560 {y - 220} 1360 {y + 220} 1840 {y}",
+                    "stroke": "#2c3440", "strokeWidth": 4, "draw": [[0, 0], [2, 1]]})
+        out += [{"id": f"dart{n}-{k}", "type": "polygon", "sides": 3, "r": 12, "rotate": 90, "fill": "$accent",
+                 "along": {"d": f"#route{n}", "p": [[k * 0.15, 0], [k * 0.15 + 3, 1, "linear"]], "orient": True}}
+                for k in range(10)]
+    for n in range(40):
+        cx, cy = 140 + (n % 10) * 182, 1000 - (n // 10) * 40
+        out.append({"id": f"bar{n}", "type": "rect", "w": 18, "h": 6, "fill": "#e8e2d0",
+                    "along": {"d": f"M{cx - 60} {cy} a60 18 0 1 0 120 0 a60 18 0 1 0 -120 0 Z",
+                              "p": f"=t * 0.4 + {n / 40}", "orient": True}})
+    return _scene(out)
+
+
 def counters() -> dict:
     return _scene([{"id": f"c{n}", "type": "counter", "x": 120 + (n % 10) * 180, "y": 80 + (n // 10) * 100,
                     "size": 40, "value": {"from": 0, "to": 10 ** (1 + n % 6), "dur": 3.5}, "format": "{:,.0f}"}
@@ -376,6 +393,7 @@ SCENES = {
     "expressions": (expressions, ".mp4", "600 layers, 4 expressions each"),
     "keys-dense": (keys_dense, ".mp4", "300 layers x 121 keyframes on x, y, rotate, plus colour keys"),
     "counters": (counters, ".mp4", "100 counters formatting every frame"),
+    "along-100": (along_100, ".mp4", "100 layers riding paths: 60 on 6 path layers that draw on, 40 round closed paths"),
     "shaders": (shaders, ".mp4", "4 full-frame SkSL presets blended, grain and vignette"),
     "uhd-4k": (uhd_4k, ".mp4", "3840x2160: shader, split text, stroke draw, shadow, grade"),
     "long-120s": (long_120s, ".mp4", "3600 frames: worker split, segment joins"),
