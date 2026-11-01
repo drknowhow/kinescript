@@ -31,6 +31,7 @@ ENVS = {"studio": {"top": "#f6f3ec", "horizon": "#7d828c", "bottom": "#23252b"},
         "night": {"top": "#0a0f24", "horizon": "#34477a", "bottom": "#050608"},
         "chrome": {"top": "#ffffff", "horizon": "#15171c", "bottom": "#9a9da3"}}
 FIXED = {"preset", "from", "follow", "type"}  # light keys that do not tween
+DOF_MAX = 48.0  # the most a layer or a stage pixel blurs out of focus (sigma, px)
 _SKSL = """
 DECLARE
 uniform half3 keyDir;
@@ -222,6 +223,16 @@ def fogged(fg: tuple, w):
     """How much of fog fg covers points whose camera projection gives them w: 0 (clear) up to its amount."""
     col, near, far, amt, focus = fg
     return np.clip((np.asarray(w, float) * focus - near) / max(far - near, 1e-6), 0.0, 1.0) * amt
+
+
+def defocus(dof: tuple, w):
+    """The blur (sigma, frame px) of points whose camera projection gives them w, under depth of field dof =
+    (focus distance, aperture, z 0's distance): aperture px per 1000 px from the focus plane near it, growing
+    without end toward the camera and to aperture times the focus distance over 1000 far away, as a lens does.
+    Never past DOF_MAX."""
+    near, ap, focus = dof
+    d = np.asarray(w, float) * focus
+    return np.minimum(ap / 1000.0 * np.abs(d - near) * near / np.maximum(d, 1.0), DOF_MAX)
 
 
 def fog_filter(fg: tuple, f: float) -> skia.ColorFilter:
@@ -717,6 +728,8 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
         r._stage.cast(P @ view[:3, :3].T + view[:3, 3], T)
     hom = P @ r._m3d[:3, :3].T + r._m3d[:3, 3]
     w = P @ r._m3d[3, :3] + r._m3d[3, 3]
+    if r._focused is not None and len(w):
+        r._reach(w[T.ravel()] if len(T) else w)
     if len(w) and w.min() < space.NEAR:  # no vertex that near, no triangle crossing
         near = (w[T] < space.NEAR).any(1)
         if near.any():

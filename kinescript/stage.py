@@ -7,6 +7,8 @@ nearer is larger and 0 is where nothing is. The GPU keeps it in 24 bits of an RG
 F16, about 1.5 px of depth at z 0. The CPU keeps float32."""
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import skia
 
@@ -123,6 +125,72 @@ half4 main(float2 p) {
     return half4(c.rgb * half(1.0 - dz.w * n / 9.0), c.a);
 }
 """.replace("NEAREST", _NEAREST)
+# How blurred each frame pixel is, from its depth, as a fraction of the most any is (`top`): red for every pixel,
+# green for those nearer than the focus plane, whose blur spreads over what is behind them. Alpha marks depth.
+_COC = _DEP + """
+uniform shader accd;
+uniform float4 lens;  // kq times z 0's distance (so the distance is that over the depth), the focus distance,
+                      // aperture / 1000, top
+half4 main(float2 p) {
+    float d = NEAREST;
+    if (d <= 0.0) {
+        return half4(0.0);
+    }
+    float D = lens.x / d;
+    float s = min(lens.z * abs(D - lens.y) * lens.y / max(D, 1.0), lens.w) / lens.w;
+    return half4(half(s), D < lens.y ? half(s) : 0.0, 0.0, 1.0);
+}
+""".replace("NEAREST", _NEAREST)
+# The stage at 1x, each pixel from the two of five copies (sharp, then blurred by 1/8, 1/4, 1/2 and all of top)
+# either side of its blur. A pixel with no depth takes the blur of what is round it, so a blurred edge spreads past
+# the shape (spread: the blur map blurred, whose red over alpha is the mean blur round a pixel); and the blur of
+# anything nearer than the focus plane spreads over what is behind it, as far as its copy reaches, as a lens does
+# (fore: the map's green grown by half the most blur, then blurred: a mean of nearby blur left a ring).
+# A blurred copy holds only what is at least half as blurred as it (b, from _MATTE) and how much of it there is (w);
+# the pixel's own colour fills the rest, so a sharp layer does not glow onto a blurred one in front of it.
+_DOF = """
+uniform shader sharp;
+uniform shader b1;
+uniform shader b2;
+uniform shader b3;
+uniform shader b4;
+uniform shader w1;
+uniform shader w2;
+uniform shader w3;
+uniform shader w4;
+uniform shader coc;
+uniform shader spread;
+uniform shader fore;
+half4 main(float2 p) {
+    half4 k = coc.eval(p);
+    half4 sp = spread.eval(p);
+    half s = max(k.a > 0.0 ? k.r : (sp.a > 0.004 ? sp.r / sp.a : 0.0), fore.eval(p).g);
+    half4 c = sharp.eval(p);
+    if (s <= 0.125) {
+        return mix(c, b1.eval(p) + (1.0 - w1.eval(p).a) * c, s * 8.0);
+    }
+    if (s <= 0.25) {
+        return mix(b1.eval(p) + (1.0 - w1.eval(p).a) * c, b2.eval(p) + (1.0 - w2.eval(p).a) * c, s * 8.0 - 1.0);
+    }
+    if (s <= 0.5) {
+        return mix(b2.eval(p) + (1.0 - w2.eval(p).a) * c, b3.eval(p) + (1.0 - w3.eval(p).a) * c, s * 4.0 - 1.0);
+    }
+    return mix(b3.eval(p) + (1.0 - w3.eval(p).a) * c, b4.eval(p) + (1.0 - w4.eval(p).a) * c, s * 2.0 - 1.0);
+}
+"""
+# What of the stage (at some size) goes into the copy blurred by lv.x of top: each pixel by how blurred it is, from
+# none at a quarter of that to all at a half, and empty pixels whole (they blur in as clear). lv.y 1 gives how much.
+_MATTE = """
+uniform shader colour;
+uniform shader blur;
+uniform float2 lv;
+half4 main(float2 p) {
+    half4 k = blur.eval(p);
+    half m = (1.0 - k.a) + k.a * smoothstep(half(lv.x * 0.25), half(lv.x * 0.5), k.a > 0.0 ? k.r / k.a : 0.0);
+    return lv.y > 0.5 ? half4(m) : colour.eval(p) * m;
+}
+"""
+LEVELS = (0.0, 0.125, 0.25, 0.5, 1.0)  # the blur of each copy _DOF mixes, as a fraction of top
 _SKSL = {
     "pack": _PACK,
     # the child's depth, kept only where it drew (drawn with kDstIn)
@@ -133,6 +201,9 @@ _SKSL = {
     "depth": _NEAR.replace("RESULT", "return near ? d : accd.eval(p);"),
     "fog": _FOG,
     "sun": _SUN,
+    "coc": _COC,
+    "dof": _DOF,
+    "matte": _MATTE,
 }
 _EFFECTS: dict[str, skia.RuntimeEffect] = {}
 
@@ -159,6 +230,7 @@ class Stage:
         self.child = None  # the child being drawn
         self.casters = None  # (camera-space corners, triangles) of the models that cast shadows, when they are on
         self.sun = self.sund = None  # the shadow map, made on first use; on the CPU, its pixels
+        self.spare: dict = {}  # GPU surfaces depth of field draws into, by what they hold and their size
         self.m = None  # its world-to-canvas matrix, set by Renderer._layer once it draws
         info = skia.ImageInfo.Make(self.w, self.h, skia.kRGBA_8888_ColorType, skia.kPremul_AlphaType)
         if self.gpu:
@@ -193,6 +265,7 @@ class Stage:
             self.box = None
         here = c.getLocalToDevice()
         r._stage, r._dev = self, self.ss
+        outside, r._span = r._span, [math.inf, 0.0]  # the depths of this stage's children, for its depth of field
         try:
             for child in kids:
                 if r._stopped:
@@ -211,7 +284,15 @@ class Stage:
                 self._clear(box)
         finally:
             r._stage, r._dev, self.child = None, 1.0, None
-        self._finish(c, render3d.fog(r, T), self._sun(r, T, shadows) if self.casters else None)
+            span, r._span = r._span, outside
+        dof = None
+        if r._focused is not None and span[1] > 0:
+            r._reach(np.array(span))
+            top = float(render3d.defocus(r._focused, np.array(span)).max())  # at the nearest or the farthest
+            if top > 0.5:
+                dof = (r._focused, top)
+                r.slow_dof = r.slow_dof or not self.gpu
+        self._finish(c, render3d.fog(r, T), self._sun(r, T, shadows) if self.casters else None, dof)
 
     def depth(self, xy: np.ndarray, q: np.ndarray, tris: np.ndarray):
         """Draw the depth of triangles tris, whose corners are at xy (stage px) with 1/w q, in order: each one
@@ -444,9 +525,10 @@ class Stage:
             for a in arrays:
                 a[y0:y1, x0:x1] = 0
 
-    def _finish(self, c: skia.Canvas, fg=None, sun=None):
-        """Lay the merged children on c at the frame's resolution, darkened where shadows fall (sun, from _sun) and
-        through fog fg, when there are any."""
+    def _finish(self, c: skia.Canvas, fg=None, sun=None, dof=None):
+        """Lay the merged children on c at the frame's resolution, darkened where shadows fall (sun, from _sun),
+        through fog fg and blurred out of focus (dof: the camera's depth of field and the most any pixel blurs),
+        when there are any."""
         sampling = skia.SamplingOptions(skia.FilterMode.kLinear) if self.ss > 1 else skia.SamplingOptions()
         ss = self.ss
         if self.gpu:
@@ -466,10 +548,13 @@ class Stage:
                 self._fog_cpu(px, self.outd[y0:y1, x0:x1], fg)
             img = skia.Image.fromarray(px, skia.kRGBA_8888_ColorType, skia.kPremul_AlphaType)
             src = skia.Rect(0, 0, x1 - x0, y1 - y0)
+            if dof is not None:  # at 1x from here
+                img, (y0, y1, x0, x1) = self._defocus_cpu(px, self.outd[y0:y1, x0:x1], y0, x0, *dof)
+                src, ss, sampling = skia.Rect(0, 0, x1 - x0, y1 - y0), 1, skia.SamplingOptions()
         c.save()
         c.resetMatrix()
         dst = skia.Rect(x0 / ss, y0 / ss, x1 / ss, y1 / ss)
-        if self.gpu and (fg is not None or sun is not None):
+        if self.gpu and (fg is not None or sun is not None or dof is not None):
             to = skia.Matrix.Scale(1 / ss, 1 / ss)
             colour = img.makeShader(skia.TileMode.kClamp, skia.TileMode.kClamp, sampling, to)
             depth = self.accd.makeImageSnapshot().makeShader(skia.TileMode.kClamp, skia.TileMode.kClamp,
@@ -484,10 +569,157 @@ class Stage:
                 b.setUniform("fogCol", col)
                 b.setUniform("fog", [near, max(far - near, 1e-6), amt, focus * 16777215.0 / QMAX])
                 colour = b.makeShader()
+            if dof is not None:
+                colour = self._defocus_gpu(colour, depth, *dof)
             c.drawRect(dst, skia.Paint(Shader=colour))
         else:
             c.drawImageRect(img, src, dst, sampling)
         c.restore()
+
+    # ---- depth of field -----------------------------------------------------------------------------------------
+    def _defocus_gpu(self, colour: skia.Shader, depth: skia.Shader, dof: tuple, top: float) -> skia.Shader:
+        """The stage at 1x (colour, with its shadows and fog) blurred by the depth of each pixel."""
+        W, H = self.w // self.ss, self.h // self.ss
+        sharp = self._surface(W, H, "sharp")
+        sharp.getCanvas().drawPaint(skia.Paint(Shader=colour, BlendMode=skia.BlendMode.kSrc))
+        near, ap, focus = dof
+        b = skia.RuntimeShaderBuilder(_effect("coc"))
+        b.setChild("accd", depth)
+        b.setUniform("lens", [16777215.0 / QMAX * focus, near, ap / 1000.0, top])
+        coc = self._surface(W, H, "coc")
+        coc.getCanvas().drawPaint(skia.Paint(Shader=b.makeShader(), BlendMode=skia.BlendMode.kSrc))
+        return self._defocused(sharp.makeImageSnapshot(), coc.makeImageSnapshot(), top)
+
+    def _defocus_cpu(self, px: np.ndarray, depth: np.ndarray, y0: int, x0: int, dof: tuple, top: float):
+        """The stage's pixels px (premultiplied, at ss, top left at stage pixel (x0, y0), depths `depth`) at 1x and
+        blurred by the depth of each, as _defocus_gpu does: the copies and the spread blur with Skia, the mix in
+        float32 (a runtime shader on the CPU took 900 ms a 1080p frame). Over the pixels that hold something and as
+        far round them as a blur reaches. Returns the image and its (y0, y1, x0, x1) in frame pixels."""
+        ss, W, H = self.ss, self.w // self.ss, self.h // self.ss
+        h, w = depth.shape[0] // ss, depth.shape[1] // ss
+        Y0, X0 = y0 // ss, x0 // ss
+        # As far round as a blur reaches, from a corner on the grid of the smallest copy, so its halves fall on
+        # the same frame pixels as the GPU's.
+        pad, step = int(math.ceil(3 * top)) + 2, 2 ** self._halvings(top)
+        a0, b0 = max(0, Y0 - pad) // step * step, max(0, X0 - pad) // step * step
+        a1, b1 = min(H, Y0 + h + pad), min(W, X0 + w + pad)
+        sharp = np.zeros((a1 - a0, b1 - b0, 4), np.uint8)
+        sharp[Y0 - a0:Y0 - a0 + h, X0 - b0:X0 - b0 + w] = np.rint(
+            px.reshape(h, ss, w, ss, 4).mean((1, 3), dtype=np.float32))
+        nearest = depth.reshape(h, ss, w, ss).max((1, 3))
+        coc = np.zeros_like(sharp)
+        hit = nearest > 0
+        near, ap, focus = dof
+        D = np.float32(focus / QMAX) / nearest[hit]
+        sv = np.minimum(np.float32(ap / 1000.0) * np.abs(D - near) * near / np.maximum(D, 1), top) / top
+        part = coc[Y0 - a0:Y0 - a0 + h, X0 - b0:X0 - b0 + w]
+        part[hit] = np.stack([np.rint(sv * 255), np.where(D < near, np.rint(sv * 255), 0), np.zeros_like(sv),
+                              np.full_like(sv, 255)], 1).astype(np.uint8)
+        image = lambda a: skia.Image.fromarray(a, skia.kRGBA_8888_ColorType, skia.kPremul_AlphaType)  # noqa: E731
+        sh = self._defocused(image(sharp), image(coc), top, raw=True)
+        surf = skia.Surface.MakeRaster(skia.ImageInfo.Make(b1 - b0, a1 - a0, skia.kRGBA_8888_ColorType,
+                                                           skia.kPremul_AlphaType))
+
+        def flat(shader) -> np.ndarray:
+            surf.getCanvas().drawPaint(skia.Paint(Shader=shader, BlendMode=skia.BlendMode.kSrc))
+            return surf.makeImageSnapshot().toarray(colorType=skia.kRGBA_8888_ColorType,
+                                                    alphaType=skia.kPremul_AlphaType)
+
+        k, sp = coc, flat(sh["spread"]).astype(np.float32) / 255
+        s = np.where(k[..., 3] > 0, k[..., 0] / np.float32(255),
+                     np.where(sp[..., 3] > 0.004, sp[..., 0] / np.maximum(sp[..., 3], 1e-6), 0))
+        s = np.maximum(s, flat(sh["fore"])[..., 1] / np.float32(255))
+        seg = np.searchsorted(np.array(LEVELS[1:-1], np.float32), s, side="left")
+        copies = {0: sharp.astype(np.float32)}
+        out = np.zeros(sharp.shape, np.float32)
+        for i in range(4):
+            sel = seg == i
+            if not sel.any():
+                continue
+            for j in (i, i + 1):
+                if j not in copies:  # the blurred part, and the pixel's own colour where it has less than all
+                    copies[j] = flat(sh[f"b{j}"]) + (1 - flat(sh[f"w{j}"])[..., 3:] / np.float32(255)) * copies[0]
+            t = ((s[sel] - LEVELS[i]) / (LEVELS[i + 1] - LEVELS[i]))[:, None]
+            out[sel] = copies[i][sel] * (1 - t) + copies[i + 1][sel] * t
+        return image(np.clip(np.rint(out), 0, 255).astype(np.uint8)), (a0, a1, b0, b1)
+
+    @staticmethod
+    def _halvings(sigma: float) -> int:
+        """How many times to halve an image before blurring it by sigma px, which keeps the blur 2 to 4 of its px:
+        a 1080p blur on the CPU took 450 ms at full size and 33 at a quarter."""
+        return max(0, int(math.floor(math.log2(max(sigma, 2.0) / 2.0))))
+
+    def _defocused(self, sharp: skia.Image, coc: skia.Image, top: float, raw: bool = False):
+        """The _DOF shader over the stage at 1x (sharp) and its blur map (coc), or, with raw, its children by name."""
+        lin, exact = skia.SamplingOptions(skia.FilterMode.kLinear), skia.SamplingOptions()
+        clamp = skia.TileMode.kClamp
+        kids = {"sharp": sharp.makeShader(clamp, clamp, exact), "coc": coc.makeShader(clamp, clamp, exact)}
+        chains = {"sharp": [sharp], "coc": [coc]}  # each image and its halves, as many as a blur has needed
+
+        def halved(src: str, n: int) -> skia.Image:
+            chain = chains[src]
+            while len(chain) <= n:  # each half the size of the one before, each pixel the mean of four
+                i = len(chain)
+                lw, lh = chain[0].width() / 2 ** i, chain[0].height() / 2 ** i
+                half = self._surface(math.ceil(lw), math.ceil(lh), (src, i))
+                half.getCanvas().clear(skia.ColorTRANSPARENT)
+                half.getCanvas().drawImageRect(chain[-1], skia.Rect(0, 0, lw * 2, lh * 2), skia.Rect(0, 0, lw, lh),
+                                               lin)
+                chain.append(half.makeImageSnapshot())
+            return chain[n]
+        jobs = [(name, sigma, halved("coc", self._halvings(sigma)), self._halvings(sigma))
+                for name, sigma in (("spread", top / 2), ("fore", top / 4))]
+        for i, f in enumerate(LEVELS[1:], 1):
+            n = self._halvings(top * f)
+            b, w = self._matte(halved("sharp", n), halved("coc", n), f, i)
+            jobs += [(f"b{i}", top * f, b, n), (f"w{i}", top * f, w, n)]
+        for name, sigma, img, n in jobs:
+            soft = self._surface(img.width(), img.height(), (name, "blur"))
+            soft.getCanvas().clear(skia.ColorTRANSPARENT)
+            g = sigma / 2 ** n
+            grow = skia.ImageFilters.Dilate(top / 2 ** (n + 1), top / 2 ** (n + 1)) if name == "fore" else None
+            soft.getCanvas().drawImage(img, 0, 0, exact,
+                                       skia.Paint(ImageFilter=skia.ImageFilters.Blur(g, g, clamp, grow)))
+            kids[name] = soft.makeImageSnapshot().makeShader(clamp, clamp, lin, skia.Matrix.Scale(2 ** n, 2 ** n))
+        if raw:
+            return kids
+        b = skia.RuntimeShaderBuilder(_effect("dof"))
+        for name, shader in kids.items():
+            b.setChild(name, shader)
+        return b.makeShader()
+
+    def _matte(self, colour: skia.Image, coc: skia.Image, f: float, i: int) -> tuple[skia.Image, skia.Image]:
+        """What of colour goes into the copy blurred by f of the most blur, and how much of it there is (_MATTE),
+        from the blur map coc at the same size."""
+        if self.gpu:
+            out = []
+            for cover in (0.0, 1.0):
+                b = skia.RuntimeShaderBuilder(_effect("matte"))
+                b.setChild("colour", colour.makeShader(skia.SamplingOptions()))
+                b.setChild("blur", coc.makeShader(skia.SamplingOptions()))
+                b.setUniform("lv", [f, cover])
+                surf = self._surface(colour.width(), colour.height(), ("matte", i, cover))
+                surf.getCanvas().drawPaint(skia.Paint(Shader=b.makeShader(), BlendMode=skia.BlendMode.kSrc))
+                out.append(surf.makeImageSnapshot())
+            return out[0], out[1]
+        kind = dict(colorType=skia.kRGBA_8888_ColorType, alphaType=skia.kPremul_AlphaType)
+        c, k = colour.toarray(**kind).astype(np.float32), coc.toarray(**kind).astype(np.float32) / 255
+        ka = k[..., 3]
+        t = np.clip((np.where(ka > 0, k[..., 0] / np.maximum(ka, 1e-6), 0) - f / 4) / (f / 4), 0, 1)
+        m = (1 - ka) + ka * t * t * (3 - 2 * t)
+        image = lambda a: skia.Image.fromarray(np.ascontiguousarray(np.clip(np.rint(a), 0, 255).astype(np.uint8)),
+                                               skia.kRGBA_8888_ColorType, skia.kPremul_AlphaType)  # noqa: E731
+        return image(c * m[..., None]), image(np.repeat(m[..., None] * 255, 4, 2))
+
+    def _surface(self, w: int, h: int, what) -> skia.Surface:
+        """A surface to draw into: on the GPU kept from frame to frame (each use draws all of it), on the CPU new."""
+        info = skia.ImageInfo.Make(w, h, skia.kRGBA_8888_ColorType, skia.kPremul_AlphaType)
+        if not self.gpu:
+            return skia.Surface.MakeRaster(info)
+        key = (what, w, h)
+        if key not in self.spare:
+            self.spare[key] = skia.Surface.MakeRenderTarget(self.ctx, skia.Budgeted.kNo, info, 0)
+        return self.spare[key]
 
     @staticmethod
     def _fog_cpu(px: np.ndarray, depth: np.ndarray, fg: tuple):

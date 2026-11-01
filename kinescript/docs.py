@@ -214,7 +214,15 @@ DEPTH AND CAMERA (3D)
               pan from it. Keyframes between points and ids pan across: [[0, "logo"], [2, "title"]].
               shake: px, or {"amount": 8, "speed": 1.5, "seed": 0}: a handheld wobble, smooth noise that
               turns the view by up to about amount px, speed times a second. amount animates.
-              check warns (camera-inside-model) when the camera is inside a model.
+              aperture and focus: depth of field. aperture is px of blur per 1000 px from the focus
+              plane (12 is gentle, 40 strong); far layers blur up to aperture times the focus distance
+              over 1000, near ones more, as a lens does, never past 48 px. focus is a z (px toward the
+              camera from what it looks at; 0, the default, is the target or z 0) or a layer id, and
+              keyframes between them pull focus: [[0, "cup"], [2, "title"]]. Both animate. A flat layer
+              or a model blurs whole, by the depth of its middle; a stage blurs each pixel by its own
+              depth, which on the CPU is slow (check warns: slow-depth-of-field).
+              check warns (camera-inside-model) when the camera is inside a model, and
+              (focus-on-nothing) when the focus plane is nearer or farther than every layer.
   Camera moves:
     orbit       "target": "hero", "rotateY": [[0, -40], ["end", 40]]
     crane       "y": [[0, 0], ["end", -300]] rises with the view; add "rotateX": [[0, 0], ["end", 30]] to
@@ -223,6 +231,7 @@ DEPTH AND CAMERA (3D)
     dolly zoom  "fov": [[0, 20], ["end", 70]]: z 0 keeps its size while the far layers fall away, since
                 fov already moves the camera to keep z 0 framed
     handheld    "shake": 6, on top of any of these
+    rack focus  "aperture": 24, "focus": [[0.5, "cup"], [2, "title", "inOutSine"]]
   fog         top level: true, or {"color": "#0a0c10", "near": 1500, "far": 6000, "amount": 1}.
               Up to near px from the camera is clear; from there to far px everything mixes into
               color, up to amount. z 0 is (h / 2) / tan(fov / 2) px from the camera: 1484 at 1080p
