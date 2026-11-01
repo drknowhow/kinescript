@@ -166,6 +166,7 @@ LAYER TYPES (defaults in brackets)
   line      points [[x, y], [x, y], ...] (measured from the layer's x, y) stroke strokeWidth
             smooth closed
   path      d (SVG path data, e.g. "M0 0 L100 0") or points; fill stroke strokeWidth
+            fillRule [nonzero] (evenodd leaves holes where outlines overlap, as SVG's fill-rule)
             d also takes keyframes of paths and morphs through them, any path into any other:
             "d": [[0, "M0 0 L100 0 L50 90 Z"], [1, "M50 0 A50 50 0 1 1 49.9 0 Z"]]. Each piece
             pairs with the one its size in the other key and starts where its points move least;
@@ -218,6 +219,7 @@ LAYER TYPES (defaults in brackets)
             An .svg src draws as vectors, sharp at any size; its own size is its width and height,
             or its viewBox's. Text, <style> sheets, <symbol>, <image>, markers and an svg's own
             animation are left out (check warns svg-unsupported): turn text into paths when saving.
+            To animate its pieces one by one, use an svg layer.
             Frame by frame: frames in place of src, a pattern with the frame number in it
             ("run/run_%03d.png" or "run/run_####.png"), a glob ("run/*.png"), a folder of images
             or a list of files; or sheet {"src": "walk.png", "cols": 8, "rows": 2, "count": 14},
@@ -227,6 +229,22 @@ LAYER TYPES (defaults in brackets)
             missing-frames). The box is a frame's size, or a cell's. A file is decoded when it
             first shows and the last 64 stay decoded: a new 1080p PNG every frame took 34 ms a
             frame on an RTX 5060 Ti, one already decoded 4 ms.
+  svg       src (an .svg file) as a group of path layers, one for each path, rect, circle, ellipse,
+            line, polyline and polygon in it, with the file's transforms, fill, fill-rule, stroke
+            (width, caps, joins, dashes), opacity and linear and radial gradients. w, h (give one
+            and the other keeps the file's shape; neither: its own size) are numbers, since the
+            pieces are laid out once: animate scale to change its size. Without an x it stands
+            from its top left, as an image does; with one, at its middle. Each piece is named
+            <id>-<its id in the file> (<id>-1, <id>-2, ... for one without), and a <g> with an id
+            or an opacity becomes a group of its pieces. parts gives keys to the piece or group
+            with that id in the file, "*" to every shape: "parts": {"star": {"enter": "pop"},
+            "ring": {"draw": [[0, 0], [1, 1]]}, "*": {"stroke": "#f2f0e8"}}; check names an id the
+            file lacks (unknown-part). An enter with stagger brings the pieces on one by one.
+            Text, <style> sheets, <image>, clip paths, masks, filters, patterns, markers and an
+            svg's own animation are left out (check warns svg-unsupported); an image layer with
+            the same src draws most of them. A group whose layers all stand still is drawn once
+            and played back: an svg layer of 500 pieces draws in 1.5 ms a frame on an RTX 5060 Ti,
+            6.9 ms piece by piece.
   video     src, trim [start, end] (seconds in the source file), speed [1] (any number above 0),
             volume [1] (a number; 0 mutes), loop, w, h [canvas size], fit, zoom, focus, radius.
             Its sound is mixed in at the clip's speed and stops at the trim end unless loop is true.
@@ -713,8 +731,9 @@ COMMANDS
                                   (read-time), a character no installed font has
                                   (missing-glyph), Arabic drawn letter by letter
                                   (unjoined-letters), colour emoji or spaced-out letters
-                                  in 3D text (unshaped-3d-text), an svg with parts that are
-                                  not drawn, such as text (svg-unsupported), or a video, image
+                                  in 3D text (unshaped-3d-text), an svg in an image or svg
+                                  layer with parts that are not drawn, such as text
+                                  (svg-unsupported), or a video, image
                                   or shader more than half off the canvas for 1 s or more
                                   (media-offscreen).
                                   With sound (it is

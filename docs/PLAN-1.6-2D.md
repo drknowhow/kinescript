@@ -281,6 +281,14 @@ Status (2026-11-01): moves to 1.6.1 (decision 1).
   `<symbol>`, `<image>`, markers or `<switch>`, and follows `xlink:href` only, so plain `href` is rewritten to it;
   `svg-unsupported` names what it leaves out. Textures and particle sprites take the svg as pixels. The `svg` layer,
   the picture cache and `svg-500` come in the second PR.
+  Status (2026-11-01): the svg layer in its own PR, with `svg.json`. Changes from the bullet: it reads stroke caps,
+  joins and dashes, fill-rule (path layers gain `fillRule`), `<use>`, `<symbol>` and nested `<svg>` viewports, and
+  `hsl()` colours, which `SVGDOM` does not; `<style>` sheets stay out. Pieces are path layers centred on their own
+  bounds, so they turn and scale about their middles. The picture cache records any group whose layers are shapes and
+  groups with constant keys, from the frame each one's enter ends to the frame its exit starts; a layer's fading
+  offscreen layer is kept in the picture by a colour in its paint, since a picture folds an alpha-only layer into
+  the one draw inside it and rounds differently. `svg-500` draws in 1.5 ms a frame on the GPU (6.9 ms without the
+  cache) against the 2 ms target.
 
 ### Phase 6: motion library
 

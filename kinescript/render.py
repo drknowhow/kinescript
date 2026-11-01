@@ -46,6 +46,7 @@ BLENDS = {"normal": skia.BlendMode.kSrcOver, "multiply": skia.BlendMode.kMultipl
           "hardLight": skia.BlendMode.kHardLight, "colorDodge": skia.BlendMode.kColorDodge,
           "colorBurn": skia.BlendMode.kColorBurn, "exclusion": skia.BlendMode.kExclusion, "hue": skia.BlendMode.kHue,
           "saturation": skia.BlendMode.kSaturation, "luminosity": skia.BlendMode.kLuminosity}
+STILL = ("rect", "circle", "ellipse", "path", "polygon", "group")  # what a group's picture may hold (Renderer._rest)
 SAMPLING = skia.SamplingOptions(skia.FilterMode.kLinear, skia.MipmapMode.kNone)
 NEAREST = skia.SamplingOptions(skia.FilterMode.kNearest, skia.MipmapMode.kNone)  # an image that is "pixelated"
 # Video frames arrive at source size and upscale here. Catmull-Rom interpolates (a 1:1 draw is
@@ -702,6 +703,8 @@ class Renderer:
         self._straight = None  # (effect, surface) straightening blurred transparent frames on the GPU
         self._frame_t: float | None = None  # while drawing a motion-blur sub-frame, the time of its frame
         self._blended: dict[str, bool] = {}  # group id -> whether a layer inside it has a blend mode
+        self._rests: dict[str, list] = {}  # group id -> [from, to, its children's picture or None] or [] (_still)
+        self._recording = False  # drawing a group's children into its picture (_still)
         self._ink: skia.Rect | None = None  # track: device bounds of the strokes the layer being drawn made
         self._alpha = 1.0  # the opacity of the layer being drawn when its paint carries it (_one_draw), else 1
         self._cf: skia.ColorFilter | None = None  # likewise its fog
@@ -1339,6 +1342,9 @@ class Renderer:
                 if work:  # a layer the size of the clip, which is the frame unless a group clips it
                     clip = c.getDeviceClipBounds()
                     self.filtered += work * clip.width() * clip.height()
+                if self._recording:  # a picture folds a layer whose paint is only alpha into the one draw inside
+                    # it, which rounds differently; a layer paint's colour is not drawn, and with one it stays a layer
+                    paint.setColor4f(skia.Color4f(1.0, 1.0, 1.0, alpha))
                 c.saveLayer(None, paint)
         if box is not None:
             bx, by, bw, bh = box
@@ -1386,13 +1392,71 @@ class Renderer:
                 if L.raw.get("combine"):
                     inv = skia.Matrix()
                     self._capture = (inv, []) if c.getTotalMatrix().invert(inv) else None
-                for child in kids:
+                pic = self._still(L, T, parent_alpha * alpha)
+                if pic is not None:
+                    c.drawPicture(pic)
+                for child in kids if pic is None else ():
                     if self._stopped:
                         break
                     self._layer(c, child, T, parent_alpha * alpha)
                 if L.raw.get("combine"):
                     self._combine(c, L, t, g, box, reveal, outer_capture)
             self._frame_t = frame_t
+
+    def _still(self, L: Layer, T: float, parent_alpha: float) -> skia.Picture | None:
+        """Group L's children as a picture recorded the first time it is drawn, on frames when every layer in it
+        draws as it did then (_rest) and nothing needs them one by one: boxes, a combining group, depth, a copy, a
+        stop. The picture holds the same draws, so the frame is the same bytes; svg-500's 500 pieces take 6.9 ms a
+        frame on the GPU drawn layer by layer and 1.5 ms played back."""
+        if (self.track or self._capture is not None or self._m3d is not None or self._ops is not None
+                or self._copy is not None or self.stop_at is not None or self.stop_after is not None
+                or self._recording):
+            return None
+        rest = self._rests.get(L.id)
+        if rest is None:
+            rest = self._rests[L.id] = self._rest(L)
+        F = self._frame_t
+        if not rest or not rest[0] <= T < rest[1] or F is not None and not rest[0] <= F < rest[1]:
+            return None
+        if rest[2] is None:
+            rec = skia.PictureRecorder()
+            rc = rec.beginRecording(skia.Rect.MakeLTRB(-1e7, -1e7, 1e7, 1e7))
+            self._recording = True
+            try:
+                for child in L.children:
+                    self._layer(rc, child, T, parent_alpha)
+            finally:
+                self._recording = False
+            rest[2] = rec.finishRecordingAsPicture()
+        return rest[2]
+
+    def _rest(self, L: Layer) -> list:
+        """[from, to, None]: the scene times in which every layer inside group L draws the same on each frame (none
+        when to is not after from), or [] when one never does. Each is a shape or a group with constant keys, after
+        its enter (its group's staggered one too) and before its exit, with nothing that draws it apart from the rest:
+        a mask, an effect, a blend, repeat, a route, rough, a morph or a clock."""
+        if L.clock is not None or L.raw.get("combine") or not L.children:
+            return []
+        lo, hi, todo = -math.inf, math.inf, list(L.children)
+        while todo:
+            K = todo.pop()
+            raw = K.raw
+            if (K.type not in STILL or K.clock is not None or K.copies is not None or K.along is not None
+                    or K.mask is not None or K.looks is not None or K.warp is not None or K.rough is not None
+                    or K.morph is not None or not all(p.static for p in K.props.values())
+                    or float(K.get("blur", 0.0) or 0.0) or raw.get("shadow") or raw.get("fx")
+                    or raw.get("blend") not in (None, "normal") or raw.get("combine")):
+                return []
+            lo, hi = max(lo, K.t_in), min(hi, K.t_out)
+            # 1e-9 s inside each edge, so that time's rounding never puts a layer still moving in the window
+            if K.enter:
+                lo = max(lo, K.t_in + K.enter.dur + 1e-9)
+            if K.turn is not None:
+                lo = max(lo, K.parent.t_in + K.turn + K.parent.enter.dur + 1e-9)
+            if K.exit:
+                hi = min(hi, K.t_out - K.exit.dur - 1e-9)
+            todo.extend(K.children)
+        return [lo, hi, None]
 
     def _note(self, c, L: Layer, g, box, drawn, alpha, parent_alpha, facing, rect: skia.Rect | None = None):
         """For boxes (track): where L landed on the frame, its anchor, opacity and scale; rect, when given, is where
@@ -2112,6 +2176,9 @@ class Renderer:
         """Fill then stroke. 'draw' (0..1) trims the stroke and fades the fill with it."""
         if L.rough is not None:
             path = self._rough(L, path)
+        if L.raw.get("fillRule") == "evenodd":  # where its outlines overlap, holes
+            path = skia.Path(path)
+            path.setFillType(skia.PathFillType.kEvenOdd)
         amt = max(0.0, min(1.0, float(g("draw")) * reveal))
         has_stroke = L.raw.get("stroke") is not None or self._own(L, "stroke") is not None
         fp = self._fill_paint(L, g, box, alpha=amt * self._alpha,

@@ -246,6 +246,8 @@ def expand(raw, user: dict, theme: dict, scene=None):
         return raw
     if raw.get("type") == "sequence":
         return _sequence(raw)
+    if raw.get("type") == "svg":
+        return _svg(raw, scene)
     name = raw.get("use")
     if not name:
         return raw
@@ -292,6 +294,41 @@ _CLIP_KEYS = ("fit", "volume", "w", "h", "x", "y", "anchor")
 TRANSITION_DUR = 0.5  # seconds, when a transition gives a type but no dur
 _ENTERS = {"fade": "fade", "wipe": "wipe-right", "slide": "left", "zoom": "zoom", "blur": "blur"}
 _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".svg")  # as schema.IMAGE_EXTS
+
+
+def _svg(raw: dict, scene) -> dict:
+    """An svg layer -> a group of path layers, one for each shape in its file (svgdoc.layer). A file that cannot be
+    read is an error on the layer, an id in parts that the file does not have another; what the layer leaves out of
+    the file is a warning."""
+    from . import svgdoc
+    from .schema import suggest
+    _counter[0] += 1
+    lid = str(raw.get("id") or f"svg{_counter[0]}")
+    src = Path(scene.path(raw["src"]) if scene is not None else raw["src"])
+    empty = {k: v for k, v in raw.items() if k in _PASS or k in ("x", "y", "id")} | {"type": "group", "id": lid}
+
+    def note(level, code, message, fix):
+        if scene is None:
+            raise ValueError(f"layer '{lid}': {message}; {fix}")
+        scene.note(level, code, lid, message, fix)
+    if not src.is_file():
+        note("error", "media-missing", f"svg src not found: {src}", "paths are relative to the scene file")
+        return empty
+    try:
+        group, skipped, unknown = svgdoc.layer(dict(raw, id=lid), src)
+    except (OSError, ValueError) as e:
+        note("error", "bad-media", f"svg src {e}", "save it again as svg from a drawing program")
+        return empty
+    if skipped:
+        note("warning", "svg-unsupported", f"svg src {src.name} has {', '.join(n for v in skipped.values() for n in v)}"
+             ", which the svg layer leaves out", "; ".join(dict.fromkeys(svgdoc.SKIPPED[k] for k in skipped)))
+    ids = sorted({e.get("id") for e in svgdoc.read(src).iter() if e.get("id")}) if unknown else []
+    for k in unknown:
+        close = suggest(str(k), ids) if ids else None
+        note("error", "unknown-part", f"parts '{k}': {src.name} has no element with that id",
+             (f"did you mean '{close}'? " if close else "") + (f"its ids: {', '.join(ids[:20])}" if ids else
+                                                                "it has no ids"))
+    return group
 
 
 def _sequence(raw: dict) -> dict:

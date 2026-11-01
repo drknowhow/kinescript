@@ -18,6 +18,8 @@ from typing import NamedTuple
 import numpy as np
 import skia
 
+from . import svgdoc
+
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
 FFPROBE = shutil.which("ffprobe") or "ffprobe"
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -293,33 +295,8 @@ SVG_FIX = {"text": "turn text into paths (Inkscape: Path > Object to Path; Illus
            "foreignObject": "draw it with svg shapes",
            "feDropShadow": "drop the filter and give the layer a shadow",
            "animation": "an svg's own animation does not play: animate the layer instead"}
-_LENGTH = re.compile(r"\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)\s*(px|pt|pc|in|cm|mm|em|ex|%)?\s*", re.I)
-_PX = {"px": 1, "pt": 4 / 3, "pc": 16, "in": 96, "cm": 96 / 2.54, "mm": 96 / 25.4, "em": 16, "ex": 8}
 _START_TAG = re.compile(rb"<[A-Za-z][^>]*>")
 _HREF = re.compile(rb"(\s)href(\s*=)")
-
-
-def _svg_length(v) -> float | None:
-    """An svg width or height in px (96 to the inch), or None for one missing, a percentage or not above 0."""
-    m = _LENGTH.fullmatch(v or "")
-    if m is None or m.group(2) == "%":
-        return None
-    x = float(m.group(1)) * _PX[(m.group(2) or "px").lower()]
-    return x if 0 < x < math.inf else None
-
-
-def _svg_size(root: ET.Element) -> tuple[float, float]:
-    """The size an svg is drawn at, as a browser shows it in an <img>: its width and height; the viewBox's shape for
-    a missing one; the viewBox's size for both; 300 x 150 for what is still missing."""
-    w, h = _svg_length(root.get("width")), _svg_length(root.get("height"))
-    try:
-        vb = [float(x) for x in re.split(r"[\s,]+", (root.get("viewBox") or "").strip())]
-    except ValueError:
-        vb = []
-    if not (w and h) and len(vb) == 4 and vb[2] > 0 and vb[3] > 0:
-        aspect = vb[2] / vb[3]
-        return (w, w / aspect) if w else (h * aspect, h) if h else (vb[2], vb[3])
-    return w or 300.0, h or 150.0
 
 
 def _xlink(tag: re.Match) -> bytes:
@@ -345,7 +322,7 @@ def _vector(src: str, mtime: int, size: int) -> Vector:
         raise MediaError(f"cannot read svg {src}: it is <{root.tag.rsplit('}', 1)[-1]}>, not <svg>")
     found = {SVG_UNDRAWN.get(el.tag.rsplit("}", 1)[-1]) for el in root.iter() if isinstance(el.tag, str)}
     undrawn = tuple(k for k in SVG_FIX if k in found)
-    w, h = _svg_size(root)
+    w, h = svgdoc.size(root)
     # The reader follows xlink:href only; SVG 2 writes href (a <use>, a gradient taking another's stops).
     dom = skia.SVGDOM.MakeFromStream(skia.MemoryStream(skia.Data.MakeWithCopy(_START_TAG.sub(_xlink, data))))
     if dom is None:
