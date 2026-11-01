@@ -253,10 +253,25 @@ nine rounds: a floor reaching to just in front of the camera took eight.
 ### Phase 7: tooling and release
 
 - `kine look --depth` shows a stage's depth image; `kine look --wire` draws triangle edges over the frame.
-  Built on branch `look-depth-wire`, not merged: the renderer keeps each model's drawn triangle edges and each
-  stage's merged depth (the nearest of a frame pixel's samples) while `look` asks for them.
+  Merged (#69): the renderer keeps each model's drawn triangle edges and each stage's merged depth (the nearest of
+  a frame pixel's samples) while `look` asks for them.
 - Stress scenes `stage-16`, `textured-100k`, `skinned`, `repeat-1000` and `dof-stage`, each with frame time and
   peak memory in the 1.5 report.
+  Built on branch `stress-3d`, not merged: `textured-100k` (an .obj globe of 102,400 triangles with normals,
+  coordinates and a map_Kd image, turning under world light and `env`) and `dof-stage` (a stage of 10 models and
+  3 cards on a floor with shadows, focus pulled from the near row to the far row to the cards). `skinned` and
+  `repeat-1000` wait for Phase 5. Results in `docs/stress-test-1.5/`, 120 frames at 1080p each, render wall time
+  and peak memory of the render processes (development machine, 2026-10-31):
+
+  | scene | GPU, 4 workers | CPU, 2 workers |
+  |---|---|---|
+  | `models-30` | 2.60 s, 46 fps, 737 MB | 12.5 s, 10 fps, 294 MB |
+  | `stage-16` | 2.90 s, 41 fps, 736 MB | 42.2 s, 3 fps, 718 MB |
+  | `textured-100k` | 3.15 s, 38 fps, 999 MB | 41.9 s, 3 fps, 600 MB |
+  | `dof-stage` | 2.66 s, 45 fps, 1000 MB | 209.5 s, 0.6 fps, 1883 MB |
+
+  `kine check` of `dof-stage` takes 1.0 s on the GPU and 49.8 s on the CPU, where it warns
+  `slow-depth-of-field`.
 - Examples: `stage.json`, `product.json` (a textured glTF turntable under world lights with `env`, depth of field
   and a floor that takes its shadow), `character.json`, `cubes.json`.
 - README 3D section and its limitations line, `kine docs`, site/, CHANGELOG with measured numbers, version 1.5.0.

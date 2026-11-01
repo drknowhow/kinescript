@@ -20,6 +20,7 @@ import json
 import math
 import os
 import platform
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -29,6 +30,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MEDIA = ROOT / "examples" / "media"
+WORK = Path(tempfile.gettempdir()) / "kinescript-stress"  # where scenes that need their own files write them
 WORDS = ("motion", "written", "checked", "rendered", "frames", "scene", "layer", "cue", "agent", "render")
 
 
@@ -211,6 +213,52 @@ def stage_16() -> dict:  # 12 spinning rings and 4 turning cards that pass throu
                   camera={"rotateY": [[0, -14], ["end", 14]], "rotateX": [[0, 10], ["end", -6]]}, light="studio")
 
 
+def _globe_obj(lat: int = 160, lon: int = 320) -> str:
+    """A sphere of 2 x lat x lon triangles (102,400 by default) with normals and coordinates, as an .obj whose .mtl
+    maps globe.png onto it. Written to WORK; returns its path."""
+    WORK.mkdir(parents=True, exist_ok=True)
+    shutil.copy(MEDIA / "globe.png", WORK / "globe.png")
+    (WORK / "globe100k.mtl").write_text("newmtl map\nKd 1 1 1\nNs 300\nmap_Kd globe.png\n", encoding="utf-8")
+    lines = ["mtllib globe100k.mtl", "usemtl map"]
+    for i in range(lat + 1):
+        th = math.pi * i / lat
+        for j in range(lon + 1):
+            ph = 2 * math.pi * j / lon
+            x, y, z = math.sin(th) * math.cos(ph), math.cos(th), math.sin(th) * math.sin(ph)
+            lines += [f"v {x:.6f} {y:.6f} {z:.6f}", f"vn {x:.6f} {y:.6f} {z:.6f}", f"vt {j / lon:.6f} {1 - i / lat:.6f}"]
+    for i in range(lat):
+        for j in range(lon):
+            a, b = i * (lon + 1) + j + 1, (i + 1) * (lon + 1) + j + 1
+            lines += [f"f {a}/{a}/{a} {b + 1}/{b + 1}/{b + 1} {b}/{b}/{b}",
+                      f"f {a}/{a}/{a} {a + 1}/{a + 1}/{a + 1} {b + 1}/{b + 1}/{b + 1}"]
+    path = WORK / "globe100k.obj"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path.as_posix()
+
+
+def textured_100k() -> dict:  # one textured model of 102,400 triangles, turning, cut for its texture every frame
+    return _scene([{"id": "globe", "type": "model", "src": _globe_obj(), "x": "50%", "y": "50%", "h": 820,
+                    "rotateY": [[0, 0], [4, -180]], "rotate": 18, "shine": 0.5}],
+                  light={"preset": "studio", "follow": "world", "azimuth": -35, "elevation": 30}, env="studio")
+
+
+def dof_stage() -> dict:  # a stage with a floor taking shadows, models and cards in depth, and focus pulls
+    shapes = ("cube", "sphere", "cylinder", "cone", "torus")
+    kids = [{"id": "floor", "type": "rect", "y": 200, "w": 3000, "h": 2400, "radius": 40, "rotateX": 90,
+             "fill": "#2b3242"}]
+    kids += [{"id": f"m{n}", "type": "model", "shape": shapes[n % 5], "detail": "high", "r": 90, "w": 170, "h": 200,
+              "tube": 30, "x": -640 + (n % 5) * 320, "y": 60, "z": 350 - (n // 5) * 800,
+              "rotateY": [[0, 30 * n], [4, 30 * n + 120]], "fill": ("#ff633f", "#4a7dff", "#e8e2d4")[n % 3],
+              "shine": 0.6} for n in range(10)]
+    kids += [{"id": f"card{n}", "type": "rect", "x": -500 + n * 500, "y": -180, "z": -1400, "w": 400, "h": 260,
+              "radius": 24, "fill": "#363e51"} for n in range(3)]
+    return _scene([{"id": "stage", "type": "group", "x": "50%", "y": "50%", "sort": "pixel",
+                    "shadows": {"opacity": 0.45, "soft": 3}, "children": kids}],
+                  camera={"rotateX": 16, "rotateY": [[0, -10], ["end", 10]], "aperture": 30,
+                          "focus": [[0.3, "m2"], [1.8, "m7", "inOutSine"], [2.6, "m7"], [3.8, "card1", "inOutSine"]]},
+                  light={"preset": "studio", "follow": "world", "azimuth": -40, "elevation": 35})
+
+
 def captions_600() -> dict:
     cues = [[round(n * 0.05, 2), round(n * 0.05 + 0.05, 2), _sentence(n, 3)] for n in range(600)]
     return _scene([{"id": "cc", "type": "captions", "mode": "karaoke", "cues": cues},
@@ -256,6 +304,8 @@ SCENES = {
     "audio-40": (audio_40, ".mp4", "music bed, voice, 40 panned clicks, ducking, loudness target"),
     "models-30": (models_30, ".mp4", "30 lit primitives at high detail and 3 glTF rockets"),
     "stage-16": (stage_16, ".mp4", "a stage: 12 rings and 4 cards passing through them, merged by depth per pixel"),
+    "textured-100k": (textured_100k, ".mp4", "a textured .obj of 102,400 triangles turning under world light and env"),
+    "dof-stage": (dof_stage, ".mp4", "a stage of 10 models and 3 cards with floor shadows and focus pulls"),
     "captions-600": (captions_600, ".mp4", "600 karaoke cues and 200 pop cues in 30 s"),
     "odd-size": (odd_size, ".mp4", "1365x767 canvas into H.264 (even rounding)"),
     "gif": (gif_out, ".gif", "hello.json to GIF"),
@@ -354,6 +404,8 @@ def _packets(path: Path) -> int | None:
 
 
 def one(name: str, work: Path, scale: float) -> dict:
+    global WORK
+    WORK = work
     sys.path.insert(0, str(ROOT))
     import kinescript as k
     from kinescript import output, verify

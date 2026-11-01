@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `bench/stress.py` has two more 3D scenes: `textured-100k`, an .obj globe of 102,400 triangles with its map, and
+  `dof-stage`, a stage of 10 models and 3 cards with floor shadows and focus pulls. On the development machine's
+  GPU they render 120 frames at 1080p in 3.15 s and 2.66 s; their results, with `models-30` and `stage-16` on both
+  backends, are in `docs/stress-test-1.5/`.
 - `kine look --wire` draws every model's drawn triangles over the frames, after any cutting for textures, and
   `kine look --depth` dims the frames and shows each stage's depth image on them, nearer brighter over the range
   that frame holds; the JSON's `notes` say when no stage drew. The MCP `kine_look` tool takes `wire` and `depth`.

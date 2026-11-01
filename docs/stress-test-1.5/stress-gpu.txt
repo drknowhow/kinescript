@@ -1,0 +1,6 @@
+# v1.4.0-13-g3a4b47f-dirty · Intel64 Family 6 Model 198 Stepping 2, GenuineIntel · 20 threads · Python 3.14.4 · scale 1.0
+scene         frames  check check s render s    fps  wrk peak MB  out MB frames  status
+models-30        120    0/1    1.10     2.60     46    4     737    0.98    yes  ok
+stage-16         120    0/1    1.36     2.90     41    4     736    0.78    yes  ok
+textured-100k    120    0/0    1.08     3.15     38    4     999    0.39    yes  ok
+dof-stage        120    0/0    1.02     2.66     45    4    1000    0.55    yes  ok
