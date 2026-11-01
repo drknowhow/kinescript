@@ -22,7 +22,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SCENES = ["examples/3d.json", "examples/model.json", "examples/title3d.json", "examples/import.json",
           "examples/hello.json", "examples/edit.json", "marketing/promo.json", "stress:layers-2000",
           "stress:groups-deep", "stress:text-split", "stress:expressions", "stress:keys-dense", "stress:counters",
-          "stress:along-100", "stress:strokes-300", "stress:rough-200", "stress:combine-60"]
+          "stress:along-100", "stress:strokes-300", "stress:rough-200", "stress:combine-60",
+          "stress:morph-200"]
 SAMPLES = 5  # frames a scene, spread over its length
 
 # Run by each tree's own Python path: writes every sampled frame of every scene to one .npz.

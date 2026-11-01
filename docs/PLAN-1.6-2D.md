@@ -163,7 +163,7 @@ frames of the docs' outCubic bar recipe. The remap key is `timeRemap`, because `
   (`{"sweep": [0.5, 0.5], "stops": [...]}`), `angle` in degrees for a linear one, and gradients that animate: a fill
   keyframed between two gradient objects with the same number of stops mixes their points and colours.
 
-Status (2026-11-01): gradients (#89), then strokes, `rough` and `combine` in the PRs after. Changes from the bullets above: a gradient
+Status (2026-11-01): gradients (#89), then strokes, `rough`, `combine` and morphing in the PRs after. Changes from the bullets above: a gradient
 animates into one of the same kind as well as the same stop count, since a linear and a sweep gradient have no
 points in common to mix. `dash` marks out the strokes of images and videos too, and `radius` takes four values on
 groups, images and videos as well as rects. `strokes-300` draws in 6.2 ms a frame on the GPU, 3.2 ms more than its
@@ -173,7 +173,9 @@ corners that animate (a constant corner is cached and costs 0.1 ms) and 0.5 ms f
 without it, since a layer keeps its last wobbled path while its seed and outline stay the same. `combine` keeps
 each partial merge and starts again from the first child that changed, so a hole moving through a badge with a
 word cut out costs one path operation a frame; `combine-60` draws in 5.9 ms, 4.0 ms more than its layers drawn as
-themselves. A combined group draws with `dash` and `rough` as a shape does.
+themselves. A combined group draws with `dash` and `rough` as a shape does. Morphing resamples each piece to
+points 1.5 px apart rather than to cubic segments, draws each key as written on its own time, and mixes a pair
+with Skia's Path.interpolate; `morph-200` draws in 2.2 ms a frame on the GPU against the 8 ms target.
 
 ### Phase 3: masks, mattes and effects
 

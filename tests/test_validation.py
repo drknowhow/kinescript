@@ -322,6 +322,19 @@ def test_dash_corner_and_four_corner_radius_are_checked(layer, words):
     assert words in one_error(scene([layer]))["message"]
 
 
+def test_d_keyframes_are_checked_and_differing_pieces_noted():
+    path = {"id": "p", "type": "path", "fill": "#fff"}
+    for d, words in (([[0, "M0 0 L10 0 Z"], [1, "M0 0 Q nope"]], "d at keyframe 2"),
+                     ([[0, "M0 0 L10 0 Z"], [1, 40]], "d at keyframe 2 is 40"),
+                     ([[0, "M0 0 L10 0 Z"], ["soon", "M0 0 L20 0 Z"]], "keyframe 2 has time"),
+                     ({"from": "M0 0 L10 0 Z", "to": "M0 0 L20 0 Z"}, "keyframes of paths")):
+        e = one_error(scene([dict(path, d=d)]), "p")
+        assert words in e["message"], (d, e)
+    issues, s = load(scene([dict(path, d=[[0, "M0 0 H10 V10 Z"], [1, "M0 0 H10 V10 Z M2 2 H4 V4 Z"]])]))
+    assert s is not None and [i["code"] for i in issues] == ["morph-contours"], issues
+    assert len(s.by_id["p"].morph) == 2 and "morph" in s.by_id["p"].props
+
+
 def test_combine_is_checked_and_warns_about_what_it_leaves_out():
     disc = {"id": "d", "type": "circle", "r": 10}
     e = one_error(scene([{"id": "g", "type": "group", "combine": "weld", "children": [disc]}]), "g")

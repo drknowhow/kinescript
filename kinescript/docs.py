@@ -135,6 +135,10 @@ LAYER TYPES (defaults in brackets)
   line      points [[x, y], [x, y], ...] (measured from the layer's x, y) stroke strokeWidth
             smooth closed
   path      d (SVG path data, e.g. "M0 0 L100 0") or points; fill stroke strokeWidth
+            d also takes keyframes of paths and morphs through them, any path into any other:
+            "d": [[0, "M0 0 L100 0 L50 90 Z"], [1, "M50 0 A50 50 0 1 1 49.9 0 Z"]]. Each piece
+            pairs with the one its size in the other key and starts where its points move least;
+            a piece with no partner grows from, or shrinks into, the middle of the nearest one.
   arrow     x1 y1 x2 y2 bend [0] head [22] stroke strokeWidth
   strokes   on shapes, images and videos: dash [on, off, ...] px marks the stroke out as SVG's
             stroke-dasharray does; dashOffset slides it back along the stroke (animate it for

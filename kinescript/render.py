@@ -19,6 +19,7 @@ import skia
 
 from . import color as C
 from . import media, render3d, space, stage, svgpath
+from . import morph as M
 from . import presets as P
 from .presets import IDENT, Mods
 from .props import length, noise
@@ -585,6 +586,8 @@ class Renderer:
         # While a combining group draws its children: into its space, and the outlines they give instead of drawing
         self._capture: tuple[skia.Matrix, list] | None = None
         self._combos: dict = {}  # a combining group's id: (the outlines it merged, the merged path), the last one
+        self._morphs: dict = {}  # (layer id, key): that key and the next matched point for point (morph.match)
+        self._morphed: dict = {}  # layer id: (how far through its keys, the path there), the last one drawn
         self._routes: dict[str, tuple] = {}  # an along's path by layer (data) or route id: (path, measure, length)
         self._group_T: dict[str, float] = {}  # a group with a clock: the scene time it is drawn at, for its kids
         self._solid: dict[int, skia.Paint] = {}  # an antialiased fill paint for each colour (_fill_paint)
@@ -1652,8 +1655,32 @@ class Renderer:
             px, py = px + float(x), py + float(y)
         return px, py, math.degrees(math.atan2(ty, tx))
 
+    def _morph(self, L: Layer, g) -> skia.Path:
+        """A morphing path's d where its keys have got to: a key's own path on it, between two keys their matched
+        pair mixed (an ease that overshoots carries on past the key)."""
+        keys = L.morph
+        u = float(g("morph"))
+        i = min(max(int(math.floor(u)), 0), len(keys) - 2)
+        if len(keys) == 1 or u == i:
+            return keys[max(0, i)]
+        if u == i + 1:
+            return keys[i + 1]
+        last = self._morphed.get(L.id)
+        if last is not None and last[0] == u:
+            return last[1]
+        pair = self._morphs.get((L.id, i))
+        if pair is None:
+            pair = self._morphs[(L.id, i)] = M.match(keys[i], keys[i + 1])
+        out = skia.Path()
+        pair[0].interpolate(pair[1], 1.0 - (u - i), out)
+        self._morphed[L.id] = (u, out)
+        return out
+
     def _path(self, L: Layer, t, T, g) -> skia.Path:
         ty = L.type
+        if L.morph is not None:
+            p = self._morph(L, g)
+            return self._corner(p, g) if "corner" in L.props else p
         static = all(L.props[k].static for k in ("x1", "y1", "x2", "y2", "bend", "r", "sides", "inner") if k in L.props)
         rounds = "corner" in L.props and not L.props["corner"].static  # a corner that changes: kept unrounded
         key = (L.id, "unrounded") if rounds else L.id

@@ -275,6 +275,50 @@ def test_check_does_not_read_combined_text_for_contrast():
     assert not [i for i in issues if i["code"] in ("contrast", "text-hidden")], issues
 
 
+TRIANGLE, DISC = "M0 -70 L70 50 L-70 50 Z", "M0 -70 A70 70 0 1 1 -0.1 -70 Z"
+SQUARE, RING = "M-60 -60 H60 V60 H-60 Z", "M-70 0 A70 70 0 1 0 70 0 A70 70 0 1 0 -70 0 Z M-35 0 A35 35 0 1 1 35 0 "     "A35 35 0 1 1 -35 0 Z"
+
+
+def _morphing(d, **kw):
+    return dict({"id": "m", "type": "path", "x": 160, "y": 90, "fill": "#ffffff", "d": d}, **kw)
+
+
+def test_a_path_morphs_through_its_d_keyframes_and_is_each_key_on_its_time():
+    spec = scene([_morphing([[0, TRIANGLE], [1, DISC, "linear"], [2, SQUARE]])], bg="#000000", duration=2)
+    r = Renderer(k.Scene(spec), backend="cpu")
+    for n, d in ((0, TRIANGLE), (30, DISC)):
+        assert np.array_equal(r.frame(n), _frame(scene([_morphing(d)], bg="#000000", duration=2), 0)), n
+    tri, disc = (_frame(scene([_morphing(d)], bg="#000000"), 0)[..., 0] > 128 for d in (TRIANGLE, DISC))
+    mid = r.frame(15)[..., 0] > 128
+    assert tri.sum() < mid.sum() < disc.sum() and (mid & tri).sum() > 0.9 * tri.sum()  # it grows from one to the other
+    assert np.array_equal(_frame(spec, 15)[..., 0] > 128, mid)  # a pure function of the frame
+    pair = r._morphs[("m", 0)]
+    r.frame(20)
+    assert r._morphs[("m", 0)] is pair  # matched once for the pair, then only mixed
+
+
+def test_a_shape_with_no_partner_grows_from_the_middle_and_open_paths_morph():
+    spec = scene([_morphing([[0, SQUARE], [1, RING, "linear"]])], bg="#000000", duration=1.5)
+    r = Renderer(k.Scene(spec), backend="cpu")
+    first, mid, last = (r.frame(n)[..., 0] > 128 for n in (0, 15, 30))
+    assert first[90, 160] and not mid[90, 160] and not last[90, 160] and mid[90, 160 + 25] and not last[90, 160 + 25]
+    wave = _morphing([[0, "M-100 0 L100 0"], [1, "M-100 0 C-40 -120 40 120 100 0", "linear"]], fill=None,
+                     stroke="#ffffff", strokeWidth=4)
+    f = _frame(scene([wave], bg="#000000", duration=1), 15)[..., 0]
+    assert f[90, 70:100].max() < 20 and f[:90, 110:140].max() > 200  # off the straight line, above it on the left
+
+
+def test_morph_matches_any_two_paths_point_for_point_from_where_they_move_least():
+    from kinescript import morph, svgpath
+    for a, b in ((TRIANGLE, DISC), (SQUARE, RING), ("M0 0 L100 50", "M0 0 Q50 -60 100 50"), (RING, TRIANGLE)):
+        pa, pb = morph.match(svgpath.parse(a), svgpath.parse(b))
+        assert pa.isInterpolatable(pb), (a, b)
+    turned = "M60 -60 V60 H-60 V-60 Z"  # the same square, started at another corner and drawn the other way
+    pa, pb = morph.match(svgpath.parse(SQUARE), svgpath.parse(turned))
+    a, b = (np.array([[p.x(), p.y()] for p in q.getPoints(q.countPoints())]) for q in (pa, pb))
+    assert np.abs(a - b).max() < 2  # each point stays where it is
+
+
 DASHED = {"id": "l", "type": "line", "points": [[20, 90], [300, 90]], "strokeWidth": 6, "cap": "butt",
           "stroke": "#ffffff", "dash": [20, 20]}
 

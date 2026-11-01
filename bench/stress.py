@@ -159,6 +159,18 @@ def combine_60() -> dict:  # 60 badges with a word cut out, half of them with a 
     return _scene(out)
 
 
+def morph_200() -> dict:  # 200 paths morphing triangle, circle, star and back, a tenth of a second apart
+    tri, disc = "M0 -30 L30 22 L-30 22 Z", "M0 -30 A30 30 0 1 1 -0.1 -30 Z"
+    star = "M0 -32 L8 -10 L30 -10 L12 4 L19 26 L0 13 L-19 26 L-12 4 L-30 -10 L-8 -10 Z"
+    out = []
+    for n in range(200):
+        a = round((n % 20) * 0.05 + (n // 20) * 0.02, 3)
+        out.append({"id": f"m{n}", "type": "path", "x": 150 + (n % 20) * 85, "y": 130 + (n // 20) * 88,
+                    "fill": ("#ff5a36", "#4a7dff", "#e8e2d0")[n % 3],
+                    "d": [[a, tri], [a + 1, disc], [a + 2, star], [a + 3, tri]]})
+    return _scene(out)
+
+
 def counters() -> dict:
     return _scene([{"id": f"c{n}", "type": "counter", "x": 120 + (n % 10) * 180, "y": 80 + (n // 10) * 100,
                     "size": 40, "value": {"from": 0, "to": 10 ** (1 + n % 6), "dur": 3.5}, "format": "{:,.0f}"}
@@ -436,6 +448,7 @@ SCENES = {
     "strokes-300": (strokes_300, ".mp4", "100 marching dashed paths that draw on, 100 stars rounding, 100 four-corner tabs"),
     "rough-200": (rough_200, ".mp4", "100 outlined cards boiling 8 times a second, 100 rough lines drawing on"),
     "combine-60": (combine_60, ".mp4", "60 badges with a word cut out, 30 with a hole moving through them too"),
+    "morph-200": (morph_200, ".mp4", "200 paths morphing triangle, circle, star and back"),
     "shaders": (shaders, ".mp4", "4 full-frame SkSL presets blended, grain and vignette"),
     "uhd-4k": (uhd_4k, ".mp4", "3840x2160: shader, split text, stroke draw, shadow, grade"),
     "long-120s": (long_120s, ".mp4", "3600 frames: worker split, segment joins"),
