@@ -363,6 +363,37 @@ def test_blend_modes_take_css_names():
     assert [s.by_id[i].raw["blend"] for i in "rqu"] == ["hardLight", "colorDodge", "luminosity"], issues
 
 
+def test_looks_take_true_a_number_a_colour_or_an_object():
+    issues, s = load(scene([rect(glow=12), dict(RECT, id="q", outline="#ff0000"), dict(RECT, id="u", innerShadow=True),
+                            dict(RECT, id="v", displace={"strength": 3, "size": 40}),
+                            dict(RECT, id="w", glow={"radius": 8, "colour": "#ffffff"}, displace=False)]))
+    assert s.by_id["r"].looks == {"glow": {"size": 12}} and s.by_id["q"].looks == {"outline": {"color": "#ff0000"}}
+    assert s.by_id["u"].looks == {"innerShadow": {}} and s.by_id["u"].warp is None
+    assert s.by_id["v"].warp == {"amount": 3, "scale": 40} and s.by_id["v"].looks is None
+    assert s.by_id["w"].looks == {"glow": {"size": 8, "color": "#ffffff"}} and "displace" not in s.by_id["w"].raw
+    assert {i["code"] for i in issues} == {"renamed-key"}, issues
+
+
+def test_a_models_glow_and_outline_keep_their_3d_meanings():
+    issues, s = load(scene([{"id": "m", "type": "model", "shape": "box", "glow": 0.5, "outline": True},
+                            {"id": "g", "type": "group", "glow": 20, "children": [{"id": "n", "type": "model", "shape": "sphere"}]}]))
+    assert s.by_id["m"].looks is None and s.by_id["m"].raw["glow"] == 0.5 and "edges" in s.by_id["m"].raw, issues
+    assert s.by_id["g"].looks == {"glow": {"size": 20}}, issues
+
+
+@pytest.mark.parametrize("looks, code, words", [
+    ({"innerShadow": "deep"}, "bad-value", "innerShadow is"), ({"outline": {"width": 4, "dash": 3}}, "unknown-key",
+                                                                "outline: unknown key 'dash'"),
+    ({"displace": {"scale": 0}}, "bad-value", "displace scale is 0"),
+    ({"displace": {"seed": 1.5}}, "bad-value", "displace seed is 1.5"),
+    ({"displace": {"speed": "fast"}}, "bad-value", "displace speed is"),
+    ({"glow": {"color": "glowing"}}, None, "glow color"),
+])
+def test_looks_are_checked(looks, code, words):
+    e = one_error(scene([rect(**looks)]), "r")
+    assert (code is None or e["code"] == code) and words in e["message"] + e["fix"], e
+
+
 LENS = {"id": "lens", "type": "circle", "r": 20}
 
 

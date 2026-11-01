@@ -78,6 +78,17 @@
   `masks-50` stress scene (25 gradient cards seen through words, 25 through a feathered lens moving over them) draws
   a 1080p frame in 5.4 ms on the GPU, against 2.0 ms for the same layers unmasked, and in 0.46 s on the CPU against
   0.06 s; the 25 feathers' blurs are 0.30 s of that.
+- Layer effects: `glow` (a blurred copy behind the layer, in its own colours or the glow's: `{"color": "#ff633f",
+  "size": 24, "amount": 1}`, or `"glow": 24`), `outline` (a round line outside the layer's edge: `{"width": 4,
+  "color": "#000000"}`), `innerShadow` (`{"x": 0, "y": 4, "blur": 12, "color": "#00000080"}`) and `displace`
+  (`{"amount": 8, "scale": 60, "speed": 1, "seed": 0}`: noise waves `scale` px across move the layer's pixels by up
+  to `amount` px and slide `speed` waves a second). Their sizes animate. A layer with effects is drawn offscreen in a
+  layer only as large as what it draws; in one the size of the frame the CPU took 16.5 s a `glow-text` frame.
+  `displace` samples the layer between pixels, so bent edges stay smooth. On a model, `glow` and `outline` keep their
+  meanings (its material's glow, its edges); put the model in a group to glow or outline it. The `glow-text` stress
+  scene (a 220 px title with glow and outline over 12 lines with one effect each) draws a 1080p frame in 8.0 ms on
+  the GPU, against 4.8 ms without the effects, and in 0.31 s on the CPU, against 0.01 s; the title's glow alone adds
+  0.6 ms on the GPU.
 - `kine check` warns `strobe` where a layer moves more than 40 px a frame at 1080p for five frames running in a
   scene without motion blur, where the eye sees separate copies instead of one moving thing.
 - 2D frames cost less Python: keyframes find their segment by bisection, expressions compile once to a function,

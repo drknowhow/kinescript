@@ -121,6 +121,20 @@ def _blur_sksl(n: int) -> str:
 
 
 # Premultiplied to straight alpha with the integer rounding blurred frames have always had (_straighten).
+# A layer warped (Renderer._warped): each pixel taken from up to `amount` of the layer's own px away, in the direction
+# the noise's red and green give; m takes the layer's px to the frame's.
+WARP_SKSL = """
+uniform shader layer;
+uniform shader noise;
+uniform float4 m;
+uniform float amount;
+half4 main(float2 p) {
+    half4 n = noise.eval(p);
+    float2 v = n.a > 0 ? (float2(n.rg) / n.a - 0.5) * 2 * amount : float2(0);
+    return layer.eval(p + float2(m.x * v.x + m.z * v.y, m.y * v.x + m.w * v.y));
+}
+"""
+
 STRAIGHT_SKSL = """
 uniform shader src;
 float4 main(float2 p) {
@@ -590,6 +604,10 @@ class Renderer:
         self._capture: tuple[skia.Matrix, list] | None = None
         self._matte: Layer | None = None  # the mask being drawn (_masked): layers drawn while it is are not seen as such
         self._cutting: Layer | None = None  # the masked layer being recorded, drawn as itself inside _masked
+        self._warping: Layer | None = None  # the displaced layer being recorded, drawn as itself inside _warped
+        self._looking: Layer | None = None  # the layer with effects being recorded (_looked), drawn without its layer
+        self._look: tuple | None = None  # the paint of that layer and the matrix it applies in, once it is drawn
+        self._warp_effect = None
         self._combos: dict = {}  # a combining group's id: (the outlines it merged, the merged path), the last one
         self._morphs: dict = {}  # (layer id, key): that key and the next matched point for point (morph.match)
         self._morphed: dict = {}  # layer id: (how far through its keys, the path there), the last one drawn
@@ -787,6 +805,8 @@ class Renderer:
             return False  # it rides a path that moves
         if L.mask is not None and not self._holds(L.mask[0], lo, hi, F):
             return False
+        if L.warp is not None and float(L.warp.get("speed", 1)):
+            return False  # its waves slide
         return all(p.held(a, b, d) for p in L.props.values()) and all(self._holds(k, lo, hi, F) for k in L.children)
 
     @property
@@ -1116,6 +1136,12 @@ class Renderer:
         t = T - L.t_in
         d = L.dur
         g = lambda name, default=None: L.get(name, t, T, 0, default)  # noqa: E731
+        if L.warp is not None and self._capture is None and L is not self._warping:
+            self._warped(c, L, T, t, g, parent_alpha)
+            return
+        if L.looks is not None and self._capture is None and L is not self._looking:
+            self._looked(c, L, T, parent_alpha)
+            return
         split = L.raw.get("split") if L.type in ("text", "counter") else None
         mods = IDENT
         if L.enter and not split and t < L.enter.dur and not (L.type == "group" and L.enter.stagger):
@@ -1197,8 +1223,9 @@ class Renderer:
             blur = math.hypot(blur, defocus)
         shadow = L.raw.get("shadow")
         fx = L.raw.get("fx")
-        blend = None if L is self._cutting else L.raw.get("blend")  # a masked layer blends once cut (_masked)
-        effects = blur > 0.05 or shadow or fx or (blend and blend != "normal")
+        # A masked or displaced layer blends once it is cut (_masked) or warped (_warped).
+        blend = None if L is self._cutting or L is self._warping else L.raw.get("blend")
+        effects = blur > 0.05 or shadow or fx or (blend and blend != "normal") or L.looks
         cf = None
         if fogf > 0.002:
             if not effects and self._one_draw(L):
@@ -1220,9 +1247,9 @@ class Renderer:
             layered, paint_alpha = False, alpha
         elif layered:
             paint = skia.Paint(Alphaf=alpha)
-            filt = None
+            filt = self._looks(L, g, t) if L.looks else None
             if blur > 0.05:
-                filt = skia.ImageFilters.Blur(blur, blur)
+                filt = skia.ImageFilters.Blur(blur, blur, skia.TileMode.kDecal, filt)
             if shadow:
                 sh = shadow if isinstance(shadow, dict) else {}
                 sig = float(sh.get("blur", 16)) / 2
@@ -1239,7 +1266,10 @@ class Renderer:
                 paint.setColorFilter(skia.ColorFilters.Compose(mist, inner) if inner else mist)
             if blend:
                 paint.setBlendMode(BLENDS.get(blend, skia.BlendMode.kSrcOver))
-            c.saveLayer(None, paint)
+            if L is self._looking:  # _looked opens the layer, as large as what is drawn now
+                self._look, layered = (paint, c.getTotalMatrix()), False
+            else:
+                c.saveLayer(None, paint)
         if box is not None:
             bx, by, bw, bh = box
             if mods.wipe and mods.reveal < 1:
@@ -1303,6 +1333,124 @@ class Renderer:
         if self.stop_after == L.id:
             self._stopped = True
 
+    def _looks(self, L: Layer, g, t: float) -> skia.ImageFilter | None:
+        """L's innerShadow, outline and glow, in that order, as one image filter on its offscreen layer, so both
+        backends draw them: the layer shaded inside its edge, outlined, and over a blurred copy of itself (in the
+        glow's colour, if it has one). Their sizes are in the layer's own px."""
+        F, CF, looks = skia.ImageFilters, skia.ColorFilters, L.looks
+        f = None  # the layer as drawn
+        s = looks.get("innerShadow")
+        sig = float(g("innerShadow blur", s.get("blur", 12))) / 2 if s else 0.0
+        if s:
+            r, gg, b, a = C.parse(s.get("color", "#00000080"))
+            # The shadow's colour where the layer is not, moved and blurred, kept where the layer is.
+            gap = F.ColorFilter(CF.Matrix([0, 0, 0, 0, r, 0, 0, 0, 0, gg, 0, 0, 0, 0, b, 0, 0, 0, -a, a]), f)
+            gap = F.Offset(float(g("innerShadow x", s.get("x", 0))), float(g("innerShadow y", s.get("y", 4))), gap)
+            if sig > 0.05:
+                gap = F.Blur(sig, sig, skia.TileMode.kDecal, gap)
+            f = F.Merge([f, F.Xfermode(skia.BlendMode.kSrcIn, f, gap)])
+        o = looks.get("outline")
+        w = float(g("outline width", o.get("width", 4))) if o else 0.0
+        if w > 0.01:
+            # The layer copied round circles of radius w, w - 1.5, ... down to a pixel or so, the copies at most 1.5 px
+            # apart: a round outline with no gaps at thin strokes. Skia's dilate filter is square, and took 135 ms a
+            # pass on the CPU for a 220 px word; the 21 copies of a 3 px outline take 13 ms.
+            copies = []
+            for r in [r for r in (w - 1.5 * k for k in range(int(w / 1.5) + 1)) if r > 0.4] or [w]:
+                n = max(8, math.ceil(2 * math.pi * r / 1.5))
+                copies += [F.Offset(r * math.cos(2 * math.pi * j / n), r * math.sin(2 * math.pi * j / n), f)
+                           for j in range(n)]
+            ring = F.ColorFilter(CF.Blend(_argb(o.get("color", "#000000")), skia.BlendMode.kSrcIn), F.Merge(copies))
+            f = F.Merge([ring, f])
+        gl = looks.get("glow")
+        size = float(g("glow size", gl.get("size", 24))) if gl else 0.0
+        strength = float(g("glow amount", gl.get("amount", 1))) if gl else 0.0
+        if size > 0.05 and strength > 0.002:
+            halo = F.Blur(size / 2, size / 2, skia.TileMode.kDecal, f)
+            if gl.get("color") is not None:
+                halo = F.ColorFilter(CF.Blend(_argb(gl["color"]), skia.BlendMode.kSrcIn), halo)
+            if strength != 1:
+                halo = F.ColorFilter(CF.Matrix([1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, strength, 0]), halo)
+            f = F.Merge([halo, f])
+        return f
+
+    def _looked(self, c, L: Layer, T: float, parent_alpha: float):
+        """L with its glow, outline or inner shadow, in an offscreen layer only as large as what L draws. A layer the
+        size of the frame, as blur and shadow have, made the CPU dilate and blur all of it: 3.4 s a 1080p frame for an
+        outlined line of text. L is recorded first, without its layer; the layer then takes the same paint, in L's own
+        space, so the effects keep their sizes and order."""
+        was = self._looking, self._look
+        self._looking, self._look = L, None
+        try:
+            body = self._record(c, lambda rc: self._layer(rc, L, T, parent_alpha))
+            look = self._look
+        finally:
+            self._looking, self._look = was
+        if body is None or look is None:
+            return
+        paint, m = look
+        inv = skia.Matrix()
+        # What L drew, in its own space: the layer's filters spread it from there.
+        bounds = inv.mapRect(body.cullRect()) if not m.hasPerspective() and m.invert(inv) else None
+        c.save()
+        c.setMatrix(m)
+        c.saveLayer(bounds, paint)
+        c.resetMatrix()  # the picture was recorded where it lands on this canvas
+        c.drawPicture(body)
+        c.restore()
+        c.restore()
+
+    def _warped(self, c, L: Layer, T: float, t: float, g, parent_alpha: float):
+        """L displaced: drawn into an image of its own, at the frame's resolution, then drawn from it with each pixel
+        taken from up to `amount` px away, in a direction fractal noise picks. The waves are `scale` px across in the
+        layer's own px and slide `speed` of them a second; the image is sampled between its pixels, so bent edges stay
+        smooth (Skia's displacement filter takes the nearest pixel, which left them in steps)."""
+        d = L.warp
+        amount = max(0.0, float(g("displace amount", d.get("amount", 8))))
+        m = c.getTotalMatrix()
+        a, b, cc, dd = m.getScaleX(), m.getSkewX(), m.getSkewY(), m.getScaleY()
+        reach = math.ceil(amount * max(math.hypot(a, cc), math.hypot(b, dd)))  # how far a pixel moves, on the frame
+        was, self._warping = self._warping, L
+        try:  # what lies just outside the frame can be moved into it
+            body = self._record(c, lambda rc: self._layer(rc, L, T, parent_alpha), reach)
+        finally:
+            self._warping = was
+        if body is None:
+            return
+        blend = None if L is self._cutting else L.raw.get("blend")  # a masked layer blends once cut (_masked)
+        mode = BLENDS[blend] if blend not in (None, "normal") else skia.BlendMode.kSrcOver
+        c.save()
+        c.resetMatrix()  # the picture was recorded where it lands on this canvas
+        if reach < 1:
+            c.drawPicture(body, None, skia.Paint(BlendMode=mode))
+            c.restore()
+            return
+        src = body.cullRect().roundOut()
+        dst = skia.IRect.MakeLTRB(src.left() - reach, src.top() - reach, src.right() + reach, src.bottom() + reach)
+        if not dst.intersect(c.getDeviceClipBounds()):
+            c.restore()
+            return
+        surf = self.surface.makeSurface(self.info.makeWH(src.width(), src.height()))
+        sc = surf.getCanvas()
+        sc.clear(skia.ColorTRANSPARENT)
+        sc.translate(-src.left(), -src.top())
+        sc.drawPicture(body)
+        img = surf.makeImageSnapshot()
+        scale = float(d.get("scale", 60))
+        shift = float(d.get("speed", 1)) * t * scale  # the waves slide diagonally
+        noise = skia.PerlinNoiseShader.MakeFractalNoise(1 / scale, 1 / scale, 1, int(d.get("seed", 0)))
+        if self._warp_effect is None:
+            self._warp_effect = skia.RuntimeEffect.MakeForShader(WARP_SKSL)
+        fx = skia.RuntimeEffectBuilder(self._warp_effect)
+        fx.setChild("layer", img.makeShader(skia.TileMode.kDecal, skia.TileMode.kDecal, SAMPLING,
+                                            skia.Matrix.Translate(src.left(), src.top())))
+        fx.setChild("noise", noise.makeWithLocalMatrix(skia.Matrix.Concat(m, skia.Matrix.Translate(-shift, -0.6 * shift))))
+        fx.setUniform("m", [a, cc, b, dd])
+        fx.setUniform("amount", amount)
+        # Paint(Shader=...): skia-python's setShader copies a shader that holds an image, 1.6 ms for a line of text.
+        c.drawRect(skia.Rect.Make(dst), skia.Paint(Shader=fx.makeShader(), BlendMode=mode))
+        c.restore()
+
     def _masked(self, c, L: Layer, T: float, parent_alpha: float):
         """L cut by its mask: the mask layer, drawn beside it on its own clock, keeps L where the mask is opaque
         (luma: bright), or takes it away there for an invert; a feather blurs the mask's edge by that many px. Both are
@@ -1362,13 +1510,14 @@ class Renderer:
         c.restore()
 
     @staticmethod
-    def _record(c, draw) -> skia.Picture | None:
-        """What draw(canvas) draws on c, recorded where it lands on c's device with its bounds; None if nothing."""
+    def _record(c, draw, pad: int = 0) -> skia.Picture | None:
+        """What draw(canvas) draws on c, recorded where it lands on c's device with its bounds, and pad px past c's
+        clip; None if nothing."""
         clip = c.getDeviceClipBounds()
         if clip.isEmpty():
             return None
         rec = skia.PictureRecorder()
-        rc = rec.beginRecording(skia.Rect.Make(clip), skia.RTreeFactory()())
+        rc = rec.beginRecording(skia.Rect.Make(clip).makeOutset(pad, pad), skia.RTreeFactory()())
         rc.setMatrix(c.getLocalToDevice())
         draw(rc)
         pic = rec.finishRecordingAsPicture()

@@ -417,11 +417,66 @@ def test_frame_is_pure_function_of_index():
         {"id": "lens", "type": "circle", "r": 30, "x": "=160+sin(t*2)*80", "y": 90},
         {"id": "sheet", "type": "rect", "x": 160, "y": 90, "w": 200, "h": 60, "fill": "#3ddbd9",
          "mask": {"layer": "lens", "feather": 6}},
+        {"id": "heat", "type": "text", "text": "heat", "x": 260, "y": 30, "size": 28, "fill": "#ffd166",
+         "glow": {"size": "=6+4*sin(t*3)"}, "outline": 2, "displace": {"amount": 3, "scale": 20, "speed": 2}},
     ], duration=2)
     r = Renderer(k.Scene(spec), backend="cpu")
     sequential = [r.frame(n).copy() for n in range(0, 30)]
     alone = _frame(spec, 17)
     assert np.array_equal(sequential[17], alone)
+
+
+def _card(**looks):
+    """A red card, x 120 to 200 and y 70 to 110, on a black canvas."""
+    return scene([dict({"id": "b", "type": "rect", "x": 160, "y": 90, "w": 80, "h": 40, "fill": "#ff0000"}, **looks)],
+                 bg="#000000", duration=1)
+
+
+def test_a_glow_lights_round_a_layer_in_its_own_colour_or_the_glows():
+    plain, own = _frame(_card(), 0), _frame(_card(glow=24), 0)
+    tinted = _frame(_card(glow={"color": "#00ff00", "size": 24}), 0)
+    half = _frame(_card(glow={"size": 24, "amount": 0.5}), 0)
+    assert plain[90, 208, :3].max() == 0
+    assert own[90, 208, 0] > 40 and own[90, 208, 1:3].max() == 0  # 8 px past the edge
+    assert tinted[90, 208, 1] > 40 and tinted[90, 208, 0] == 0
+    assert abs(int(half[90, 208, 0]) - int(own[90, 208, 0]) / 2) <= 2
+    assert tuple(own[90, 160, :3]) == tuple(tinted[90, 160, :3]) == (255, 0, 0)  # the layer itself, on top
+    grows = _card(glow={"size": [[0, 0], [1, 30, "linear"]]})
+    assert _frame(grows, 0)[90, 208, 0] == 0 and _frame(grows, 29)[90, 208, 0] > 40
+
+
+def test_an_outline_rings_a_layer_outside_its_edge_and_an_inner_shadow_shades_inside_it():
+    f = _frame(_card(outline={"width": 6, "color": "#ffffff"}), 0)
+    assert tuple(f[90, 203, :3]) == (255, 255, 255) and f[90, 210, :3].max() == 0
+    assert tuple(f[90, 160, :3]) == (255, 0, 0)
+    spec = _card(fill="#ffffff", innerShadow={"x": 0, "y": 6, "blur": 4, "color": "#000000"})
+    spec["canvas"]["bg"] = "#808080"
+    f = _frame(spec, 0)
+    assert f[72, 160, 0] < 30 and tuple(f[100, 160, :3]) == (255, 255, 255)  # dark under the top edge only
+    assert tuple(f[65, 160, :3]) == (128, 128, 128)  # nothing outside
+
+
+def test_displace_bends_a_layer_smoothly_and_its_waves_slide():
+    still = _frame(_card(fill="#ffffff"), 0)
+    spec = _card(fill="#ffffff", displace={"amount": 6, "scale": 30, "speed": 2})
+    a, b = _frame(spec, 0), _frame(spec, 15)
+    assert not np.array_equal(a, still) and not np.array_equal(a, b)
+    assert len(np.unique(a[60:120, 190:210, 0])) > 10  # sampled between pixels: a bent edge is smooth, not in steps
+    assert tuple(a[90, 160, :3]) == (255, 255, 255)
+    held = _card(fill="#ffffff", displace={"amount": 6, "scale": 30, "speed": 0})
+    assert np.array_equal(_frame(held, 0), _frame(held, 15))
+    assert np.array_equal(_frame(_card(fill="#ffffff", displace={"amount": 0}), 0), still)
+    mixed = _card(fill="#ff8000", blend="multiply", displace=4)
+    mixed["canvas"]["bg"] = "#808080"
+    assert np.abs(_frame(mixed, 0)[90, 160, :3].astype(int) - (128, 64, 0)).max() <= 1  # blends with what is behind
+
+
+def test_a_masked_layer_is_displaced_inside_its_mask():
+    spec = _masked("lens")
+    spec["layers"][1]["displace"] = {"amount": 8, "scale": 20}
+    f, flat = _frame(spec, 0), _frame(_masked("lens"), 0)
+    assert np.array_equal(f[:, 200:], flat[:, 200:]) and f[:, :120, :3].max() == 0  # cut where the mask is
+    assert tuple(f[90, 140, :3]) == (255, 255, 255)
 
 
 def _masked(mask, **lens):

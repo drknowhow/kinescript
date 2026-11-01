@@ -109,6 +109,13 @@ def test_the_newer_blend_modes_mix_as_the_w3c_formulas_do(backend, blend):
     assert np.abs(got - np.round(W3C[blend](b, s) * 255)).max() <= 2, (got, W3C[blend](b, s) * 255)
 
 
+def test_displace_draws_alike_on_both_backends():
+    spec = scene([{"id": "b", "type": "rect", "x": 160, "y": 90, "w": 160, "h": 80, "fill": "#ffffff",
+                   "displace": {"amount": 6, "scale": 30, "speed": 1}}], bg="#000000")
+    cpu, gpu = (_renderer(spec, b).frame(10)[..., :3].astype(int) for b in ("cpu", "gpu"))
+    assert (np.abs(cpu - gpu) > 16).mean() < 0.002
+
+
 @pytest.mark.parametrize("backend", ["cpu", "gpu"])
 def test_a_grade_with_a_blend_on_a_see_through_canvas(backend):
     layers = [{"id": "m", "type": "rect", "x": 160, "y": 90, "w": 100, "h": 100, "fill": "#808080",

@@ -132,7 +132,20 @@ GROUND_ALIAS = {"alpha": "opacity", "strength": "opacity", "softness": "blur", "
 
 COMMON = {"id", "type", "at", "dur", "until", "x", "y", "anchor", "opacity", "scale", "scaleX", "scaleY", "rotate",
           "blur", "blend", "shadow", "fx", "enter", "exit", "hidden", "allowOffscreen", "z", "rotateX", "rotateY",
-          "backface", "fixed", "sound", "along", "mask"}
+          "backface", "fixed", "sound", "along", "mask", "glow", "outline", "innerShadow", "displace"}
+# Layer effects: their keys, the key a number (or a colour) stands for, the keys that animate and their aliases.
+LOOKS = {
+    "glow": ({"color", "size", "amount"}, "size", ("size", "amount"),
+             {"colour": "color", "radius": "size", "blur": "size", "spread": "size", "strength": "amount",
+              "intensity": "amount", "opacity": "amount"}),
+    "outline": ({"width", "color"}, "width", ("width",),
+                {"colour": "color", "size": "width", "thickness": "width", "strokeWidth": "width"}),
+    "innerShadow": (SHADOW, "blur", ("x", "y", "blur"), SHADOW_ALIAS),
+    "displace": ({"amount", "scale", "speed", "seed"}, "amount", ("amount",),
+                 {"strength": "amount", "intensity": "amount", "size": "scale", "rate": "speed"}),
+}
+LOOK_PROPS = {f"{look} {k}" for look, (_, _, keys, _) in LOOKS.items() for k in keys}
+MODEL_OWN = {"glow", "outline"}  # on a model, its material's glow and its edges (MODEL_ALIAS), as before
 MASK = {"layer", "mode", "feather"}
 MASK_ALIAS = {"id": "layer", "source": "layer", "src": "layer", "matte": "layer", "type": "mode",
               "softness": "feather", "soft": "feather", "blur": "feather", "edge": "feather"}
@@ -266,9 +279,11 @@ REQUIRED = {"text": ("text",), "image": ("src",), "video": ("src",), "path": ("d
             "captions": ("cues", "src", "voice"), "shader": ("preset", "sksl"), "model": ("shape", "parts", "src")}
 # Keys whose value is an object of their own: never a tween, even with a "from" key (a light's direction).
 OBJECTS = {"light", "lights", "env", "ground", "shadow", "shadows", "box", "fx", "uniforms", "sound", "enter", "exit",
-           "parts", "transition", "texture", "edges", "animation", "repeat", "along", "rough", "mask"}
+           "parts", "transition", "texture", "edges", "animation", "repeat", "along", "rough", "mask", "glow",
+           "outline", "innerShadow", "displace"}
 # Props that cannot be below 0, and the least each may be.
-AT_LEAST = {"radius": 0, "r": 0, "sides": 3, "blur": 0, "strokeWidth": 0, "size": 0, "corner": 0}
+AT_LEAST = {"radius": 0, "r": 0, "sides": 3, "blur": 0, "strokeWidth": 0, "size": 0, "corner": 0, "glow size": 0,
+            "glow amount": 0, "outline width": 0, "innerShadow blur": 0, "displace amount": 0}
 COLOUR_FIX = f"write {C.FORMATS}"
 TIME_FORMS = 'seconds like 1.5, "45f" (frames), "0:02.5", "title.out+0.2" or a marker name'
 
@@ -537,7 +552,7 @@ def _constant(k: str, x, where: str, rep: Report, lid):
             rep.add("error", "bad-value", lid, f"radius{where} is {_show(x)}; it is one number, or four for the "
                     "corners: [top-left, top-right, bottom-right, bottom-left], each 0 or more",
                     '"radius": [24, 24, 0, 0] rounds the top corners')
-    elif k in SCALAR or k == "along p":
+    elif k in SCALAR or k == "along p" or k in LOOK_PROPS:
         if isinstance(x, bool):
             rep.add("error", "bad-value", lid, f"{k}{where} is {str(x).lower()}, which is not a number", "use a number")
         elif isinstance(x, (int, float)):
@@ -866,7 +881,10 @@ def _layer(raw, rep: Report, path: str, comps: dict):
                     "[x, y], [x, y, z], {\"x\": ..., \"y\": ...}, or keyframes of points such as "
                     "[[0, [100, 300]], [2, [540, 60]]]", "write \"x\" and \"y\"")
     # "animation" plays a clip of a model file; on any other layer it is read as "enter", as before.
-    _keys(raw, COMMON | TYPES[t] - (set() if _model_file(raw) else {"animation"}), lalias, rep, lid, "")
+    allowed = COMMON | TYPES[t] - (set() if _model_file(raw) else {"animation"})
+    if t == "model":
+        allowed = allowed - {"outline"}  # read as edges (MODEL_ALIAS)
+    _keys(raw, allowed, lalias, rep, lid, "")
     _timing(raw, rep, lid)
     shape = raw.get("shape")
     if t == "model" and isinstance(shape, str) and shape.lower().endswith((".glb", ".gltf", ".obj")):
@@ -891,6 +909,7 @@ def _layer(raw, rep: Report, path: str, comps: dict):
     _along(raw, rep, lid)
     _effects(raw, rep, lid)
     _mask(raw, rep, lid)
+    _looks(raw, rep, lid, t)
     _layer_sound(raw, rep, lid)
     if "text" in TYPES[t]:
         _text(raw, rep, lid)
@@ -990,6 +1009,45 @@ def _rough(raw: dict, rep: Report, lid):
                 "wobble", example)
     if v.get("amount") == 0:
         rep.add("warning", "ignored-key", lid, "rough with amount 0 draws the shape smooth", example)
+
+
+def _looks(raw: dict, rep: Report, lid, t: str):
+    """glow, outline, innerShadow and displace: true, a number (or a colour for glow and outline), or an object,
+    made into the object. Their sizes animate; colours, displace's scale, speed and seed do not. A model's glow and
+    outline are its own (MODEL_OWN)."""
+    for look, (keys, main, moving, alias) in LOOKS.items():
+        if t == "model" and look in MODEL_OWN:
+            continue
+        v = raw.get(look)
+        if v is None or v is False:
+            raw.pop(look, None)
+            continue
+        example = {"glow": '"glow": {"color": "#ff633f", "size": 24, "amount": 1}',
+                   "outline": '"outline": {"width": 4, "color": "#0a0c10"}',
+                   "innerShadow": '"innerShadow": {"x": 0, "y": 4, "blur": 12, "color": "#00000080"}',
+                   "displace": '"displace": {"amount": 8, "scale": 60, "speed": 1, "seed": 0}'}[look]
+        if v is True:
+            raw[look] = v = {}
+        elif _finite(v) or isinstance(v, list) or (isinstance(v, str) and v.startswith("=")):
+            raw[look] = v = {main: v}
+        elif isinstance(v, str) and look in ("glow", "outline"):
+            raw[look] = v = {"color": v}
+        if not isinstance(v, dict):
+            rep.add("error", "bad-value", lid, f"{look} is {_show(v)}; it is true, a number, or an object", example)
+            continue
+        _keys(v, keys, alias, rep, lid, f"{look}: ")
+        for k in moving:
+            if k in v:
+                _prop(f"{look} {k}", v[k], rep, lid)
+        if v.get("color") is not None:
+            _colour(v["color"], f"{look} color", rep, lid)
+        if look == "displace":
+            for k, ok, what in (("scale", lambda x: _finite(x) and x >= 1, "the size of its waves in px, 1 or more"),
+                                ("speed", _finite, "how many waves a second it slides by, a number"),
+                                ("seed", lambda x: isinstance(x, int) and not isinstance(x, bool) and 0 <= x < 2 ** 31,
+                                 "a whole number, 0 or more, that picks the waves")):
+                if k in v and not ok(v[k]):
+                    rep.add("error", "bad-value", lid, f"displace {k} is {_show(v[k])}; it is {what}", example)
 
 
 def _mask(raw: dict, rep: Report, lid):
