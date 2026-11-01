@@ -21,10 +21,11 @@ import skia
 from . import color as C
 from . import media, render3d, space, stage, svgpath
 from . import morph as M
+from . import particles as PT
 from . import presets as P
 from .presets import IDENT, Mods
 from .props import COPY_PAINT, length, noise
-from .scene import Layer, Scene, uses_depth
+from .scene import Layer, Scene, SceneError, uses_depth
 
 ANCHORS = {"center": (0.5, 0.5), "topleft": (0, 0), "top": (0.5, 0), "topright": (1, 0), "left": (0, 0.5),
            "right": (1, 0.5), "bottomleft": (0, 1), "bottom": (0.5, 1), "bottomright": (1, 1)}
@@ -559,6 +560,9 @@ MAX_SIDE = 16384
 # What the CPU takes to blur one pixel of an offscreen layer with this Skia wheel: 0.44 s for a 1080p layer.
 # Renderer.filtered counts the pixels a frame's offscreen effects blur, or do as much work as blurring would.
 CPU_BLUR_S = 0.44 / (1920 * 1080)
+# What the CPU takes to draw a particle, and each pixel of the square its sprite covers: 5,000 particles of 1 px took
+# 1.6 ms a frame, of 12 px 53 ms and of 24 px 197 ms. Renderer.particle_s adds them up for the frame.
+CPU_PARTICLE_S, CPU_PARTICLE_PX_S = 0.3e-6, 70e-9
 
 
 def frame_size(w: int, h: int, scale) -> tuple[int, int]:
@@ -659,6 +663,9 @@ class Renderer:
         self._ops: list | None = None  # while a shape's copies are made ready: what _shape would draw
         self._copying = 0  # how many layers' copies are drawing, one inside another: their boxes join (_note)
         self._tinted: dict[tuple, tuple] = {}  # (layer id, fill or stroke) -> its copies' still colours (_tints)
+        self._sprite: dict[str, tuple] = {}  # particles layer id -> its sprite (_sprites)
+        self._emitter: dict[str, tuple | None] = {}  # particles layer id -> where its emitter is over time (_emitted)
+        self.particle_s = 0.0  # the CPU's time for the particles drawn this frame (CPU_PARTICLE_S)
         cm = color_matrix({k: v for k, v in scene.grade.items() if k not in ("vignette", "grain")})
         self.grade_filter = skia.ColorFilters.Matrix(cm) if cm else None
         self._videos = [L for L in scene.all_layers() if L.type == "video"]
@@ -904,6 +911,7 @@ class Renderer:
         self.filtered = 0.0
         self._dof, self._span = None, [math.inf, 0.0]
         self.tris = 0
+        self.particle_s = 0.0
         self.wires, self.depths = [], []
         self.stop_at, self.stop_after, self._stopped = stop_at, stop_after, False
         self._frame_t = frame_t
@@ -1134,7 +1142,7 @@ class Renderer:
         if L.mask is not None and self._capture is None and L is not self._cutting:  # a combining group takes it uncut
             self._masked(c, L, T, parent_alpha)
             return
-        if self._capture is not None and L.type in ("image", "video", "shader", "model", "captions"):
+        if self._capture is not None and L.type in ("image", "video", "shader", "model", "captions", "particles"):
             return  # a combining group merges shapes and text only
         F = self._frame_t
         if not L.visible(T if F is None else F):
@@ -1885,8 +1893,8 @@ class Renderer:
             lay = self._text_layout(L, t, T, g, self._text_of(L, t, T, g))
             pad = self._pad(L)
             w, h = lay.w + pad[1] * 2, lay.h + pad[0] * 2
-        elif ty in ("captions", "model"):
-            return None  # a model's bounds come from its projected mesh (render3d.draw)
+        elif ty in ("captions", "model", "particles"):
+            return None  # a model's bounds come from its projected mesh (render3d.draw), particles' from where they are
         elif ty in ("circle",):
             w = h = float(g("r", 50)) * 2
         elif ty in ("path", "line", "arrow", "polygon"):
@@ -2486,6 +2494,147 @@ class Renderer:
 
     def _draw_model(self, c, L, t, T, g, box, reveal, mods):
         return render3d.draw(self, c, L, g, reveal, t, T)
+
+    def _draw_particles(self, c, L, t, T, g, box, reveal, mods):
+        """The particles alive at t, each its sprite turned, sized and tinted, in one drawAtlas call; with track, the
+        frame rect they cover."""
+        try:
+            st = L.particles.state(t, L.dur, L.t_in)
+        except ValueError as e:
+            raise SceneError(f"layer '{L.id}': {e}", layer=L.id) from e
+        if st is None:
+            return None
+        x, y, size = st["x"], st["y"], st["size"]
+        moved = self._emitted(L, t, T, mods, st["birth"])
+        if moved is not None:
+            x, y = x + moved[0], y + moved[1]
+        img, cells, side, mid = self._sprites(L)
+        k = size / side
+        rot = st["rot"]
+        scos, ssin = k * np.cos(rot), k * np.sin(rot)
+        tx, ty = x - (scos - ssin) * mid, y - (ssin + scos) * mid
+        rs = skia.RSXform
+        xf = [rs(a, b, e, f) for a, b, e, f in zip(scos.tolist(), ssin.tolist(), tx.tolist(), ty.tolist())]
+        cell = st["cell"]
+        tex = [cells[0]] * len(xf) if cell is None else [cells[j] for j in cell.tolist()]
+        c.drawAtlas(img, xf, tex, st["argb"].tolist(), skia.BlendMode.kModulate, SAMPLING)
+        m = c.getTotalMatrix()
+        quad = float(np.dot(k, k)) * (2 * mid) ** 2 * abs(m.getScaleX() * m.getScaleY() - m.getSkewX() * m.getSkewY())
+        self.particle_s += len(xf) * CPU_PARTICLE_S + quad * CPU_PARTICLE_PX_S
+        if not self.track:
+            return None
+        half = size * (0.5 if L.particles.shape in ("circle", "soft", "ring") else 0.71)
+        r = m.mapRect(skia.Rect(float((x - half).min()), float((y - half).min()), float((x + half).max()),
+                                float((y + half).max())))
+        return (r.left(), r.top(), r.right(), r.bottom())
+
+    def _emitted(self, L: Layer, t: float, T: float, mods, births: np.ndarray):
+        """How far L's emitter has moved since each particle left it, in L's own space, so that particles stay where
+        they were born while x, y or along move the layer; None while it stays put."""
+        hit = self._emitter.get(L.id, False)
+        if hit is False:
+            hit = None
+            if any(k in L.props and not L.props[k].static for k in ("x", "y")) or L.along is not None:
+                off = T - t
+                grid = np.minimum(np.arange(int(math.ceil(L.dur * PT.GRID)) + 1) / PT.GRID, L.dur)
+                spots = np.array([self._spot_of(L, s, s + off) for s in grid.tolist()])
+                hit = (grid, spots[:, 0], spots[:, 1])
+            self._emitter[L.id] = hit
+        if hit is None:
+            return None
+        grid, xs, ys = hit
+        ex, ey = self._spot_of(L, t, T)
+        dx, dy = np.interp(births, grid, xs) - ex, np.interp(births, grid, ys) - ey
+        _, _, rot, sc, sx, sy, _ = L.placed(t, T)
+        sc = float(sc) * mods.scale
+        sx, sy = sc * float(sx), sc * float(sy)
+        if abs(sx) < 1e-9 or abs(sy) < 1e-9:
+            return None
+        a = -math.radians(float(rot) + mods.rotate)
+        cs, sn = math.cos(a), math.sin(a)
+        return (cs * dx - sn * dy) / sx, (sn * dx + cs * dy) / sy
+
+    def _spot_of(self, L: Layer, t: float, T: float) -> tuple[float, float]:
+        """Where x, y and along put L's anchor at t, in its parent's space."""
+        x, y = float(L.get("x", t, T)), float(L.get("y", t, T))
+        if L.along is not None:
+            ax, ay, _ = self._along(L, t, T)
+            x, y = x + ax, y + ay
+        return x, y
+
+    def _sprites(self, L: Layer) -> tuple:
+        """L's particle drawn white on clear, once: (the image, a cell rect for each width it flips through, the
+        particle's size in the image's px, the middle of a cell). The image holds the particle at its largest size
+        on the frame, so it is never drawn larger than it was made."""
+        hit = self._sprite.get(L.id)
+        if hit is not None:
+            return hit
+        em = L.particles
+        side = int(min(256, max(8, math.ceil(em.most() * self.scale))))
+        cell = side + 4
+        n = PT.FLIPS if em.flips else 1
+        surf = skia.Surface(cell * n, cell)
+        c = surf.getCanvas()
+        c.clear(skia.ColorTRANSPARENT)
+        draw = self._sprite_of(L, side)
+        for j in range(n):
+            c.save()
+            c.translate(cell * j + cell / 2, cell / 2)
+            if n > 1:
+                c.scale(max(0.08, j / (n - 1)), 1.0)
+            draw(c)
+            c.restore()
+        img = surf.makeImageSnapshot()
+        if self.gr is not None:
+            img = img.makeTextureImage(self.gr) or img
+        hit = self._sprite[L.id] = (img, [skia.Rect.MakeXYWH(cell * j, 0, cell, cell) for j in range(n)], side,
+                                    cell / 2)
+        return hit
+
+    def _sprite_of(self, L: Layer, s: float):
+        """A function drawing L's particle in white, `s` px across its longer side, centred on the origin."""
+        paint = skia.Paint(AntiAlias=True, Color=skia.ColorWHITE)
+        h = s / 2
+        if L.raw.get("src") is not None:
+            img = media.image(L.src)
+            k = s / max(img.width(), img.height())
+            w, ht = img.width() * k, img.height() * k
+            return lambda c: c.drawImageRect(img, skia.Rect.MakeXYWH(-w / 2, -ht / 2, w, ht), SAMPLING, paint)
+        if L.raw.get("text") is not None:
+            txt = str(L.raw["text"])
+            g = lambda k, d=None: L.raw.get(k, d)  # noqa: E731
+            font = self._font(L, g, s)
+            m = font.getMetrics()
+            font = self._font(L, g, s * s / max(self._measure(font, txt), m.fDescent - m.fAscent, 1e-6))
+            m, w = font.getMetrics(), self._measure(font, txt)
+            pcs = self._pieces(font, txt)
+            return lambda c: self._draw_pieces(c, pcs, txt, -w / 2, -(m.fAscent + m.fDescent) / 2, font, paint)
+        shape = L.particles.shape or "circle"
+        if shape == "circle":
+            return lambda c: c.drawCircle(0, 0, h, paint)
+        if shape == "square":
+            return lambda c: c.drawRect(skia.Rect(-h, -h, h, h), paint)
+        if shape == "rect":
+            return lambda c: c.drawRect(skia.Rect(-h, -h / 2, h, h / 2), paint)
+        if shape == "ring":
+            ring = skia.Paint(AntiAlias=True, Color=skia.ColorWHITE, Style=skia.Paint.kStroke_Style, StrokeWidth=s / 8)
+            return lambda c: c.drawCircle(0, 0, h - s / 16, ring)
+        if shape == "soft":
+            soft = skia.Paint(AntiAlias=True, Shader=skia.GradientShader.MakeRadial(
+                skia.Point(0, 0), h, [0xFFFFFFFF, 0x99FFFFFF, 0x33FFFFFF, 0x00FFFFFF], [0.0, 0.35, 0.7, 1.0]))
+            return lambda c: c.drawCircle(0, 0, h, soft)
+        if shape == "streak":  # fading from the tail to its head, which leads (+x) when it turns with its path
+            streak = skia.Paint(AntiAlias=True, Shader=skia.GradientShader.MakeLinear(
+                [skia.Point(-h, 0), skia.Point(h, 0)], [0x00FFFFFF, 0xFFFFFFFF]))
+            return lambda c: c.drawRRect(skia.RRect.MakeRectXY(skia.Rect(-h, -s / 10, h, s / 10), s / 10, s / 10),
+                                         streak)
+        path = skia.Path()
+        points = ([(h * math.cos(a), h * math.sin(a)) for a in (-math.pi / 2, math.pi / 6, 5 * math.pi / 6)]
+                  if shape == "triangle" else
+                  [((h if j % 2 == 0 else h * 0.45) * math.cos(-math.pi / 2 + j * math.pi / 5),
+                    (h if j % 2 == 0 else h * 0.45) * math.sin(-math.pi / 2 + j * math.pi / 5)) for j in range(10)])
+        path.addPoly([skia.Point(px, py) for px, py in points], True)
+        return lambda c: c.drawPath(path, paint)
 
     def _model_surface(self):
         """The offscreen models are drawn in at their place in the frame, and its supersampling factor: 2x, which

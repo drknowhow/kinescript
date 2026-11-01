@@ -225,6 +225,27 @@ LAYER TYPES (defaults in brackets)
             Fills the canvas unless you give w and h.
   model     a lit 3D solid, 3D text, an extruded SVG path or a model file: shape, src or parts
             (see 3D MODELS).
+  particles an emitter: rate (particles a second; keyframes taper it) and burst (how many leave at
+            once at the layer's start, or [[time, count], ...]), or a preset (confetti|sparks|snow|
+            dust|bubbles) whose keys the layer's own replace: {"type": "particles", "preset":
+            "confetti", "y": "70%"}. Each particle draws its own value from a number or [min, max] of
+            life [2] (seconds), speed [100] (px a second), angle [[0, 360]] (degrees: 0 is right, 90
+            down, so [-120, -60] sprays upward), size [8] (px across), spin [0] (degrees a second),
+            drag [0] (2 loses most of the speed in a second) and flip [0] (turns over that many times
+            a second, as confetti does). gravity [0] pulls in px a second each second, down, or
+            [x, y]. turbulence (px, or {"amount": 30, "speed": 0.5}) sways each one. align turns
+            each along its path. sizeOverLife and opacityOverLife are keyframes over 0..1 of a
+            particle's life, [[0, 1], [1, 0]] shrinking or fading it out; fillOverLife takes colours.
+            fill [#ffffff] is a colour or a list taken in turn. shape [circle] (circle|square|rect|
+            triangle|star|ring|soft|streak), or text (a character such as "★") or src (an image),
+            tinted by fill: white leaves them as they are. emitter [point] (point|line|rect|circle|
+            ring) spreads births over w [canvas width] and h [canvas height], or r [100], round x
+            and y [50%]. prewarm (true, or seconds) starts it as if it had been running; seed [from
+            the id] gives another draw. Particles stay where they were born while x, y or along move
+            the layer; rotate and scale turn and scale them all. A particle's path comes from its
+            number and the seed, so any frame renders alone. 5,000 alive render at 1080p at 131 to
+            159 fps on an RTX 5060 Ti and take about 0.1 s a frame on the CPU, where check warns
+            particle-cost past 0.25 s.
   group     children [layers], w, h, clip (true cuts children off at w x h), radius, fill.
             Children are placed from the group's x, y and start at the group's "at".
             Its children's time: speed (2 runs them twice as fast), loop (seconds after which they

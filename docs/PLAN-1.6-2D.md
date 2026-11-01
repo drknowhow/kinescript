@@ -240,6 +240,12 @@ Status (2026-11-01): moves to 1.6.1 (decision 1).
   turbulence, so frame n needs no frame before it. Computed in numpy, drawn with `drawAtlas` from one sprite per
   shape and colour. Presets: `confetti`, `sparks`, `snow`, `dust`, `bubbles`. Target: `particles-5k` (5,000 alive)
   30 fps on the GPU. Check: `particle-cost` on the CPU.
+  Status (2026-11-01): in its own PR, with `confetti.json`. The over-life keys are `sizeOverLife`,
+  `opacityOverLife` and `fillOverLife`, since a particles layer's `size` and `fill` are the particles' own and its
+  `opacity` fades the whole layer. `flip`, `align` and `prewarm` joined the keys for confetti, sparks and snow. A
+  character is `text` and an image `src`. One sprite is drawn for the layer, white, and each particle tinted by its
+  colour. Particles stay where they were born while the layer's x, y or along move it. `particles-5k` renders at 131
+  to 159 fps on the GPU.
 - Image sequences: `image` with `frames` (`"frames/run_%03d.png"` or a folder) or `sheet` (`{"src": "run.png",
   "cols": 8, "rows": 2}`), `fps` and `loop`, for frame-by-frame animation. Check: `missing-frames`.
 

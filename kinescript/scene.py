@@ -11,12 +11,13 @@ from . import color as C
 from . import components, media, models, schema, svgpath
 from . import presets as P
 from . import voice as V
+from . import particles
 from . import words as W
 from .props import Copies, Ctx, Prop, compile_prop, is_keyframes
 from .timing import Timeline, parse_clock
 
 LAYER_TYPES = {"rect", "circle", "ellipse", "path", "line", "arrow", "polygon", "text", "counter",
-               "image", "video", "group", "captions", "shader", "model"}
+               "image", "video", "group", "captions", "shader", "model", "particles"}
 STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "children", "layers", "src", "trim", "texture",
           "speed", "fit", "text", "cues", "d", "points", "font", "split", "format", "align", "anchor",
           "blend", "clip", "mode", "volume", "hidden", "note", "words", "stops", "cap", "join", "loop",
@@ -71,7 +72,7 @@ def _where(owner, message: str) -> str:
 class Layer:
     __slots__ = ("id", "type", "raw", "t_in", "t_out", "props", "enter", "exit", "children", "parent",
                  "index", "src", "video", "ahead", "ctx", "parts", "copies", "xf", "along", "turn", "clock",
-                 "rough", "morph", "mask", "looks", "warp")
+                 "rough", "morph", "mask", "looks", "warp", "particles")
 
     def __init__(self, lid: str, ltype: str, raw: dict, parent: "Layer | None", index: int):
         self.id, self.type, self.raw, self.parent, self.index = lid, ltype, raw, parent, index
@@ -96,6 +97,7 @@ class Layer:
         self.mask: tuple["Layer", str, float] | None = None  # the layer that masks it, the mode and the feather in px
         self.looks: dict | None = None  # its glow, outline and innerShadow; their sizes are props "glow size"
         self.warp: dict | None = None  # its displace; its amount is the prop "displace amount"
+        self.particles: particles.Emitter | None = None  # a particles layer's emitter
 
     @property
     def dur(self) -> float:
@@ -736,12 +738,14 @@ class Scene:
                 raise SceneError(f"duplicate layer id '{lid}'", layer=lid)
             if ltype == "captions":
                 raw = dict({"x": "50%", "y": "86%", "size": 46, "weight": 700}, **raw)
+            elif ltype == "particles":
+                raw = particles.expand(raw, self.theme)
             layer = Layer(lid, ltype, raw, parent, len(self.by_id))
             self.by_id[lid] = layer
             if raw.get("sound") is not None:
                 self._sounding.append(layer)
             natural = None
-            if ltype in ("video", "image", "model") or (ltype == "captions" and raw.get("src")):
+            if ltype in ("video", "image", "model") or (ltype in ("captions", "particles") and raw.get("src")):
                 layer.src = self.path(raw["src"]) if raw.get("src") else None
             info = None
             if ltype == "video" and layer.src and Path(layer.src).is_file():  # a folder or missing file: _check_media
@@ -801,6 +805,8 @@ class Scene:
             pctx = parent.ctx if parent and parent.ctx else self.ctx
             try:
                 for k, v in raw.items():
+                    if ltype == "particles" and k in particles.OWN:
+                        continue  # read by its emitter
                     if k in schema.COLOR_KEYS and (not isinstance(v, dict) or "to" in v or "keys" in v):
                         layer.props[k] = compile_prop(k, v, pctx)  # a colour, or a tween of one; not a gradient
                     elif k not in STRUCT or (ltype == "model" and k in schema.MODEL_OWN):  # a model's glow animates
@@ -810,6 +816,8 @@ class Scene:
                                    for p in raw.get("parts") or [] if isinstance(p, dict)]
                 if isinstance(raw.get("repeat"), dict):
                     layer.copies = Copies(raw["repeat"], pctx)
+                if ltype == "particles":
+                    layer.particles = particles.Emitter(raw, pctx, lid)
                 d = raw.get("d")
                 if ltype == "path" and isinstance(d, list) and d:  # morphing: its key, eased, as a number
                     layer.morph = [svgpath.parse(k[1]) for k in d]
@@ -1023,7 +1031,8 @@ def _num(v, ref):
 
 
 def _infer_type(raw: dict) -> str:
-    for key, t in (("shape", "model"), ("parts", "model"), ("text", "text"), ("cues", "captions"), ("d", "path"),
+    for key, t in (("rate", "particles"), ("burst", "particles"), ("emitter", "particles"), ("shape", "model"),
+                   ("parts", "model"), ("text", "text"), ("cues", "captions"), ("d", "path"),
                    ("points", "path"), ("children", "group"), ("layers", "group"), ("r", "circle")):
         if key in raw:
             return t

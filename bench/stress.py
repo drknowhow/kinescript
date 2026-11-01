@@ -473,6 +473,14 @@ def repeat_10k() -> dict:  # one circle's 10,000 copies, each moved by two expre
                                "fill": "=hsl(i * 0.036, 0.7, 0.6)"}}])
 
 
+def particles_5k() -> dict:  # 5,000 alive from the first frame: a fountain of stars spun, shrunk and faded over life
+    return _scene([{"id": "fountain", "type": "particles", "rate": 2500, "life": 2, "prewarm": True, "x": "50%",
+                    "y": "92%", "speed": [600, 1100], "angle": [-115, -65], "gravity": 700, "drag": 0.4,
+                    "size": [10, 22], "shape": "star", "spin": [-360, 360], "turbulence": 20,
+                    "fill": ["#ff633f", "#b9f45d", "#f2f0e8", "#4a7dff", "#ffd166"],
+                    "sizeOverLife": [[0, 0.4], [0.1, 1], [1, 0.6]], "opacityOverLife": [[0, 1], [0.8, 1], [1, 0]]}])
+
+
 def captions_600() -> dict:
     cues = [[round(n * 0.05, 2), round(n * 0.05 + 0.05, 2), _sentence(n, 3)] for n in range(600)]
     return _scene([{"id": "cc", "type": "captions", "mode": "karaoke", "cues": cues},
@@ -534,6 +542,7 @@ SCENES = {
     "skinned": (skinned, ".mp4", "6 skinned glTF tubes of 24 joints and 23k triangles and 12 arms, posed every frame"),
     "repeat-1000": (repeat_1000, ".mp4", "one model of 1000 cubes moved, turned and coloured by expressions, with edges"),
     "repeat-10k": (repeat_10k, ".mp4", "one circle repeated 10,000 times, each copy moved by expressions every frame"),
+    "particles-5k": (particles_5k, ".mp4", "a fountain keeping 5,000 stars alive, spun, shrunk and faded over life"),
     "captions-600": (captions_600, ".mp4", "600 karaoke cues and 200 pop cues in 30 s"),
     "odd-size": (odd_size, ".mp4", "1365x767 canvas into H.264 (even rounding)"),
     "gif": (gif_out, ".gif", "hello.json to GIF"),

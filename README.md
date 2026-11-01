@@ -335,6 +335,8 @@ More scenes in [`examples/`](https://github.com/drknowhow/kinescript/tree/main/e
 - [`explainer.json`](https://github.com/drknowhow/kinescript/blob/main/examples/explainer.json): hand-drawn boxes
   that boil, and a dot that rides a dashed route through `kine check`, which glows, into the video box, with a lens
   mask lighting the route round the dot, 6 s.
+- [`confetti.json`](https://github.com/drknowhow/kinescript/blob/main/examples/confetti.json): a counter runs to a
+  million and three confetti bursts go off behind and beside it, over drifting dust, 6 s.
 
 `edit.json`, `import.json`, `textures.json`, `screens.json`, `edges.json`, `product.json`, `voiceover.json` and
 `narrated.json` read sample media: run `python examples/make_media.py` first to generate it.
@@ -353,7 +355,7 @@ Measured on the development machine (Intel Core Ultra 7 265, 20 threads, NVIDIA 
 [`python bench/stages.py`](https://github.com/drknowhow/kinescript/blob/main/bench/stages.py) splits the time
 per frame into drawing, conversion and readback, and writing to ffmpeg for several workloads, and times whole
 renders. [`python bench/stress.py`](https://github.com/drknowhow/kinescript/blob/main/bench/stress.py) generates
-39 scenes that each push one thing far past the examples (2000 layers, 60 cuts, 4K, 120 s, 16-sample motion blur
+40 scenes that each push one thing far past the examples (2000 layers, 60 cuts, 4K, 120 s, 16-sample motion blur
 with alpha, 600 caption cues, 200 morphing paths, 50 masks, a stage of 16 layers, a textured model of 102,400
 triangles and more), then checks, renders and probes each one in its own process and reports time, peak memory and
 whether the output holds every frame.
