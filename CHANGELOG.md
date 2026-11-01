@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- The 1.6 stress report is in `docs/stress-test-1.6/`: the Phase 0 and 2D stress scenes and the three new examples,
+  on the development machine's GPU and CPU. `bench/stress.py` gains `logo`, `kinetic` and `explainer`, which read
+  the examples. On the GPU the seven 2D scenes render 120 frames at 1080p in 0.77 to 1.60 s, and the examples their
+  180 frames in 0.55 to 0.61 s; on the CPU they take 0.93 to 26.1 s and 1.99 to 3.91 s. `vs-1.5.1.txt` times GPU
+  frames against 1.5.1 in alternating runs: six of the seven Phase 0 scenes draw 6% to 37% faster, and `text-wrap`
+  1% slower. On the CPU `text-split` does not finish in 900 s: a frame takes up to 179 s while its letters blur in,
+  each in a layer from the frame's top left corner to the letter, which 1.6 keeps so its pixels stay the same and
+  `slow-effects` now reports.
 - `slow-effects` counts the letters of a split text that blur as they enter, which on the CPU each blur a layer
   reaching from the frame's top left corner to the letter. `text-split` takes up to 179 s a CPU frame while its
   letters blur in, and `kine check` did not warn; its estimates for three frames are now 1.04, 28.6 and 165 s
