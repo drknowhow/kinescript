@@ -21,6 +21,7 @@ class Mesh(NamedTuple):
     N: np.ndarray  # (n, 3) unit normals
     T: np.ndarray  # (m, 3) triangles, wound so a face toward the camera is clockwise on screen (y down)
     M: np.ndarray  # (n,) material index of each vertex
+    U: np.ndarray | None = None  # (n, 2) texture coordinates: x right and y down across the image, 1 a whole image
 
 
 def _grid(nu: int, nv: int, base: int = 0) -> np.ndarray:
@@ -36,7 +37,7 @@ def _fan(n: int, centre: int, ring: int) -> np.ndarray:
     return np.stack([np.full(n, centre), ring + k, ring + k + 1], -1)
 
 
-def _orient(P, N, T) -> Mesh:
+def _orient(P, N, T, U=None) -> Mesh:
     """Wind every triangle so its face normal agrees with its vertex normals; drop degenerate ones."""
     a, b, c = P[T[:, 0]], P[T[:, 1]], P[T[:, 2]]
     fn = np.cross(b - a, c - a)
@@ -45,27 +46,45 @@ def _orient(P, N, T) -> Mesh:
     flip = (fn * (N[T[:, 0]] + N[T[:, 1]] + N[T[:, 2]])).sum(1) < 0
     T[flip] = T[flip][:, [0, 2, 1]]
     return Mesh(P.astype(float), N / np.linalg.norm(N, axis=1, keepdims=True), T.astype(np.int32),
-                np.zeros(len(P), np.int32))
+                np.zeros(len(P), np.int32), None if U is None else np.asarray(U, float))
 
 
 def cat(meshes) -> Mesh:
     base = np.cumsum([0] + [len(m.P) for m in meshes[:-1]])
+    U = None
+    if any(m.U is not None for m in meshes):  # a mesh without coordinates takes the image's corner
+        U = np.concatenate([np.zeros((len(m.P), 2)) if m.U is None else m.U for m in meshes])
     return Mesh(np.concatenate([m.P for m in meshes]), np.concatenate([m.N for m in meshes]),
-                np.concatenate([m.T + b for m, b in zip(meshes, base)]), np.concatenate([m.M for m in meshes]))
+                np.concatenate([m.T + b for m, b in zip(meshes, base)]), np.concatenate([m.M for m in meshes]), U)
 
 
 def _surface(fn, nu: int, nv: int):
-    """Vertices of a parametric surface over u, v in [0, 1] (both ends included)."""
+    """Vertices of a parametric surface over u, v in [0, 1] (both ends included), and their u, v."""
     u, v = np.meshgrid(np.linspace(0, 1, nu + 1), np.linspace(0, 1, nv + 1), indexing="ij")
     P, N = fn(u.ravel(), v.ravel())
-    return P, N, _grid(nu, nv)
+    return P, N, _grid(nu, nv), np.stack([u.ravel(), v.ravel()], -1)
+
+
+def _wrapped(P, N, T, uv) -> Mesh:
+    """A surface wrapped round the y axis (u the angle from +x toward +z, v from top to bottom): the image runs
+    left to right across the front as the camera sees it, its middle facing the camera, its edges meeting behind."""
+    return _orient(P, N, T, np.stack([0.75 - uv[:, 0], uv[:, 1]], -1))
+
+
+def _facing(P: np.ndarray, n, half: float = 0.5) -> np.ndarray:
+    """Texture coordinates of points P on a flat face with normal n (an axis), as seen from in front of the face:
+    upright on a side, on top and underneath with the image's top away from the camera. P spans -half..half."""
+    n = np.asarray(n, float)
+    down = np.array([0.0, 1.0, 0.0]) if abs(n[1]) < 0.5 else np.array([0.0, 0.0, -n[1]])
+    right = np.cross(down, n)
+    return np.stack([P @ right, P @ down], -1) / (2 * half) + 0.5
 
 
 def _disc(y: float, n: int, normal_y: float):
     a = np.linspace(0, 2 * np.pi, n + 1)
     ring = np.stack([np.cos(a), np.full(n + 1, y), np.sin(a)], -1)
     P = np.concatenate([[[0, y, 0]], ring])
-    return P, np.tile([0, normal_y, 0], (n + 2, 1)), _fan(n, 0, 1)
+    return P, np.tile([0, normal_y, 0], (n + 2, 1)), _fan(n, 0, 1), _facing(P, (0, normal_y, 0), 1.0)
 
 
 @lru_cache(maxsize=64)
@@ -85,21 +104,21 @@ def unit(shape: str, detail: str = "medium", tube: float = 0.35) -> Mesh:
             P[:, a], P[:, b], P[:, c] = (0.0 if shape == "plane" else 0.5 * sign), u.ravel(), v.ravel()
             N = np.zeros_like(P)
             N[:, a] = sign
-            faces.append(_orient(P, N, _grid(n, n)))
+            faces.append(_orient(P, N, _grid(n, n), _facing(P, N[0])))
         return cat(faces)
     if shape == "sphere":
         def fn(u, v):
             th, ph = u * 2 * np.pi, v * np.pi
             P = np.stack([np.sin(ph) * np.cos(th), -np.cos(ph), np.sin(ph) * np.sin(th)], -1)
             return P, P
-        return _orient(*_surface(fn, 2 * seg, seg))
+        return _wrapped(*_surface(fn, 2 * seg, seg))
     if shape == "torus":
         def fn(u, v):
             th, ph = u * 2 * np.pi, v * 2 * np.pi
             N = np.stack([np.cos(ph) * np.cos(th), np.cos(ph) * np.sin(th), np.sin(ph)], -1)
             P = np.stack([np.cos(th), np.sin(th), np.zeros_like(th)], -1) + tube * N
             return P, N
-        return _orient(*_surface(fn, round(2.6 * seg), seg))
+        return _orient(*_surface(fn, round(2.6 * seg), seg))  # the image once round the ring and round the tube
     if shape in ("cylinder", "cone"):
         cone = shape == "cone"
 
@@ -109,7 +128,7 @@ def unit(shape: str, detail: str = "medium", tube: float = 0.35) -> Mesh:
             P = np.stack([r * np.cos(th), v - 0.5, r * np.sin(th)], -1)
             N = np.stack([np.cos(th), np.full_like(th, -1.0 if cone else 0.0), np.sin(th)], -1)
             return P, N
-        side = _orient(*_surface(fn, 2 * seg, max(1, seg // 6)))
+        side = _wrapped(*_surface(fn, 2 * seg, max(1, seg // 6)))
         caps = [_orient(*_disc(0.5, 2 * seg, 1.0))] + ([] if cone else [_orient(*_disc(-0.5, 2 * seg, -1.0))])
         return cat([side] + caps)
     raise ValueError(f"unknown shape '{shape}'. Known: {', '.join(SHAPES)}")
@@ -310,16 +329,23 @@ def shape2d(rings: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray, np.ndarray
     return Q, starts, (np.concatenate(tris) if tris else np.zeros((0, 3), np.int64))
 
 
-def _refine(P: np.ndarray, T: np.ndarray, most: float, outline: bool = False, extra: tuple = ()) -> tuple:
+def _refine(P: np.ndarray, T: np.ndarray, most: float, outline: bool = False, extra: tuple = (), long=None,
+            rounds: int = 12) -> tuple:
     """Split edges longer than `most` at their midpoints until none is left, so a surface is made of small
     triangles the painter's sort can order against nearby walls and parts. Returns P, T and the per-vertex
     arrays in `extra` grown to match (a new vertex takes the mean of its edge's ends, or the first end's
-    integer). `outline=False` never splits edges on the outline, so a cap still meets its walls."""
+    integer). `outline=False` never splits edges on the outline, so a cap still meets its walls.
+    long(P, extra, a, b), when given, says which edges (from vertices a to vertices b) are too long instead."""
     extra = list(extra)
-    for _ in range(12):
+    for _ in range(rounds):
         e = np.sort(T[:, [[0, 1], [1, 2], [2, 0]]].reshape(-1, 2), axis=1)  # edges ab, bc, ca of each triangle
-        edges, inv, count = np.unique(e, axis=0, return_inverse=True, return_counts=True)
-        cut = ((count == 2) | outline) & (np.linalg.norm(P[edges[:, 0]] - P[edges[:, 1]], axis=1) > most)
+        # As np.unique(e, axis=0), in the same order, in a fifth of the time: one int64 per edge.
+        keys, inv, count = np.unique(e[:, 0].astype(np.int64) * len(P) + e[:, 1], return_inverse=True,
+                                     return_counts=True)
+        edges = np.stack([keys // len(P), keys % len(P)], 1)
+        a, b = edges[:, 0], edges[:, 1]
+        cut = ((count == 2) | outline) & (np.linalg.norm(P[a] - P[b], axis=1) > most if long is None
+                                          else long(P, extra, a, b))
         if not cut.any():
             break
         mid = np.full(len(edges), -1)
@@ -386,5 +412,8 @@ def extrude(Q: np.ndarray, starts: np.ndarray, caps: np.ndarray, depth: float, b
         P = np.concatenate([face, np.full((len(face), 1), s * depth / 2)], 1)
         pieces.append((P, np.tile([0.0, 0.0, s], (len(face), 1)), caps))
     base = np.cumsum([0] + [len(p[0]) for p in pieces[:-1]])
-    return _orient(np.concatenate([p[0] for p in pieces]), np.concatenate([p[1] for p in pieces]),
-                   np.concatenate([p[2] + o for p, o in zip(pieces, base)]).astype(np.int64))
+    P = np.concatenate([p[0] for p in pieces])
+    lo, hi = Q.min(0), Q.max(0)
+    U = (P[:, :2] - lo) / np.maximum(hi - lo, 1e-9)  # the image across the outline's box, seen from the front
+    return _orient(P, np.concatenate([p[1] for p in pieces]),
+                   np.concatenate([p[2] + o for p, o in zip(pieces, base)]).astype(np.int64), U)

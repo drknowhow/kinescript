@@ -190,6 +190,18 @@ one in front of it. On the CPU the stage blurs at halved sizes and mixes in nump
 - Check rules: `no-uvs` (a texture on a mesh without coordinates), `texture-missing`, `texture-swim` (a textured
   triangle still too large on screen).
 
+Status (2026-10-31): image textures (branch `textures`): coordinates on every shape, `texture` with `repeat` and
+`offset` on layers and parts, glTF `TEXCOORD_n` and `baseColorTexture`, the passes, the cutting, `no-uvs` and
+`texture-swim` are built, not merged. Video and `"#groupId"` textures and `emissiveTexture` come next, then
+`edges` and model `opacity`. Changes from the bullets above: a missing or unreadable texture is `media-missing` or
+`bad-media`, as for other files, not `texture-missing`. `.obj` files' `vt` and `map_Kd` are read too.
+`"texture": false` draws the fill (on a part, instead of the layer's texture; on a model file, its mean colour).
+Cylinder and cone ends take the image flat. On the GPU the picture, the light on a white surface and the added
+light (highlights, rim, reflection) are drawn on three surfaces and combined per pixel; on the CPU the picture is
+drawn times its per-vertex light at half strength and doubled when it is composited, which saved two copies of the
+region. Triangles are cut on shared edges until the image is within 1 px of where perspective puts it, for up to
+nine rounds: a floor reaching to just in front of the camera took eight.
+
 ### Phase 5: motion from files, parts and repeats
 
 - glTF animation: node translation, rotation and scale channels (LINEAR, STEP, CUBICSPLINE), morph target weights,

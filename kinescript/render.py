@@ -559,6 +559,7 @@ class Renderer:
         self.unlit: set[str] = set()  # models drawn this frame with the key light behind them
         self.fogged: set[str] = set()  # layers drawn this frame wholly hidden by fog
         self.inside: set[str] = set()  # models the camera is inside this frame
+        self.swim: set[str] = set()  # textured models whose triangles stayed too large to map the image this frame
         self.unfocused = False  # the camera's focus plane was nearer or farther than every layer this frame
         self.slow_dof = False  # a stage blurred per pixel on the CPU this frame
         self._dof = None  # (focus distance, aperture, z 0's distance) while the camera blurs (render3d.defocus)
@@ -571,6 +572,7 @@ class Renderer:
         self._solids: dict = {}  # outlines and extruded meshes of text and path models
         self._outer = None  # the 3D matrix of the layer being drawn's parent (models put their floor in it)
         self._msurf = None  # offscreen that models draw into, antialiased, before compositing
+        self._mspare: dict = {}  # more offscreens like it, for the passes of textured models
         self._stages = None  # surfaces of groups with "sort": "pixel" (stage.Stage)
         self._stage = None  # the stage whose child is being drawn
         self._dev = 1.0  # stage px per device px of the canvas being drawn on (models draw in device px)
@@ -807,7 +809,7 @@ class Renderer:
         only they draw, ungraded; `under` is an image of that, which the sub-frame starts from in their place."""
         s = self.s
         self.boxes = {}
-        self.culled, self.unlit, self.fogged, self.inside = set(), set(), set(), set()
+        self.culled, self.unlit, self.fogged, self.inside, self.swim = set(), set(), set(), set(), set()
         self.unfocused = self.slow_dof = False
         self._dof, self._span = None, [math.inf, 0.0]
         self.tris = 0
@@ -1626,6 +1628,15 @@ class Renderer:
             surf = skia.Surface.MakeRenderTarget(ctx, skia.Budgeted.kNo, info, 4 if self.track else 0) if ctx else None
             self._msurf = surf or skia.Surface.MakeRaster(info), ss
         return self._msurf
+
+    def _model_spare(self, k: int) -> skia.Surface:
+        """Another surface like _model_surface's, the k-th, for a pass of a textured model."""
+        if k not in self._mspare:
+            surf = self._model_surface()[0]
+            info, ctx = surf.imageInfo(), surf.recordingContext()
+            self._mspare[k] = (ctx and skia.Surface.MakeRenderTarget(ctx, skia.Budgeted.kNo, info,
+                                                                     4 if self.track else 0)) or surf.makeSurface(info)
+        return self._mspare[k]
 
     def _effect(self, L: Layer):
         hit = self._shaders.get(L.id)
