@@ -205,6 +205,7 @@ class Scene:
                       fix + " (paths are relative to the scene file)")
             return True
 
+        self.surfaces: set[str] = set()  # groups drawn as a texture, and so not where they stand
         for layer in self.all_layers():
             if layer.src and not missing(layer.src, layer.id, f"{layer.type} src") and layer.type == "model":
                 try:
@@ -222,11 +223,30 @@ class Scene:
             for spec in [layer.raw.get("texture")] + [p.get("texture") for p in layer.raw.get("parts") or []
                                                       if isinstance(p, dict)]:
                 src = spec.get("src") if isinstance(spec, dict) else spec
-                if isinstance(src, str) and src.strip() and not missing(self.path(src), layer.id, "texture"):
+                if not (isinstance(src, str) and src.strip()) or src.strip() == "#":
+                    continue
+                kind = schema.texture_kind(src)
+                if kind == "group":
+                    self._check_surface(layer, src[1:])
+                elif missing(self.path(src), layer.id, "texture"):
+                    continue
+                elif kind == "image":
                     try:
                         media.image(self.path(src))
                     except media.MediaError as e:
                         self.note("error", "bad-media", layer.id, f"texture {e}", "save it again as .png or .jpg")
+                else:
+                    try:
+                        info = media.probe(self.path(src))
+                    except media.MediaError as e:
+                        self.note("error", "bad-media", layer.id, f"texture {e}",
+                                  "export it again as .mp4, .mov or .webm, or use an image")
+                        continue
+                    if not info["w"]:
+                        self.note("error", "no-picture", layer.id, f"texture {Path(src).name} has no picture",
+                                  "use a video with a picture, or an image")
+                    elif isinstance(spec, dict) and spec.get("trim") is not None:
+                        _check_trim(self, layer.id, spec["trim"], info["duration"])
         for s in self.audio:
             owner = s.layer or s.id
             if s.raw.get("text") and s.src and not Path(s.src).exists():
@@ -289,6 +309,22 @@ class Scene:
                         self.note("error", "bad-value", layer.id, f"{name} is {v!r} at t={t:.2f}s; expected a number",
                                   "use a number, a percentage like '50%', or an expression starting with '='")
                         break
+
+    def _check_surface(self, layer: Layer, gid: str):
+        """A "#groupId" texture on model `layer` names a group that does not hold the model."""
+        g = self.by_id.get(gid)
+        if g is None:
+            close = schema.suggest(gid, list(self.by_id))
+            self.note("error", "unknown-texture", layer.id, f"texture '#{gid}' names no layer",
+                      (f"did you mean '#{close}'? " if close else "") + "give the group drawn on the model that id")
+        elif g.type != "group":
+            self.note("error", "bad-texture", layer.id, f"texture '#{gid}' is a {g.type} layer; a texture names a "
+                      "group", f"put '{gid}' in a group with a w and h, and name that group")
+        elif any(x is g for x in _lineage(layer)):
+            self.note("error", "bad-texture", layer.id, f"texture '#{gid}' is a group the model is in, so it would "
+                      "draw itself", "move the model out of that group, or name another group")
+        else:
+            self.surfaces.add(gid)
 
     def _check_spans(self):
         """Warn about a layer that is never on screen because its time falls wholly outside the scene (or its group),

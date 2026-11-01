@@ -1,0 +1,36 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 6, "bg": {"radial": [0.5, 0.3], "stops": ["#22252f", "#0b0c10"]}},
+  "camera": {"rotateX": 8, "rotateY": [[0, -12], ["end", 12, "inOutSine"]]},
+  "light": {"preset": "studio", "follow": "world", "azimuth": -30, "elevation": 35},
+  "env": "studio",
+  "layers": [
+    {"id": "app", "type": "group", "w": 360, "h": 760, "children": [
+      {"id": "app-bg", "type": "rect", "w": 360, "h": 760, "anchor": "topleft",
+       "fill": {"linear": [[0, 0], [0, 1]], "stops": ["#1b2030", "#0d1018"]}},
+      {"id": "app-title", "type": "text", "text": "Renders", "x": 32, "y": 70, "anchor": "left", "size": 34,
+       "weight": 700, "fill": "$paper"},
+      {"id": "app-count", "type": "counter", "x": 180, "y": 230, "anchor": "center", "size": 120, "weight": 700,
+       "fill": "$accent", "at": 0.3, "value": {"from": 0, "to": 248, "dur": 3, "ease": "outCubic"}, "format": "{:.0f}"},
+      {"id": "app-unit", "type": "text", "text": "frames a minute", "x": 180, "y": 310, "anchor": "center",
+       "size": 24, "fill": "$muted"},
+      {"id": "bar-1", "type": "rect", "x": 32, "y": 400, "h": 34, "radius": 8, "anchor": "left", "fill": "#ff633f",
+       "w": [[0.6, 0], [1.8, 230, "outCubic"]]},
+      {"id": "bar-2", "type": "rect", "x": 32, "y": 460, "h": 34, "radius": 8, "anchor": "left", "fill": "#b9f45d",
+       "w": [[0.9, 0], [2.1, 296, "outCubic"]]},
+      {"id": "bar-3", "type": "rect", "x": 32, "y": 520, "h": 34, "radius": 8, "anchor": "left", "fill": "#7b5cff",
+       "w": [[1.2, 0], [2.4, 150, "outCubic"]]},
+      {"id": "app-note", "type": "text", "text": "GPU  ·  CPU  ·  stage", "x": 180, "y": 640, "anchor": "center",
+       "size": 22, "fill": "$muted", "at": 2.4, "enter": "fade"}]},
+    {"id": "phone", "type": "group", "x": 700, "y": 540, "rotateY": [[0, 28], ["end", -18, "inOutSine"]],
+     "sort": "pixel", "children": [
+      {"id": "body", "type": "model", "shape": "cube", "w": 400, "h": 800, "depth": 36, "fill": "#1a1d24",
+       "shine": 0.8, "metal": 0.4},
+      {"id": "screen", "type": "model", "shape": "plane", "w": 360, "h": 760, "z": 19, "texture": "#app",
+       "shine": 0.5}]},
+    {"id": "drum", "type": "model", "shape": "cylinder", "r": 230, "h": 520, "x": 1320, "y": 540,
+     "rotateY": [[0, 0], ["end", -110]], "shine": 0.4,
+     "texture": {"src": "media/fractal.mp4", "trim": [0, 1.2], "loop": true, "speed": 0.4}},
+    {"id": "title", "type": "text", "text": "an app on a phone, footage round a drum",
+     "x": "50%", "y": "93%", "size": 34, "weight": 400, "fill": "$muted", "fixed": true, "at": 0.4, "enter": "fade"}
+  ]
+}

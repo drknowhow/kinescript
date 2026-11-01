@@ -158,3 +158,86 @@ def test_texture_keys_files_and_coordinates_are_checked(tmp_path):
     plain = write_gltf(tmp_path / "plain.glb", [([[0, 0, 0], [1, 0, 0], [0, 1, 0]], [[0, 1, 2]], None, None)],
                        binary=True)
     assert ("warning", "no-uvs") in codes({"id": "m", "type": "model", "src": plain, "texture": img})
+
+
+def test_a_group_is_drawn_on_the_model_at_the_frames_time_and_not_where_it_stands():
+    """A group of four coloured quarters, the top right one sliding down out of its box over the second."""
+    def quarter(x, y, fill):
+        return {"type": "rect", "x": x, "y": y, "w": 50, "h": 50, "anchor": "topleft", "fill": fill}
+    ui = {"id": "ui", "type": "group", "w": 100, "h": 100, "x": 0, "y": 0, "children": [
+        quarter(0, 0, "#e62828"), quarter(50, [[0, 0], [1, 100]], "#28c83c"), quarter(0, 50, "#2846e6"),
+        quarter(50, 50, "#f0dc28")]}
+    spec = scene([ui, card("#ui", fill="#ffffff")], duration=2)
+    for backend in ("cpu", "gpu"):
+        try:
+            f = frame(spec, 0, backend)
+        except RuntimeError:
+            continue
+        assert near(f[50, 120], RED) and near(f[50, 200], GREEN) and near(f[130, 120], BLUE)
+        assert near(f[130, 200], YELLOW) and near(f[5, 5], (0, 0, 0))  # not at the top left, where it stands
+        f = frame(spec, 30, backend)  # the green quarter has gone: the fill shows there
+        assert near(f[50, 200], (255, 255, 255)) and near(f[50, 120], RED)
+    r = Renderer(k.Scene(spec), backend="cpu")
+    seq = [r.frame(n).copy() for n in (0, 12, 24)]
+    for n, want in zip((24, 12, 0), seq[::-1]):  # a frame of its own, whatever was drawn before
+        assert (Renderer(k.Scene(spec), backend="cpu").frame(n) == want).all()
+
+
+def colours_clip(path, *colours, size=64, each=1) -> str:
+    """A clip showing each colour for `each` seconds in turn, at 30 fps."""
+    import subprocess
+    from kinescript import media
+    args = []
+    for c in colours:
+        args += ["-f", "lavfi", "-i", f"color=c={c}:size={size}x{size}:rate=30:d={each}"]
+    subprocess.run([media.FFMPEG, "-y", "-v", "error", *args, "-filter_complex",
+                    "".join(f"[{i}:v]" for i in range(len(colours))) + f"concat=n={len(colours)}:v=1:a=0",
+                    "-pix_fmt", "yuv420p", str(path)], check=True)
+    return str(path)
+
+
+@pytest.mark.parametrize("backend", ["cpu", "gpu"])
+def test_a_video_plays_on_the_model_with_its_loop_trim_and_speed(tmp_path, backend):
+    clip = colours_clip(tmp_path / "rb.mp4", "red", "blue")
+
+    def colour(texture, n):
+        return frame(scene([card(texture)], duration=3), n, backend)[90, 160]
+    try:
+        assert near(colour(clip, 15), (255, 0, 0), 24)
+    except RuntimeError:
+        pytest.skip("no GPU")
+    assert near(colour(clip, 45), (0, 0, 255), 24) and near(colour(clip, 75), (0, 0, 255), 24)  # holds its last
+    assert near(colour({"src": clip, "loop": True}, 75), (255, 0, 0), 24)  # starts again at 2 s
+    assert near(colour({"src": clip, "trim": [1]}, 15), (0, 0, 255), 24)
+    assert near(colour({"src": clip, "speed": 2}, 20), (0, 0, 255), 24)  # 1.33 s into the clip
+
+
+def test_group_and_video_textures_are_checked(tmp_path):
+    clip = colours_clip(tmp_path / "r.mp4", "red")
+    img = quadrants(tmp_path / "q.png")
+    ui = {"id": "ui", "type": "group", "w": 100, "h": 100, "children": [{"id": "dot", "type": "circle", "r": 20}]}
+
+    def codes(*layers):
+        return [(i["level"], i["code"]) for i in check(scene(list(layers)))["issues"]]
+    assert codes(ui, card("#ui")) == [] and codes(card({"src": clip, "loop": True, "trim": [0, 0.5]})) == []
+    assert ("error", "unknown-texture") in codes(ui, card("#iu"))
+    assert ("error", "bad-texture") in codes(ui, card("#dot"))  # not a group
+    inside = {"id": "box", "type": "group", "w": 100, "h": 100, "children": [card("#box")]}
+    assert ("error", "bad-texture") in codes(inside)
+    assert ("warning", "ignored-key") in codes(card({"src": img, "loop": True}))
+    assert ("error", "bad-trim") in codes(card({"src": clip, "trim": [5]}))
+    assert ("error", "media-missing") in codes(card(str(tmp_path / "gone.mp4")))
+    assert any(lv == "error" for lv, _ in codes(card({"src": clip, "speed": 0})))
+    assert any(lv == "error" for lv, _ in codes(card("#")))
+
+
+def test_a_model_inside_a_texture_group_is_drawn_on_the_texture():
+    ball = {"id": "ball", "type": "model", "shape": "sphere", "r": 30, "x": 50, "y": 50, "light": "flat",
+            "fill": "#e62828"}
+    ui = {"id": "ui", "type": "group", "w": 100, "h": 100, "children": [ball]}
+    for backend in ("cpu", "gpu"):
+        try:
+            f = frame(scene([ui, card("#ui", fill="#ffffff")]), 0, backend)
+        except RuntimeError:
+            continue
+        assert near(f[90, 160], RED, 24) and near(f[20, 90], (255, 255, 255))  # the ball in the middle, fill round

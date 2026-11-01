@@ -12,6 +12,7 @@ import unicodedata
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import skia
@@ -20,7 +21,7 @@ from . import color as C
 from . import media, render3d, space, stage, svgpath
 from .presets import IDENT, Mods
 from .props import length, noise
-from .scene import Layer, Scene
+from .scene import Layer, Scene, uses_depth
 
 ANCHORS = {"center": (0.5, 0.5), "topleft": (0, 0), "top": (0.5, 0), "topright": (1, 0), "left": (0, 0.5),
            "right": (1, 0.5), "bottomleft": (0, 1), "bottom": (0.5, 1), "bottomright": (1, 1)}
@@ -589,6 +590,8 @@ class Renderer:
         self.grade_filter = skia.ColorFilters.Matrix(cm) if cm else None
         self._videos = [L for L in scene.all_layers() if L.type == "video"]
         self._on: float | None = None  # the frame time the last draw showed, to tell a render drawing forward
+        self._clips: dict = {}  # video textures: (model id, src, timing) -> (model layer, decoder)
+        self._insets: set[str] = set()  # the groups being drawn as textures (_surface)
 
     # ---- public -------------------------------------------------------------------------
     def frame(self, n: int) -> np.ndarray:
@@ -874,6 +877,9 @@ class Renderer:
             if L.ahead is not None and not (L.t_in <= on + AHEAD and on < L.t_out):  # as _prime reckons it
                 L.ahead[1].close()
                 L.ahead = None
+        for L, v in self._clips.values():
+            if v.proc is not None and not L.t_in <= on < L.t_out:
+                v.close()
 
     def _prime(self, on: float, ahead: float):
         """Open the decoder of each clip shown at frame time `on`, and of each coming on within `ahead` seconds, where
@@ -1031,6 +1037,8 @@ class Renderer:
     def _layer(self, c: skia.Canvas, L: Layer, T: float, parent_alpha: float):
         if self.stop_at == L.id:
             self._stopped = True
+            return
+        if L.id in self.s.surfaces:  # a model's texture: drawn there (_surface), not here
             return
         F = self._frame_t
         if not L.visible(T if F is None else F):
@@ -1550,6 +1558,68 @@ class Renderer:
         img = L.video.at(self._src_time(L, t, L.video.info))
         if img is not None:
             self._content(c, L, g, box, img, img.width(), img.height())
+
+    def _surface(self, gid: str, T: float) -> skia.Image | None:
+        """Group gid drawn at scene time T on an image of its own, for a model's texture: its box (w x h, or the
+        canvas's size) fills the image. Its layers draw as in a scene without a camera, those that move in depth seen
+        as a camera of the image's size sees them, without fog or depth of field; their boxes are not the frame's.
+        None for a group that is already being drawn, which would show itself."""
+        G = self.s.by_id[gid]
+        if gid in self._insets:
+            return None
+        t = T - G.t_in
+        w, h = (max(1.0, float(G.get(k, t, T, 0, d))) for k, d in (("w", self.s.w), ("h", self.s.h)))
+        size = (max(1, min(4096, round(w * self.scale))), max(1, min(4096, round(h * self.scale))))
+        surf = self._models.get(("surface", gid))
+        if surf is None or (surf.width(), surf.height()) != size:
+            info = skia.ImageInfo.MakeN32Premul(*size)
+            surf = (self.gr and skia.Surface.MakeRenderTarget(self.gr, skia.Budgeted.kNo, info)) or \
+                skia.Surface.MakeRaster(info)
+            self._models[("surface", gid)] = surf
+        c = surf.getCanvas()
+        c.resetMatrix()
+        c.clear(skia.ColorTRANSPARENT)
+        c.scale(size[0] / w, size[1] / h)
+        ax, ay = ANCHORS.get(G.raw.get("anchor", "topleft"), (0, 0))
+        cam = space.camera(w, h, x=-ax * w, y=-ay * h)  # looking at the middle of the box
+        kept = (self.boxes, self._m3d, self._cam, self._focused, self._stage, self._dev, self._lens, self._outer)
+        self.boxes, self._focused, self._stage, self._dev, self._lens = {}, None, None, 1.0, space.lens(w, h)
+        self._insets.add(gid)
+        try:
+            for child in G.children:
+                if self._stopped:
+                    break
+                m = cam if uses_depth(child) else None
+                self._m3d = self._cam = m
+                c.save()
+                if m is None:
+                    c.translate(ax * w, ay * h)
+                else:
+                    c.concat(space.to_skia(m))
+                self._layer(c, child, T, 1.0)
+                c.restore()
+        finally:
+            self._insets.discard(gid)
+            self.boxes, self._m3d, self._cam, self._focused, self._stage, self._dev, self._lens, self._outer = kept
+        return surf.makeImageSnapshot()
+
+    def _clip(self, L: Layer, spec: dict, t: float) -> skia.Image | None:
+        """The frame video texture spec ({"src", "loop", "trim", "speed"}) on model L shows at L's own time t, the
+        whole frame at the clip's own size, up to 2048 px across."""
+        if self._frame_t is not None:  # a motion-blur sub-frame shows its frame's picture, as a video layer does
+            t = min(max(self._frame_t, L.t_in), math.nextafter(L.t_out, -math.inf)) - L.t_in
+        timing = SimpleNamespace(raw={k: spec[k] for k in ("loop", "trim", "speed") if k in spec})
+        key = (L.id, spec["src"], repr(timing.raw))
+        hit = self._clips.get(key)
+        if hit is None:
+            src = self.s.path(spec["src"])
+            info = media.probe(src)
+            k = min(1.0, self.scale, 2048 / max(info["w"], info["h"], 1))
+            hit = self._clips[key] = (L, media.VideoSource(
+                src, round(info["w"] * k), round(info["h"] * k), self.s.fps, float(spec.get("speed", 1)), "stretch",
+                ctx=gpu_context() if self.backend == "gpu" else None))
+        v = hit[1]
+        return v.at(self._src_time(timing, t, v.info))
 
     def _decode_size(self, L: Layer, bw: float, bh: float) -> tuple[int, int]:
         """The size video layer L decodes at in a bw x bh box."""

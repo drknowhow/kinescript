@@ -91,7 +91,8 @@ ENV_ALIAS = {"name": "preset", "sky": "top", "ground": "bottom", "floor": "botto
 FOG = {"color", "near", "far", "amount"}
 FOG_ALIAS = {"colour": "color", "start": "near", "end": "far", "density": "amount", "strength": "amount"}
 MATERIAL = {"fill", "shine", "metal", "rim", "bands", "glow", "texture"}
-TEXTURE = {"src", "repeat", "offset"}
+TEXTURE = {"src", "repeat", "offset", "loop", "trim", "speed"}
+CLIP_KEYS = ("loop", "trim", "speed")  # a video texture's, as on a video layer
 TEXTURE_ALIAS = {"image": "src", "file": "src", "path": "src", "url": "src", "tile": "repeat", "tiles": "repeat",
                  "tiling": "repeat", "shift": "offset", "position": "offset"}
 PART = MATERIAL | {"shape", "w", "h", "depth", "r", "tube", "x", "y", "z", "rotateX", "rotateY", "rotate", "scale",
@@ -1225,9 +1226,14 @@ def _outline(obj: dict, rep: Report, lid, where: str = ""):
                 'add "d": "M0 0 L100 0 L50 80 Z"')
 
 
+def texture_kind(src: str) -> str:
+    """What a texture's src names: "group" ("#id"), "image" or "video"."""
+    return "group" if src.startswith("#") else "image" if src.lower().endswith(IMAGE_EXTS + (".gif",)) else "video"
+
+
 def _texture(obj: dict, rep: Report, lid, where: str = ""):
-    """`texture` is an image file, or {"src", "repeat", "offset"}; false draws the fill instead of the layer's
-    texture (on a part) or the model file's own."""
+    """`texture` is an image or video file, or "#groupId", or {"src", "repeat", "offset"} with a video's "loop",
+    "trim" and "speed"; false draws the fill instead of the layer's texture (on a part) or the model file's own."""
     v = obj.get("texture")
     if v is None or v is False:
         return
@@ -1247,14 +1253,21 @@ def _texture(obj: dict, rep: Report, lid, where: str = ""):
                 rep.add("error", "bad-value", lid, f"{where}texture {k} is {_show(x)}; it takes {what}",
                         "\"repeat\": 2 shows the image twice across and down" if k == "repeat" else
                         "\"offset\": [0.5, 0] moves the image half its width to the right")
+        if v.get("loop") is not None and not isinstance(v["loop"], bool):
+            rep.add("error", "bad-value", lid, f"{where}texture loop is {_show(v['loop'])}; it takes true or false")
+        sp = v.get("speed")
+        if sp is not None and not (_finite(sp) and sp > 0):
+            rep.add("error", "bad-value", lid, f"{where}texture speed is {_show(sp)}; it must be a number above 0",
+                    "2 plays twice as fast, 0.5 at half speed")
     else:
         src = v
-    if not (isinstance(src, str) and src.strip()):
-        rep.add("error", "bad-value", lid, f"{where}texture is {_show(v)}; it takes an image file, or an object "
-                "like {\"src\": \"wood.jpg\", \"repeat\": 2}")
-    elif not src.lower().endswith(IMAGE_EXTS + (".gif",)):
-        rep.add("error", "bad-value", lid, f"{where}texture {src!r} is not an image file; a texture is a .png, .jpg, "
-                ".webp, .gif or .bmp", "use a still image")
+    if not (isinstance(src, str) and src.strip()) or src.strip() == "#":
+        rep.add("error", "bad-value", lid, f"{where}texture is {_show(v)}; it takes an image or video file, "
+                "\"#groupId\", or an object like {\"src\": \"wood.jpg\", \"repeat\": 2}")
+    elif isinstance(v, dict) and texture_kind(src) != "video" and any(k in v for k in CLIP_KEYS):
+        keys = ", ".join(k for k in CLIP_KEYS if k in v)
+        rep.add("warning", "ignored-key", lid, f"{where}texture {keys}: only a video texture plays, and {src!r} is "
+                f"{'a group' if src.startswith('#') else 'a still image'}", "drop them, or use a video file")
 
 
 def _model(raw: dict, rep: Report, lid):
