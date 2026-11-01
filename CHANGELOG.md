@@ -28,7 +28,13 @@
 - `kine check` reports `unknown-animation`, naming the clips the file has, and warns `skin-influences` when
   vertices take more than four joints (`JOINTS_1`); they follow the first four.
 - `examples/make_media.py` writes `arm.glb`, a tube skinned to three joints with a looping `wave` clip and an
-  eased `curl`.
+  eased `curl`, and `figure.glb`, a figure of 8,352 triangles on 11 joints with a `walk` and a `wave` loop.
+- `examples/character.json`: two figures walk across a floor in a stage with shadows, one near and one far, while
+  a third waves. 180 frames render in 6.2 s on the development machine's GPU.
+- `bench/stress.py` has `skinned`, six snakes from a 24-joint glTF of 23,040 triangles and twelve `arm.glb`, each
+  on its own clip and start, and `repeat-1000`, 1,000 moving cubes in one layer with `repeat`. On the development
+  machine's GPU they render 120 frames at 1080p in 3.89 s and 6.60 s, on the CPU in 12.1 s and 27.3 s; the results
+  are in `docs/stress-test-1.5/`.
 
 ## 1.5.0 (2026-11-01)
 

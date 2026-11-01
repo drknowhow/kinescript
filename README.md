@@ -278,6 +278,8 @@ More scenes in [`examples/`](https://github.com/drknowhow/kinescript/tree/main/e
   and two more cans out of focus behind it, 6 s.
 - [`cubes.json`](https://github.com/drknowhow/kinescript/blob/main/examples/cubes.json): a ripple through a grid of
   144 cubes, one model layer with `repeat`, each copy placed and coloured by an expression of its number, 6 s.
+- [`character.json`](https://github.com/drknowhow/kinescript/blob/main/examples/character.json): a skinned glTF
+  figure playing its `walk` and `wave` clips: two walk across a floor with their shadows while a third waves, 6 s.
 - [`voiceover.json`](https://github.com/drknowhow/kinescript/blob/main/examples/voiceover.json): titles cued from
   the words of a voice-over, karaoke captions of it, and a music bed that dips under it, 5.4 s.
 - [`narrated.json`](https://github.com/drknowhow/kinescript/blob/main/examples/narrated.json): the same idea

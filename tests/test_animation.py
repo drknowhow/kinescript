@@ -267,6 +267,24 @@ def test_the_sample_arm_bends_on_its_joints():
     assert np.allclose(P[rest[:, 1] > rest[:, 1].max() - 1], rest[rest[:, 1] > rest[:, 1].max() - 1], atol=1e-4)
 
 
+def test_the_sample_figure_walks_and_waves():
+    from pathlib import Path
+    fig = Path(__file__).resolve().parents[1] / "examples" / "media" / "figure.glb"
+    if not fig.exists():
+        pytest.skip("run examples/make_media.py first")
+    imp = models.load(str(fig))
+    assert models.clip_names(imp) == ["walk", "wave"] and imp.about["skins"] == [{"name": "figure", "joints": 11}]
+    rest = imp.mesh.P
+    arm = rest[:, 0] > 18.5  # the right arm, beside the torso
+    hand = arm & (rest[:, 1] > rest[arm, 1].max() - 1)
+    P, _ = models.pose(imp, models.clip_index(imp, "wave"), 0.5)
+    assert P[hand, 1].max() < rest[:, 1].min()  # y runs down: the hand is raised over the head
+    feet = rest[:, 1] > rest[:, 1].max() - 1
+    P, _ = models.pose(imp, models.clip_index(imp, "walk"), 0.25)
+    left, right = P[feet & (rest[:, 0] < 0), 2].mean(), P[feet & (rest[:, 0] > 0), 2].mean()
+    assert left * right < 0 and min(abs(left), abs(right)) > 30  # mid-stride: one foot forward, one back
+
+
 def _parts(*parts, **layer):
     return scene([dict({"id": "m", "type": "model", "x": 160, "y": 90, "parts": list(parts)}, **layer)],
                  bg="#000000")

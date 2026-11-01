@@ -259,6 +259,90 @@ def dof_stage() -> dict:  # a stage with a floor taking shadows, models and card
                   light={"preset": "studio", "follow": "world", "azimuth": -40, "elevation": 35})
 
 
+def _snake_gltf(joints: int = 24, rings: int = 289, seg: int = 40) -> str:
+    """A tube 600 long on a chain of `joints` joints, each vertex weighted to the two it lies between, with a 2 s
+    "slither" clip that bends each joint a little later than the one before (33 LINEAR rotation keys a joint):
+    rings x seg vertices, 11,560 and 23,040 triangles by default. Written to WORK as a .gltf; returns its path."""
+    import base64
+    import numpy as np
+    length, r, step = 600.0, 18.0, 600.0 / joints
+    a = np.linspace(0, 2 * np.pi, seg, endpoint=False)
+    rim = np.stack([np.cos(a), np.zeros(seg), np.sin(a)], 1)
+    y = np.linspace(0, length, rings)
+    P = (rim[None] * r + y[:, None, None] * [0, 1, 0]).reshape(-1, 3)
+    N = np.tile(rim, (rings, 1))
+    i, j = np.arange(rings - 1)[:, None] * seg, np.arange(seg)[None]
+    a0, a1 = i + j, i + (j + 1) % seg
+    T = np.r_[np.stack([a0, a0 + seg, a1], -1).reshape(-1, 3), np.stack([a1, a0 + seg, a1 + seg], -1).reshape(-1, 3)]
+    u = P[:, 1] / step
+    j0 = np.minimum(np.floor(u), joints - 1).astype(int)
+    f = np.clip(u - j0, 0, 1)
+    f = np.where(j0 + 1 < joints, f * f * (3 - 2 * f), 0.0)
+    jw = np.stack([j0, np.minimum(j0 + 1, joints - 1), np.zeros_like(j0), np.zeros_like(j0)], 1)
+    ww = np.stack([1 - f, f, np.zeros_like(f), np.zeros_like(f)], 1)
+    blob, views, accessors = bytearray(), [], []
+
+    def add(arr, ctype, kind):
+        views.append({"buffer": 0, "byteOffset": len(blob), "byteLength": arr.nbytes})
+        blob.extend(arr.tobytes() + b"\0" * (-arr.nbytes % 4))
+        acc = {"bufferView": len(views) - 1, "componentType": ctype, "count": len(arr), "type": kind}
+        if kind == "VEC3":
+            acc.update(min=arr.min(0).tolist(), max=arr.max(0).tolist())
+        accessors.append(acc)
+        return len(accessors) - 1
+
+    attrs = {"POSITION": add(P.astype("<f4"), 5126, "VEC3"), "NORMAL": add(N.astype("<f4"), 5126, "VEC3"),
+             "JOINTS_0": add(jw.astype("<u1"), 5121, "VEC4"), "WEIGHTS_0": add(ww.astype("<f4"), 5126, "VEC4")}
+    ibm = np.tile(np.eye(4), (joints, 1, 1))
+    ibm[:, 1, 3] = -np.arange(joints) * step
+    axis = np.array([0.35, 0.0, 1.0]) / np.hypot(0.35, 1.0)
+    t = np.arange(33) / 16
+    samplers, channels = [], []
+    for n in range(1, joints):
+        half = np.radians(14 * np.sin(np.pi * t - 0.5 * n)) / 2
+        q = np.c_[axis[None] * np.sin(half)[:, None], np.cos(half)]
+        samplers.append({"input": add(t.astype("<f4"), 5126, "SCALAR"), "output": add(q.astype("<f4"), 5126, "VEC4")})
+        channels.append({"sampler": len(samplers) - 1, "target": {"node": n, "path": "rotation"}})
+    nodes = [{"name": f"j{n}", **({"translation": [0, step, 0]} if n else {}),
+              **({"children": [n + 1]} if n + 1 < joints else {})} for n in range(joints)]
+    nodes.append({"name": "tube", "mesh": 0, "skin": 0})
+    doc = {"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": [0, joints]}], "nodes": nodes,
+           "skins": [{"joints": list(range(joints)),
+                      "inverseBindMatrices": add(ibm.transpose(0, 2, 1).reshape(-1, 16).astype("<f4"), 5126, "MAT4")}],
+           "meshes": [{"primitives": [{"attributes": attrs, "material": 0,
+                                       "indices": add(T.astype("<u4").ravel(), 5125, "SCALAR")}]}],
+           "materials": [{"pbrMetallicRoughness": {"baseColorFactor": [0.18, 0.55, 1.0, 1.0], "metallicFactor": 0.2,
+                                                   "roughnessFactor": 0.35}}],
+           "animations": [{"name": "slither", "samplers": samplers, "channels": channels}],
+           "accessors": accessors, "bufferViews": views,
+           "buffers": [{"byteLength": len(blob),
+                         "uri": "data:application/octet-stream;base64," + base64.b64encode(bytes(blob)).decode()}]}
+    WORK.mkdir(parents=True, exist_ok=True)
+    path = WORK / "snake.gltf"
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    return path.as_posix()
+
+
+def skinned() -> dict:  # 6 skinned tubes of 24 joints and 23,040 triangles each and 12 arms, posed every frame
+    src = _snake_gltf()
+    out = [{"id": f"snake{n}", "type": "model", "src": src, "h": 640, "x": 260 + n * 280, "y": "42%",
+            "rotateY": 30 * n, "animation": {"name": "slither", "start": 0.3 * n, "speed": 0.8 + 0.1 * n}}
+           for n in range(6)]
+    out += [{"id": f"arm{n}", "type": "model", "src": _m("arm.glb"), "h": 180, "x": 120 + n * 152, "y": "86%",
+             "animation": {"name": ("wave", "curl")[n % 2], "start": 0.1 * n}} for n in range(12)]
+    return _scene(out, light="studio", camera={"rotateY": [[0, -8], ["end", 8]]})
+
+
+def repeat_1000() -> dict:  # one model of 1000 cubes, each moved, turned and coloured by expressions every frame
+    return _scene([{"id": "grid", "type": "model", "shape": "cube", "w": 26, "detail": "low", "x": "50%", "y": "55%",
+                    "edges": {"width": 1, "angle": 40}, "rotateY": [[0, -20], ["end", 20]],
+                    "repeat": {"count": 1000, "x": "=(i % 40 - 19.5) * 40", "z": "=(floor(i / 40) - 12) * 40",
+                               "y": "=sin(t * 3 + (i % 40) * 0.3 + floor(i / 40) * 0.2) * 40",
+                               "rotateY": "=t * 90 + i * 7",
+                               "fill": "=hsl((i % 40) * 9 + t * 45, 0.7, 0.55)"}}],
+                  camera={"rotateX": 32}, light="studio")
+
+
 def captions_600() -> dict:
     cues = [[round(n * 0.05, 2), round(n * 0.05 + 0.05, 2), _sentence(n, 3)] for n in range(600)]
     return _scene([{"id": "cc", "type": "captions", "mode": "karaoke", "cues": cues},
@@ -306,6 +390,8 @@ SCENES = {
     "stage-16": (stage_16, ".mp4", "a stage: 12 rings and 4 cards passing through them, merged by depth per pixel"),
     "textured-100k": (textured_100k, ".mp4", "a textured .obj of 102,400 triangles turning under world light and env"),
     "dof-stage": (dof_stage, ".mp4", "a stage of 10 models and 3 cards with floor shadows and focus pulls"),
+    "skinned": (skinned, ".mp4", "6 skinned glTF tubes of 24 joints and 23k triangles and 12 arms, posed every frame"),
+    "repeat-1000": (repeat_1000, ".mp4", "one model of 1000 cubes moved, turned and coloured by expressions, with edges"),
     "captions-600": (captions_600, ".mp4", "600 karaoke cues and 200 pop cues in 30 s"),
     "odd-size": (odd_size, ".mp4", "1365x767 canvas into H.264 (even rounding)"),
     "gif": (gif_out, ".gif", "hello.json to GIF"),
