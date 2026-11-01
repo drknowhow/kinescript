@@ -585,6 +585,8 @@ class Renderer:
         self._roughs: dict = {}  # layer id: (seed, the path it wobbled, the wobbled path), the last one made
         # While a combining group draws its children: into its space, and the outlines they give instead of drawing
         self._capture: tuple[skia.Matrix, list] | None = None
+        self._matte: Layer | None = None  # the mask being drawn (_masked): layers drawn while it is are not seen as such
+        self._cutting: Layer | None = None  # the masked layer being recorded, drawn as itself inside _masked
         self._combos: dict = {}  # a combining group's id: (the outlines it merged, the merged path), the last one
         self._morphs: dict = {}  # (layer id, key): that key and the next matched point for point (morph.match)
         self._morphed: dict = {}  # layer id: (how far through its keys, the path there), the last one drawn
@@ -749,7 +751,7 @@ class Renderer:
         lo, hi = min(times), max(times)
         k = 0
         for L in self.s.layers:
-            if not self._holds(L, lo, hi, F):
+            if L.id not in self.s.mattes and not self._holds(L, lo, hi, F):  # a mask holds where its layer does
                 break
             k += 1
         return k
@@ -780,6 +782,8 @@ class Renderer:
         route = self.s.by_id[L.along[0][1:]] if L.along and L.along[0].startswith("#") else None
         if route is not None and not all(p.static for p in route.props.values()):
             return False  # it rides a path that moves
+        if L.mask is not None and not self._holds(L.mask[0], lo, hi, F):
+            return False
         return all(p.held(a, b, d) for p in L.props.values()) and all(self._holds(k, lo, hi, F) for k in L.children)
 
     @property
@@ -1091,6 +1095,11 @@ class Renderer:
             return
         if L.id in self.s.surfaces:  # a model's texture: drawn there (_surface), not here
             return
+        if L.id in self.s.mattes and L is not self._matte:  # a mask: drawn where it cuts the layer it masks
+            return
+        if L.mask is not None and self._capture is None and L is not self._cutting:  # a combining group takes it uncut
+            self._masked(c, L, T, parent_alpha)
+            return
         if self._capture is not None and L.type in ("image", "video", "shader", "model", "captions"):
             return  # a combining group merges shapes and text only
         F = self._frame_t
@@ -1185,7 +1194,7 @@ class Renderer:
             blur = math.hypot(blur, defocus)
         shadow = L.raw.get("shadow")
         fx = L.raw.get("fx")
-        blend = L.raw.get("blend")
+        blend = None if L is self._cutting else L.raw.get("blend")  # a masked layer blends once cut (_masked)
         effects = blur > 0.05 or shadow or fx or (blend and blend != "normal")
         cf = None
         if fogf > 0.002:
@@ -1255,6 +1264,8 @@ class Renderer:
                             text=self._last_text if hasattr(self, "_last_text") else "")
             if not facing:
                 info["mirrored"] = True
+            if self._matte is not None:
+                info["mask"] = True
             self.boxes[L.id] = info
         if L.type == "group":
             kids = L.children
@@ -1288,6 +1299,77 @@ class Renderer:
         self._m3d = outer
         if self.stop_after == L.id:
             self._stopped = True
+
+    def _masked(self, c, L: Layer, T: float, parent_alpha: float):
+        """L cut by its mask: the mask layer, drawn beside it on its own clock, keeps L where the mask is opaque
+        (luma: bright), or takes it away there for an invert; a feather blurs the mask's edge by that many px. Both are
+        recorded first, so the layers that cut are only as large as what they draw."""
+        M, mode, feather = L.mask
+        was, self._cutting = self._cutting, L
+        try:
+            body = self._record(c, lambda rc: self._layer(rc, L, T, parent_alpha))
+        finally:
+            self._cutting = was
+        if body is None and not self.track:  # check sees where the mask is even when the layer draws nothing
+            return
+        m = c.getTotalMatrix()
+        sigma = feather / 2 * math.sqrt(abs(m.getScaleX() * m.getScaleY() - m.getSkewX() * m.getSkewY()))
+        was, self._matte = self._matte, M
+        try:
+            cut = self._record(c, lambda rc: self._layer(rc, M, T, parent_alpha))
+        finally:
+            self._matte = was
+        if body is None:
+            return
+        area = body.cullRect()
+        invert = mode.endswith("Invert")
+        blend = L.raw.get("blend")
+        mix = skia.Paint(BlendMode=BLENDS[blend]) if blend not in (None, "normal") else None
+        if cut is None:  # no mask drawn now: an invert keeps all of the layer, any other mode none of it
+            if invert:
+                c.save()
+                c.resetMatrix()
+                c.drawPicture(body, None, mix)
+                c.restore()
+            return
+        reach = cut.cullRect().makeOutset(3 * sigma, 3 * sigma)  # the mask, and its blur
+        if not invert and not (area.left() < reach.right() and reach.left() < area.right()
+                               and area.top() < reach.bottom() and reach.top() < area.bottom()):
+            return  # nothing is left outside the mask
+        # Both layers hold all of the layer and all of the mask, in whole pixels and one more each way: what a
+        # layer's bounds cut through is antialiased otherwise (by up to 56 levels for a circle on the CPU). They hold
+        # no more: 50 masks took 2.1 s a 1080p frame on the CPU in layers from the frame's corner, 0.15 s in these.
+        # The CPU antialiases a circle or rounded rect by where it is in its layer, so one in a layer that moves with
+        # its mask can shift by up to 14 levels at its edge.
+        area.join(reach)
+        area = skia.Rect.Make(area.makeOutset(1, 1).roundOut())
+        paint = skia.Paint(BlendMode=skia.BlendMode.kDstOut if invert else skia.BlendMode.kDstIn)
+        if mode.startswith("luma"):
+            paint.setColorFilter(skia.LumaColorFilter.Make())  # premultiplied: half-clear white keeps half
+        if sigma > 0:
+            paint.setImageFilter(skia.ImageFilters.Blur(sigma, sigma))
+        c.save()
+        c.resetMatrix()  # the pictures were recorded where they land on this canvas
+        c.saveLayer(area, mix)
+        c.drawPicture(body)
+        c.saveLayer(area, paint)
+        c.drawPicture(cut)
+        c.restore()
+        c.restore()
+        c.restore()
+
+    @staticmethod
+    def _record(c, draw) -> skia.Picture | None:
+        """What draw(canvas) draws on c, recorded where it lands on c's device with its bounds; None if nothing."""
+        clip = c.getDeviceClipBounds()
+        if clip.isEmpty():
+            return None
+        rec = skia.PictureRecorder()
+        rc = rec.beginRecording(skia.Rect.Make(clip), skia.RTreeFactory()())
+        rc.setMatrix(c.getLocalToDevice())
+        draw(rc)
+        pic = rec.finishRecordingAsPicture()
+        return None if pic.cullRect().isEmpty() else pic
 
     def _combine(self, c, L: Layer, t: float, g, box, reveal, outer):
         """Merge the outlines L's children gave (_take), first to last by L's combine, and draw the merged shape with

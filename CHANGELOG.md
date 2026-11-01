@@ -66,6 +66,16 @@
   different numbers of pieces. The `morph-200` stress scene (200 paths morphing triangle, circle, star and back)
   draws a 1080p frame in 2.2 ms on the GPU, 1.0 ms more than the same paths standing still; matching its 600
   pairs takes 0.7 s once.
+- `mask` on any layer shows it through another layer beside it in the same group: `"mask": "lens"`, or
+  `{"layer": "lens", "mode": "alpha", "feather": 12}` with mode `alpha` (shown where the mask is opaque), `luma`
+  (where it is bright), `alphaInvert` or `lumaInvert`. The mask layer draws only as a mask, on its own clock and by
+  its own x and y, so it can move over a layer that holds still; `feather` blurs its edge. Video inside a word is a
+  video layer masked by a text layer. The layer and its mask are recorded first and cut in a layer only as large as
+  both. `kine check` reports `mask-unknown`, `bad-mask` (the layer itself, one in another group or inside the layer,
+  layers masking one another in a ring) and warns `mask-misses` where a mask never overlaps its layer. The
+  `masks-50` stress scene (25 gradient cards seen through words, 25 through a feathered lens moving over them) draws
+  a 1080p frame in 5.4 ms on the GPU, against 2.0 ms for the same layers unmasked, and in 0.46 s on the CPU against
+  0.06 s; the 25 feathers' blurs are 0.30 s of that.
 - `kine check` warns `strobe` where a layer moves more than 40 px a frame at 1080p for five frames running in a
   scene without motion blur, where the eye sees separate copies instead of one moving thing.
 - 2D frames cost less Python: keyframes find their segment by bisection, expressions compile once to a function,

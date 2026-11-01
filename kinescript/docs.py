@@ -114,6 +114,12 @@ KEYS EVERY LAYER HAS
   blur          px
   blend         normal | multiply | screen | overlay | add | lighten | darken | softLight |
                 difference | color
+  mask          the id of a layer beside it, in the same group, that it shows through: "mask": "lens",
+                or {"layer": "lens", "mode": "alpha", "feather": 12}. mode alpha (default: shown where
+                the mask is opaque), luma (where it is bright), alphaInvert or lumaInvert (where it is
+                not). feather blurs the mask's edge, in px. The mask layer draws only as a mask, on its
+                own clock, placed by its own x and y in the group, so it can move over a layer that
+                holds still. Video inside a word is a video layer masked by a text layer.
   shadow        {"x": 0, "y": 6, "blur": 16, "color": "#00000099"}   (those are the defaults)
   fx            {"brightness": 0, "contrast": 1, "saturate": 1, "hue": 0, "exposure": 0,
                  "temperature": 0, "tint": 0, "gray": 0, "invert": 0}. brightness adds to every

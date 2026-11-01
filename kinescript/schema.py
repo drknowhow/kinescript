@@ -132,7 +132,14 @@ GROUND_ALIAS = {"alpha": "opacity", "strength": "opacity", "softness": "blur", "
 
 COMMON = {"id", "type", "at", "dur", "until", "x", "y", "anchor", "opacity", "scale", "scaleX", "scaleY", "rotate",
           "blur", "blend", "shadow", "fx", "enter", "exit", "hidden", "allowOffscreen", "z", "rotateX", "rotateY",
-          "backface", "fixed", "sound", "along"}
+          "backface", "fixed", "sound", "along", "mask"}
+MASK = {"layer", "mode", "feather"}
+MASK_ALIAS = {"id": "layer", "source": "layer", "src": "layer", "matte": "layer", "type": "mode",
+              "softness": "feather", "soft": "feather", "blur": "feather", "edge": "feather"}
+MASK_MODES = ("alpha", "luma", "alphaInvert", "lumaInvert")
+MASK_MODE_ALIAS = {"invert": "alphaInvert", "inverted": "alphaInvert", "inverse": "alphaInvert",
+                   "alphainverted": "alphaInvert", "luminance": "luma", "lumainverted": "lumaInvert",
+                   "luminanceinvert": "lumaInvert"}
 SHAPE = {"fill", "stroke", "strokeWidth", "draw", "drawStart", "cap", "join", "dash", "dashOffset", "rough"}
 ROUGH = {"amount", "length", "seed", "boil"}
 ROUGH_ALIAS = {"roughness": "amount", "jitter": "amount", "wobble": "amount", "segment": "length",
@@ -256,7 +263,7 @@ REQUIRED = {"text": ("text",), "image": ("src",), "video": ("src",), "path": ("d
             "captions": ("cues", "src", "voice"), "shader": ("preset", "sksl"), "model": ("shape", "parts", "src")}
 # Keys whose value is an object of their own: never a tween, even with a "from" key (a light's direction).
 OBJECTS = {"light", "lights", "env", "ground", "shadow", "shadows", "box", "fx", "uniforms", "sound", "enter", "exit",
-           "parts", "transition", "texture", "edges", "animation", "repeat", "along", "rough"}
+           "parts", "transition", "texture", "edges", "animation", "repeat", "along", "rough", "mask"}
 # Props that cannot be below 0, and the least each may be.
 AT_LEAST = {"radius": 0, "r": 0, "sides": 3, "blur": 0, "strokeWidth": 0, "size": 0, "corner": 0}
 COLOUR_FIX = f"write {C.FORMATS}"
@@ -880,6 +887,7 @@ def _layer(raw, rep: Report, path: str, comps: dict):
     _rough(raw, rep, lid)
     _along(raw, rep, lid)
     _effects(raw, rep, lid)
+    _mask(raw, rep, lid)
     _layer_sound(raw, rep, lid)
     if "text" in TYPES[t]:
         _text(raw, rep, lid)
@@ -979,6 +987,47 @@ def _rough(raw: dict, rep: Report, lid):
                 "wobble", example)
     if v.get("amount") == 0:
         rep.add("warning", "ignored-key", lid, "rough with amount 0 draws the shape smooth", example)
+
+
+def _mask(raw: dict, rep: Report, lid):
+    """mask: the id of the layer that masks this one, or {"layer", "mode", "feather"}, made into the object."""
+    v = raw.get("mask")
+    if v is None or v is False:
+        raw.pop("mask", None)
+        return
+    example = '"mask": {"layer": "lens", "mode": "alpha", "feather": 12}'
+    if isinstance(v, str):
+        raw["mask"] = v = {"layer": v}
+    if not isinstance(v, dict):
+        rep.add("error", "bad-value", lid, f"mask is {_show(v)}; it is the id of the layer that masks this one, or "
+                "an object", example)
+        return
+    _keys(v, MASK, MASK_ALIAS, rep, lid, "mask: ")
+    m = v.get("layer")
+    if isinstance(m, str) and m.strip().lstrip("#"):
+        v["layer"] = m.strip().lstrip("#")
+    else:
+        rep.add("error", "bad-value" if "layer" in v else "missing-key", lid, "mask names no layer"
+                + (f": layer is {_show(m)}" if "layer" in v else "") + "; give it the id of the layer that masks "
+                "this one", example)
+    mode = v.get("mode")
+    if mode is None:
+        v.pop("mode", None)
+    elif not isinstance(mode, str) or mode not in MASK_MODES:
+        low = mode.strip().lower() if isinstance(mode, str) else ""
+        fixed = {x.lower(): x for x in MASK_MODES}.get(low) or MASK_MODE_ALIAS.get(low)
+        if fixed:
+            v["mode"] = fixed
+            rep.add("info", "renamed-value", lid, f"mask mode '{mode}' read as '{fixed}'",
+                    f"write \"mode\": \"{fixed}\"")
+        else:
+            rep.add("error", "bad-value", lid, "mask mode: " + unknown("mask mode", mode, MASK_MODES), example)
+    f = v.get("feather")
+    if f is None:
+        v.pop("feather", None)
+    elif not (_finite(f) and f >= 0):
+        rep.add("error", "bad-value", lid, f"mask feather is {_show(f)}; it is how many px the mask's edge fades "
+                "over, 0 or more", example)
 
 
 COMBINES = {"rect", "circle", "ellipse", "polygon", "path", "line", "arrow", "text", "counter", "group"}

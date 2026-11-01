@@ -414,11 +414,90 @@ def test_frame_is_pure_function_of_index():
          "enter": {"name": "rise", "stagger": 0.1, "order": "random", "seed": 3}},
         {"id": "r", "type": "rect", "x": 60, "y": 120, "w": 60, "h": 40, "fill": "#4a7dff",
          "rough": {"amount": 3, "seed": 2, "boil": 8}},
+        {"id": "lens", "type": "circle", "r": 30, "x": "=160+sin(t*2)*80", "y": 90},
+        {"id": "sheet", "type": "rect", "x": 160, "y": 90, "w": 200, "h": 60, "fill": "#3ddbd9",
+         "mask": {"layer": "lens", "feather": 6}},
     ], duration=2)
     r = Renderer(k.Scene(spec), backend="cpu")
     sequential = [r.frame(n).copy() for n in range(0, 30)]
     alone = _frame(spec, 17)
     assert np.array_equal(sequential[17], alone)
+
+
+def _masked(mask, **lens):
+    """A white sheet over the left half of a black canvas, cut by `mask`; the lens, a circle at x 160, overlaps it
+    from x 120 to 160 and stands off it from 160 to 200."""
+    return scene([dict({"id": "lens", "type": "circle", "r": 40, "x": 160, "y": 90, "fill": "#ff0000"}, **lens),
+                  {"id": "sheet", "type": "rect", "x": 80, "y": 90, "w": 160, "h": 180, "fill": "#ffffff",
+                   "mask": mask}], bg="#000000", duration=1)
+
+
+def test_a_mask_shows_a_layer_through_another_and_is_not_drawn_itself():
+    f = _frame(_masked("lens"), 0)
+    assert tuple(f[90, 140, :3]) == (255, 255, 255)  # the sheet, where the lens is
+    assert f[90, 60, :3].max() == 0 and f[90, 180, :3].max() == 0  # nothing where it is not, nor the lens itself
+    inv = _frame(_masked({"layer": "lens", "mode": "alphaInvert"}), 0)
+    assert inv[90, 140, 0] == 0 and inv[90, 60, 0] == 255 and inv[90, 180, 0] == 0
+    soft = _frame(_masked({"layer": "lens", "feather": 30}), 0)
+    assert soft[90, 135, 0] > 200 and 60 < soft[90, 120, 0] < 200 and 0 < soft[90, 110, 0] < 60  # the edge fades
+    half = _frame(_masked({"layer": "lens", "mode": "luma"}, fill="#808080"), 0)
+    assert abs(int(half[90, 140, 0]) - 128) <= 2 and half[90, 60, 0] == 0  # grey keeps half
+    rest = _frame(_masked({"layer": "lens", "mode": "lumaInvert"}, fill="#808080"), 0)
+    assert abs(int(rest[90, 140, 0]) - 127) <= 2 and rest[90, 60, 0] == 255
+    faint = _frame(_masked("lens", opacity=0.5), 0)
+    assert abs(int(faint[90, 140, 0]) - 128) <= 2  # a mask's opacity is how much it keeps
+
+
+def test_a_masked_layer_blends_with_what_is_behind_it():
+    for mode in ("alpha", "alphaInvert"):
+        spec = scene([{"id": "lens", "type": "rect", "x": 80, "y": 90, "w": 160, "h": 180},
+                      {"id": "m", "type": "rect", "x": 160, "y": 90, "w": 320, "h": 180, "fill": "#ff8000",
+                       "blend": "multiply", "mask": {"layer": "lens", "mode": mode}}], bg="#808080", duration=1)
+        f = _frame(spec, 0)
+        kept = (40, 280) if mode == "alpha" else (280, 40)
+        assert np.abs(f[90, kept[0], :3].astype(int) - (128, 64, 0)).max() <= 1, (mode, f[90, kept[0]])
+        assert tuple(f[90, kept[1], :3]) == (128, 128, 128), mode
+    alone = scene([{"id": "m", "type": "rect", "x": 160, "y": 90, "w": 320, "h": 180, "fill": "#ff8000",
+                    "blend": "multiply", "mask": {"layer": "lens", "mode": "alphaInvert"}},
+                   {"id": "lens", "type": "rect", "x": 80, "y": 90, "w": 160, "h": 180, "at": 0.5}],
+                  bg="#808080", duration=1)
+    assert np.abs(_frame(alone, 0)[90, 40, :3].astype(int) - (128, 64, 0)).max() <= 1  # no mask yet: all of it
+
+
+def test_a_mask_moves_on_its_own_clock_and_cuts_motion_blur_as_it_moves():
+    spec = _masked("lens", at=0.5, x=[[0, 40], [0.5, 140, "linear"]])
+    r = Renderer(k.Scene(spec), backend="cpu")
+    assert r.frame(0)[..., :3].max() == 0  # before the mask starts, nothing shows through it
+    assert r.frame(15)[90, 40, 0] == 255 and r.frame(15)[90, 140, 0] == 0
+    assert r.frame(29)[90, 140, 0] == 255 and r.frame(29)[90, 40, 0] == 0
+    # A sheet that holds still behind a moving mask is drawn on every sub-frame: it smears as a moving disc does.
+    blur = {"samples": 8, "shutter": 0.5}
+    moving = dict(_masked("lens", x=[[0, 40], [1, 280, "linear"]], fill="#ffffff"), motionBlur=blur)
+    disc = dict(scene([{"id": "d", "type": "circle", "r": 40, "y": 90, "x": [[0, 40], [1, 280, "linear"]],
+                        "fill": "#ffffff"},
+                       {"id": "cover", "type": "rect", "x": 240, "y": 90, "w": 160, "h": 180, "fill": "#000000"}],
+                      bg="#000000", duration=1), motionBlur=blur)
+    a, b = _frame(moving, 10), _frame(disc, 10)
+    edge = a[90, 70:90, 0]  # the disc's left edge, at x 80 on this frame
+    assert ((edge > 0) & (edge < 255)).any() and np.abs(a.astype(int) - b).max() <= 2
+
+
+def test_check_warns_when_a_mask_never_overlaps_its_layer():
+    def misses(spec):
+        return [i["layer"] for i in check(spec)["issues"] if i["code"] == "mask-misses"]
+    assert misses(_masked("lens")) == []
+    assert misses(_masked("lens", x=300)) == ["sheet"]
+    assert misses(_masked({"layer": "lens", "mode": "alphaInvert"}, x=300)) == []  # all of it shows then
+
+
+def test_check_sees_the_mask_over_a_clip_it_does_not_decode(clip):
+    spec = scene([{"id": "word", "type": "text", "text": "CLIP", "size": 80, "x": 160, "y": 90},
+                  {"id": "v", "type": "video", "src": clip, "x": 160, "y": 90, "anchor": "center", "w": 320, "h": 180,
+                   "mask": "word"}], duration=1)
+    assert not [i for i in check(spec)["issues"] if i["code"] == "mask-misses"]
+    cut, whole = _frame(spec, 0), _frame(dict(spec, layers=[dict(spec["layers"][1], mask=None)]), 0)
+    same = (cut == whole).all(axis=2)
+    assert 1000 < same.sum() < same.size / 2 and not same[5, 5] and not same[175, 315]  # the clip in the word only
 
 
 def _boxes(spec, T=0.0):

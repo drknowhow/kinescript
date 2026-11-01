@@ -192,6 +192,15 @@ with Skia's Path.interpolate; `morph-200` draws in 2.2 ms a frame on the GPU aga
   time). Target: a glowing 1080p title under 1 ms on the GPU (`glow-text`).
 - Check rule: `slow-effects` on the CPU when masks and effects together pass a measured per-frame cost.
 
+Status (2026-11-01): masks in their own PR. Changes from the bullet above: the mask layer stands beside the layer it
+masks, in the same group (check says `bad-mask` otherwise), so its x and y mean what they say. A saveLayer bounded by
+the masked layer's box alone was not enough: the layer and its mask are recorded as pictures, and both layers hold
+all of both, in whole pixels, since Skia's CPU antialiasing of a circle changes by up to 56 levels where a layer's
+bounds cut through it. Those bounds matter on the CPU: `masks-50` took 2.1 s a frame in layers from the frame's
+corner and 0.16 s in these (without feathers). On the GPU it draws in 5.4 ms, 3.4 ms more than unmasked. A feather
+is Skia's blur filter, which is slow on the CPU (15 ms for a 400x150 layer), as a layer's `blur` already is: the
+`slow-effects` rule covers both.
+
 ### Phase 4: many things at once
 
 - `repeat` on 2D layers (shapes, text, images, groups) with the model's keys plus `opacity` and `stroke`, through

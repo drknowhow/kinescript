@@ -239,7 +239,7 @@ def _over(boxes: dict, lid: str, a: list) -> str | None:
         if other == lid:
             after = True
             continue
-        if not after or b["alpha"] < 0.5:
+        if not after or b["alpha"] < 0.5 or b.get("mask"):
             continue
         r = b["rect"]
         ix, iy = min(a[2], r[2]) - max(a[0], r[0]), min(a[3], r[3]) - max(a[1], r[1])
@@ -489,6 +489,7 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
     r.footage = False
     found: dict[tuple, dict] = {}
     off: dict[str, list] = {}  # media layer (or its sequence) id -> (time, box, share off, layer) when mostly off
+    cuts: dict[str, list] = {}  # masked layer id -> [times it is drawn at, times its mask overlaps it at]
     shown: dict[str, int] = {}  # other layer id -> samples it is visible at
     gone: dict[str, list] = {}  # other layer id -> times it is visible but entirely off the canvas
 
@@ -557,10 +558,18 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
                 "use \"detail\": \"low\" or \"medium\", or fewer parts")
         texts = []
         for lid, b in r.boxes.items():
-            if b["alpha"] < 0.3:
+            layer = scene.by_id.get(lid)
+            if layer is not None and layer.mask is not None and not layer.mask[1].endswith("Invert"):
+                seen = cuts.setdefault(lid, [[], []])
+                seen[0].append(T)
+                mb, a = r.boxes.get(layer.mask[0].id), b["rect"]
+                if mb is not None and min(a[2], mb["rect"][2]) > max(a[0], mb["rect"][0]) and \
+                        min(a[3], mb["rect"][3]) > max(a[1], mb["rect"][1]):
+                    seen[1].append(T)
+            if b["alpha"] < 0.3 or b.get("mask"):
                 continue
             l, t, rr, bb = b["rect"]
-            layer = up = scene.by_id.get(lid)
+            up = layer
             allow = False
             while up is not None and not allow:  # set on a group or sequence, it covers what is inside
                 allow, up = bool(up.raw.get("allowOffscreen")), up.parent
@@ -599,6 +608,12 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
                     if ix * iy / area > 0.15:
                         add("warning", "text-overlap", f"{texts[i][0]}+{texts[j][0]}", T,
                             "two text layers overlap", "offset one of them or separate them in time")
+    for lid, (drawn, met) in cuts.items():
+        if not met:
+            m = scene.by_id[lid].mask[0].id
+            add("warning", "mask-misses", lid, drawn[0], f"its mask '{m}' never overlaps it, so it is never seen",
+                f"move '{m}' over '{lid}' (it stands in the same group, by its own x and y), or check the mask's "
+                "times", until=drawn[-1])
     for lid, ts in gone.items():
         # A shape that sweeps across the canvas starts or ends off it: note one that is off whenever it is on, or
         # for MEDIA_OFF_FOR seconds.
@@ -619,7 +634,7 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
     # luminance under its box. These read pixels, footage included.
     r.footage = True
     for layer in scene.all_layers():
-        if layer.type not in ("text", "counter"):
+        if layer.type not in ("text", "counter") or layer.id in scene.mattes:
             continue
         T = min(layer.t_out - 1e-3, layer.t_in + min(layer.dur * 0.6, 1.5))
         try:
