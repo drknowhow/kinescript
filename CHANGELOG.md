@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Depth of field in a stage blurs by the render's scale: a `--scale 0.5` draft, or `kine look`'s small frames,
+  used to blur twice or four times as much of the picture as the full frame. Full-size frames are unchanged.
 - `examples/product.json`: a glTF can turning on a table under a studio light and environment, its shadow on the
   table and two more cans out of focus behind it. `examples/make_media.py` writes the can, `can.glb`, with its label
   as a texture inside the file.

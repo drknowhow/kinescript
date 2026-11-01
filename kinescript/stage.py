@@ -288,9 +288,12 @@ class Stage:
         dof = None
         if r._focused is not None and span[1] > 0:
             r._reach(np.array(span))
-            top = float(render3d.defocus(r._focused, np.array(span)).max())  # at the nearest or the farthest
+            # The stage blurs at the frame's size, so a draft or a contact sheet at a smaller scale blurs as much
+            # of the picture as the full frame does: the blur, at the nearest or the farthest, in frame px.
+            near, ap, f0 = r._focused
+            top = float(render3d.defocus(r._focused, np.array(span)).max()) * r.scale
             if top > 0.5:
-                dof = (r._focused, top)
+                dof = ((near, ap * r.scale, f0), top)
                 r.slow_dof = r.slow_dof or not self.gpu
         self._finish(c, render3d.fog(r, T), self._sun(r, T, shadows) if self.casters else None, dof)
         if r.depth_view and not r._insets:
