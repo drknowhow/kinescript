@@ -267,6 +267,9 @@ Status (2026-11-01): moves to 1.6.1 (decision 1).
 - Per-unit keys `unitFill` and `unitBlur`, and an expression helper `sweep(i, n, p, soft)` that is 1 for units the
   sweep has passed and 0 for the rest, with a soft edge, so a highlight running across a line is one expression:
   `"unitFill": "=mix('#f2f0e8', '#ff633f', sweep(i, n, p, 3))"`. `n` (the unit count) joins `i` in unit expressions.
+  Status (2026-11-01): in its own PR, with `sweep.json`. `n` is in unit keys only. `unitFill` colours a unit's plain
+  letters and leaves emphasis its colour. Loading and `kine check` try unit expressions on the first and the last
+  unit, counting `n` from the text, since the renderer's count comes from the layout.
 - SVG files. An `image` with an `.svg` src draws through `SVGDOM` as vectors, sharp at any zoom. An `svg` layer
   (`{"type": "svg", "src": "logo.svg"}`) turns the file's path, rect, circle, ellipse, line, polyline and polygon
   elements, `g` transforms, fill, stroke, opacity and linear and radial gradients into child layers named from the

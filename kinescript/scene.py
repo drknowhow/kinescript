@@ -6,6 +6,7 @@ import json
 import math
 import re
 from pathlib import Path
+from typing import Any, Callable
 
 from . import color as C
 from . import components, media, models, schema, svgpath
@@ -13,7 +14,7 @@ from . import presets as P
 from . import voice as V
 from . import particles
 from . import words as W
-from .props import Copies, Ctx, Prop, compile_prop, is_keyframes
+from .props import FIELD, UNIT, Copies, Ctx, Prop, compile_prop, is_keyframes
 from .timing import Timeline, parse_clock
 
 LAYER_TYPES = {"rect", "circle", "ellipse", "path", "line", "arrow", "polygon", "text", "counter",
@@ -116,6 +117,42 @@ class Layer:
         except (ArithmeticError, ValueError, TypeError) as e:  # a user expression, e.g. 1/(t-0.7) at t=0.7
             raise SceneError(f"layer '{self.id}': {name} failed at t={t:.3f}s (scene {T:.3f}s): "
                              f"{type(e).__name__}: {e}", layer=self.id) from e
+
+    def unit_fn(self, name: str, t: float, T: float, n: int) -> Callable[[int], Any]:
+        """The unit key `name` at t as a function of the unit's number i, for a split text of n units: one call a
+        unit, as get is. An expression sees n as well as i (keyframes keep no value)."""
+        p, d = self.props[name], self.t_out - self.t_in
+        if p.static:
+            v = p.value
+            return lambda i: v
+        fn, each = p.fn, isinstance(p.value, str)
+
+        def at(i: int):
+            try:
+                return fn(t, d, T, i, n) if each else fn(t, d, T, i)
+            except (ArithmeticError, ValueError, TypeError) as e:
+                raise SceneError(f"layer '{self.id}': {name} failed at t={t:.3f}s (scene {T:.3f}s) for unit {i} of "
+                                 f"{n}: {type(e).__name__}: {e}", layer=self.id) from e
+        return at
+
+    def unit_count(self, t: float, T: float = 0.0) -> int:
+        """About how many units this split text has at t, for checking its unit expressions before it is laid out:
+        its letters, words or lines (a counter's as its value is written then), or 1 when it is not split."""
+        split = self.raw.get("split")
+        if split not in ("chars", "words", "lines"):
+            return 1
+        try:
+            if self.type == "counter":
+                v = float(self.get("value", t, T, 0, 0))
+                text = FIELD.sub(lambda m: format(v, m.group(1)), str(self.raw.get("format", "{:,.0f}")))
+            else:
+                text = str(self.raw.get("text", ""))
+        except (SceneError, ValueError, TypeError):  # its value or format is reported on its own
+            return 1
+        text = text.replace("**", "")
+        n = len("".join(text.split())) if split == "chars" else len(text.split()) if split == "words" else (
+            text.count("\n") + 1)
+        return max(1, n)
 
     def placed(self, t: float, T: float = 0.0) -> list:
         """The values of PLACED at t, as get gives them, with the constant ones read once. Do not change the list."""
@@ -391,9 +428,15 @@ class Scene:
             for name, prop in layer.props.items():
                 if name.startswith("u_"):
                     continue
+                each = name in UNIT and isinstance(prop.value, str)  # a unit expression: the first unit and the last
                 for t in (0.0, d / 2, max(0.0, d - 1e-3), d):  # d: the last keyframe value itself
                     try:
-                        v = prop.at(t, d, layer.t_in + t, 0)
+                        if each:
+                            n = layer.unit_count(t, layer.t_in + t)
+                            prop.at(t, d, layer.t_in + t, 0, n)
+                            v = prop.at(t, d, layer.t_in + t, n - 1, n)
+                        else:
+                            v = prop.at(t, d, layer.t_in + t, 0)
                     except Exception as e:  # noqa: BLE001 - any failure inside a user expression
                         self.note("error", "bad-expression", layer.id,
                                   f"{name} failed at t={t:.2f}s: {type(e).__name__}: {e}")
@@ -603,11 +646,17 @@ class Scene:
                  for name, prop in props.items() if not prop.static and isinstance(prop.value, str)]
         stride = max(1, -(-sum(n1 - n0 for *_, n0, n1 in spans) // budget))
         for layer, name, prop, i, n0, n1 in spans:
+            each = name in UNIT  # a unit expression: the first unit and the last
             for n in range(n0, n1, stride):
                 T = n / self.fps
                 t = T - layer.t_in
                 try:
-                    v = prop.at(t, layer.dur, T, i)
+                    if each:
+                        units = layer.unit_count(t, T)
+                        prop.at(t, layer.dur, T, 0, units)
+                        v = prop.at(t, layer.dur, T, units - 1, units)
+                    else:
+                        v = prop.at(t, layer.dur, T, i)
                 except Exception as e:  # noqa: BLE001 - any failure inside a user expression
                     self.note("error", "bad-expression", layer.id, f"{name} failed at t={t:.2f}s (frame {n}): "
                               f"{type(e).__name__}: {e}", "guard the expression, e.g. max(…, 0.001) under a division")

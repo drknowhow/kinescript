@@ -190,7 +190,10 @@ LAYER TYPES (defaults in brackets)
             text; pad is [vertical, horizontal]), case (upper|lower),
             split (chars|words|lines: animate each unit, see ENTER AND EXIT),
             caret (true shows a cursor while typing),
-            unitX unitY unitRotate unitScale unitOpacity (expressions per unit; i is its index).
+            unitX unitY unitRotate unitScale unitOpacity unitBlur unitFill (expressions per unit:
+            i is its number from 0 and n how many there are; unitFill colours its plain letters,
+            emph keeps its own). sweep(i, n, p, soft) is 1 for the units a sweep has passed, so
+            "unitFill": "=mix('#f2f0e8', '#ff633f', sweep(i, n, p, 3))" runs a highlight across.
             textPath lays the letters along a path, each turned to it where its middle is: SVG
             path data in the layer's space (x and y move it), "#id" of a path, line, arrow or
             polygon in the same group (where that layer draws it), or {"d": ..., "offset": [0]
@@ -537,11 +540,15 @@ ANIMATING A VALUE (any number or colour key)
   expression   "y": "=540 + sin(t * 3) * 40"   (a string starting with "=")
                t = seconds since the layer started   d = the layer's length   p = t / d (0..1)
                T = seconds since the scene started   i = unit index (split text)   W, H, fps
+               n = how many units (in unit keys only)
                helpers: sin cos tan sqrt abs min max round floor ceil exp log atan2 hypot pi tau
                         clamp(v, lo, hi)  lerp(a, b, p)  noise(x, seed)  wiggle(freq, amp, t, seed)
                         ease("outCubic", p)  hsl(hue, sat, light)  mix(colour, colour, p)
+                        sweep(i, n, p, soft)
                hsl takes a hue in degrees and saturation and lightness from 0 to 1; hsl and mix give
-               a colour, so "fill": "=mix('#ff633f', '#7b5cff', p)" works.
+               a colour, so "fill": "=mix('#ff633f', '#7b5cff', p)" works. sweep is 1 for the units
+               a sweep across n of them has passed at p, 0 for those it has not reached, and eased
+               between over soft [1] units at its front; it starts before unit 0 and ends past n - 1.
   Colours animate too: "fill": {"from": "#ff633f", "to": "#b9f45d", "dur": 1}.
   Gradient fill: "fill": {"linear": [[0, 0], [1, 1]], "stops": ["#ff633f", "#7b5cff"]}
                  or {"radial": [0.5, 0.5, 0.6], "stops": [...]}; points are 0..1 of the layer box.

@@ -24,7 +24,7 @@ from . import morph as M
 from . import particles as PT
 from . import presets as P
 from .presets import IDENT, Mods
-from .props import COPY_PAINT, length, noise
+from .props import COPY_PAINT, FIELD, UNIT, length, noise
 from .scene import Layer, Scene, SceneError, uses_depth
 
 ANCHORS = {"center": (0.5, 0.5), "topleft": (0, 0), "top": (0.5, 0), "topright": (1, 0), "left": (0, 0.5),
@@ -53,7 +53,7 @@ NEAREST = skia.SamplingOptions(skia.FilterMode.kNearest, skia.MipmapMode.kNone) 
 CUBIC = skia.SamplingOptions(skia.CubicResampler.CatmullRom())
 # Seconds ahead that a render drawing forward opens the decoders of the clips coming on (Renderer._prime).
 AHEAD = 1.0
-_FMT = re.compile(r"\{:([^{}]*)\}")
+_FMT = FIELD
 _GL: dict = {}
 
 # A frame as I420 (BT.709, limited range), computed on the GPU so the readback and the pipe to the
@@ -3125,7 +3125,9 @@ class Renderer:
         visible_chars = lay.nchars * reveal if (reveal < 1 or typing) else None
         track = mods.track
         c00 = lay.runs[0].char0 if lay.runs else 0
-        unit_keys = {k for k in ("unitX", "unitY", "unitRotate", "unitScale", "unitOpacity") if k in L.props}
+        fu = {k: L.unit_fn(k, t, T, len(units)) for k in UNIT if k in L.props}  # each a function of the unit
+        fx, fy, fo, fr, fs, fb, ff = (fu.get(k) for k in ("unitX", "unitY", "unitOpacity", "unitRotate", "unitScale",
+                                                           "unitBlur", "unitFill"))
         cols, pop = (fill, emph, act), active is not None and L.raw.get("mode") == "pop"  # captions only
         painted = None  # (which colour, alpha) fpaint holds
         onpath = self._on_path(L, t, T, g, lay, font, track) if L.onpath is not None else None
@@ -3137,13 +3139,16 @@ class Renderer:
                     um = enter.mods(p)
             if um.alpha <= 0.002:
                 continue
-            ux = um.dx + (float(L.get("unitX", t, T, ui)) if "unitX" in unit_keys else 0)
-            uy = um.dy + (float(L.get("unitY", t, T, ui)) if "unitY" in unit_keys else 0)
-            ua = um.alpha * (float(L.get("unitOpacity", t, T, ui)) if "unitOpacity" in unit_keys else 1)
-            urot = um.rotate + (float(L.get("unitRotate", t, T, ui)) if "unitRotate" in unit_keys else 0)
-            usc = um.scale * (float(L.get("unitScale", t, T, ui)) if "unitScale" in unit_keys else 1)
+            ux = um.dx + (float(fx(ui)) if fx else 0)
+            uy = um.dy + (float(fy(ui)) if fy else 0)
+            ua = um.alpha * (float(fo(ui)) if fo else 1)
+            urot = um.rotate + (float(fr(ui)) if fr else 0)
+            usc = um.scale * (float(fs(ui)) if fs else 1)
+            ublur = um.blur + (max(0.0, float(fb(ui))) if fb else 0)
+            uf = ff(ui) if ff else None  # its plain letters' colour
+            ucols = cols if uf is None else (uf, emph, act)
             moved = ux or uy or urot or usc != 1 or um.rx or um.ry or um.dz
-            blurred = um.blur > 0.1
+            blurred = ublur > 0.1
             if moved:  # a unit drawn where it lies needs no save and restore: most of them, once they are in
                 c.save()
                 if onpath is None:
@@ -3164,17 +3169,17 @@ class Renderer:
                     c.rotate(-ang)
                 c.translate(-ucx, -ucy)
             if blurred and onpath is not None:  # bounded by the letters on the CPU, as _blur_bounds does
-                out = 3 * um.blur + (spaint.getStrokeWidth() if spaint is not None else 0.0)
+                out = 3 * ublur + (spaint.getStrokeWidth() if spaint is not None else 0.0)
                 left, top, right, bottom = onpath.bounds
                 bounds = skia.Rect.MakeLTRB(left - out, top - out, right + out, bottom + out) if (
                     self.backend == "cpu" and right >= left) else None
             elif blurred:
-                bounds = self._blur_bounds(c, um.blur, ox + x1 + max(0.0, track * (runs[-1][0].char0 - c00)),
+                bounds = self._blur_bounds(c, ublur, ox + x1 + max(0.0, track * (runs[-1][0].char0 - c00)),
                                            oy + (runs[-1][0].line + 1) * lay.lh, size, spaint)
                 area = skia.Rect.Make(c.getDeviceClipBounds())  # the layer: the clip, as far as the bounds reach
                 if bounds is None or area.intersect(c.getTotalMatrix().mapRect(bounds)):
                     self.filtered += area.width() * area.height()
-                c.saveLayer(bounds, skia.Paint(ImageFilter=skia.ImageFilters.Blur(um.blur, um.blur)))
+                c.saveLayer(bounds, skia.Paint(ImageFilter=skia.ImageFilters.Blur(ublur, ublur)))
             batch: dict = {}  # on a path: (colour, alpha): the letters drawn as they are, and their RSXforms
             for r, pcs in runs:
                 text = r.text
@@ -3190,12 +3195,12 @@ class Renderer:
                         continue
                 elif r.emph:
                     k = 1
-                if painted != (k, ua):
-                    fpaint.setColor(_argb(cols[k], ua))
+                if painted != (k, ua, uf):
+                    fpaint.setColor(_argb(ucols[k], ua))
                     if gpaint is not None:
                         gpaint.setAlphaf(ua)
-                    painted = (k, ua)
-                ink = gpaint if gpaint is not None and k == 0 else fpaint
+                    painted = (k, ua, uf)
+                ink = gpaint if gpaint is not None and k == 0 and uf is None else fpaint
                 if onpath is not None:
                     self._path_run(c, onpath, r, pcs, text, font, (k, ua), ink, spaint, batch)
                     continue
@@ -3217,11 +3222,11 @@ class Renderer:
                     continue
                 if spaint is not None:
                     c.drawTextBlob(blob, 0, 0, spaint)
-                if gpaint is not None and k == 0:
+                if gpaint is not None and k == 0 and uf is None:
                     gpaint.setAlphaf(ua)
                     c.drawTextBlob(blob, 0, 0, gpaint)
                 else:
-                    c.drawTextBlob(blob, 0, 0, skia.Paint(AntiAlias=True, Color=_argb(cols[k], ua)))
+                    c.drawTextBlob(blob, 0, 0, skia.Paint(AntiAlias=True, Color=_argb(ucols[k], ua)))
                 painted = None
             if blurred:
                 c.restore()
