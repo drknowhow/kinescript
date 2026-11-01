@@ -1,11 +1,13 @@
 """Imported models: glTF 2.0 (.glb, .gltf) and Wavefront .obj files read with numpy into a Mesh and its
-materials. The geometry is static: node transforms apply, animation, skins and morph targets do not. A glTF
-base colour texture or an .obj map_Kd is drawn as a texture, with its mean colour as the material's fill for when
-it is not. Files are y up; the mesh comes out y down like space.py."""
+materials. Node transforms, skins and morph target weights apply; a glTF file's animations are kept with it, and
+pose() moves the mesh to a time of one of them. A glTF base colour texture or an .obj map_Kd is drawn as a
+texture, with its mean colour as the material's fill for when it is not. Files are y up; the mesh comes out y down
+like space.py."""
 from __future__ import annotations
 
 import base64
 import json
+import math
 import struct
 from pathlib import Path
 from typing import NamedTuple
@@ -21,6 +23,7 @@ _TYPES = {5120: "<i1", 5121: "<u1", 5122: "<i2", 5123: "<u2", 5125: "<u4", 5126:
 _WIDTH = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT2": 4, "MAT3": 9, "MAT4": 16}
 _COMPRESSED = ("KHR_draco_mesh_compression", "EXT_meshopt_compression")
 _WRAP = {33071: "clamp", 33648: "mirror", 10497: "repeat"}  # glTF sampler wrapS and wrapT
+_PATHS = ("translation", "rotation", "scale")  # what an animation channel sets on a node, besides weights
 EDGE = 1 / 24  # longest triangle edge kept, as a share of the model's longest side
 _CACHE: dict = {}
 
@@ -29,6 +32,38 @@ class Imported(NamedTuple):
     mesh: Mesh  # centred on its bounding box, in file units; M indexes `materials`, -1 takes the layer's own
     materials: list  # {"fill": (r, g, b), "shine": s, "metal": m}, and "texture": {"image", "tint", "tile"}
     size: np.ndarray  # (3,) bounding box
+    motion: Motion | None = None  # a glTF file's animations and what posing the mesh again takes
+    about: dict | None = None  # what kine probe lists: animations, skins, morph targets, textures, UV sets
+
+
+class Place(NamedTuple):
+    """One glTF primitive as its node draws it, kept to pose it again."""
+    P: np.ndarray  # positions in the mesh's own space
+    N: np.ndarray | None  # normals, or None for flat faces worked out from the posed triangles
+    dP: np.ndarray | None  # (targets, n, 3) morph target offsets of positions
+    dN: np.ndarray | None  # and of normals
+    joints: np.ndarray | None  # (n, 4) joints of its skin, None for a primitive its node carries
+    weights: np.ndarray | None  # (n, 4) their weights, adding up to 1
+    T: np.ndarray  # its triangles, wound as drawn
+    double: bool  # double-sided: drawn again facing the other way
+    node: int | None  # the node it hangs from (None in a file without nodes)
+    skin: int | None
+    w0: np.ndarray  # morph target weights when no animation sets them
+
+
+class Motion(NamedTuple):
+    """A glTF file's node tree and animations, and how its mesh was cut, centred and cleaned, so pose() can
+    build the same mesh from the file's primitives moved."""
+    parent: list  # each node's parent, -1 for a root
+    order: list  # the nodes, each after its parent
+    local: list  # each node's matrix when nothing animates it
+    trs: list  # each node's [translation, rotation, scale], None for a node given as a matrix
+    skins: list  # (joint nodes, inverse bind matrices (J, 4, 4))
+    places: list  # one Place per primitive drawn, in the order the mesh holds them
+    clips: list  # (name or None, first key time, duration, [(node, path, interpolation, times, values)])
+    used: np.ndarray  # the vertices the mesh kept
+    trail: list  # the edges _refine cut, round by round
+    centre: np.ndarray  # the middle of the bounding box, taken off the points
 
 
 def load(path: str) -> Imported:
@@ -76,9 +111,10 @@ def _flat(P: np.ndarray, T: np.ndarray, U: np.ndarray | None = None) -> tuple:
     return P, np.repeat(fn, 3, axis=0), np.arange(len(P)).reshape(-1, 3), None if U is None else U[T].reshape(-1, 2)
 
 
-def _finish(pieces: list, mats: list) -> Imported:
+def _finish(pieces: list, mats: list, rig: dict | None = None, about: dict | None = None) -> Imported:
     """One mesh from (P, N, T, M, U) pieces in file space (U None without texture coordinates): turned y down,
-    cleaned of degenerate triangles and unused vertices, centred, and with repeated materials merged."""
+    cleaned of degenerate triangles and unused vertices, centred, and with repeated materials merged. `rig`, a
+    glTF file's node tree and clips, becomes the Motion that poses it again."""
     if not pieces:
         raise ValueError("no triangle meshes found")
     base = np.cumsum([0] + [len(p[0]) for p in pieces[:-1]])
@@ -100,7 +136,8 @@ def _finish(pieces: list, mats: list) -> Imported:
     lo, hi = P.min(0), P.max(0)
     # Long triangles sort by their middle and can be drawn over parts in front of them (the painter's
     # algorithm): cut every edge down to 1/24 of the model's size. Already fine meshes are unchanged.
-    P, T, N, M, *U = _refine(P, T, float((hi - lo).max()) * EDGE, outline=True, extra=extra)
+    trail: list = []
+    P, T, N, M, *U = _refine(P, T, float((hi - lo).max()) * EDGE, outline=True, extra=extra, trail=trail)
     U = U[0] if U else None
     N = N / np.maximum(np.linalg.norm(N, axis=1, keepdims=True), 1e-12)
     T = T.astype(np.int32)
@@ -126,22 +163,164 @@ def _finish(pieces: list, mats: list) -> Imported:
                    **({} if keys[k][4] is None else {"emit": keys[k][4]}),
                    **({} if looks[k][1] is None else {"emitTexture": looks[k][1]}),
                    **({} if keys[k][6] is None else {"transparency": keys[k][6]})) for k in kept]
-    return Imported(Mesh(P - (lo + hi) / 2, N, T, lut[M].astype(np.int32), U), merged, hi - lo)
+    centre = (lo + hi) / 2
+    about = dict(about or {})
+    about.setdefault("uvSets", [] if U is None else ["vt"])
+    about["textures"] = len({id(m[k]["image"]) for m in merged for k in ("texture", "emitTexture") if k in m})
+    motion = None if rig is None else Motion(**rig, used=used, trail=trail, centre=centre)
+    return Imported(Mesh(P - centre, N, T, lut[M].astype(np.int32), U), merged, hi - lo, motion, about)
+
+
+def clip_names(imp: Imported) -> list[str]:
+    """The file's animations by name, an unnamed one by its number."""
+    return [c[0] or str(i) for i, c in enumerate(imp.motion.clips if imp.motion else [])]
+
+
+def clip_index(imp: Imported, name) -> int | None:
+    """Which animation `name` picks: one named so (case aside, when only one matches), a number counting from 0,
+    or true for the first; None for none."""
+    names = clip_names(imp)
+    if isinstance(name, bool):
+        return 0 if name and names else None
+    if isinstance(name, int):
+        return name if 0 <= name < len(names) else None
+    if name in names:
+        return names.index(name)
+    low = [n.lower() for n in names]
+    s = str(name).lower()
+    return low.index(s) if low.count(s) == 1 else None
+
+
+def pose(imp: Imported, clip: int, t: float) -> tuple[np.ndarray, np.ndarray]:
+    """The mesh's points and normals, as imp.mesh holds them, t seconds into animation `clip` (clamped to it):
+    its channels set node translations, rotations, scales and morph target weights, skins follow their joints, and
+    the triangles are cut as when the file was read, so a vertex moves with the ends of the edge it was cut from."""
+    mo = imp.motion
+    _, start, _, chans = mo.clips[clip]
+    trs = list(mo.trs)
+    weights: dict = {}
+    for node, path, how, times, vals in chans:
+        v = _sample(times, vals, how, start + t, path == "rotation")
+        if path == "weights":
+            weights[node] = v
+        else:
+            trs[node] = [v if k == path else x for k, x in zip(_PATHS, trs[node])]
+    local = [m if x is mo.trs[i] else _trs(*x) for i, (m, x) in enumerate(zip(mo.local, trs))]
+    G = _worlds(mo.parent, mo.order, local)
+    bones = [np.stack([G[j] for j in J]) @ ibm if J else None for J, ibm in mo.skins]
+    got = []
+    for pc in mo.places:
+        w = pc.w0
+        if pc.node in weights:
+            v = weights[pc.node][:len(w)]
+            w = np.r_[v, w[len(v):]]
+        got.append(_place(pc, np.eye(4) if pc.node is None else G[pc.node],
+                          None if pc.skin is None else bones[pc.skin], w))
+    P = np.concatenate([p for p, _ in got]) * (1.0, -1.0, 1.0)
+    N = np.concatenate([n for _, n in got]) * (1.0, -1.0, 1.0)
+    P, N = P[mo.used], N[mo.used]
+    for a, b in mo.trail:  # the cuts _finish made, on the moved points
+        P = np.concatenate([P, (P[a] + P[b]) / 2])
+        N = np.concatenate([N, (N[a] + N[b]) / 2])
+    N = N / np.maximum(np.linalg.norm(N, axis=1, keepdims=True), 1e-12)
+    return P - mo.centre, N
+
+
+def _sample(times: np.ndarray, vals: np.ndarray, how: str, t: float, turn: bool) -> np.ndarray:
+    """An animation channel's value at time t: held before its first key and after its last, STEP holding each
+    key, LINEAR blending (rotations along the sphere), CUBICSPLINE through the keys with the file's tangents.
+    `vals` is (keys, width), or (keys, 3, width) for CUBICSPLINE: in-tangent, value, out-tangent."""
+    cubic = how == "CUBICSPLINE"
+    v = vals[:, 1] if cubic else vals
+    if len(times) == 1 or t <= times[0]:
+        out = v[0]
+    elif t >= times[-1]:
+        out = v[-1]
+    else:
+        i = int(np.searchsorted(times, t, side="right")) - 1
+        dt = float(times[i + 1] - times[i])
+        u = (t - float(times[i])) / dt if dt > 0 else 0.0
+        if how == "STEP":
+            out = v[i]
+        elif cubic:
+            u2, u3 = u * u, u * u * u
+            out = ((2 * u3 - 3 * u2 + 1) * v[i] + (u3 - 2 * u2 + u) * dt * vals[i, 2]
+                   + (3 * u2 - 2 * u3) * v[i + 1] + (u3 - u2) * dt * vals[i + 1, 0])
+        elif turn:
+            out = _slerp(v[i], v[i + 1], u)
+        else:
+            out = v[i] * (1 - u) + v[i + 1] * u
+    return out / max(float(np.linalg.norm(out)), 1e-12) if turn else out
+
+
+def _slerp(a: np.ndarray, b: np.ndarray, u: float) -> np.ndarray:
+    """The rotation u of the way from quaternion a to b, the short way round."""
+    d = float(a @ b)
+    if d < 0:
+        b, d = -b, -d
+    if d > 0.9995:  # nearly the same: a straight blend, normalised by the caller
+        return a + (b - a) * u
+    th = math.acos(d)
+    return (math.sin((1 - u) * th) * a + math.sin(u * th) * b) / math.sin(th)
+
+
+def _worlds(parent: list, order: list, local: list) -> list:
+    """Each node's matrix in the file's space: its parents' and its own, in turn."""
+    G = [np.eye(4)] * len(local)
+    for i in order:
+        G[i] = (np.eye(4) if parent[i] < 0 else G[parent[i]]) @ local[i]
+    return G
+
+
+def _place(pc: Place, world: np.ndarray, bones: np.ndarray | None, w: np.ndarray) -> tuple:
+    """One primitive's points and normals in file space: its morph targets at weights w, then its skin's joints
+    (bones: each joint's matrix times its inverse bind matrix; the node's own matrix is not used, as glTF says)
+    or its node's matrix."""
+    P, N = pc.P, pc.N
+    if pc.dP is not None and np.any(w):
+        P = P + np.tensordot(w, pc.dP, 1)
+        if N is not None and pc.dN is not None:
+            N = N + np.tensordot(w, pc.dN, 1)
+    if bones is not None:
+        B = sum(pc.weights[:, k, None, None] * bones[pc.joints[:, k], :3] for k in range(4))  # (n, 3, 4)
+        P = np.einsum("nij,nj->ni", B[:, :, :3], P) + B[:, :, 3]
+        if N is not None:  # each vertex's matrix's cofactors carry its normal
+            c0, c1, c2 = B[:, :, 0], B[:, :, 1], B[:, :, 2]
+            N = N[:, :1] * np.cross(c1, c2) + N[:, 1:2] * np.cross(c2, c0) + N[:, 2:] * np.cross(c0, c1)
+    else:
+        A = world[:3, :3]
+        P = P @ A.T + world[:3, 3]
+        if N is not None:
+            N = N @ np.linalg.inv(A)
+    if N is None:
+        P, N = _flat(P, pc.T)[:2]
+    if pc.double:
+        P, N = np.r_[P, P], np.r_[N, -N]
+    return P, N
 
 
 # ---- glTF -----------------------------------------------------------------------------------------------
 
-def _node(nd: dict) -> np.ndarray:
-    if "matrix" in nd:
-        return np.array(nd["matrix"], float).reshape(4, 4).T  # stored column by column
-    x, y, z, w = nd.get("rotation", (0.0, 0.0, 0.0, 1.0))
+def _rest(nd: dict) -> list:
+    return [nd.get("translation", (0.0, 0.0, 0.0)), nd.get("rotation", (0.0, 0.0, 0.0, 1.0)),
+            nd.get("scale", (1.0, 1.0, 1.0))]
+
+
+def _trs(t, r, s) -> np.ndarray:
+    x, y, z, w = r
     R = np.array([[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
                   [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
                   [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
     m = np.eye(4)
-    m[:3, :3] = R * np.asarray(nd.get("scale", (1.0, 1.0, 1.0)), float)
-    m[:3, 3] = nd.get("translation", (0.0, 0.0, 0.0))
+    m[:3, :3] = R * np.asarray(s, float)
+    m[:3, 3] = t
     return m
+
+
+def _node(nd: dict) -> np.ndarray:
+    if "matrix" in nd:
+        return np.array(nd["matrix"], float).reshape(4, 4).T  # stored column by column
+    return _trs(*_rest(nd))
 
 
 def _gltf(p: Path) -> tuple[list, list]:
@@ -187,14 +366,19 @@ def _gltf(p: Path) -> tuple[list, list]:
 
     def accessor(i: int) -> np.ndarray:
         a = doc["accessors"][i]
-        if "sparse" in a:
-            raise ValueError("sparse accessors are not read; export it again without them")
         dt, k, n = np.dtype(_TYPES[a["componentType"]]), _WIDTH[a["type"]], a["count"]
-        if "bufferView" not in a:
-            return np.zeros((n, k))
-        buf, off, stride = view(a["bufferView"])
-        arr = np.ndarray((n, k), dt, buf, off + a.get("byteOffset", 0), (stride or k * dt.itemsize, dt.itemsize))
-        out = arr.astype(float)
+
+        def read(at: dict, dt: np.dtype, n: int, k: int) -> np.ndarray:
+            buf, off, stride = view(at["bufferView"])
+            return np.ndarray((n, k), dt, buf, off + at.get("byteOffset", 0),
+                              (stride or k * dt.itemsize, dt.itemsize)).astype(float)
+
+        out = read(a, dt, n, k) if "bufferView" in a else np.zeros((n, k))
+        sp = a.get("sparse")
+        if sp:  # the values that differ, at their indices (morph targets are often stored so)
+            m = sp["count"]
+            idx = read(sp["indices"], np.dtype(_TYPES[sp["indices"]["componentType"]]), m, 1).ravel().astype(np.int64)
+            out[idx] = read(sp["values"], dt, m, k)
         if a.get("normalized") and dt.kind in "iu":
             out = np.maximum(out / np.iinfo(dt).max, -1.0)
         return out
@@ -254,11 +438,38 @@ def _gltf(p: Path) -> tuple[list, list]:
                 mats[-1]["emitTexture"] = {"image": lit[0], "tint": None if tint == (1.0, 1.0, 1.0) else tint,
                                            "tile": lit[2]}
         sets.append(int((pbr.get("baseColorTexture") or mt.get("emissiveTexture") or {}).get("texCoord", 0)))
-    pieces = []
+    nodes, meshes = doc.get("nodes", []), doc.get("meshes", [])
+    parent = [-1] * len(nodes)
+    for i, nd in enumerate(nodes):
+        for k in nd.get("children", []):
+            parent[k] = i
+    order, seen = [], set()  # every node after its parent
+    for i in [i for i in range(len(nodes)) if parent[i] < 0]:
+        todo = [i]
+        while todo:
+            j = todo.pop()
+            if j not in seen:
+                seen.add(j)
+                order.append(j)
+                todo.extend(nodes[j].get("children", []))
+    local = [_node(nd) for nd in nodes]
+    rest = _worlds(parent, order, local)
+    skins = []
+    for sk in doc.get("skins", []):
+        J = [int(j) for j in sk.get("joints", [])]
+        ibm = (accessor(sk["inverseBindMatrices"]).reshape(-1, 4, 4).transpose(0, 2, 1)  # column by column
+               if "inverseBindMatrices" in sk else np.tile(np.eye(4), (len(J), 1, 1)))
+        skins.append((J, ibm[:len(J)]))
+    bones = [np.stack([rest[j] for j in J]) @ ibm if J else None for J, ibm in skins]
+    pieces, places, sets_read, crowded, most = [], [], set(), 0, 0
 
-    def emit(mi: int, world: np.ndarray):
+    def emit(mi: int, world: np.ndarray, node: int | None):
+        nonlocal crowded, most
         A = world[:3, :3]
-        for prim in doc["meshes"][mi].get("primitives", []):
+        nd = nodes[node] if node is not None else {}
+        skin = nd.get("skin")
+        skin = skin if isinstance(skin, int) and 0 <= skin < len(skins) and skins[skin][0] else None
+        for prim in meshes[mi].get("primitives", []):
             mode, at = prim.get("mode", 4), prim.get("attributes", {})
             if mode not in (4, 5, 6) or "POSITION" not in at:
                 continue  # points and lines have no surface
@@ -270,22 +481,49 @@ def _gltf(p: Path) -> tuple[list, list]:
                 i = np.arange(max(0, len(idx) - 2))
                 T = (np.stack([idx[i], idx[i + 1 + i % 2], idx[i + 2 - i % 2]], 1) if mode == 5
                      else np.stack([np.full(len(i), idx[0]), idx[i + 1], idx[i + 2]], 1))
-            if np.linalg.det(A) < 0:
+            joints = weights = None
+            if skin is not None and "JOINTS_0" in at and "WEIGHTS_0" in at:
+                weights = np.zeros((len(P), 4))
+                got = accessor(at["WEIGHTS_0"])[:, :4]
+                weights[:, :got.shape[1]] = got
+                if "WEIGHTS_1" in at:  # joints past the fourth are dropped
+                    crowded += int((accessor(at["WEIGHTS_1"]) > 0).any(1).sum())
+                total = weights.sum(1, keepdims=True)
+                weights = np.where(total > 0, weights / np.where(total > 0, total, 1.0), [1.0, 0.0, 0.0, 0.0])
+                joints = np.zeros((len(P), 4), np.int64)
+                got = accessor(at["JOINTS_0"])[:, :4].astype(np.int64)
+                joints[:, :got.shape[1]] = np.clip(got, 0, len(skins[skin][0]) - 1)
+            elif np.linalg.det(A) < 0:
                 T = T[:, [0, 2, 1]]  # a mirroring node turns its faces inside out; turn them back
-            P = P @ A.T + world[:3, 3]
+            targets = [t for t in prim.get("targets", []) if isinstance(t, dict)]
+            most = max(most, len(targets))
+            dP = dN = None
+            if targets:
+                dP = np.stack([accessor(t["POSITION"])[:, :3] if "POSITION" in t else np.zeros((len(P), 3))
+                               for t in targets])
+                if "NORMAL" in at:
+                    dN = np.stack([accessor(t["NORMAL"])[:, :3] if "NORMAL" in t else np.zeros((len(P), 3))
+                                   for t in targets])
+            w0 = np.zeros(len(targets))
+            given = list(nd.get("weights", meshes[mi].get("weights", [])))[:len(targets)]
+            w0[:len(given)] = given
             mat = prim.get("material", -1)
             uv = f"TEXCOORD_{sets[mat] if mat >= 0 else 0}"
+            sets_read.update(k for k in at if k.startswith("TEXCOORD_"))
             U = accessor(at[uv])[:, :2] if uv in at else None
-            if "NORMAL" in at:
-                N = accessor(at["NORMAL"])[:, :3] @ np.linalg.inv(A)
-            else:
-                P, N, T, U = _flat(P, T, U)
-            if mat >= 0 and doc["materials"][mat].get("doubleSided"):
-                P, N, T = np.r_[P, P], np.r_[N, -N], np.r_[T, T[:, [0, 2, 1]] + len(P)]
+            N = accessor(at["NORMAL"])[:, :3] if "NORMAL" in at else None
+            double = bool(mat >= 0 and doc["materials"][mat].get("doubleSided"))
+            pc = Place(P, N, dP, dN, joints, weights, T, double, node, skin, w0)
+            places.append(pc)
+            P, N = _place(pc, world, None if skin is None else bones[skin], w0)
+            if pc.N is None:  # each triangle its own three vertices, with its face's normal
+                U = None if U is None else U[T].reshape(-1, 2)
+                T = np.arange(3 * len(T)).reshape(-1, 3)
+            if double:
+                T = np.r_[T, T[:, [0, 2, 1]] + len(P) // 2]
                 U = None if U is None else np.r_[U, U]
             pieces.append((P, N, T, np.full(len(P), mat), U))
 
-    nodes = doc.get("nodes", [])
     if doc.get("scenes"):
         roots = doc["scenes"][doc.get("scene", 0)].get("nodes", [])
     else:
@@ -293,15 +531,43 @@ def _gltf(p: Path) -> tuple[list, list]:
         roots = [i for i in range(len(nodes)) if i not in kids]
     stack = [(i, np.eye(4)) for i in roots]
     while stack:
-        i, parent = stack.pop()
-        world = parent @ _node(nodes[i])
+        i, up = stack.pop()
+        world = up @ local[i]
         if "mesh" in nodes[i]:
-            emit(nodes[i]["mesh"], world)
+            emit(nodes[i]["mesh"], world, i)
         stack.extend((k, world) for k in nodes[i].get("children", []))
     if not nodes:
-        for mi in range(len(doc.get("meshes", []))):
-            emit(mi, np.eye(4))
-    return pieces, mats
+        for mi in range(len(meshes)):
+            emit(mi, np.eye(4), None)
+    clips = []
+    for an in doc.get("animations", []):
+        chans = []
+        for ch in an.get("channels", []):
+            node, path = ch.get("target", {}).get("node"), ch.get("target", {}).get("path")
+            if not (isinstance(node, int) and 0 <= node < len(nodes)) or path not in (*_PATHS, "weights") \
+                    or (path != "weights" and "matrix" in nodes[node]):
+                continue  # a node given as a matrix does not animate; KHR_animation_pointer is not read
+            sm = an["samplers"][ch["sampler"]]
+            how = sm.get("interpolation", "LINEAR")
+            times, vals = accessor(sm["input"]).ravel(), accessor(sm["output"])
+            per = len(times) * (3 if how == "CUBICSPLINE" else 1)
+            width = {"translation": 3, "rotation": 4, "scale": 3}.get(path) or (vals.size // per if per else 0)
+            if not len(times) or not width or vals.size != per * width:
+                continue
+            vals = vals.reshape(len(times), 3, width) if how == "CUBICSPLINE" else vals.reshape(len(times), width)
+            chans.append((node, path, how, times, vals))
+        lo = min((float(c[3][0]) for c in chans), default=0.0)
+        hi = max((float(c[3][-1]) for c in chans), default=0.0)
+        clips.append((an.get("name") or None, lo, hi - lo, chans))
+    about = {"animations": [{"name": n or str(i), "duration": round(d, 3)} for i, (n, _, d, _) in enumerate(clips)],
+             "skins": [{"name": sk.get("name") or str(i), "joints": len(skins[i][0])}
+                       for i, sk in enumerate(doc.get("skins", []))],
+             "morphTargets": most, "uvSets": sorted(sets_read), "crowded": crowded}
+    rig = None
+    if clips:
+        rig = dict(parent=parent, order=order, local=local, skins=skins,
+                   trs=[None if "matrix" in nd else _rest(nd) for nd in nodes], places=places, clips=clips)
+    return pieces, mats, rig, about
 
 
 # ---- OBJ ------------------------------------------------------------------------------------------------

@@ -259,12 +259,21 @@ def _chars(chars: list[str], most: int = 8) -> str:
 def probe_media(src: str) -> dict:
     """What `kine probe` says about a file that is not a scene: {"ok", "src", "kind": video|audio|image|model,
     ...}. A media file gives its duration, displayed w and h, fps, audio, alpha and rotation; a model its triangles,
-    vertices, materials and size. Raises MediaError or ValueError, naming the file, for one it cannot read."""
+    vertices, materials, size, animations (each with its duration in seconds), skins (with their joint counts),
+    morph targets, textures and texture coordinate sets. Raises MediaError or ValueError, naming the file, for one
+    it cannot read."""
     if Path(src).suffix.lower() in models.EXTENSIONS:
         imp = models.load(src)
-        return {"ok": True, "src": src, "kind": "model", "triangles": int(len(imp.mesh.T)),
-                "vertices": int(len(imp.mesh.P)), "materials": len(imp.materials),
-                "size": [round(float(v), 3) for v in imp.size]}
+        about = imp.about or {}
+        out = {"ok": True, "src": src, "kind": "model", "triangles": int(len(imp.mesh.T)),
+               "vertices": int(len(imp.mesh.P)), "materials": len(imp.materials),
+               "size": [round(float(v), 3) for v in imp.size], "animations": about.get("animations", []),
+               "skins": about.get("skins", []), "morphTargets": about.get("morphTargets", 0),
+               "textures": about.get("textures", 0), "uvSets": about.get("uvSets", [])}
+        if about.get("crowded"):
+            out["note"] = (f"{about['crowded']} vertices are moved by more than four joints; each follows the four "
+                           "in JOINTS_0")
+        return out
     info = media.probe(src)
     kind = "image" if info["image"] else "video" if info["video"] else "audio" if info["audio"] else "other"
     out = {"ok": True, "src": src, "kind": kind, **info}

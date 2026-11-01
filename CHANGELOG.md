@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- glTF animation. A model layer's `animation` plays a clip of its file on the layer's clock: its name, its number
+  from 0, `true` for the first, or `{"name", "speed", "loop", "start"}`. Node translation, rotation and scale
+  channels (LINEAR, STEP and CUBICSPLINE keys, rotations along the sphere), morph target weights and skins
+  (`JOINTS_0`, `WEIGHTS_0` and inverse bind matrices, blended in numpy) move the mesh, which is cut for the depth
+  sort the same way at every pose. Posing `examples/media/arm.glb` (1,314 vertices) takes 0.36 ms.
+- Skins and morph target weights apply to a model file at rest too: a skinned mesh stands as its joints place it,
+  without its own node's transform, as glTF says, and a mesh with default `weights` takes them. Files without
+  either are drawn as before.
+- glTF sparse accessors are read, as exporters often store morph targets; a file with one used to be refused.
+- `kine probe` on a model file lists its animations with their durations, skins with their joint counts, morph
+  targets, textures and texture coordinate sets.
+- `kine check` reports `unknown-animation`, naming the clips the file has, and warns `skin-influences` when
+  vertices take more than four joints (`JOINTS_1`); they follow the first four.
+- `examples/make_media.py` writes `arm.glb`, a tube skinned to three joints with a looping `wave` clip and an
+  eased `curl`.
+
 ## 1.5.0 (2026-11-01)
 
 - Depth of field in a stage blurs by the render's scale: a `--scale 0.5` draft, or `kine look`'s small frames,

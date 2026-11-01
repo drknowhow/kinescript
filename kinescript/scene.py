@@ -23,7 +23,7 @@ STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "children", "laye
           "allowOffscreen", "style", "audio", "shadow", "box", "fx", "fill", "stroke", "emph", "active",
           "sksl", "preset", "uniforms", "caret", "case", "italic", "smooth", "closed", "focus", "use",
           "backface", "fixed", "sort", "shape", "detail", "parts", "light", "span", "sound", "voice",
-          "fadeIn", "fadeOut", "sequence"}
+          "fadeIn", "fadeOut", "sequence", "animation"}
 # Property defaults by name; everything not listed defaults to None.
 DEFAULTS = {"x": 0.0, "y": 0.0, "opacity": 1.0, "scale": 1.0, "scaleX": 1.0, "scaleY": 1.0, "rotate": 0.0,
             "blur": 0.0, "draw": 1.0, "zoom": 1.0, "z": 0.0, "rotateX": 0.0, "rotateY": 0.0}
@@ -214,10 +214,27 @@ class Scene:
                     self.note("error", "bad-model", layer.id, f"model src {e}",
                               "export it again as glTF 2.0 (.glb) or .obj")
                 else:
+                    name = Path(layer.src).name
                     if layer.raw.get("texture") and imp.mesh.U is None:
-                        self.note("warning", "no-uvs", layer.id, f"{Path(layer.src).name} has no texture "
+                        self.note("warning", "no-uvs", layer.id, f"{name} has no texture "
                                   "coordinates, so its texture shows as one colour (its corner pixel)",
                                   "export it again with UVs, or put the texture on a part instead")
+                    play = layer.raw.get("animation")
+                    clip = play.get("name", 0) if isinstance(play, dict) else play
+                    if play is not None and models.clip_index(imp, clip) is None:
+                        clips = models.clip_names(imp)
+                        close = schema.suggest(str(clip), clips) if clips and isinstance(clip, str) else None
+                        self.note("error", "unknown-animation", layer.id, f"animation {clip!r} is not in {name}, "
+                                  + (f"whose animations are {', '.join(map(repr, clips))}" if clips
+                                     else "which has no animations"),
+                                  f"did you mean {close!r}?" if close else
+                                  "name one of them, or its number from 0" if clips else "drop animation")
+                    crowded = (imp.about or {}).get("crowded", 0)
+                    if crowded:
+                        self.note("warning", "skin-influences", layer.id, f"{crowded} vertices of {name} are moved "
+                                  "by more than four joints; each follows the four in JOINTS_0, and the weights of "
+                                  "the others are dropped",
+                                  "export it again with at most four joint influences per vertex")
             if layer.type != "model":
                 continue
             for spec in [layer.raw.get("texture")] + [p.get("texture") for p in layer.raw.get("parts") or []

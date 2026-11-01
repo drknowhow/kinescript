@@ -592,8 +592,26 @@ def _imported(r, L, taken: int):
         M, mats = models.slots(imp, MAX_MATERIALS - taken)
         own = [{k: v for k, v in m.items() if k not in L.raw} for m in mats]
         m = imp.mesh._replace(M=np.where(M < 0, 0, M + taken).astype(np.int32))
-        hit = r._models[("src", L.id)] = (m, own, imp.size)
+        hit = r._models[("src", L.id)] = (m, own, imp.size, imp)
     return hit
+
+
+def playing(L, imp, t: float) -> tuple[int, float] | None:
+    """The animation of the layer's model file it plays at its time t, and the time into it: "animation" names
+    it, or is {"name", "speed", "loop", "start"}, on the layer's clock. A clip loops unless loop is false, which
+    holds its ends. None when there is none to play (kine check reports a name the file does not have)."""
+    spec = L.raw.get("animation")
+    if spec is None or spec is False or imp.motion is None:
+        return None
+    spec = spec if isinstance(spec, dict) else {"name": spec}
+    i = models.clip_index(imp, spec.get("name", 0))
+    if i is None:
+        return None
+    length = imp.motion.clips[i][2]
+    at = float(spec.get("start", 0)) + t * float(spec.get("speed", 1))
+    if length <= 0:
+        return i, 0.0
+    return i, at % length if spec.get("loop", True) else min(max(at, 0.0), length)
 
 
 def _fit(g, size) -> float:
@@ -609,10 +627,17 @@ def model(r, L, g, t: float = 0.0, T: float = 0.0) -> tuple[mesh.Mesh, list[tupl
     shape = L.raw.get("shape")
     meshes = [] if parts is None else [parts]
     if L.src:
-        m, own, size = _imported(r, L, len(keys))
+        m, own, size, imp = _imported(r, L, len(keys))
         keys = keys + own
         fit = _fit(g, size)
-        meshes.insert(0, _kept(r, ("fit", L.id), fit, lambda: m._replace(P=m.P * fit)))
+        play = playing(L, imp, t)
+        if play is None:
+            meshes.insert(0, _kept(r, ("fit", L.id), fit, lambda: m._replace(P=m.P * fit)))
+        else:  # posed at this time: a new mesh, kept while the time into the clip holds (its ends, a pause)
+            def posed():
+                P, N = models.pose(imp, *play)
+                return m._replace(P=P * fit, N=N)
+            meshes.insert(0, _kept(r, ("fit", L.id), (fit, play), posed))
     elif shape:
         meshes.insert(0, _shape(r, shape, g, L.raw, L.raw.get("detail", "medium"), ("shape", L.id)))
     if len(meshes) == 1:
@@ -1087,10 +1112,12 @@ def wire(xy: np.ndarray, T: np.ndarray) -> np.ndarray:
 
 
 def _topology(r, L, m) -> tuple:
-    """mesh.edges of the model's mesh, kept while its triangles are (a size that animates keeps them)."""
+    """mesh.edges of the model's mesh, kept while its triangles are (a size that animates keeps them). A model
+    file's animation moves points it welds, so a posed mesh's are worked out each time."""
     hit = r._models.get(("edges", L.id))
-    if hit is None or hit[0] is not m.T or hit[1] != len(m.P):
-        hit = r._models[("edges", L.id)] = (m.T, len(m.P), mesh.edges(m.P, m.T))
+    if hit is None or hit[0] is not m.T or hit[1] != len(m.P) or (L.raw.get("animation") not in (None, False)
+                                                                  and hit[3] is not m.P):
+        hit = r._models[("edges", L.id)] = (m.T, len(m.P), mesh.edges(m.P, m.T), m.P)
     return hit[2]
 
 
