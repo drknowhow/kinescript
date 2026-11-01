@@ -23,6 +23,7 @@ import re
 
 from . import color as C
 from . import ease as E
+from . import particles as PT
 from .props import _LEN, _NUM, KEY_TIMES, _is_time
 from .timing import KEYWORDS, LIMIT, finite as _finite_secs, parse_clock, show
 
@@ -185,6 +186,7 @@ TYPES: dict[str, set[str]] = {
                                                                               "draw", "light", "lights", "env",
                                                                               "src", "ground", "edges",
                                                                               "animation", "repeat"},
+    "particles": PT.OWN | {"text", "font", "weight", "src", "w", "h", "r"},
 }
 SEQUENCE = COMMON | {"clips", "transition", "fit", "volume", "w", "h"}
 TRANSITION = {"type", "dur"}
@@ -199,7 +201,8 @@ TYPE_ALIAS = {"rectangle": "rect", "square": "rect", "box": "rect", "shape": "re
               "subtitle": "captions", "number": "counter", "count": "counter", "movie": "video", "clip": "video",
               "svg": "path", "polyline": "line", "star": "polygon", "background": "shader", "container": "group",
               "frame": "group", "mesh": "model", "3d": "model", "object": "model", "primitive": "model",
-              "solid": "model"}
+              "solid": "model", "particle": "particles", "emitter": "particles", "particlesystem": "particles",
+              "particle_system": "particles", "particle-system": "particles"}
 # Synonyms other tools use. A per-type entry wins over the general one.
 ALIAS = {"color": "fill", "colour": "fill", "fillColor": "fill", "backgroundColor": "fill", "background": "fill",
          "fontSize": "size", "font_size": "size", "textSize": "size", "fontWeight": "weight",
@@ -229,6 +232,16 @@ TYPE_ALIASES = {
     "captions": {"subtitles": "cues", "lines": "cues"},
     "shader": {"shader": "preset", "code": "sksl", "source": "sksl"},
     "model": MODEL_ALIAS,
+    "particles": {"lifetime": "life", "lifespan": "life", "velocity": "speed", "direction": "angle",
+                  "emitRate": "rate", "emissionRate": "rate", "perSecond": "rate", "count": "burst",
+                  "amount": "burst", "colors": "fill", "colours": "fill", "palette": "fill", "rotationSpeed": "spin",
+                  "angularVelocity": "spin", "sizeOverLifetime": "sizeOverLife",
+                  "opacityOverLifetime": "opacityOverLife", "alphaOverLife": "opacityOverLife",
+                  "colorOverLife": "fillOverLife", "colourOverLife": "fillOverLife",
+                  "colorOverLifetime": "fillOverLife", "image": "src", "char": "text", "character": "text",
+                  "emoji": "text", "friction": "drag", "damping": "drag", "noise": "turbulence",
+                  "wobble": "turbulence", "radius": "r", "warmup": "prewarm", "preWarm": "prewarm", "orient": "align",
+                  "alignToVelocity": "align", "faceVelocity": "align", "flutter": "flip"},
 }
 ENUMS = {
     "anchor": ("center", "topleft", "top", "topright", "left", "right", "bottomleft", "bottom", "bottomright"),
@@ -279,7 +292,8 @@ SCALAR = {"x", "y", "w", "h", "r", "opacity", "scale", "scaleX", "scaleY", "rota
           "depth", "tube", "shine", "metal", "rim", "bands", "explode", "bevel", "transparency", "timeRemap",
           "dashOffset", "corner"}
 REQUIRED = {"text": ("text",), "image": ("src",), "video": ("src",), "path": ("d", "points"), "line": ("points",),
-            "captions": ("cues", "src", "voice"), "shader": ("preset", "sksl"), "model": ("shape", "parts", "src")}
+            "captions": ("cues", "src", "voice"), "shader": ("preset", "sksl"), "model": ("shape", "parts", "src"),
+            "particles": ("rate", "burst", "preset")}
 # Keys whose value is an object of their own: never a tween, even with a "from" key (a light's direction).
 OBJECTS = {"light", "lights", "env", "ground", "shadow", "shadows", "box", "fx", "uniforms", "sound", "enter", "exit",
            "parts", "transition", "texture", "edges", "animation", "repeat", "along", "rough", "mask", "glow",
@@ -461,9 +475,10 @@ def _values(raw: dict, ltype: str, rep: Report, lid):
     if isinstance(raw.get("italic"), str) and raw["italic"].lower() in ("italic", "oblique", "normal"):
         raw["italic"] = raw["italic"].lower() != "normal"
     for key in ENUMS:
-        _enum(raw, key, rep, lid)
+        if not (ltype == "particles" and key == "shape"):  # a particle's shape, checked by _particles
+            _enum(raw, key, rep, lid)
     for k, v in list(raw.items()):
-        if k in OBJECTS:
+        if k in OBJECTS or (ltype == "particles" and k in PT.OWN):
             continue
         if v is None and (k in SCALAR or k in COLOR_KEYS):
             del raw[k]  # null is the default
@@ -839,6 +854,11 @@ def _layer(raw, rep: Report, path: str, comps: dict):
         _timing(raw, rep, lid)
         return  # parameters are checked when the component expands (components.Params)
     t = raw.get("type")
+    if isinstance(t, str) and t.strip().lower() in PT.PRESETS and "preset" not in raw:
+        raw["type"], raw["preset"] = "particles", t.strip().lower()
+        rep.add("info", "renamed-value", lid, f"type '{t}' read as particles with preset '{raw['preset']}'",
+                f"write \"type\": \"particles\", \"preset\": \"{raw['preset']}\"")
+        t = "particles"
     if isinstance(t, str) and t.strip().lower() in ENUMS["shape"] and t.strip().lower() not in TYPES \
             and "shape" not in raw:  # "Text" is a text layer, not a model with shape text
         raw["type"], raw["shape"] = "model", t.strip().lower()
@@ -928,6 +948,8 @@ def _layer(raw, rep: Report, path: str, comps: dict):
                 rep.add("error", "bad-value", lid, "preset: " + unknown("shader preset", raw["preset"], SH))
     if t == "model":
         _model(raw, rep, lid)
+    if t == "particles":
+        _particles(raw, rep, lid)
     if t == "group":
         _shadows(raw, rep, lid)
         _clock(raw, rep, lid)
@@ -1784,6 +1806,176 @@ def _repeat(raw: dict, rep: Report, lid, t: str):
             what = "a number, a list of numbers taken in turn, or an expression of i such as \"=i * 60\""
         rep.add("error", "bad-value", lid, f"repeat {k} is {_show(x)}; it is {what}",
                 "i is the copy's number from 0, n the count; t, d, p and T are the layer's times")
+
+
+PARTICLE_SHAPE_ALIAS = {"dot": "circle", "disc": "circle", "disk": "circle", "box": "square", "strip": "rect",
+                        "rectangle": "rect", "confetti": "rect", "spark": "streak", "line": "streak", "trail": "streak",
+                        "bokeh": "soft", "glow": "soft", "blur": "soft", "bubble": "ring", "circleoutline": "ring"}
+EMITTER_ALIAS = {"dot": "point", "center": "point", "centre": "point", "origin": "point", "box": "rect",
+                 "area": "rect", "square": "rect", "rectangle": "rect", "disc": "circle", "disk": "circle",
+                 "sphere": "circle", "edge": "ring", "outline": "ring", "segment": "line", "bar": "line"}
+RANGE_LEAST = {"life": 0.001, "size": 0, "drag": 0, "flip": 0}
+RANGE_EXAMPLE = {"life": "[1.5, 3]", "speed": "[200, 600]", "angle": "[-120, -60]", "size": "[6, 14]",
+                 "spin": "[-360, 360]", "drag": "1.5", "flip": "[1, 3]"}
+
+
+def _particles(raw: dict, rep: Report, lid):
+    """A particles layer's own keys (particles.OWN), which are its emitter's and not layer props."""
+    pre = raw.get("preset")
+    if pre is not None and pre not in PT.PRESETS:
+        s = suggest(str(pre), PT.PRESETS)
+        if s and s.lower() == str(pre).strip().lower():
+            raw["preset"] = s
+            rep.add("info", "renamed-value", lid, f"preset '{pre}' read as '{s}'", f"write '{s}'")
+        else:
+            rep.add("error", "bad-value", lid, "preset: " + unknown("particles preset", pre, PT.PRESETS))
+    for k in PT.RANGES:
+        v = raw.get(k)
+        if v is None:
+            continue
+        nums = v if isinstance(v, list) and len(v) == 2 else [v]
+        if not all(_finite(x) for x in nums):
+            rep.add("error", "bad-value", lid, f"{k} is {_show(v)}; it is a number, or [min, max] for each particle "
+                    "to draw its own between", f"\"{k}\": {RANGE_EXAMPLE[k]}")
+        elif k in RANGE_LEAST and min(nums) < RANGE_LEAST[k]:
+            rep.add("error", "bad-value", lid, f"{k} is {_show(v)}; it must be "
+                    + ("above 0" if k == "life" else "0 or more"))
+    rate = raw.get("rate")
+    if rate is not None and not (isinstance(rate, str) and rate.startswith("=")):
+        if _finite(rate):
+            if rate < 0:
+                rep.add("error", "bad-value", lid, f"rate is {_show(rate)}; it is particles a second, 0 or more")
+        elif isinstance(rate, dict) or _keyframes(rate):
+            _prop("rate", rate, rep, lid)
+            keys = rate if isinstance(rate, list) else rate.get("keys") or [[0, rate.get("from", 0)],
+                                                                            [1, rate.get("to", 0)]]
+            if any(isinstance(k, (list, tuple)) and len(k) > 1 and not (_finite(k[1]) and k[1] >= 0) for k in keys):
+                rep.add("error", "bad-value", lid, "rate: every key is particles a second, a number 0 or more")
+        else:
+            rep.add("error", "bad-value", lid, f"rate is {_show(rate)}; it is particles a second: a number, "
+                    "keyframes or an expression", "\"rate\": [[0, 200], [2, 0]] tapers off over two seconds")
+    burst = raw.get("burst")
+    if burst is not None:
+        pairs = burst if isinstance(burst, list) else [[0, burst]]
+        if not all(isinstance(p, (list, tuple)) and len(p) == 2 and _is_time(p[0]) and _finite(p[1]) and p[1] >= 0
+                   for p in pairs):
+            rep.add("error", "bad-value", lid, f"burst is {_show(burst)}; it is how many particles leave at once at "
+                    "the layer's start, or a list of [time, count]", "\"burst\": [[0, 120], [1.5, 80]]")
+    g = raw.get("gravity")
+    if g is not None and not (_finite(g) or isinstance(g, list) and len(g) == 2 and all(_finite(x) for x in g)):
+        rep.add("error", "bad-value", lid, f"gravity is {_show(g)}; it is px/s² downward, or [x, y] for a pull in "
+                "any direction", "\"gravity\": 900, or [300, 0] for a wind to the right")
+    tb = raw.get("turbulence")
+    if isinstance(tb, dict):
+        _keys(tb, {"amount", "speed"}, {"strength": "amount", "size": "amount", "rate": "speed", "frequency": "speed"},
+              rep, lid, "turbulence: ")
+        _numbers(tb, ("amount", "speed"), "turbulence ", rep, lid, least=0)
+    elif tb is not None and not (_finite(tb) and tb >= 0):
+        rep.add("error", "bad-value", lid, f"turbulence is {_show(tb)}; it is how far, in px, each particle sways, "
+                "or {\"amount\": px, \"speed\": sways a second}", "\"turbulence\": 30")
+    for k in ("align",):
+        if raw.get(k) is not None and not isinstance(raw[k], bool):
+            rep.add("error", "bad-value", lid, f"{k} is {_show(raw[k])}; it is true or false")
+    pw = raw.get("prewarm")
+    if pw is not None and not (isinstance(pw, bool) or _finite(pw) and pw >= 0):
+        rep.add("error", "bad-value", lid, f"prewarm is {_show(pw)}; it is true (as long as a particle lives) or "
+                "seconds the emitter has run when the layer starts")
+    seed = raw.get("seed")
+    if seed is not None and not (_finite(seed) and float(seed).is_integer()):
+        rep.add("error", "bad-value", lid, f"seed is {_show(seed)}; it is a whole number")
+    em = raw.get("emitter")
+    if isinstance(em, dict):  # {"type": "rect", "w": 400, "h": 200}: its size is the layer's w, h and r
+        inner = dict(em)
+        raw["emitter"] = em = inner.pop("type", inner.pop("shape", "point"))
+        for k, v in inner.items():
+            if k in ("w", "h", "r", "width", "height", "radius") and {"width": "w", "height": "h",
+                                                                         "radius": "r"}.get(k, k) not in raw:
+                raw[{"width": "w", "height": "h", "radius": "r"}.get(k, k)] = v
+            else:
+                rep.add("error", "unknown-key", lid, f"emitter: '{k}' is not read; an emitter's size is the layer's "
+                        "w and h (line, rect) or r (circle, ring)")
+        rep.add("info", "renamed-key", lid, f"emitter object read as \"emitter\": \"{em}\" with its size on the "
+                "layer", f"write \"emitter\": \"{em}\" and w, h or r on the layer")
+    if em is not None:
+        low = re.sub(r"[-_ ]", "", str(em).strip().lower())
+        hit = low if low in PT.EMITTERS else EMITTER_ALIAS.get(low)
+        if hit is None or not isinstance(em, str):
+            rep.add("error", "bad-value", lid, "emitter: " + unknown("emitter", em, PT.EMITTERS))
+        elif hit != em:
+            raw["emitter"] = hit
+            rep.add("info", "renamed-value", lid, f"emitter '{em}' read as '{hit}'", f"write '{hit}'")
+    for k in ("w", "h", "r"):
+        v = raw.get(k)
+        if v is not None and not (_finite(v) or isinstance(v, str) and _lengthish(v)):
+            rep.add("error", "bad-value", lid, f"{k} is {_show(v)}; a particles layer's {k} is its emitter's size, "
+                    "a number or a percentage, and it does not animate", f"\"{k}\": \"100%\"")
+    shape = raw.get("shape")
+    if shape is not None:
+        low = re.sub(r"[-_ ]", "", str(shape).strip().lower())
+        hit = low if low in PT.SHAPES else PARTICLE_SHAPE_ALIAS.get(low)
+        if not isinstance(shape, str):
+            rep.add("error", "bad-value", lid, "shape: " + unknown("particle shape", shape, PT.SHAPES))
+        elif hit is not None:
+            if hit != shape:
+                raw["shape"] = hit
+                rep.add("info", "renamed-value", lid, f"shape '{shape}' read as '{hit}'", f"write '{hit}'")
+        elif shape.lower().endswith(IMAGE_EXTS + (".gif",)) and "src" not in raw:
+            raw["src"] = raw.pop("shape")
+            rep.add("info", "renamed-key", lid, f"shape '{shape}' read as src (an image)",
+                    f"write \"src\": \"{shape}\"")
+        elif len(shape) <= 2 and "text" not in raw:  # a character, or one with a variation selector
+            raw["text"] = raw.pop("shape")
+            rep.add("info", "renamed-key", lid, f"shape '{shape}' read as text (a character)",
+                    f"write \"text\": \"{shape}\"")
+        else:
+            rep.add("error", "bad-value", lid, "shape: " + unknown("particle shape", shape, PT.SHAPES),
+                    "a character goes in \"text\" and an image in \"src\"")
+    if raw.get("text") is not None and (not isinstance(raw["text"], str) or not raw["text"]):
+        rep.add("error", "bad-value", lid, f"text is {_show(raw['text'])}; a particle's text is a character such as "
+                "\"★\"")
+    for k in PT.CURVES:
+        v = raw.get(k)
+        if v is None:
+            continue
+        keys = [[0, v.get("from", v.get("to"))], [1, v.get("to")]] if isinstance(v, dict) else v if isinstance(
+            v, list) else [[0, v]]
+        if not keys or not all(isinstance(p, (list, tuple)) and len(p) == 2 and _finite(p[0]) and 0 <= p[0] <= 1
+                               and _finite(p[1]) and p[1] >= 0 for p in keys):
+            rep.add("error", "bad-value", lid, f"{k} is {_show(v)}; it is keyframes over a particle's life, "
+                    "[share of its life from 0 to 1, value 0 or more]", f"\"{k}\": [[0, 1], [1, 0]]")
+    fill = raw.get("fill")
+    if fill is not None:
+        cols = fill if isinstance(fill, list) and fill else [fill]
+        if all(isinstance(c, str) for c in cols):
+            for c in cols:
+                _colour(c, "fill", rep, lid)
+        else:
+            rep.add("error", "bad-value", lid, f"fill is {_show(fill)}; a particle's fill is a colour, or a list of "
+                    "colours the particles take in turn", "\"fill\": [\"#ff633f\", \"#b9f45d\", \"#f2f0e8\"]")
+    fol = raw.get("fillOverLife")
+    if fol is not None:
+        keys = [[0, fol.get("from", fol.get("to"))], [1, fol.get("to")]] if isinstance(fol, dict) else fol
+        if isinstance(keys, list) and keys and all(isinstance(p, (list, tuple)) and len(p) == 2 and _finite(p[0])
+                                                   and 0 <= p[0] <= 1 and isinstance(p[1], str) for p in keys):
+            for p in keys:
+                _colour(p[1], "fillOverLife", rep, lid)
+        else:
+            rep.add("error", "bad-value", lid, f"fillOverLife is {_show(fol)}; it is keyframes over a particle's "
+                    "life, [share of its life from 0 to 1, colour]", "\"fillOverLife\": [[0, \"#fff6d8\"], [1, "
+                    "\"#ff4a1c\"]]")
+    life = raw.get("life", PT.PRESETS.get(raw.get("preset"), {}).get("life", PT.DEFAULTS["life"]))
+    rate = raw.get("rate", PT.PRESETS.get(raw.get("preset"), {}).get("rate", 0))
+    if isinstance(rate, list) and _keyframes(rate):
+        rate = max((k[1] for k in rate if _finite(k[1])), default=0)
+    burst = raw.get("burst", PT.PRESETS.get(raw.get("preset"), {}).get("burst", 0))
+    try:
+        most = (float(rate) if _finite(rate) else 0.0) * max(life if isinstance(life, list) else [life]) + sum(
+            float(p[1]) for p in (burst if isinstance(burst, list) else [[0, burst]]))
+    except (TypeError, ValueError, IndexError):
+        return  # reported above
+    if most > PT.MOST:
+        rep.add("error", "too-many-particles", lid, f"rate and burst keep up to {most:,.0f} particles alive at once; "
+                f"a particles layer has {PT.MOST:,} at most", "lower rate, burst or life, or split it into layers")
 
 
 def _model(raw: dict, rep: Report, lid):

@@ -1,0 +1,19 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 6, "bg": "#0a0c10"},
+  "layers": [
+    {"id": "dust", "type": "particles", "preset": "dust", "fill": "$annotation"},
+    {"id": "pop", "type": "particles", "preset": "confetti", "at": 2.35, "y": "60%",
+     "burst": [[0, 140], [0.2, 100]]},
+    {"id": "label", "type": "text", "text": "SUBSCRIBERS", "x": "50%", "y": "33%", "size": 40, "weight": 500,
+     "letterSpacing": 8, "fill": "$annotation", "enter": {"name": "fade", "dur": 0.6}},
+    {"id": "count", "type": "counter", "x": "50%", "y": "50%", "size": 220, "weight": 700,
+     "value": {"from": 0, "to": 1000000, "dur": 2.4, "ease": "outExpo"},
+     "scale": [[2.3, 1], [2.45, 1.08, "outBack"], [2.8, 1]]},
+    {"id": "goal", "type": "text", "text": "one million, thank you", "x": "50%", "y": "67%", "size": 48,
+     "fill": "$key", "at": 2.6, "enter": {"name": "rise", "dur": 0.6}},
+    {"id": "left", "type": "particles", "preset": "confetti", "at": 2.4, "x": "6%", "y": "104%",
+     "angle": [-78, -52], "speed": [1400, 2600], "burst": 110},
+    {"id": "right", "type": "particles", "preset": "confetti", "at": 2.4, "x": "94%", "y": "104%",
+     "angle": [-128, -102], "speed": [1400, 2600], "burst": 110}
+  ]
+}

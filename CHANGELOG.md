@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- A `particles` layer: an emitter with `rate` (particles a second; keyframes taper it) and `burst` (how many leave at
+  once, or `[[time, count], ...]`), or one of the presets `confetti`, `sparks`, `snow`, `dust` and `bubbles`. Each
+  particle draws its own `life`, `speed`, `angle`, `size`, `spin`, `drag` and `flip` from a number or `[min, max]`,
+  falls by `gravity`, sways by `turbulence`, can turn along its path (`align`), and changes over its life by
+  `sizeOverLife`, `opacityOverLife` and `fillOverLife`. It is a circle, square, rect, triangle, star, ring, soft dot or
+  streak, a character (`text`) or an image (`src`), tinted by `fill`, a colour or a list taken in turn. `emitter`
+  spreads births over a point, line, rect, circle or ring, and `prewarm` starts it full. A particle's birth, start and
+  path come from its number and the seed in closed form, so any frame renders alone, and particles stay where they
+  were born while x, y or along move the layer. They draw from one sprite in one drawAtlas call: the new
+  `particles-5k` stress scene keeps 5,000 alive and renders at 131 to 159 fps on the GPU (7.6 ms a frame drawn and
+  read back) and draws a frame in 104 ms on the CPU, where `kine check` warns `particle-cost` past 0.25 s a frame.
+  `examples/confetti.json` bursts confetti over a counter.
 - `repeat` works on 2D layers: shapes, text, counters, images, video, shaders and groups take `{"count": 60,
   "rotate": "=i * 6", "x": "=cos(i * 0.1047) * 300", "fill": "=hsl(i * 6)"}`, up to 10,000 copies. A copy is the
   layer moved by its own x, y, rotate and scale in the layer's space, in its own fill, stroke and opacity; the
