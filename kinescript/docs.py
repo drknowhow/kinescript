@@ -136,6 +136,12 @@ LAYER TYPES (defaults in brackets)
             smooth closed
   path      d (SVG path data, e.g. "M0 0 L100 0") or points; fill stroke strokeWidth
   arrow     x1 y1 x2 y2 bend [0] head [22] stroke strokeWidth
+  strokes   on shapes, images and videos: dash [on, off, ...] px marks the stroke out as SVG's
+            stroke-dasharray does; dashOffset slides it back along the stroke (animate it for
+            marching dashes), and a dashed stroke still draws on, its dashes where they lie on
+            the whole path. corner (px) on a path, line or polygon rounds every corner. radius on
+            a rect, group, image or video takes four values, [top-left, top-right, bottom-right,
+            bottom-left], as CSS's border-radius does; [24, 24, 0, 0] rounds the top corners.
   text      text (centred on x, y: the anchor is center), size [64], weight [600] (100..900), font ["Space Grotesk"; also "IBM Plex Mono",
             any installed family, or a .ttf path], italic, fill [#f2f0e8], emph (colour of
             text written **like this**, also inside a word: g**P**u colours the P),

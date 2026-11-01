@@ -23,7 +23,7 @@ STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "children", "laye
           "allowOffscreen", "style", "audio", "shadow", "box", "fx", "fill", "stroke", "emph", "active",
           "sksl", "preset", "uniforms", "caret", "case", "italic", "smooth", "closed", "focus", "use",
           "backface", "fixed", "sort", "shape", "detail", "parts", "light", "span", "sound", "voice",
-          "fadeIn", "fadeOut", "sequence", "animation", "repeat", "profile", "along"}
+          "fadeIn", "fadeOut", "sequence", "animation", "repeat", "profile", "along", "dash"}
 PART_STRUCT = {"shape", "texture", "text", "font", "d", "italic", "profile"}  # a part's keys that never animate
 # Property defaults by name; everything not listed defaults to None.
 DEFAULTS = {"x": 0.0, "y": 0.0, "opacity": 1.0, "scale": 1.0, "scaleX": 1.0, "scaleY": 1.0, "rotate": 0.0,
@@ -365,7 +365,8 @@ class Scene:
                                                   or isinstance(v, C.Gradient)):
                             self._bad_colour(v, name if t == 0 else f"{name} at t={t:.2f}s", layer.id)
                             break
-                    elif name in schema.SCALAR and (isinstance(v, bool) or not isinstance(v, (int, float))):
+                    elif name in schema.SCALAR and (isinstance(v, bool) or not isinstance(v, (int, float))) and not (
+                            name == "radius" and isinstance(v, list) and len(v) == 4):  # four corners
                         self.note("error", "bad-value", layer.id, f"{name} is {v!r} at t={t:.2f}s; expected a number",
                                   "use a number, a percentage like '50%', or an expression starting with '='")
                         break

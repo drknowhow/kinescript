@@ -33,6 +33,15 @@
   tween, its points, angle, stop positions and colours (mixed in OKLab) moving together; `kine check` says when the
   kinds or stop counts differ. A text layer took a gradient fill without complaint but drew it in the paper colour;
   it draws the gradient now, across the whole block of text, and emphasised words keep their colour.
+- Strokes: `dash` (`[on, off, ...]` px, as SVG's stroke-dasharray) marks out the stroke of a shape, image or
+  video, and `dashOffset` slides the pattern back along it; animate it for marching dashes. A dashed stroke still
+  draws on, with its dashes where they lie on the whole path, and an arrow's head stays whole. `corner` (px) rounds
+  every corner of a path, line or polygon, and `draw` and riders on it follow the rounded line. `radius` takes four
+  values, `[top-left, top-right, bottom-right, bottom-left]`, on a rect, group, image or video, and they animate.
+  `strokeDasharray` and `strokeDashoffset` are read as `dash` and `dashOffset`, and `corner` on a rect as `radius`;
+  `kine check` warns about a dash with no stroke and a corner on a smooth line. The `strokes-300` stress scene
+  (100 marching dashed paths that draw on, 100 stars whose corners round as it plays, 100 tabs whose four radii
+  animate) draws a 1080p frame in 6.2 ms on the GPU, 3.2 ms more than the same layers without those keys.
 - `kine check` warns `strobe` where a layer moves more than 40 px a frame at 1080p for five frames running in a
   scene without motion blur, where the eye sees separate copies instead of one moving thing.
 - 2D frames cost less Python: keyframes find their segment by bisection, expressions compile once to a function,

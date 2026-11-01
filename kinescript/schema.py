@@ -133,18 +133,19 @@ GROUND_ALIAS = {"alpha": "opacity", "strength": "opacity", "softness": "blur", "
 COMMON = {"id", "type", "at", "dur", "until", "x", "y", "anchor", "opacity", "scale", "scaleX", "scaleY", "rotate",
           "blur", "blend", "shadow", "fx", "enter", "exit", "hidden", "allowOffscreen", "z", "rotateX", "rotateY",
           "backface", "fixed", "sound", "along"}
-SHAPE = {"fill", "stroke", "strokeWidth", "draw", "drawStart", "cap", "join"}
+SHAPE = {"fill", "stroke", "strokeWidth", "draw", "drawStart", "cap", "join", "dash", "dashOffset"}
 TEXT = {"text", "size", "weight", "font", "italic", "fill", "emph", "align", "maxWidth", "lineHeight",
         "letterSpacing", "stroke", "strokeWidth", "box", "case", "textCase", "caret", "split",
         "unitX", "unitY", "unitRotate", "unitScale", "unitOpacity"}
-MEDIA = {"src", "w", "h", "fit", "zoom", "focus", "focusX", "focusY", "radius", "stroke", "strokeWidth", "cap", "join"}
+MEDIA = {"src", "w", "h", "fit", "zoom", "focus", "focusX", "focusY", "radius", "stroke", "strokeWidth", "cap", "join",
+         "dash", "dashOffset"}
 TYPES: dict[str, set[str]] = {
     "rect": SHAPE | {"w", "h", "radius", "dimOutside"},
     "circle": SHAPE | {"r"},
     "ellipse": SHAPE | {"w", "h"},
-    "polygon": SHAPE | {"sides", "r", "inner"},
-    "path": SHAPE | {"d", "points", "smooth", "closed"},
-    "line": SHAPE | {"points", "smooth", "closed"},
+    "polygon": SHAPE | {"sides", "r", "inner", "corner"},
+    "path": SHAPE | {"d", "points", "smooth", "closed", "corner"},
+    "line": SHAPE | {"points", "smooth", "closed", "corner"},
     "arrow": SHAPE | {"x1", "y1", "x2", "y2", "bend", "head"},
     "text": TEXT,
     "counter": TEXT | {"value", "format"},
@@ -182,6 +183,7 @@ ALIAS = {"color": "fill", "colour": "fill", "fillColor": "fill", "backgroundColo
          "width": "w", "height": "h", "rotation": "rotate", "angle": "rotate", "content": "text",
          "alpha": "opacity", "borderRadius": "radius", "cornerRadius": "radius", "border_radius": "radius",
          "lineWidth": "strokeWidth", "stroke_width": "strokeWidth", "borderWidth": "strokeWidth",
+         "strokeDasharray": "dash", "dasharray": "dash", "dashArray": "dash", "strokeDashoffset": "dashOffset",
          "strokeColor": "stroke", "borderColor": "stroke", "source": "src", "file": "src", "url": "src",
          "textAlign": "align", "text_align": "align", "letter_spacing": "letterSpacing", "tracking": "letterSpacing",
          "line_height": "lineHeight", "leading": "lineHeight", "max_width": "maxWidth", "wrap": "maxWidth",
@@ -192,6 +194,7 @@ ALIAS = {"color": "fill", "colour": "fill", "fillColor": "fill", "backgroundColo
          "translateZ": "z", "backfaceVisibility": "backface", "sfx": "sound", "audio": "sound",
          "soundEffect": "sound"}
 TYPE_ALIASES = {
+    "rect": {"corner": "radius"},
     "circle": {"radius": "r", "size": "r"}, "polygon": {"radius": "r", "points": "sides"},
     "line": {"color": "stroke", "colour": "stroke", "fill": "stroke", "width": "strokeWidth"},
     "arrow": {"color": "stroke", "colour": "stroke", "fill": "stroke", "width": "strokeWidth"},
@@ -241,14 +244,15 @@ SCALAR = {"x", "y", "w", "h", "r", "opacity", "scale", "scaleX", "scaleY", "rota
           "strokeWidth", "draw", "drawStart", "zoom", "value", "radius", "dimOutside", "sides", "inner", "x1", "y1",
           "x2", "y2", "bend", "head", "maxWidth", "lineHeight", "letterSpacing", "focusX", "focusY", "speed",
           "unitX", "unitY", "unitRotate", "unitScale", "unitOpacity", "z", "rotateX", "rotateY", "fov",
-          "depth", "tube", "shine", "metal", "rim", "bands", "explode", "bevel", "transparency", "timeRemap"}
+          "depth", "tube", "shine", "metal", "rim", "bands", "explode", "bevel", "transparency", "timeRemap",
+          "dashOffset", "corner"}
 REQUIRED = {"text": ("text",), "image": ("src",), "video": ("src",), "path": ("d", "points"), "line": ("points",),
             "captions": ("cues", "src", "voice"), "shader": ("preset", "sksl"), "model": ("shape", "parts", "src")}
 # Keys whose value is an object of their own: never a tween, even with a "from" key (a light's direction).
 OBJECTS = {"light", "lights", "env", "ground", "shadow", "shadows", "box", "fx", "uniforms", "sound", "enter", "exit",
            "parts", "transition", "texture", "edges", "animation", "repeat", "along"}
 # Props that cannot be below 0, and the least each may be.
-AT_LEAST = {"radius": 0, "r": 0, "sides": 3, "blur": 0, "strokeWidth": 0, "size": 0}
+AT_LEAST = {"radius": 0, "r": 0, "sides": 3, "blur": 0, "strokeWidth": 0, "size": 0, "corner": 0}
 COLOUR_FIX = f"write {C.FORMATS}"
 TIME_FORMS = 'seconds like 1.5, "45f" (frames), "0:02.5", "title.out+0.2" or a marker name'
 
@@ -430,7 +434,8 @@ def _values(raw: dict, ltype: str, rep: Report, lid):
         if v is None and (k in SCALAR or k in COLOR_KEYS):
             del raw[k]  # null is the default
             continue
-        if k in SCALAR and isinstance(v, list) and v and all(isinstance(x, (int, float)) for x in v):
+        if k in SCALAR and isinstance(v, list) and v and all(isinstance(x, (int, float)) for x in v) and (
+                k != "radius"):  # a radius list is its corners, checked below
             rep.add("error", "flat-keyframes", lid,
                     f"{k}: {v} is a flat list. Keyframes are a list of [time, value] pairs",
                     f"\"{k}\": [[0, {v[0]}], [\"end\", {v[-1]}]]")
@@ -511,7 +516,12 @@ def _prop(k: str, v, rep: Report, lid):
 def _constant(k: str, x, where: str, rep: Report, lid):
     if isinstance(x, str) and x.startswith(("=", "$")):
         return
-    if k in SCALAR or k == "along p":
+    if k == "radius" and isinstance(x, list):
+        if len(x) != 4 or not all(_finite(r) and r >= 0 for r in x):
+            rep.add("error", "bad-value", lid, f"radius{where} is {_show(x)}; it is one number, or four for the "
+                    "corners: [top-left, top-right, bottom-right, bottom-left], each 0 or more",
+                    '"radius": [24, 24, 0, 0] rounds the top corners')
+    elif k in SCALAR or k == "along p":
         if isinstance(x, bool):
             rep.add("error", "bad-value", lid, f"{k}{where} is {str(x).lower()}, which is not a number", "use a number")
         elif isinstance(x, (int, float)):
@@ -860,6 +870,7 @@ def _layer(raw, rep: Report, path: str, comps: dict):
         _volume(raw, rep, lid)
     _values(raw, t, rep, lid)
     _structure(raw, t, rep, lid)
+    _stroke(raw, t, rep, lid)
     _along(raw, rep, lid)
     _effects(raw, rep, lid)
     _layer_sound(raw, rep, lid)
@@ -913,6 +924,25 @@ def _position(pos) -> dict | None:
         return {a: dict(pos, to=pos["to"][j], **({"from": pos["from"][j]} if "from" in pos else {}))
                 for j, a in enumerate("xyz"[:n])}
     return None
+
+
+def _stroke(raw: dict, t: str, rep: Report, lid):
+    """dash ([on, off, ...] px, as SVG's stroke-dasharray), the dashOffset that slides it, and a path's corner."""
+    dash = raw.get("dash")
+    if dash is not None:
+        if not (isinstance(dash, list) and dash and all(_finite(d) and d >= 0 for d in dash) and any(dash)):
+            rep.add("error", "bad-value", lid, f"dash is {_show(dash)}; it is lengths in px, dash then gap, "
+                    "repeated along the stroke, at least one above 0", '"dash": [12, 8]; to march the dashes, animate '
+                    "dashOffset")
+        elif raw.get("stroke") is None and t not in ("line", "arrow"):
+            rep.add("warning", "ignored-key", lid, "dash marks out a stroke and this layer has none",
+                    '"stroke": "#f2f0e8", "strokeWidth": 4')
+    elif "dashOffset" in raw:
+        rep.add("warning", "ignored-key", lid, "dashOffset slides a dash pattern and this layer has no dash",
+                '"dash": [12, 8]')
+    if "corner" in raw and raw.get("smooth") is True:
+        rep.add("warning", "ignored-key", lid, "corner rounds the corners between straight pieces, and smooth "
+                "leaves none", "drop smooth to keep the points' straight lines and round their corners")
 
 
 def _clock(raw: dict, rep: Report, lid):
