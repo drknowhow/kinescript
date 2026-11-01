@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- A textured model of several materials draws each pass in one draw call. It used to make one call for each run of
+  a material in the depth sort, converting every vertex of the model each time; where the materials take turns,
+  as on a glTF can whose label and steel alternate down its side, that was 15,000 calls and 48 s a frame on the
+  GPU, now 0.13 s. A shader picks each material's picture by an offset added to its texture coordinates.
+  `examples/textures.json` draws a GPU frame in 22.5 ms instead of 50.9; its pixels move by at most one level.
 - `bench/stress.py` has two more 3D scenes: `textured-100k`, an .obj globe of 102,400 triangles with its map, and
   `dof-stage`, a stage of 10 models and 3 cards with floor shadows and focus pulls. On the development machine's
   GPU they render 120 frames at 1080p in 3.15 s and 2.66 s; their results, with `models-30` and `stage-16` on both
