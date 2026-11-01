@@ -403,7 +403,10 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
             r.draw(T)
         except (ValueError, RuntimeError, OSError) as e:
             return broke(e, T)
-        for lid in r.culled:
+        for lid in r.inside:
+            add("warning", "camera-inside-model", lid, T, "the camera is inside this model, so it sees only the "
+                "model's inside, which is not drawn", "move the camera back (a higher camera z) or the model away")
+        for lid in r.culled - r.inside:
             msg = ("the triangles of this model that cross the camera plane are not drawn"
                    if scene.by_id[lid].type == "model" else "layer crosses the camera plane, so it is not drawn")
             add("warning", "behind-camera", lid, T, msg, "lower its z, or move the camera back (a higher camera z)")

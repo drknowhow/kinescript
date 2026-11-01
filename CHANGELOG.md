@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- `camera` takes `target`: a point `[x, y, z]` or a layer id that the camera looks at and orbits in place of the
+  canvas centre, framed as z 0 is. A layer id makes the camera follow the layer through its groups, by its keys and
+  not its enter and exit motions, so a layer that rises in still rises on screen. Keyframes between points and ids
+  pan from one to the next. `shake` (px, or `{"amount", "speed", "seed"}`) turns the camera on its own spot by
+  smooth noise of the scene time, up to about `amount` px with a little roll; `amount` animates. `kine check` warns
+  (`camera-inside-model`) when the camera is inside a model: two of three rays from it cross the model's surface an
+  odd number of times, so a camera through a ring's hole is outside it. `kine docs` has recipes for orbit, crane,
+  push-in, dolly zoom and handheld moves. `examples/camera.json` renders in 1.72 s on the GPU against 1.69 s without
+  `target` and `shake`, and in 5.5 s on the CPU against 5.6 s. Scenes without them draw the same bytes:
+  `bench/same.py` finds no difference against main on nine 3D examples and `hello.json`, on either backend.
 - `"shadows": true` (or `{"opacity", "soft"}`) on a stage: its models cast shadows from the scene's key light onto
   every child, so a ring shades a card, a cube the floor and a wall behind it. The stage draws a 1024-texel map of
   how near the light each model triangle turned away from it is, seen along the light; each frame pixel finds its

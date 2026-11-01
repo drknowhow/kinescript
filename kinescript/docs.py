@@ -208,6 +208,21 @@ DEPTH AND CAMERA (3D)
               x and y pan (px). z moves the camera back; negative moves it in. rotateY orbits it
               right around the canvas centre, rotateX up over it (looking down), rotate rolls it.
               fov (5..150) sets how strong perspective looks; it does not change size at z 0.
+              target: what the camera looks at and orbits in place of the canvas centre, framed as z 0
+              is (in the middle, at its own size): a point [x, y, z] in px, or a layer id, which the
+              camera follows (its keys and its parents', not its enter and exit motions). x and y still
+              pan from it. Keyframes between points and ids pan across: [[0, "logo"], [2, "title"]].
+              shake: px, or {"amount": 8, "speed": 1.5, "seed": 0}: a handheld wobble, smooth noise that
+              turns the view by up to about amount px, speed times a second. amount animates.
+              check warns (camera-inside-model) when the camera is inside a model.
+  Camera moves:
+    orbit       "target": "hero", "rotateY": [[0, -40], ["end", 40]]
+    crane       "y": [[0, 0], ["end", -300]] rises with the view; add "rotateX": [[0, 0], ["end", 30]] to
+                swing up over the target, looking down
+    push-in     "z": [[0, 0], ["end", -400]]
+    dolly zoom  "fov": [[0, 20], ["end", 70]]: z 0 keeps its size while the far layers fall away, since
+                fov already moves the camera to keep z 0 framed
+    handheld    "shake": 6, on top of any of these
   fog         top level: true, or {"color": "#0a0c10", "near": 1500, "far": 6000, "amount": 1}.
               Up to near px from the camera is clear; from there to far px everything mixes into
               color, up to amount. z 0 is (h / 2) / tan(fov / 2) px from the camera: 1484 at 1080p

@@ -1,0 +1,20 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 6, "bg": {"radial": [0.5, 0.45], "stops": ["#22252f", "#0b0c10"]}},
+  "camera": {"target": [[0, "ring"], [3.4, "ring"], [5, "word", "inOutSine"]], "z": 200, "rotateX": 10,
+             "rotateY": [[0, -35], ["end", 30, "inOutSine"]], "shake": {"amount": 5, "speed": 1.2}},
+  "light": {"preset": "studio", "follow": "world"},
+  "layers": [
+    {"id": "world", "type": "group", "sort": "depth", "children": [
+      {"id": "post1", "type": "rect", "x": 260, "y": 560, "z": -320, "w": 120, "h": 640, "radius": 24, "fill": "#2b3242"},
+      {"id": "post2", "type": "rect", "x": 900, "y": 560, "z": -420, "w": 120, "h": 640, "radius": 24, "fill": "#2b3242"},
+      {"id": "post3", "type": "rect", "x": 1560, "y": 560, "z": -320, "w": 120, "h": 640, "radius": 24, "fill": "#2b3242"},
+      {"id": "post4", "type": "rect", "x": 620, "y": 600, "z": 260, "w": 90, "h": 520, "radius": 20, "fill": "#363e51"},
+      {"id": "post5", "type": "rect", "x": 1260, "y": 600, "z": 300, "w": 90, "h": 520, "radius": 20, "fill": "#363e51"},
+      {"id": "ring", "type": "model", "shape": "torus", "r": 110, "tube": 30, "detail": "high", "y": 540,
+       "x": [[0, 420], [3.4, 1380, "inOutSine"]], "z": [[0, -120], [3.4, 120, "inOutSine"]],
+       "rotateX": 60, "rotateY": [[0, 0], ["end", 300]], "fill": "#ff633f", "shine": 0.7},
+      {"id": "word", "type": "text", "text": "target", "x": 1500, "y": 330, "z": -160, "size": 130, "weight": 800}]},
+    {"id": "note", "type": "text", "text": "the camera follows the ring, then pans to the word, handheld", "x": "50%", "y": "92%",
+     "size": 38, "weight": 400, "fill": "$muted", "fixed": true, "at": 0.4, "enter": "fade"}
+  ]
+}
