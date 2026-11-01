@@ -272,6 +272,9 @@ blur or shadow, the estimate came within 2% below to 35% above the measured time
 - Examples: `logo.json` (an SVG logo draws on, morphs into a wordmark and glows), `kinetic.json` (stagger orders,
   `rise-mask`, `scramble`, text on a path), `explainer.json` (rough shapes, a dashed route with a dot riding it,
   masks), `confetti.json` (a burst over a counter).
+  Status (2026-11-01): `logo`, `kinetic` and `explainer` in their own PR, built from Phases 1 to 3 only, since SVG
+  layers, text on a path, `rise-mask` and `scramble` are 1.6.1 work: the logo draws the mark from its path data and
+  morphs its arms, and kinetic's mask reveal is a text masked by a rect. `confetti` waits for particles.
 - The 1.6 stress report: every Phase 0 stress scene and the four 2D scenes above, GPU and CPU, frame time and peak
   memory, as 1.5's table.
 - README's 2D section and its limits (the stale shaping line fixed), `kine docs`, site/, CHANGELOG with measured

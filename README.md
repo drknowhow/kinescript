@@ -289,6 +289,15 @@ More scenes in [`examples/`](https://github.com/drknowhow/kinescript/tree/main/e
   the words of a voice-over, karaoke captions of it, and a music bed that dips under it, 5.4 s.
 - [`narrated.json`](https://github.com/drknowhow/kinescript/blob/main/examples/narrated.json): the same idea
   with a voice written as text, a marked word and a click on it. Run `kine voice examples/narrated.json` first.
+- [`logo.json`](https://github.com/drknowhow/kinescript/blob/main/examples/logo.json): the brand mark draws on,
+  its arms morph into a play mark and back, and the wordmark slides out from behind it through a mask while the dot
+  glows, 6 s.
+- [`kinetic.json`](https://github.com/drknowhow/kinescript/blob/main/examples/kinetic.json): a title whose letters
+  rise from the middle out and pop in a random order, a version badge cut out of its plate with `combine`, a line
+  that drops from behind a rule through a mask, and keyframe squares looping on a dashed track, 6 s.
+- [`explainer.json`](https://github.com/drknowhow/kinescript/blob/main/examples/explainer.json): hand-drawn boxes
+  that boil, and a dot that rides a dashed route through `kine check`, which glows, into the video box, with a lens
+  mask lighting the route round the dot, 6 s.
 
 `edit.json`, `import.json`, `textures.json`, `screens.json`, `edges.json`, `product.json`, `voiceover.json` and
 `narrated.json` read sample media: run `python examples/make_media.py` first to generate it.
