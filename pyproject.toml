@@ -50,8 +50,10 @@ Issues = "https://github.com/drknowhow/kinescript/issues"
 Changelog = "https://github.com/drknowhow/kinescript/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
+draco = ["DracoPy>=1.7"]   # reads Draco-compressed glTF meshes (KHR_draco_mesh_compression)
 dev = [
     "pytest>=8",
+    "DracoPy>=1.7",
     "build>=1.2",
     "readme_renderer[md]>=43",   # renders README.md the way PyPI does (tests/test_packaging.py)
     "trove-classifiers",

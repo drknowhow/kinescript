@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Compressed model files are read. Meshopt-compressed buffer views (`EXT_meshopt_compression` and
+  `KHR_meshopt_compression`, as `gltfpack -c` writes them) are decoded in numpy, with their octahedral,
+  quaternion, exponential and colour filters; a 99,264-triangle file of 418 KB loads in 130 ms, against 75 ms for
+  the same mesh uncompressed at 2.4 MB. Draco-compressed meshes (`KHR_draco_mesh_compression`) are read with
+  `pip install "kinescript[draco]"` (DracoPy); without it `kine check` names the extra. `KHR_texture_transform` on
+  a base colour or emissive texture moves its texture coordinates, which gltfpack uses for the ones it quantizes.
 - 3D text is shaped as a text layer is: Arabic letters join, marks sit on their letters and right-to-left runs
   read right to left. A line that needs none of this is built as before. `letterSpacing` still draws each
   character on its own, unshaped, and colour emoji have no outline, so 3D text leaves them out; `unshaped-3d-text`

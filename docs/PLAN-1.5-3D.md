@@ -279,13 +279,22 @@ nine rounds: a floor reaching to just in front of the camera took eight.
 - Shaped 3D text: glyph runs from `TextBlob.MakeFromShapedText` (HarfBuzz, which 2D text already uses), read with
   `TextBlob.Iter`, outlines from `Font.getPath`. Arabic letters join, marks sit on their letters and right-to-left
   runs read right to left. `unshaped-3d-text` narrows to colour emoji, which have no outline to extrude.
-  Built on branch `shaped-3d-text`. `TextBlob.Iter` gives glyph ids but no positions, so a line that needs shaping
+  Merged (#81). `TextBlob.Iter` gives glyph ids but no positions, so a line that needs shaping
   is laid out as a text layer's (`_bidi_order`, `_pieces`) and drawn on Skia's SVG canvas with text converted to
   paths; the `d` of each path is the outline. Building it takes 0.9 ms for `مرحبا بالعالم` at 120 px, against
   0.03 ms for a plain line, and the solid is kept per text. Plain lines are built as before, so `title3d.json` and
   `edges.json` keep their bytes. `letterSpacing` still draws characters one by one, unshaped, and
   `unshaped-3d-text` warns about that and about colour emoji.
 - `EXT_meshopt_compression` decoded in numpy. Draco per decision 2.
+  Built on branch `meshopt-draco`. `meshopt.py` follows meshoptimizer's reference decoder: vertex codec versions
+  0 and 1, triangle and index-sequence codecs, and the four filters; `KHR_meshopt_compression` is the same format
+  and is read too. Checked against the WASM decoder of meshoptimizer 1.3.0 on 60 random buffers: every byte
+  matches but 3 of 2,664 values of the 16-bit octahedral and quaternion filters, which round halves the other
+  way (off by one). gltfpack's output of the four sample models renders within a mean of 0.14 of a level of the
+  originals once `KHR_texture_transform` is applied (gltfpack quantizes texture coordinates with it).
+  A 99,264-triangle file loads in 130 ms (75 ms uncompressed). Draco goes through DracoPy 1.7 or later, the
+  `draco` extra (also in `dev`, so CI runs its tests); gltf-transform's Draco output of the sample models renders
+  within 0.09 of the originals, the skinned figure included.
 
 ### Phase 7: tooling and release
 

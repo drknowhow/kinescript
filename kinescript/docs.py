@@ -340,7 +340,10 @@ DEPTH AND CAMERA (3D)
             The light a material gives off (glTF emissiveFactor and emissiveTexture, .mtl Ke and
             map_Ke) is added to its colour however it is lit. A glTF material with alphaMode BLEND is
             see-through by its base colour's alpha, an .mtl one by d or Tr. Long triangles are cut to
-            1/24 of its size for the depth sort. Draco- or meshopt-compressed files are not read.
+            1/24 of its size for the depth sort. Compressed files are read: meshopt
+            (EXT_meshopt_compression, gltfpack -c) and quantized ones as they are; Draco
+            (KHR_draco_mesh_compression) with pip install "kinescript[draco]" (check names the
+            extra when it is missing).
   animation a clip of the glTF file to play on the layer's clock: its name (kine probe lists them),
             its number from 0, true for the first, or {"name": "Walk", "speed": 1, "loop": true,
             "start": 0}. speed 2 plays twice as fast, -1 backwards; start is the seconds into the

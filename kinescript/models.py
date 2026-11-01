@@ -1,8 +1,9 @@
 """Imported models: glTF 2.0 (.glb, .gltf) and Wavefront .obj files read with numpy into a Mesh and its
 materials. Node transforms, skins and morph target weights apply; a glTF file's animations are kept with it, and
 pose() moves the mesh to a time of one of them. A glTF base colour texture or an .obj map_Kd is drawn as a
-texture, with its mean colour as the material's fill for when it is not. Files are y up; the mesh comes out y down
-like space.py."""
+texture, with its mean colour as the material's fill for when it is not. Meshopt-compressed buffer views are
+decoded by meshopt.py, Draco-compressed primitives by DracoPy when it is installed (kinescript[draco]). Files are
+y up; the mesh comes out y down like space.py."""
 from __future__ import annotations
 
 import base64
@@ -16,12 +17,13 @@ from urllib.parse import unquote
 import numpy as np
 import skia
 
+from . import meshopt
 from .mesh import Mesh, _refine
 
 EXTENSIONS = (".glb", ".gltf", ".obj")
 _TYPES = {5120: "<i1", 5121: "<u1", 5122: "<i2", 5123: "<u2", 5125: "<u4", 5126: "<f4"}
 _WIDTH = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT2": 4, "MAT3": 9, "MAT4": 16}
-_COMPRESSED = ("KHR_draco_mesh_compression", "EXT_meshopt_compression")
+_DRACO = "KHR_draco_mesh_compression"
 _WRAP = {33071: "clamp", 33648: "mirror", 10497: "repeat"}  # glTF sampler wrapS and wrapT
 _PATHS = ("translation", "rotation", "scale")  # what an animation channel sets on a node, besides weights
 EDGE = 1 / 24  # longest triangle edge kept, as a share of the model's longest side
@@ -323,6 +325,24 @@ def _node(nd: dict) -> np.ndarray:
     return _trs(*_rest(nd))
 
 
+def _uv_move(tt: dict) -> np.ndarray:
+    """KHR_texture_transform as a 2 x 3 matrix on texture coordinates: scaled, turned by rotation, then offset."""
+    sx, sy = (list(tt.get("scale") or ()) + [1.0, 1.0])[:2]
+    ox, oy = (list(tt.get("offset") or ()) + [0.0, 0.0])[:2]
+    c, s = math.cos(float(tt.get("rotation", 0.0))), math.sin(float(tt.get("rotation", 0.0)))
+    return np.array([[c * sx, s * sy, ox], [-s * sx, c * sy, oy]], float)
+
+
+def _dracopy():
+    """DracoPy, which decodes Draco-compressed meshes; a ValueError naming the extra when it is not installed."""
+    try:
+        import DracoPy
+    except ImportError:
+        raise ValueError(f"meshes are compressed with {_DRACO}, which needs DracoPy: pip install "
+                         "\"kinescript[draco]\", or export it again without mesh compression") from None
+    return DracoPy
+
+
 def _gltf(p: Path) -> tuple[list, list]:
     data, chunks = p.read_bytes(), []
     if data[:4] == b"glTF":
@@ -343,11 +363,10 @@ def _gltf(p: Path) -> tuple[list, list]:
         doc = json.loads(data)
     if not str(doc.get("asset", {}).get("version", "2")).startswith("2"):
         raise ValueError(f"glTF version {doc['asset']['version']}; only glTF 2.0 is read")
-    squeezed = [e for e in doc.get("extensionsRequired", []) if e in _COMPRESSED]
-    if squeezed:
-        raise ValueError(f"meshes are compressed with {squeezed[0]}, which Kinescript does not read; "
-                         "export it again without mesh compression")
+    if _DRACO in doc.get("extensionsRequired", []):
+        _dracopy()
     bufs: dict = {}
+    unpacked: dict = {}  # meshopt-compressed buffer views, decoded
 
     def uri(u: str) -> bytes:
         if u.startswith("data:"):
@@ -362,6 +381,12 @@ def _gltf(p: Path) -> tuple[list, list]:
 
     def view(i: int) -> tuple[bytes, int, int | None]:
         v = doc["bufferViews"][i]
+        ext = v.get("extensions") or {}
+        squeezed = next((ext[k] for k in meshopt.NAMES if k in ext), None)
+        if squeezed is not None:
+            if i not in unpacked:
+                unpacked[i] = meshopt.decode(squeezed, buffer(squeezed["buffer"]))
+            return unpacked[i], 0, v.get("byteStride")
         return buffer(v["buffer"]), v.get("byteOffset", 0), v.get("byteStride")
 
     def accessor(i: int) -> np.ndarray:
@@ -381,6 +406,27 @@ def _gltf(p: Path) -> tuple[list, list]:
             out[idx] = read(sp["values"], dt, m, k)
         if a.get("normalized") and dt.kind in "iu":
             out = np.maximum(out / np.iinfo(dt).max, -1.0)
+        return out
+
+    def draco(prim: dict) -> dict | None:
+        """A Draco-compressed primitive's attributes by name, and its indices; None when it is not compressed."""
+        dr = (prim.get("extensions") or {}).get(_DRACO)
+        if dr is None:
+            return None
+        buf, off, _ = view(dr["bufferView"])
+        got = _dracopy().decode(bytes(buf[off:off + doc["bufferViews"][dr["bufferView"]]["byteLength"]]))
+        faces = getattr(got, "faces", None)
+        out = {"indices": np.zeros(0, np.int64) if faces is None else np.asarray(faces, np.int64).ravel()}
+        for name, uid in dr.get("attributes", {}).items():
+            att = got.get_attribute_by_unique_id(uid)
+            if att is None:
+                continue
+            data = np.asarray(att["data"])
+            vals = data.reshape(len(data), -1).astype(float)
+            acc = doc["accessors"][prim["attributes"][name]] if name in prim.get("attributes", {}) else {}
+            if acc.get("normalized") and data.dtype.kind in "iu":
+                vals = np.maximum(vals / np.iinfo(data.dtype).max, -1.0)
+            out[name] = vals
         return out
 
     pictures: dict = {}
@@ -407,7 +453,7 @@ def _gltf(p: Path) -> tuple[list, list]:
         except (KeyError, IndexError, TypeError, AttributeError, OSError):
             return None
 
-    mats, sets = [], []  # each material, and which TEXCOORD_n its texture reads
+    mats, sets, moves = [], [], []  # each material, which TEXCOORD_n its texture reads, and how they are moved
     for mt in doc.get("materials", []):
         pbr = mt.get("pbrMetallicRoughness", {})
         factor = np.clip(np.array(pbr.get("baseColorFactor", (1.0, 1.0, 1.0, 1.0))[:3], float), 0, 1)
@@ -437,7 +483,10 @@ def _gltf(p: Path) -> tuple[list, list]:
                 tint = tuple(float(v) for v in np.round(emit ** (1 / 2.2), 4))
                 mats[-1]["emitTexture"] = {"image": lit[0], "tint": None if tint == (1.0, 1.0, 1.0) else tint,
                                            "tile": lit[2]}
-        sets.append(int((pbr.get("baseColorTexture") or mt.get("emissiveTexture") or {}).get("texCoord", 0)))
+        info = pbr.get("baseColorTexture") or mt.get("emissiveTexture") or {}
+        move = (info.get("extensions") or {}).get("KHR_texture_transform")
+        sets.append(int((move or {}).get("texCoord", info.get("texCoord", 0))))
+        moves.append(None if move is None else _uv_move(move))
     nodes, meshes = doc.get("nodes", []), doc.get("meshes", [])
     parent = [-1] * len(nodes)
     for i, nd in enumerate(nodes):
@@ -473,8 +522,16 @@ def _gltf(p: Path) -> tuple[list, list]:
             mode, at = prim.get("mode", 4), prim.get("attributes", {})
             if mode not in (4, 5, 6) or "POSITION" not in at:
                 continue  # points and lines have no surface
-            P = accessor(at["POSITION"])[:, :3]
-            idx = accessor(prim["indices"]).ravel().astype(np.int64) if "indices" in prim else np.arange(len(P))
+            dz = draco(prim) or {}
+
+            def attr(name: str) -> np.ndarray:
+                return dz[name] if name in dz else accessor(at[name])
+
+            P = attr("POSITION")[:, :3]
+            if "indices" in dz or "indices" in prim:
+                idx = dz["indices"] if "indices" in dz else accessor(prim["indices"]).ravel().astype(np.int64)
+            else:
+                idx = np.arange(len(P))
             if mode == 4:
                 T = idx[:len(idx) // 3 * 3].reshape(-1, 3)
             else:
@@ -484,14 +541,14 @@ def _gltf(p: Path) -> tuple[list, list]:
             joints = weights = None
             if skin is not None and "JOINTS_0" in at and "WEIGHTS_0" in at:
                 weights = np.zeros((len(P), 4))
-                got = accessor(at["WEIGHTS_0"])[:, :4]
+                got = attr("WEIGHTS_0")[:, :4]
                 weights[:, :got.shape[1]] = got
                 if "WEIGHTS_1" in at:  # joints past the fourth are dropped
-                    crowded += int((accessor(at["WEIGHTS_1"]) > 0).any(1).sum())
+                    crowded += int((attr("WEIGHTS_1") > 0).any(1).sum())
                 total = weights.sum(1, keepdims=True)
                 weights = np.where(total > 0, weights / np.where(total > 0, total, 1.0), [1.0, 0.0, 0.0, 0.0])
                 joints = np.zeros((len(P), 4), np.int64)
-                got = accessor(at["JOINTS_0"])[:, :4].astype(np.int64)
+                got = attr("JOINTS_0")[:, :4].astype(np.int64)
                 joints[:, :got.shape[1]] = np.clip(got, 0, len(skins[skin][0]) - 1)
             elif np.linalg.det(A) < 0:
                 T = T[:, [0, 2, 1]]  # a mirroring node turns its faces inside out; turn them back
@@ -510,8 +567,10 @@ def _gltf(p: Path) -> tuple[list, list]:
             mat = prim.get("material", -1)
             uv = f"TEXCOORD_{sets[mat] if mat >= 0 else 0}"
             sets_read.update(k for k in at if k.startswith("TEXCOORD_"))
-            U = accessor(at[uv])[:, :2] if uv in at else None
-            N = accessor(at["NORMAL"])[:, :3] if "NORMAL" in at else None
+            U = attr(uv)[:, :2] if uv in at else None
+            if U is not None and mat >= 0 and moves[mat] is not None:  # gltfpack stores them quantized so
+                U = U @ moves[mat][:, :2].T + moves[mat][:, 2]
+            N = attr("NORMAL")[:, :3] if "NORMAL" in at else None
             double = bool(mat >= 0 and doc["materials"][mat].get("doubleSided"))
             pc = Place(P, N, dP, dN, joints, weights, T, double, node, skin, w0)
             places.append(pc)
