@@ -83,6 +83,8 @@ no depth draw exactly as before.
 - **Model files.** `src` reads `.glb` and `.gltf` (glTF 2.0) and `.obj` with its `.mtl`: node transforms, base
   colours and base colour textures, emission (`emissiveFactor` and `emissiveTexture`, or `Ke` and `map_Ke`),
   transparency (`alphaMode` `BLEND`, or `d` and `Tr`), and metallic and roughness as `metal` and `shine`.
+  Meshopt-compressed and quantized files (`gltfpack -c`) are read as they are; Draco-compressed ones with
+  `pip install "kinescript[draco]"`.
   `animation` plays a glTF file's clips on the layer's clock: node movement, morph target weights and skins, with
   `speed`, `loop` and `start`. `ground` puts a soft shadow under any model, straight down or, with
   `"from": "light"`, cast along its key light.
@@ -322,7 +324,7 @@ Within one process, such as the MCP server, the workers stay warm for two minute
 - 3D is drawn by Skia with a depth sort, not a GL pipeline: models cast shadows on each other only inside a stage,
   and a skinned vertex follows at most four joints. Separate layers hide each other per pixel only inside a
   stage, and parts of one model that cut through each other meet at a stepped seam. A textured model is drawn
-  solid whatever its `transparency`. Draco- and meshopt-compressed model files are not read.
+  solid whatever its `transparency`. Draco-compressed model files need the `draco` extra.
 - Audio is mixing and levelling (trim, gain over time, fades, speed, loop, pan, role levels, ducking, a loudness
   target), with no effects such as EQ, compression of single sounds or reverb.
 - Kinescript does not speak by itself: `kine voice` needs a plugin or a command. The Kokoro plugin times words

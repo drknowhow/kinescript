@@ -2,6 +2,7 @@
 import base64
 import json
 import struct
+import sys
 
 import numpy as np
 import pytest
@@ -170,13 +171,14 @@ def test_model_src_fits_its_box_and_a_layer_fill_recolours_it(tmp_path):
     assert x1 - x0 == pytest.approx(300, abs=4)  # no w or h: the longest side is 300 px
 
 
-def test_unreadable_compressed_or_missing_model_files_are_reported_by_check(tmp_path):
+def test_unreadable_compressed_or_missing_model_files_are_reported_by_check(tmp_path, monkeypatch):
+    monkeypatch.setitem(sys.modules, "DracoPy", None)  # Draco files need the draco extra
     P, T, N = file_space(mesh.placed(mesh.unit("cube"), (10, 10, 10)))
     draco = write_gltf(tmp_path / "d.gltf", [(P, T, N, None)],
                        extra={"extensionsRequired": ["KHR_draco_mesh_compression"]})
     bad = tmp_path / "bad.glb"
     bad.write_bytes(b"glTF" + struct.pack("<II", 2, 40) + b"\0" * 8)
-    for src, code, words in ((draco, "bad-model", "KHR_draco_mesh_compression"), (str(bad), "bad-model", "bad.glb"),
+    for src, code, words in ((draco, "bad-model", "kinescript[draco]"), (str(bad), "bad-model", "bad.glb"),
                              (str(tmp_path / "gone.glb"), "media-missing", "gone.glb")):
         r = check(scene([{"id": "m", "type": "model", "src": src}]))
         hit = [i for i in r["issues"] if i["code"] == code]
