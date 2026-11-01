@@ -1,0 +1,18 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 6, "bg": "#0a0c10"},
+  "camera": {"rotateX": [[0, 38], ["end", 24]], "rotateY": [[0, -18], ["end", 18]], "z": [[0, 120], ["end", -60]]},
+  "light": "studio",
+  "layers": [
+    {"id": "grid", "type": "model", "shape": "cube", "w": 52, "detail": "low", "x": "50%", "y": "50%",
+     "rotateY": "=t * 12", "shine": 0.5, "edges": {"width": 1.5, "angle": 40},
+     "repeat": {"count": 144,
+                "x": "=(i % 12 - 5.5) * 70",
+                "z": "=(floor(i / 12) - 5.5) * 70",
+                "y": "=-max(0, sin(t * 2.4 - hypot(i % 12 - 5.5, floor(i / 12) - 5.5) * 0.7)) * 110",
+                "rotateY": "=sin(t * 2.4 - hypot(i % 12 - 5.5, floor(i / 12) - 5.5) * 0.7) * 25",
+                "fill": "=mix('#ff633f', '#b9f45d', hypot(i % 12 - 5.5, floor(i / 12) - 5.5) / 7.8)"},
+     "enter": {"name": "build", "dur": 1.4}},
+    {"id": "title", "type": "text", "text": "144 cubes, one layer", "x": "50%", "y": "13%", "size": 64,
+     "weight": 700, "fill": "#e8e2d0", "fixed": true, "at": 0.6, "enter": {"name": "rise", "dur": 0.6}}
+  ]
+}

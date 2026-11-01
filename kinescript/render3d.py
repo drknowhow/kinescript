@@ -11,10 +11,11 @@ import skia
 
 from . import color as C
 from . import media, mesh, models, schema, space, svgpath
-from .props import compile_prop
+from .props import PLACE, PLACE_DEFAULT, compile_prop
 
 MATERIAL = ("fill", "shine", "metal", "rim", "bands", "glow", "texture", "transparency")
 MAX_MATERIALS = 8
+COPY_SLOTS = schema.COPY_SLOTS  # materials once a model's copies take fills of their own (_copies)
 # Lights are fixed to the camera by default, like a studio key light on the camera rig: turning a model
 # changes its shading, orbiting the camera around it does not. "follow": "world" fixes one in the scene instead.
 LIGHTS = {"studio": {"key": 0.85, "fill": 0.25, "ambient": 0.22, "rim": 0.35, "from": "topleft"},
@@ -626,7 +627,8 @@ def _imported(r, L, taken: int):
     if hit is None:
         imp = models.load(L.src)
         M, mats = models.slots(imp, MAX_MATERIALS - taken)
-        own = [{k: v for k, v in m.items() if k not in L.raw} for m in mats]
+        mine = set(L.raw) | ({"fill"} if "fill" in (L.raw.get("repeat") or {}) else set())
+        own = [{k: v for k, v in m.items() if k not in mine} for m in mats]
         m = imp.mesh._replace(M=np.where(M < 0, 0, M + taken).astype(np.int32))
         hit = r._models[("src", L.id)] = (m, own, imp.size, imp)
     return hit
@@ -683,11 +685,76 @@ def model(r, L, g, t: float = 0.0, T: float = 0.0) -> tuple[mesh.Mesh, list[tupl
         if hit is None or len(hit[0]) != len(meshes) or any(a is not b for a, b in zip(hit[0], meshes)):
             hit = r._models[("cat", L.id)] = (meshes, mesh.cat(meshes))
         m = hit[1]
+    if L.copies is not None:
+        m, keys = _copies(r, L, m, keys, t, T)
     accent = r.s.theme.get("accent", "#ff633f")
     root = lambda k, d=None: g(k, accent if k == "fill" and d is None else d)  # noqa: E731
     mats = [_material(lambda k, d=None, o=o: o.get(k, root(k, d)), o.get("emit")) for o in keys]
     glows = [_texture(r, o.get("emitTexture")) if L.raw.get("texture") is not False else None for o in keys]
     return m, mats, [_texture(r, o.get("texture", L.raw.get("texture")), L, t, T) for o in keys], glows
+
+
+def _copies(r, L, m, keys: list, t: float, T: float) -> tuple[mesh.Mesh, list]:
+    """The model's copies ("repeat") at its time t (scene time T): mesh m placed once for each and merged, so they
+    sort as one model, and its materials keys with one for each copy fill in place of each without a fill of its
+    own, which that copy takes as it would the layer's fill. The mesh is kept while m and the copies' values hold;
+    its triangles while m's do, so moving copies keep them."""
+    cols, fills = L.copied(t, T)
+    n, free = L.copies.n, [s for s, o in enumerate(keys) if "fill" not in o]
+    q = slot = None
+    if fills is not None and free:
+        most = max(1, (COPY_SLOTS - len(keys) + len(free)) // len(free))
+        pal = r._models.get(("palette", L.id))
+        if pal is None or pal[0] is not fills or pal[1] != most:  # a fill that holds is the same list each frame
+            pal = r._models[("palette", L.id)] = (fills, most, *_palette(fills, most))
+        colours, q = pal[2:]
+        slot, out = np.zeros((len(keys), len(colours)), np.int32), []
+        for s, o in enumerate(keys):
+            slot[s] = len(out) + (np.arange(len(colours)) if s in free else 0)
+            out += [dict(o, fill=c) for c in colours] if s in free else [o]
+        keys = out
+    vals = list(cols.values()) + [q]
+    hit = r._models.get(("copies", L.id))
+    if hit is not None and hit[0] is m and len(hit[1]) == len(vals) and all(
+            a is b or (a is not None and b is not None and np.array_equal(a, b)) for a, b in zip(hit[1], vals)):
+        return hit[2], keys
+    A = {k: np.asarray(cols[k], float) if k in cols else np.full(n, PLACE_DEFAULT[k]) for k in PLACE}
+    R = _turns(A["rotateX"], A["rotateY"], A["rotate"]).transpose(0, 2, 1)
+    s = A["scale"][:, None, None]
+    P = (m.P @ R) * s + np.stack([A["x"], A["y"], A["z"]], 1)[:, None, :]
+    N = (m.N @ R) * np.where(s < 0, -1.0, 1.0)  # a mirrored copy's normals turn round with it
+    if hit is not None and hit[0] is m:  # the same mesh copied: the same triangles
+        Tn, U = hit[2].T, hit[2].U
+    else:
+        Tn = (m.T[None] + (np.arange(n) * len(m.P))[:, None, None]).reshape(-1, 3).astype(np.int32)
+        U = None if m.U is None else np.tile(m.U, (n, 1))
+    M = np.tile(m.M, n) if q is None else slot[m.M[None, :], q[:, None]].ravel()
+    merged = mesh.Mesh(P.reshape(-1, 3), N.reshape(-1, 3), Tn, M.astype(np.int32), U)
+    r._models[("copies", L.id)] = (m, vals, merged)
+    return merged, keys
+
+
+def _turns(rx, ry, rz) -> np.ndarray:
+    """(n, 3, 3) rotations by rotateX, rotateY and then rotate, in degrees, as a part's (mesh.part_matrix)."""
+    a, b, c = (np.radians(np.asarray(v, float)) for v in (rx, ry, rz))
+    one, zero = np.ones_like(a), np.zeros_like(a)
+    turn = lambda *e: np.stack(e, -1).reshape(-1, 3, 3)  # noqa: E731
+    return (turn(one, zero, zero, zero, np.cos(a), -np.sin(a), zero, np.sin(a), np.cos(a))
+            @ turn(np.cos(b), zero, np.sin(b), zero, one, zero, -np.sin(b), zero, np.cos(b))
+            @ turn(np.cos(c), -np.sin(c), zero, np.sin(c), np.cos(c), zero, zero, zero, one))
+
+
+def _palette(fills: list, most: int) -> tuple[list, np.ndarray]:
+    """The colours the copies' fills (one each) are drawn in, at most `most`, and each copy's among them: each
+    distinct fill in the order the copies first take it; past `most`, that many spread along that order, each copy
+    taking the nearest."""
+    colours = list(dict.fromkeys(fills))
+    if len(colours) <= most:
+        at = {c: j for j, c in enumerate(colours)}
+        return colours, np.array([at[c] for c in fills], np.int32)
+    colours = [colours[round(j * (len(colours) - 1) / max(most - 1, 1))] for j in range(most)]
+    a, b = np.asarray(fills, float), np.asarray(colours, float)
+    return colours, ((a[:, None, :] - b[None]) ** 2).sum(-1).argmin(1).astype(np.int32)
 
 
 def _inner(p: np.ndarray) -> np.ndarray:
@@ -1114,13 +1181,11 @@ def _lines(r, L, m, T, ids, front, w, cos: float, exact: bool) -> tuple:
     end, so a line is hidden only by what is in front of it. exact: by the sort's own key; else by each face's
     nearest corner, for triangles _unswim is to cut."""
     weld, face, first, ends, sides, same = _topology(r, L, m)
-
-    def creases():  # the cosine of the angle between the faces either side of each edge
-        a, b, c = (m.P[m.T[first, k]] for k in range(3))
-        n = np.cross(b - a, c - a)
-        n = np.r_[n / (np.linalg.norm(n, axis=1, keepdims=True) + 1e-30), np.zeros((1, 3))]
-        return (n[sides[:, 0]] * n[sides[:, 1]]).sum(1) * np.where(same, -1.0, 1.0)
-    dots = _fixed(r, L, m, "creases", creases)
+    c = r._models.get(("copies", L.id)) if L.copies is not None else None
+    if c is not None and c[2] is m:  # a copy turns and scales its faces together: its creases are the one's
+        dots = np.tile(_fixed(r, L, c[0], "creases1", lambda: _creases(c[0], _welded(r, L, c[0]))), L.copies.n)
+    else:
+        dots = _fixed(r, L, m, "creases", lambda: _creases(m, (weld, face, first, ends, sides, same)))
     rows = np.flatnonzero(front)
     fid = face[ids[rows]]
     seen = np.zeros(len(first) + 1, bool)  # each face toward the camera; the last, past a border, never is
@@ -1140,6 +1205,15 @@ def _lines(r, L, m, T, ids, front, w, cos: float, exact: bool) -> tuple:
     return va, vb, np.maximum(top[ends[e, 0]], top[ends[e, 1]])
 
 
+def _creases(m, topo: tuple) -> np.ndarray:
+    """The cosine of the angle between the faces either side of each edge of mesh m (its _topology)."""
+    _, _, first, _, sides, same = topo
+    a, b, c = (m.P[m.T[first, k]] for k in range(3))
+    n = np.cross(b - a, c - a)
+    n = np.r_[n / (np.linalg.norm(n, axis=1, keepdims=True) + 1e-30), np.zeros((1, 3))]
+    return (n[sides[:, 0]] * n[sides[:, 1]]).sum(1) * np.where(same, -1.0, 1.0)
+
+
 def wire(xy: np.ndarray, T: np.ndarray) -> np.ndarray:
     """Each edge of triangles T once, as its two ends at points xy: what kine look --wire draws."""
     e = np.sort(T[:, [[0, 1], [1, 2], [2, 0]]].reshape(-1, 2), axis=1).astype(np.int64)
@@ -1149,7 +1223,19 @@ def wire(xy: np.ndarray, T: np.ndarray) -> np.ndarray:
 
 def _topology(r, L, m) -> tuple:
     """mesh.edges of the model's mesh, kept while its triangles are (a size that animates keeps them). A model
-    file's animation moves points it welds, so a posed mesh's are worked out each time."""
+    file's animation moves points it welds, so a posed mesh's are worked out each time. Copies (repeat) take the
+    edges of the mesh they copy, once for each: on the merged mesh, copies that touch would share points."""
+    c = r._models.get(("copies", L.id)) if L.copies is not None else None
+    if c is None or c[2] is not m:
+        return _welded(r, L, m)
+    one = _welded(r, L, c[0])
+    hit = r._models.get(("edges", L.id, "copies"))
+    if hit is None or hit[0] is not one:
+        hit = r._models[("edges", L.id, "copies")] = (one, mesh.tiled(one, L.copies.n, len(c[0].T)))
+    return hit[1]
+
+
+def _welded(r, L, m) -> tuple:
     hit = r._models.get(("edges", L.id))
     if hit is None or hit[0] is not m.T or hit[1] != len(m.P) or (L.raw.get("animation") not in (None, False)
                                                                   and hit[3] is not m.P):

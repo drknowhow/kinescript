@@ -198,6 +198,19 @@ def edges(P: np.ndarray, T: np.ndarray) -> tuple:
     return weld, face, first, np.stack([a[s], b[s]], 1), sides, two & (a[nxt] == a[s])
 
 
+def tiled(e: tuple, n: int, nt: int) -> tuple:
+    """edges() of n copies of one mesh of nt triangles merged in order (cat), from the one's
+    edges() e: each copy's points, faces and edges numbered after the copy before's, borders past the last face."""
+    weld, face, first, ends, sides, same = e
+    nw, nf = (int(weld.max()) + 1 if len(weld) else 1), len(first)
+    k = np.arange(n)[:, None]
+    two = sides[None] + (k * nf)[:, :, None]
+    two[..., 1] = np.where(sides[None, :, 1] == nf, n * nf, two[..., 1])
+    return ((weld[None] + k * nw).ravel(), np.where(face[None] < 0, -1, face[None] + k * nf).ravel(),
+            (first[None] + k * nt).ravel(), (ends[None] + (k * nw)[:, :, None]).reshape(-1, 2),
+            two.reshape(-1, 2), np.tile(same, n))
+
+
 def build_order(m: Mesh) -> np.ndarray:
     """Triangle indices bottom to top, the order `draw` and the build motion reveal them in."""
     return np.argsort(-m.P[m.T, 1].mean(1), kind="stable")

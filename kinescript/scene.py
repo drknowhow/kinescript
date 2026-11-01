@@ -12,7 +12,7 @@ from . import components, media, models, schema
 from . import presets as P
 from . import voice as V
 from . import words as W
-from .props import Ctx, Prop, compile_prop, is_keyframes
+from .props import Copies, Ctx, Prop, compile_prop, is_keyframes
 from .timing import Timeline, parse_clock
 
 LAYER_TYPES = {"rect", "circle", "ellipse", "path", "line", "arrow", "polygon", "text", "counter",
@@ -23,7 +23,7 @@ STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "children", "laye
           "allowOffscreen", "style", "audio", "shadow", "box", "fx", "fill", "stroke", "emph", "active",
           "sksl", "preset", "uniforms", "caret", "case", "italic", "smooth", "closed", "focus", "use",
           "backface", "fixed", "sort", "shape", "detail", "parts", "light", "span", "sound", "voice",
-          "fadeIn", "fadeOut", "sequence", "animation"}
+          "fadeIn", "fadeOut", "sequence", "animation", "repeat"}
 PART_STRUCT = {"shape", "texture", "text", "font", "d", "italic"}  # a part's keys that never animate
 # Property defaults by name; everything not listed defaults to None.
 DEFAULTS = {"x": 0.0, "y": 0.0, "opacity": 1.0, "scale": 1.0, "scaleX": 1.0, "scaleY": 1.0, "rotate": 0.0,
@@ -67,7 +67,7 @@ def _where(owner, message: str) -> str:
 
 class Layer:
     __slots__ = ("id", "type", "raw", "t_in", "t_out", "props", "enter", "exit", "children", "parent",
-                 "index", "src", "video", "ahead", "ctx", "parts")
+                 "index", "src", "video", "ahead", "ctx", "parts", "copies")
 
     def __init__(self, lid: str, ltype: str, raw: dict, parent: "Layer | None", index: int):
         self.id, self.type, self.raw, self.parent, self.index = lid, ltype, raw, parent, index
@@ -81,6 +81,7 @@ class Layer:
         self.ahead: tuple[tuple[int, int], media.VideoSource] | None = None
         self.ctx: Ctx | None = None
         self.parts: list[dict[str, Prop]] = []  # a model's parts' keys, each compiled like a layer's
+        self.copies: Copies | None = None  # a model's "repeat"
 
     @property
     def dur(self) -> float:
@@ -103,6 +104,13 @@ class Layer:
         except (ArithmeticError, ValueError, TypeError) as e:
             raise SceneError(f"layer '{self.id}': parts[{i}]: {name} failed at t={t:.3f}s (scene {T:.3f}s): "
                              f"{type(e).__name__}: {e}", layer=self.id) from e
+
+    def copied(self, t: float, T: float = 0.0) -> tuple[dict[str, list], list | None]:
+        """Each of the model's copies' placement and fill at the layer's time t (Copies.at)."""
+        try:
+            return self.copies.at(t, self.dur, T)
+        except (ArithmeticError, ValueError, TypeError) as e:
+            raise SceneError(f"layer '{self.id}': {e} at t={t:.3f}s (scene {T:.3f}s)", layer=self.id) from e
 
     def visible(self, T: float) -> bool:
         return self.t_in <= T < self.t_out and not self.raw.get("hidden")
@@ -486,6 +494,28 @@ class Scene:
                 if name.split(": ")[-1] in schema.COLOR_KEYS and not (isinstance(v, (tuple, list)) and len(v) in (3, 4)):
                     self._bad_colour(v, f"{name} at t={t:.2f}s (frame {n})", layer.id)
                     break
+        for layer in self.all_layers():  # a model's repeat: every copy, at every few frames past the budget
+            c = layer.copies
+            if c is None:
+                continue
+            n0, n1 = math.ceil(layer.t_in * self.fps - 1e-6), math.ceil(layer.t_out * self.fps - 1e-6)
+            frames = range(n0, max(n1, n0 + 1), max(1, -(-(n1 - n0) * c.n * len(c.keys) // budget))) \
+                if c.moves() else [n0]
+            most = 0
+            for n in frames:
+                T = n / self.fps
+                t = T - layer.t_in
+                try:
+                    fills = c.at(t, layer.dur, T)[1]
+                except (ArithmeticError, ValueError, TypeError) as e:
+                    self.note("error", "bad-expression", layer.id, f"{e} at t={t:.2f}s (frame {n})",
+                              "guard the expression, e.g. max(…, 0.001) under a division")
+                    break
+                most = max(most, len(set(fills or ())))
+            if most > schema.COPY_SLOTS:
+                self.note("warning", "repeat-colours", layer.id, f"repeat fill gives {most} different colours at "
+                          f"once; a model draws at most {schema.COPY_SLOTS}, so copies take the nearest of those",
+                          "fewer steps of colour, e.g. hsl(floor(i / n * 32) * 11, 0.7, 0.55)")
 
     def path(self, src: str) -> str:
         p = Path(src)
@@ -681,6 +711,8 @@ class Scene:
                 if ltype == "model":
                     layer.parts = [{k: compile_prop(k, v, pctx) for k, v in p.items() if k not in PART_STRUCT}
                                    for p in raw.get("parts") or [] if isinstance(p, dict)]
+                    if isinstance(raw.get("repeat"), dict):
+                        layer.copies = Copies(raw["repeat"], pctx)
                 for un, uv in (raw.get("uniforms") or {}).items():
                     if not isinstance(uv, (int, float, str)) or (isinstance(uv, str) and uv.startswith("=")):
                         layer.props["u_" + un] = compile_prop("u_" + un, uv, pctx)

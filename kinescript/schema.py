@@ -106,11 +106,19 @@ MODEL_ALIAS = {"radius": "r", "thickness": "tube", "geometry": "shape", "primiti
                "floor": "ground", "groundShadow": "ground", "contactShadow": "ground", "map": "texture",
                "image": "texture", "picture": "texture", "decal": "texture", "skin": "texture", "outline": "edges",
                "outlines": "edges", "lines": "edges", "creases": "edges", "transmission": "transparency",
-               "seeThrough": "transparency", "translucency": "transparency"}
+               "seeThrough": "transparency", "translucency": "transparency", "copies": "repeat",
+               "instances": "repeat", "array": "repeat", "clones": "repeat", "grid": "repeat"}
 ANIMATION = {"name", "speed", "loop", "start"}  # a model file's clip, played on the layer's clock
 ANIMATION_ALIAS = {"clip": "name", "track": "name", "rate": "speed", "timeScale": "speed", "repeat": "loop",
                    "offset": "start", "from": "start", "time": "start"}
 MODEL_FILES = (".glb", ".gltf", ".obj")
+# A model's copies: how many, and each one's place and fill (a number or colour, a list in turn, an expression of i).
+REPEAT = {"count", "x", "y", "z", "rotateX", "rotateY", "rotate", "scale", "fill"}
+REPEAT_ALIAS = {"n": "count", "copies": "count", "number": "count", "times": "count", "amount": "count",
+                "color": "fill", "colour": "fill", "colors": "fill", "colours": "fill", "rotation": "rotate",
+                "rotationX": "rotateX", "rotationY": "rotateY", "rotationZ": "rotate", "rotateZ": "rotate"}
+MAX_COPIES = 10_000
+COPY_SLOTS = 64  # the materials a model with copies draws: its own, and one per copy fill for those without a fill
 GROUND = {"y", "opacity", "blur", "from"}
 EDGES = {"width", "color", "angle"}
 EDGES_ALIAS = {"colour": "color", "thickness": "width", "size": "width", "strokeWidth": "width", "crease": "angle",
@@ -145,7 +153,7 @@ TYPES: dict[str, set[str]] = {
     "model": PART - {"x", "y", "z", "rotateX", "rotateY", "rotate", "scale"} | {"detail", "parts", "explode",
                                                                               "draw", "light", "lights", "env",
                                                                               "src", "ground", "edges",
-                                                                              "animation"},
+                                                                              "animation", "repeat"},
 }
 SEQUENCE = COMMON | {"clips", "transition", "fit", "volume", "w", "h"}
 TRANSITION = {"type", "dur"}
@@ -233,7 +241,7 @@ REQUIRED = {"text": ("text",), "image": ("src",), "video": ("src",), "path": ("d
             "captions": ("cues", "src", "voice"), "shader": ("preset", "sksl"), "model": ("shape", "parts", "src")}
 # Keys whose value is an object of their own: never a tween, even with a "from" key (a light's direction).
 OBJECTS = {"light", "lights", "env", "ground", "shadow", "shadows", "box", "fx", "uniforms", "sound", "enter", "exit",
-           "parts", "transition", "texture", "edges", "animation"}
+           "parts", "transition", "texture", "edges", "animation", "repeat"}
 # Props that cannot be below 0, and the least each may be.
 AT_LEAST = {"radius": 0, "r": 0, "sides": 3, "blur": 0, "strokeWidth": 0, "size": 0}
 COLOUR_FIX = f"write {C.FORMATS}"
@@ -1351,8 +1359,51 @@ def _animation(raw: dict, rep: Report, lid):
                 "clip repeats) or false (it holds its last pose)")
 
 
+def _repeat(raw: dict, rep: Report, lid):
+    """`repeat` draws `count` copies of the model, each placed by x, y, z, rotateX, rotateY, rotate and scale and
+    coloured by fill: a number (a colour), a list taken in turn, or an expression of i (the copy, from 0) and n."""
+    if "repeat" not in raw:
+        return
+    v = raw["repeat"]
+    if v is None or v is False:
+        del raw["repeat"]
+        return
+    example = '"repeat": {"count": 10, "x": "=(i - 4.5) * 60"}'
+    if not isinstance(v, dict):
+        rep.add("error", "bad-value", lid, f"repeat is {_show(v)}; it is an object: how many copies and where each "
+                "one goes", example)
+        return
+    _keys(v, REPEAT, REPEAT_ALIAS, rep, lid, "repeat: ")
+    c = v.get("count")
+    if isinstance(c, float) and c.is_integer():
+        v["count"] = c = int(c)
+    if "count" not in v:
+        rep.add("error", "missing-key", lid, "repeat needs a count: how many copies of the model to draw", example)
+    elif isinstance(c, bool) or not isinstance(c, int) or not 1 <= c <= MAX_COPIES:
+        rep.add("error", "bad-value", lid, f"repeat count is {_show(c)}; it is a whole number from 1 to "
+                f"{MAX_COPIES:,}")
+    for k in sorted(REPEAT - {"count"}):
+        x = v.get(k)
+        if x is None or (isinstance(x, str) and x.startswith("=")):
+            continue
+        items = x if isinstance(x, list) and x else [x]
+        if k == "fill":
+            if all(isinstance(y, str) for y in items):
+                for y in items:
+                    _colour(y, "repeat fill", rep, lid)
+                continue
+            what = "a colour, a list of colours taken in turn, or an expression of i such as \"=hsl(i * 30)\""
+        elif all(_finite(y) for y in items):
+            continue
+        else:
+            what = "a number, a list of numbers taken in turn, or an expression of i such as \"=i * 60\""
+        rep.add("error", "bad-value", lid, f"repeat {k} is {_show(x)}; it is {what}",
+                "i is the copy's number from 0, n the count; t, d, p and T are the layer's times")
+
+
 def _model(raw: dict, rep: Report, lid):
     _animation(raw, rep, lid)
+    _repeat(raw, rep, lid)
     _light(raw, rep, lid)
     _outline(raw, rep, lid)
     _texture(raw, rep, lid)
