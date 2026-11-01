@@ -1022,6 +1022,15 @@ def test_missing_system_gl_libraries_name_the_packages(tmp_path):
     assert "libEGL.so.1" in r.stderr and "sudo apt install libegl1 libgl1 libfontconfig1" in r.stderr
 
 
+def test_too_old_skia_python_names_the_version_to_install(tmp_path):
+    # skia-python 87.9, 138.0 and 144.0.post1 bind M44 without Rows; space.to_skia then failed mid-render.
+    (tmp_path / "skia.py").write_text('__version__ = "138.0"\nclass M44:\n    pass\n')
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(tmp_path), root]))
+    r = subprocess.run([sys.executable, "-c", "import kinescript"], env=env, capture_output=True, text=True)
+    assert "skia-python 138.0 is too old" in r.stderr and 'pip install -U "skia-python>=144.1"' in r.stderr
+
+
 def test_emphasis_can_start_and_stop_inside_a_word():
     s = k.Scene(scene([{"id": "t", "type": "text", "text": "g**P**u(doom) **diff**, done", "size": 30}]))
     L, r = s.by_id["t"], Renderer(s, backend="cpu")
