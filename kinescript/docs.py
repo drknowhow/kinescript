@@ -191,11 +191,20 @@ LAYER TYPES (defaults in brackets)
             split (chars|words|lines: animate each unit, see ENTER AND EXIT),
             caret (true shows a cursor while typing),
             unitX unitY unitRotate unitScale unitOpacity (expressions per unit; i is its index).
+            textPath lays the letters along a path, each turned to it where its middle is: SVG
+            path data in the layer's space (x and y move it), "#id" of a path, line, arrow or
+            polygon in the same group (where that layer draws it), or {"d": ..., "offset": [0]
+            (how far along, a share of the path's length; animate it to run the text along),
+            "align": [start] (start|center|end: the part of the text that stands at offset)}.
+            The first line stands on the path and the others below it. An open path leaves out
+            the letters past its ends (check: text-off-path); a closed one takes them round
+            again. anchor does nothing there, and unit keys move along and across the path.
             A character the font lacks (emoji, CJK, Hebrew, Arabic...) is drawn with an installed
             font that has it; check names any that no font has (missing-glyph). Arabic letters
             join and accents sit on their letter. Right-to-left words read right to left, and a
             line's words are put in order by the Unicode bidi rules applied word by word.
-            split chars and letterSpacing draw each letter alone, so Arabic does not join there.
+            split chars, letterSpacing and textPath draw each letter alone, so Arabic does not join
+            there.
   counter   value (animate it, e.g. {"from": 0, "to": 1250, "dur": 2}), format ["{:,.0f}"; also
             "${:,.2f}M" or "{:.0f}%"], and every text key
   image     src (every src, for image, video, captions and audio, is relative to the scene

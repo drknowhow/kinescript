@@ -25,7 +25,7 @@ STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "children", "laye
           "sksl", "preset", "uniforms", "caret", "case", "italic", "smooth", "closed", "focus", "use",
           "backface", "fixed", "sort", "shape", "detail", "parts", "light", "span", "sound", "voice",
           "fadeIn", "fadeOut", "sequence", "animation", "repeat", "profile", "along", "dash", "rough", "mask",
-          "glow", "outline", "innerShadow", "displace", "frames", "sheet", "fps", "pixelated"}
+          "glow", "outline", "innerShadow", "displace", "frames", "sheet", "fps", "pixelated", "textPath"}
 PART_STRUCT = {"shape", "texture", "text", "font", "d", "italic", "profile"}  # a part's keys that never animate
 # Property defaults by name; everything not listed defaults to None.
 DEFAULTS = {"x": 0.0, "y": 0.0, "opacity": 1.0, "scale": 1.0, "scaleX": 1.0, "scaleY": 1.0, "rotate": 0.0,
@@ -72,7 +72,7 @@ def _where(owner, message: str) -> str:
 class Layer:
     __slots__ = ("id", "type", "raw", "t_in", "t_out", "props", "enter", "exit", "children", "parent",
                  "index", "src", "video", "ahead", "ctx", "parts", "copies", "xf", "along", "turn", "clock",
-                 "rough", "morph", "mask", "looks", "warp", "particles", "seq")
+                 "rough", "morph", "mask", "looks", "warp", "particles", "seq", "onpath")
 
     def __init__(self, lid: str, ltype: str, raw: dict, parent: "Layer | None", index: int):
         self.id, self.type, self.raw, self.parent, self.index = lid, ltype, raw, parent, index
@@ -99,6 +99,7 @@ class Layer:
         self.warp: dict | None = None  # its displace; its amount is the prop "displace amount"
         self.particles: particles.Emitter | None = None  # a particles layer's emitter
         self.seq: media.Frames | None = None  # an image layer's frames or sheet; src is its first frame, or the sheet
+        self.onpath: str | None = None  # a text's textPath d (data or "#id"); how far along is props["textPath offset"]
 
     @property
     def dur(self) -> float:
@@ -312,6 +313,8 @@ class Scene:
                                   "export it again with at most four joint influences per vertex")
             if layer.along and layer.along[0].startswith("#"):
                 self._check_route(layer, layer.along[0][1:])
+            if layer.onpath and layer.onpath.startswith("#"):
+                self._check_route(layer, layer.onpath[1:], "textPath")
             if layer.type != "model":
                 continue
             for spec in [layer.raw.get("texture")] + [p.get("texture") for p in layer.raw.get("parts") or []
@@ -406,23 +409,25 @@ class Scene:
                                   "use a number, a percentage like '50%', or an expression starting with '='")
                         break
 
-    def _check_route(self, layer: Layer, rid: str):
-        """An along "#pathId" on `layer` names a path, line, arrow or polygon in its group that rides no path."""
+    def _check_route(self, layer: Layer, rid: str, key: str = "along"):
+        """An along (or textPath) "#pathId" on `layer` names a path, line, arrow or polygon in its group that rides no
+        path."""
         r = self.by_id.get(rid)
+        rides = "rides" if key == "along" else "follows"
         if r is None:
             close = schema.suggest(rid, list(self.by_id))
-            self.note("error", "unknown-route", layer.id, f"along '#{rid}' names no layer",
-                      (f"did you mean '#{close}'? " if close else "") + "give the path it rides that id, or write "
-                      "the path data in d")
+            self.note("error", "unknown-route", layer.id, f"{key} '#{rid}' names no layer",
+                      (f"did you mean '#{close}'? " if close else "") + f"give the path it {rides} that id, or "
+                      "write the path data in d")
         elif r.type not in ROUTES or r is layer:
             what = "the layer itself" if r is layer else f"a {r.type} layer"
-            self.note("error", "bad-route", layer.id, f"along '#{rid}' is {what}; it rides a path, line, arrow or "
+            self.note("error", "bad-route", layer.id, f"{key} '#{rid}' is {what}; it {rides} a path, line, arrow or "
                       "polygon", "name a path layer, or write the path data in d")
         elif r.parent is not layer.parent:
-            self.note("error", "bad-route", layer.id, f"along '#{rid}' is in another group, where its points are "
+            self.note("error", "bad-route", layer.id, f"{key} '#{rid}' is in another group, where its points are "
                       "somewhere else", f"put '{rid}' and '{layer.id}' in the same group")
         elif r.along:
-            self.note("error", "bad-route", layer.id, f"along '#{rid}' rides a path itself",
+            self.note("error", "bad-route", layer.id, f"{key} '#{rid}' rides a path itself",
                       f"give '{layer.id}' the path '{r.along[0]}' as well, or take along off '{rid}'")
 
     def _check_masks(self):
@@ -885,6 +890,10 @@ class Scene:
                 if isinstance(rough, dict):  # amount, length, seed, boil
                     layer.rough = (float(rough.get("amount", 3)), float(rough.get("length", 12)),
                                    int(rough.get("seed", 0)), float(rough.get("boil", 0)))
+                on = raw.get("textPath")
+                if ltype in ("text", "counter") and isinstance(on, dict) and isinstance(on.get("d"), str):
+                    layer.onpath = on["d"]
+                    layer.props["textPath offset"] = compile_prop("textPath offset", on.get("offset", 0), pctx)
                 along = raw.get("along")
                 if isinstance(along, dict) and isinstance(along.get("d"), str):
                     layer.along = (along["d"], along.get("orient") is True)

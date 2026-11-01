@@ -339,6 +339,9 @@ More scenes in [`examples/`](https://github.com/drknowhow/kinescript/tree/main/e
   million and three confetti bursts go off behind and beside it, over drifting dust, 6 s.
 - [`flipbook.json`](https://github.com/drknowhow/kinescript/blob/main/examples/flipbook.json): a pixel-art figure
   from an eight-cell sprite sheet walks up to a flame drawn as twelve numbered files, 6 s.
+- [`textpath.json`](https://github.com/drknowhow/kinescript/blob/main/examples/textpath.json): a title rises letter
+  by letter onto an arch, a ring of text turns once round a counter of its degrees, and a line types itself along a
+  wave, 6 s.
 
 `edit.json`, `import.json`, `textures.json`, `screens.json`, `edges.json`, `product.json`, `voiceover.json`,
 `narrated.json` and `flipbook.json` read sample media: run `python examples/make_media.py` first to generate it.

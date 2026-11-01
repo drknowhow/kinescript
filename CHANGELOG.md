@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Text on a path: `textPath` lays a text's or a counter's letters along SVG path data in the layer's space, or along
+  `"#id"` of a path, line, arrow or polygon in the same group where that layer draws it, each letter turned to the
+  path where its middle is: `{"d": "#arc", "offset": [[0, 0], [3, 1]], "align": "center"}`. `offset` is how far
+  along, a share of the path's length, and animates; `align` says which part of the text stands there. Later lines
+  stand below the first. An open path leaves out the letters past its ends, which `kine check` warns as
+  `text-off-path`, and a closed one takes them round again. Split units, their enters and the unit keys still apply,
+  moving each unit along and across the path, and a typing caret follows the last letter. `kine check` reads
+  `text-overlap` from the letters where they stand, so a label inside a ring of text is not an overlap. Letters draw
+  through `TextBlob.MakeFromRSXform`, one blob for each colour. `examples/textpath.json` arches a title over a curve,
+  turns a ring of text round a counter and types a line along a wave.
 - Image sequences: an `image` layer plays `frames`, numbered files named by a pattern (`"run/run_%03d.png"` or
   `"run/run_####.png"`), a glob, a folder or a list, or the cells of a `sheet` (`{"src": "walk.png", "cols": 8,
   "rows": 2, "count": 14}`), at `fps` (12 unless given). `loop` starts again after the last frame (the default),

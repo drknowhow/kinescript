@@ -99,6 +99,11 @@ TEXTURE_ALIAS = {"image": "src", "file": "src", "path": "src", "url": "src", "ti
 ALONG = {"d", "p", "orient"}
 ALONG_ALIAS = {"path": "d", "route": "d", "progress": "p", "autoRotate": "orient", "autoOrient": "orient",
                "rotate": "orient"}
+TEXT_PATH = {"d", "offset", "align"}
+TEXT_PATH_ALIAS = {"path": "d", "route": "d", "data": "d", "startOffset": "offset", "start": "offset",
+                   "anchor": "align", "textAnchor": "align"}
+TEXT_PATH_ALIGN = {"start": "start", "left": "start", "center": "center", "centre": "center", "middle": "center",
+                   "end": "end", "right": "end"}
 PART = MATERIAL | {"shape", "w", "h", "depth", "r", "tube", "x", "y", "z", "rotateX", "rotateY", "rotate", "scale",
                    "text", "size", "font", "weight", "italic", "letterSpacing", "lineHeight", "d", "strokeWidth",
                    "bevel", "profile"}
@@ -174,8 +179,8 @@ TYPES: dict[str, set[str]] = {
     "path": SHAPE | {"d", "points", "smooth", "closed", "corner", "repeat"},
     "line": SHAPE | {"points", "smooth", "closed", "corner", "repeat"},
     "arrow": SHAPE | {"x1", "y1", "x2", "y2", "bend", "head", "repeat"},
-    "text": TEXT | {"repeat"},
-    "counter": TEXT | {"value", "format", "repeat"},
+    "text": TEXT | {"repeat", "textPath"},
+    "counter": TEXT | {"value", "format", "repeat", "textPath"},
     "image": MEDIA | {"repeat", "frames", "sheet", "fps", "loop", "pixelated"},
     "video": MEDIA | {"trim", "speed", "volume", "loop", "fadeIn", "fadeOut", "repeat"},
     "captions": TEXT | {"src", "cues", "mode", "active", "voice"},
@@ -300,7 +305,7 @@ REQUIRED = {"text": ("text",), "image": ("src", "frames", "sheet"), "video": ("s
 # Keys whose value is an object of their own: never a tween, even with a "from" key (a light's direction).
 OBJECTS = {"light", "lights", "env", "ground", "shadow", "shadows", "box", "fx", "uniforms", "sound", "enter", "exit",
            "parts", "transition", "texture", "edges", "animation", "repeat", "along", "rough", "mask", "glow",
-           "outline", "innerShadow", "displace"}
+           "outline", "innerShadow", "displace", "textPath"}
 # Props that cannot be below 0, and the least each may be.
 AT_LEAST = {"radius": 0, "r": 0, "sides": 3, "blur": 0, "strokeWidth": 0, "size": 0, "corner": 0, "glow size": 0,
             "glow amount": 0, "outline width": 0, "innerShadow blur": 0, "displace amount": 0}
@@ -933,6 +938,7 @@ def _layer(raw, rep: Report, path: str, comps: dict):
     _stroke(raw, t, rep, lid)
     _rough(raw, rep, lid)
     _along(raw, rep, lid)
+    _text_path(raw, rep, lid)
     _effects(raw, rep, lid)
     _mask(raw, rep, lid)
     _looks(raw, rep, lid, t)
@@ -1581,6 +1587,41 @@ def _along(raw: dict, rep: Report, lid):
         _prop("along p", a["p"], rep, lid)
     if a.get("orient") is not None and not isinstance(a["orient"], bool):
         rep.add("error", "bad-value", lid, f"along orient is {_show(a['orient'])}; it is true or false", example)
+
+
+def _text_path(raw: dict, rep: Report, lid):
+    """textPath: the path a text's letters stand on, as path data or "#id" of a path layer, how far along it the
+    text is (offset, a share of its length) and which part of the text is there (align)."""
+    v = raw.get("textPath")
+    if v is None:
+        return
+    example = "\"textPath\": {\"d\": \"M100 600 C600 200 1300 200 1800 600\", \"offset\": 0.5, \"align\": \"center\"}"
+    if isinstance(v, str):
+        raw["textPath"] = v = {"d": v}
+    if not isinstance(v, dict):
+        rep.add("error", "bad-value", lid, f"textPath is {_show(v)}; it is path data, \"#id\" of a path layer, or an "
+                "object with the path in d", example)
+        return
+    _keys(v, TEXT_PATH, TEXT_PATH_ALIAS, rep, lid, "textPath: ")
+    d = v.get("d")
+    if not (isinstance(d, str) and d.strip()):
+        rep.add("error", "missing-key", lid, "textPath needs d: SVG path data, or \"#id\" of a path layer", example)
+    elif not d.startswith("#"):
+        _path_data(d, "textPath d", rep, lid)
+    if v.get("offset") is not None:
+        _prop("textPath offset", v["offset"], rep, lid)
+    a = v.get("align")
+    if a is not None:
+        to = TEXT_PATH_ALIGN.get(str(a).strip().lower()) if isinstance(a, str) else None
+        if to is None:
+            rep.add("error", "bad-value", lid, f"textPath align is {_show(a)}; it is start, center or end: which part "
+                    "of the text stands at offset", example)
+        elif to != a:
+            v["align"] = to
+            rep.add("info", "renamed-value", lid, f"textPath align '{a}' read as '{to}'", f"write '{to}'")
+    if "anchor" in raw:
+        rep.add("warning", "ignored-key", lid, "anchor is ignored on a text on a path: the path places its letters",
+                "take anchor off; move the text with x and y, or along the path with textPath offset")
 
 
 def _path_data(d, what: str, rep: Report, lid):
