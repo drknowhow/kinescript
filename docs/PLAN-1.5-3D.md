@@ -190,10 +190,17 @@ one in front of it. On the CPU the stage blurs at halved sizes and mixes in nump
 - Check rules: `no-uvs` (a texture on a mesh without coordinates), `texture-missing`, `texture-swim` (a textured
   triangle still too large on screen).
 
-Status (2026-10-31): image textures (branch `textures`): coordinates on every shape, `texture` with `repeat` and
+Status (2026-11-01): image textures merged (#64): coordinates on every shape, `texture` with `repeat` and
 `offset` on layers and parts, glTF `TEXCOORD_n` and `baseColorTexture`, the passes, the cutting, `no-uvs` and
-`texture-swim` are built, not merged. Video and `"#groupId"` textures and `emissiveTexture` come next, then
-`edges` and model `opacity`. Changes from the bullets above: a missing or unreadable texture is `media-missing` or
+`texture-swim`. Video and `"#groupId"` textures are built on branch `live-textures`, not merged. glTF emission
+(`emissiveFactor` and `emissiveTexture`) comes next: the importer reads neither yet, and per-pixel emission needs one
+more pass. Then `edges` and model `opacity`. Video and group textures: a video texture takes `loop`, `trim` and
+`speed` as a video layer does and plays on the model's clock. A group named by a texture is drawn only on the
+model, its box (its `w` and `h`, else the canvas) filling the image, its layers as in a scene without a camera
+(those that move in depth seen by a camera of the image's size, with no fog or depth of field). `kine check`
+adds `unknown-texture` and `bad-texture` (a layer that is not a group, or a group the model is in). Each
+material's picture is now a small runtime shader: skia-python's `Shaders.Blend` took 99 ms a call with a 1080p
+video frame on the GPU, and the same bytes come out for image textures. Changes from the bullets above: a missing or unreadable texture is `media-missing` or
 `bad-media`, as for other files, not `texture-missing`. `.obj` files' `vt` and `map_Kd` are read too.
 `"texture": false` draws the fill (on a part, instead of the layer's texture; on a model file, its mean colour).
 Cylinder and cone ends take the image flat. On the GPU the picture, the light on a white surface and the added

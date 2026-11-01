@@ -286,16 +286,20 @@ DEPTH AND CAMERA (3D)
   fill      one colour [theme accent]   shine 0..1 [0.4]   metal 0..1 [0]   rim 0..1 [0.5] (edge
             light)   bands [0] (2 or more: flat toon steps)   glow 0..1 [0] (shows at least fill x
             glow however it is lit: neon, screens, lamps). These animate.
-  texture   an image file (png, jpg, webp, gif, bmp) drawn on the surface, or {"src": "wood.jpg",
-            "repeat": 2 or [across, down], "offset": [across, down] (in images, toward the right and
-            down)}. Once on each cube face and on a plane, upright from in front (on top and
-            underneath, its top is the far edge); round a sphere, cylinder or cone with its middle
-            facing you, and flat across their ends; once round a torus and its tube; across the
-            front and back of text and path shapes. The fill shows through clear pixels. A part
-            takes the layer's texture unless it sets its own; false draws its fill. Triangles are
-            cut where perspective would slide the image across them (check warns texture-swim
-            where that is not enough, right in front of the camera). It does not animate. A
-            textured model takes about twice as long to draw.
+  texture   an image (png, jpg, webp, gif, bmp) or video file drawn on the surface, "#groupId", or
+            an object: {"src": "wood.jpg", "repeat": 2 or [across, down], "offset": [across, down]
+            (in images, toward the right and down)}. A video plays on the model's clock, with "loop", "trim" and
+            "speed" as on a video layer. "#groupId" draws that group on the surface at each frame's
+            time, its box (its w and h, else the canvas) filling the image: a UI on a phone's screen.
+            The group is drawn only there, its layers as in a scene without a camera. Once on each
+            cube face and on a plane, upright from in front (on top and underneath, its top is the
+            far edge); round a sphere, cylinder or cone with its middle facing you, and flat across
+            their ends; once round a torus and its tube; across the front and back of text and path
+            shapes. The fill shows through clear pixels. A part takes the layer's texture unless it
+            sets its own; false draws its fill. Triangles are cut where perspective would slide the
+            image across them (check warns texture-swim where that is not enough, right in front of
+            the camera). repeat and offset do not animate. A textured model takes about twice as
+            long to draw.
   parts     [{"shape": "sphere", "r": 30, "x": 0, "y": -120, "z": 0, "rotateX": 0, "rotateY": 0,
             "rotate": 0, "scale": 1, "fill": "#b9f45d", "shine": 0.9}, ...] placed from the
             model's centre, in plain numbers (parts do not animate; the model does). A part takes

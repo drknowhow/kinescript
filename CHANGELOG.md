@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- `texture` takes a video file, which plays on the model's clock with `loop`, `trim` and `speed` as on a video
+  layer, and `"#groupId"`, a group of layers drawn on the model at each frame's time, such as an app on a phone's
+  screen. The group is drawn only there, its box (its `w` and `h`, else the canvas) filling the image, and its
+  layers as in a scene without a camera. `kine check` reports a texture that names no layer (`unknown-texture`),
+  one that names a layer that is not a group or a group the model is in (`bad-texture`), and a video's bad
+  `trim`. Each material's picture is now a small runtime shader: skia-python's `Shaders.Blend` took 99 ms a call
+  with a 1080p video frame on the GPU. Image textures draw the same bytes as before. `examples/screens.json`
+  renders in 9.6 s on the GPU against 4.1 s without its textures, and in 42.3 s on the CPU against
+  21.4 s.
 - Models take `texture`: an image file, or `{"src", "repeat", "offset"}`, on the layer or on one part. Every shape
   has texture coordinates. The image goes once on each cube face and on a plane, upright from in front, and round a
   sphere, cylinder or cone with its middle facing the camera, flat on their ends. It goes once round a torus and its

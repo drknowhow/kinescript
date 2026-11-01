@@ -10,7 +10,7 @@ import numpy as np
 import skia
 
 from . import color as C
-from . import media, mesh, models, space, svgpath
+from . import media, mesh, models, schema, space, svgpath
 from .props import compile_prop
 
 MATERIAL = ("fill", "shine", "metal", "rim", "bands", "glow", "texture")
@@ -100,6 +100,16 @@ half4 main(float2 p) {
     half4 t = base.eval(p);
     half4 f = fog.eval(p);
     return half4(saturate(t.rgb * light.eval(p).rgb * 2.0 + add.eval(p).rgb) * (1.0 - f.a) + f.rgb, t.a);
+}
+"""
+# A material's picture: its texture, times its tint, over its fill.
+_LOOK = """
+uniform shader image;
+uniform half4 fill;
+uniform half3 tint;
+half4 main(float2 p) {
+    half4 c = image.eval(p);
+    return half4(c.rgb * tint, c.a) + fill * (1.0 - c.a);
 }
 """
 _EFFECTS: dict[tuple, skia.RuntimeEffect] = {}
@@ -228,8 +238,8 @@ def sun(r, T: float) -> tuple[list[float], float]:
 
 def fog(r, T: float) -> tuple | None:
     """The scene's fog at scene time T as (colour, near, far, amount, focus), near and far in px from the camera
-    and focus the distance of the canvas plane (z 0) from it, or None."""
-    if r.s.fog is None or r._lens is None:
+    and focus the distance of the canvas plane (z 0) from it, or None. A group drawn as a texture has none."""
+    if r.s.fog is None or r._lens is None or r._insets:
         return None
     f = at(r._lit, r.s.ctx, r.s.fog, T, r.s.duration, T)
     focus = -1.0 / r._lens[3, 2]
@@ -351,23 +361,39 @@ def _argb(rgb: np.ndarray) -> np.ndarray:
     return 0xFF000000 | (c[:, 0] << 16) | (c[:, 1] << 8) | c[:, 2]
 
 
-def _texture(r, spec) -> tuple | None:
-    """A texture as drawn: its image (mipmapped, and on the GPU when drawing there), repeat and offset across and
-    down, tint (or None) and tiling; None for none. spec is a file name, {"src", "repeat", "offset"}, or a model
-    file's {"image", "tint", "tile"}."""
+def _texture(r, spec, L=None, t: float = 0.0, T: float = 0.0) -> tuple | None:
+    """A texture as drawn on model L at its time t (scene time T): its image (mipmapped, and on the GPU when
+    drawing there), repeat and offset across and down, tint (or None) and tiling; None for none. spec is a file
+    name or "#groupId", {"src", "repeat", "offset"} with a video's "loop", "trim" and "speed", or a model file's
+    {"image", "tint", "tile"}. A video shows its frame at t and a group is drawn at T, each frame anew."""
     if not spec:
         return None
     if isinstance(spec, str):
         spec = {"src": spec}
-    key = ("texture", spec["src"]) if "src" in spec else ("texture", id(spec["image"]))
-    img = r._models.get(key)
-    if img is None:
-        img = media.image(r.s.path(spec["src"])) if "src" in spec else spec["image"]
-        img = img.makeTextureImage(r.gr, skia.GrMipmapped.kYes) if r.gr is not None else img.withDefaultMipmaps()
-        r._models[key] = img
+    kind = schema.texture_kind(spec["src"]) if "src" in spec else "image"
+    if kind == "image":
+        key = ("texture", spec["src"]) if "src" in spec else ("texture", id(spec["image"]))
+        img = r._models.get(key)
+        if img is None:
+            img = r._models[key] = _mipped(r, media.image(r.s.path(spec["src"])) if "src" in spec else spec["image"])
+    elif kind == "video" and not r.footage:  # boxes only: a clear picture, drawn as a texture all the same
+        img = _CLEAR
+    else:
+        img = r._clip(L, spec, t) if kind == "video" else r._surface(spec["src"][1:], T)
+        if img is None:  # no frame decoded, or a group drawn inside itself
+            img = _CLEAR
+        img = _mipped(r, img)
     pair = lambda v: (float(v), float(v)) if isinstance(v, (int, float)) else (float(v[0]), float(v[1]))  # noqa: E731
     return img, pair(spec.get("repeat", 1)), pair(spec.get("offset", 0)), spec.get("tint"), \
         tuple(spec.get("tile", ("repeat", "repeat")))
+
+
+_CLEAR = skia.Image.fromarray(np.zeros((2, 2, 4), np.uint8), skia.kRGBA_8888_ColorType)
+
+
+def _mipped(r, img: skia.Image) -> skia.Image:
+    """img with mipmaps, on the GPU when drawing there."""
+    return img.makeTextureImage(r.gr, skia.GrMipmapped.kYes) if r.gr is not None else img.withDefaultMipmaps()
 
 
 def _material(get) -> tuple:
@@ -531,8 +557,9 @@ def _fit(g, size) -> float:
     return min(s) if s else 300.0 / max(float(size.max()), 1e-9)
 
 
-def model(r, L, g) -> tuple[mesh.Mesh, list[tuple], list]:
-    """The model's mesh in its own space at this frame, its materials, and each material's texture or None."""
+def model(r, L, g, t: float = 0.0, T: float = 0.0) -> tuple[mesh.Mesh, list[tuple], list]:
+    """The model's mesh in its own space at its time t (scene time T), its materials, and each material's texture
+    or None."""
     parts, keys = _parts(r, L)
     shape = L.raw.get("shape")
     meshes = [] if parts is None else [parts]
@@ -553,7 +580,7 @@ def model(r, L, g) -> tuple[mesh.Mesh, list[tuple], list]:
     accent = r.s.theme.get("accent", "#ff633f")
     root = lambda k, d=None: g(k, accent if k == "fill" and d is None else d)  # noqa: E731
     mats = [_material(lambda k, d=None, o=o: o.get(k, root(k, d))) for o in keys]
-    return m, mats, [_texture(r, o.get("texture", L.raw.get("texture"))) for o in keys]
+    return m, mats, [_texture(r, o.get("texture", L.raw.get("texture")), L, t, T) for o in keys]
 
 
 def _inner(p: np.ndarray) -> np.ndarray:
@@ -817,20 +844,23 @@ def _unswim(r, L, P, N, M, U, T, texs) -> tuple:
 
 
 def _look(r, L, i: int, fill, tx) -> skia.Shader:
-    """Material i's picture: its texture tx over its fill, kept while they hold (skia-python takes 1.5 ms to make
-    the blend)."""
+    """Material i's picture: its texture tx times its tint over its fill, kept while they hold. A runtime shader:
+    skia-python's Shaders.Blend took 1.5 ms with a small image and 99 ms with a 1080p video frame on the GPU."""
     def make():
-        under = skia.Shaders.Color(skia.Color4f(*fill, 1.0))
         if tx is None:
-            return under
+            return skia.Shaders.Color(skia.Color4f(*fill, 1.0))
         img, _, _, tint, tile = tx
-        sh = img.makeShader(TILE[tile[0]], TILE[tile[1]],
-                            skia.SamplingOptions(skia.FilterMode.kLinear, skia.MipmapMode.kLinear))
-        if tint is not None:
-            sh = sh.makeWithColorFilter(skia.ColorFilters.Blend(skia.Color4f(*tint, 1.0).toColor(),
-                                                                skia.BlendMode.kModulate))
-        return skia.Shaders.Blend(skia.BlendMode.kSrcOver, under, sh)
-    return _kept(r, ("look", L.id, i), (tuple(fill), None if tx is None else (id(tx[0]), tx[3], tx[4])), make)
+        if "look" not in _EFFECTS:
+            _EFFECTS["look"] = skia.RuntimeEffect.MakeForShader(_LOOK)
+        b = skia.RuntimeShaderBuilder(_EFFECTS["look"])
+        b.setChild("image", img.makeShader(TILE[tile[0]], TILE[tile[1]],
+                                           skia.SamplingOptions(skia.FilterMode.kLinear, skia.MipmapMode.kLinear)))
+        b.setUniform("fill", [float(v) for v in fill] + [1.0])
+        b.setUniform("tint", [float(v) for v in (tint if tint is not None else (1.0, 1.0, 1.0))])
+        return b.makeShader()
+    # The image itself in the key, not its id: a video's or group's frame goes once drawn, and a later frame's
+    # image could take its id.
+    return _kept(r, ("look", L.id, i), (tuple(fill), None if tx is None else (tx[0], tx[3], tx[4])), make)
 
 
 def _textured(r, L, cv: skia.Canvas, region: skia.Rect, q, T, nv, M, U, mats, texs, lit, fv, fg) -> bool:
@@ -903,7 +933,7 @@ def _combined() -> skia.RuntimeEffect:
 def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float = 0.0):
     """Draw model layer L on canvas c at its time t (scene_t on the scene's clock). Returns its projected bounds
     in device pixels, or None."""
-    m, mats, texs = model(r, L, g)
+    m, mats, texs = model(r, L, g, t, scene_t)
     lt, more, env = _lighting(r, L, m, t, scene_t)
     fg = fog(r, scene_t) if r._stage is None else None  # a stage fogs each pixel it shows
     P, N, T, M = m.P, m.N, m.T, m.M
