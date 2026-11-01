@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.6.0 (2026-11-01)
 
 - The 1.6 stress report is in `docs/stress-test-1.6/`: the Phase 0 and 2D stress scenes and the three new examples,
   on the development machine's GPU and CPU. `bench/stress.py` gains `logo`, `kinetic` and `explainer`, which read
