@@ -105,7 +105,24 @@ def is_color(v) -> bool:
     return isinstance(v, str) and problem(v) is None
 
 
+_ARGB: dict[tuple, int] = {}
+
+
 def to_argb_int(c: RGBA, alpha_mul: float = 1.0) -> int:
+    key = (c, alpha_mul)
+    try:
+        return _ARGB[key]
+    except KeyError:
+        pass
+    except TypeError:  # a list
+        return _argb_int(c, alpha_mul)
+    if len(_ARGB) >= 65536:  # colours that animate make a new key on most frames
+        _ARGB.clear()
+    v = _ARGB[key] = _argb_int(c, alpha_mul)
+    return v
+
+
+def _argb_int(c: RGBA, alpha_mul: float) -> int:
     r, g, b, a = (max(0.0, min(1.0, x)) for x in c)  # a computed colour can overshoot (an outBack ease)
     a = max(0.0, min(1.0, a * alpha_mul))
     return (round(a * 255) << 24) | (round(r * 255) << 16) | (round(g * 255) << 8) | round(b * 255)

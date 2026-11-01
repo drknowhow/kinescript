@@ -16,6 +16,7 @@ import ast
 import colorsys
 import math
 import re
+from bisect import bisect_right
 from typing import Any, Callable
 
 from . import color as C
@@ -201,20 +202,27 @@ class _FloatPow(ast.NodeTransformer):
 
 
 _GLOBALS = {"__builtins__": {}, "_pow": _pow}
+ARGS = ("t", "d", "p", "T", "i")  # what an expression function takes, in order (expr_fn)
 
 
-def compile_expr(src: str, name: str, allowed: set[str]):
+def compile_expr(src: str, name: str, allowed: set[str], args: tuple[str, ...] = ()):
     """Compile a scene expression. Only arithmetic, comparisons and calls to the whitelisted
     helpers are accepted (no attributes, subscripts or lambdas), because scene files may come
-    from other agents and are evaluated with eval()."""
+    from other agents and are evaluated with eval(). With args, the code evaluates to a function
+    of those names."""
     try:
-        return _compile_expr(src, name, allowed)
+        return _compile_expr(src, name, allowed, args)
     except (RecursionError, MemoryError):  # "-" * 50000 + "1", or a sum of 5000 terms
         raise ValueError(f"'{name}': the expression is nested too deeply to read ({len(src)} characters); "
                          "write it shorter, or split it across keyframes") from None
 
 
-def _compile_expr(src: str, name: str, allowed: set[str]):
+def expr_fn(src: str, name: str, env: dict) -> Callable:
+    """The expression as a function of (t, d, p, T, i) whose globals are env's helpers, so a call builds no dict."""
+    return eval(compile_expr(src, name, set(env) | set(ARGS), ARGS), dict(env, **_GLOBALS))
+
+
+def _compile_expr(src: str, name: str, allowed: set[str], args: tuple[str, ...] = ()):
     tree = ast.parse(src, mode="eval")
     for node in ast.walk(tree):
         if not isinstance(node, _SAFE_NODES):
@@ -226,8 +234,12 @@ def _compile_expr(src: str, name: str, allowed: set[str]):
             raise ValueError(f"'{name}': only direct helper calls are allowed")
         if isinstance(node, ast.BinOp) and (_sequence(node.left) or _sequence(node.right)):
             raise ValueError(f"'{name}': arithmetic works on numbers, not on text or lists")
-    tree = ast.fix_missing_locations(_FloatPow().visit(tree))
-    return compile(tree, f"<{name}>", "eval")
+    tree = _FloatPow().visit(tree)
+    if args:
+        params = ast.arguments(posonlyargs=[], args=[ast.arg(a) for a in args], kwonlyargs=[], kw_defaults=[],
+                               defaults=[])
+        tree = ast.Expression(ast.Lambda(params, tree.body))
+    return compile(ast.fix_missing_locations(tree), f"<{name}>", "eval")
 
 
 def _finite(v) -> bool:
@@ -257,12 +269,11 @@ def compile_prop(name: str, raw, ctx: Ctx) -> Prop:
     if name in NOT_ANIMATABLE:
         return Prop(True, raw)
     if isinstance(raw, str) and raw.startswith("="):
-        env = dict(EXPR_ENV, W=ctx.w, H=ctx.h, fps=ctx.fps)
-        code = compile_expr(raw[1:], name, set(env) | {"t", "d", "p", "T", "i"})
+        fn = expr_fn(raw[1:], name, dict(EXPR_ENV, W=ctx.w, H=ctx.h, fps=ctx.fps))
 
-        def fx(t, d, T, i, code=code, env=env):
+        def fx(t, d, T, i, fn=fn):
             try:
-                v = eval(code, _GLOBALS, dict(env, t=t, d=d, p=(t / d if d else 0.0), T=T, i=i))
+                v = fn(t, d, t / d if d else 0.0, T, i)
             except OverflowError:  # 10.0**400, exp(1000), floor(inf)
                 raise ValueError("gives a number too large for a float, not a finite number") from None
             if isinstance(v, (int, float)) and not isinstance(v, bool) and not _finite(v):
@@ -278,24 +289,26 @@ def compile_prop(name: str, raw, ctx: Ctx) -> Prop:
     if is_keyframes(raw):
         keys = [(k[0], _norm(length(k[1], name, ctx)), E.get(k[2] if len(k) > 2 else "inOutCubic")) for k in raw]
         fps = ctx.fps
-        cache: dict[float, list] = {}
+        cache: dict[float, tuple[list, list[float]]] = {}  # layer length -> (keys in time order, their times)
 
-        def points(d):
-            pts = cache.get(d)
-            if pts is None:
-                pts = cache[d] = sorted(((key_time(k, d, fps), v, e) for k, v, e in keys), key=lambda x: x[0])
-            return pts
+        def sorted_keys(d):
+            hit = cache.get(d)
+            if hit is None:
+                pts = sorted(((key_time(k, d, fps), v, e) for k, v, e in keys), key=lambda x: x[0])
+                hit = cache[d] = (pts, [p[0] for p in pts])
+            return hit
 
         def fk(t, d, T, i):
-            pts = points(d)
-            if t <= pts[0][0]:
+            pts, times = sorted_keys(d)
+            if t <= times[0]:
                 return pts[0][1]
-            for (t0, v0, _), (t1, v1, e1) in zip(pts, pts[1:]):
-                if t < t1:
-                    u = (t - t0) / (t1 - t0) if t1 > t0 else 1.0
-                    return lerp(v0, v1, e1(u))
-            return pts[-1][1]
-        return Prop(False, fn=fk, keys=points)
+            j = bisect_right(times, t)  # the first key after t; keys at equal times leave the later one in force
+            if j == len(pts):
+                return pts[-1][1]
+            t0, v0, _ = pts[j - 1]
+            t1, v1, e1 = pts[j]
+            return lerp(v0, v1, e1((t - t0) / (t1 - t0)))
+        return Prop(False, fn=fk, keys=lambda d: sorted_keys(d)[0])
     return Prop(True, _norm(length(raw, name, ctx)))
 
 
