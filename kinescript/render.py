@@ -439,6 +439,48 @@ class Layout:
     units: list | None = None  # _draw_text's units, worked out on first use
 
 
+def _on_contour(meas: skia.PathMeasure, n: float, s: float, lx: float, ly: float, clamp: bool = False):
+    """The point (lx, ly) of the frame that stands s along the path meas measures (n long), x along it and y across,
+    as (cos, sin, x, y) of that frame's turn and where the point lands. Past an open path's ends: None, or with clamp
+    its end; a closed path goes round again."""
+    if n <= 0:
+        return None
+    if meas.isClosed():
+        s %= n
+    elif clamp:
+        s = min(max(s, 0.0), n)
+    elif not 0.0 <= s <= n:
+        return None
+    pt = meas.getPosTan(s)
+    if not pt:
+        return None
+    pos, tan = pt
+    co, si = tan.x(), tan.y()
+    return co, si, pos.x() + co * lx - si * ly, pos.y() + si * lx + co * ly
+
+
+@dataclass
+class PathText:
+    """Where a text's letters stand on its textPath (Renderer._on_path)."""
+    lay: Layout
+    key: tuple
+    frames: dict  # id(run): (cos, sin, x, y), the run's left end on its baseline turned to the path, or None (off it)
+    bounds: tuple  # (left, top, right, bottom) of the letters drawn, in the layer's space
+    parts: list  # (left, top, right, bottom) of each run drawn, in the layer's space, for text-overlap
+    meas: skia.PathMeasure
+    n: float  # the path's length
+    start: float  # how far along the path the text's left edge is
+
+    def pivot(self, x: float, line: int) -> tuple[float, float, float]:
+        """Where a unit whose middle is x across the layout and on `line` turns and moves: the middle of its line
+        on the path, and the path's direction there in degrees."""
+        lay = self.lay
+        f = _on_contour(self.meas, self.n, self.start + x, 0.0, line * lay.lh - lay.baseline0 + lay.lh / 2, True)
+        if f is None:
+            return 0.0, 0.0, 0.0
+        return f[2], f[3], math.degrees(math.atan2(f[1], f[0]))
+
+
 def color_matrix(fx: dict) -> list[float] | None:
     """4x5 row-major colour matrix from brightness/contrast/saturate/hue/exposure/temperature/tint/invert/gray."""
     if not fx:
@@ -604,6 +646,7 @@ class Renderer:
         # False: video layers are placed (box, stroke) but no frame is decoded, for checks that read boxes, not pixels.
         self.footage = True
         self.boxes: dict[str, dict] = {}
+        self.letters: dict[str, list] = {}  # tracking, a text on a path: its letters' rects, as boxes has its own
         self._tf: dict = {}
         self._layouts: dict = {}
         self._fonts: dict = {}
@@ -621,7 +664,9 @@ class Renderer:
         self._combos: dict = {}  # a combining group's id: (the outlines it merged, the merged path), the last one
         self._morphs: dict = {}  # (layer id, key): that key and the next matched point for point (morph.match)
         self._morphed: dict = {}  # layer id: (how far through its keys, the path there), the last one drawn
-        self._routes: dict[str, tuple] = {}  # an along's path by layer (data) or route id: (path, measure, length)
+        self._routes: dict = {}  # an along's path by layer (data) or route id: (path, measure, length); a textPath's
+        # by ("textPath", layer id): (route path, its placing, measure, length)
+        self._pathtext: dict[str, PathText] = {}  # a text's letters on its textPath, the last placing worked out
         self._group_T: dict[str, float] = {}  # a group with a clock: the scene time it is drawn at, for its kids
         self._solid: dict[int, skia.Paint] = {}  # an antialiased fill paint for each colour (_fill_paint)
         self._shaders: dict = {}
@@ -906,7 +951,7 @@ class Renderer:
         held: the background and the first `held` layers draw the same on every sub-frame (_held). Without `under`,
         only they draw, ungraded; `under` is an image of that, which the sub-frame starts from in their place."""
         s = self.s
-        self.boxes = {}
+        self.boxes, self.letters = {}, {}
         self.culled, self.unlit, self.fogged, self.inside, self.swim = set(), set(), set(), set(), set()
         self.unfocused = self.slow_dof = False
         self.filtered = 0.0
@@ -1377,6 +1422,9 @@ class Renderer:
         if self._matte is not None:
             info["mask"] = True
         self.boxes[L.id] = info
+        on = self._pathtext.get(L.id) if L.onpath is not None else None
+        if on is not None:
+            self.letters[L.id] = [list(m.mapRect(skia.Rect.MakeLTRB(*p))) for p in on.parts]
 
     def _copies(self, c, L: Layer, t, T, g, box, reveal, mods, alpha, parent_alpha, facing):
         """L's "repeat": L drawn once for each copy, moved by the copy's x, y, rotate and scale in L's space and in
@@ -1892,6 +1940,12 @@ class Renderer:
             return (-ax * w, -ay * h, w, h)
         if ty in ("text", "counter"):
             lay = self._text_layout(L, t, T, g, self._text_of(L, t, T, g))
+            if L.onpath is not None:  # its letters where they stand on the path, in the layer's space, and box's pad
+                left, top, right, bottom = self._on_path(L, t, T, g, lay, self._font(L, g, float(g("size", 64)))).bounds
+                if right < left:
+                    return (0.0, 0.0, 0.0, 0.0)
+                py, px = self._pad(L)
+                return (left - px, top - py, right - left + px * 2, bottom - top + py * 2)
             pad = self._pad(L)
             w, h = lay.w + pad[1] * 2, lay.h + pad[0] * 2
         elif ty in ("captions", "model", "particles"):
@@ -2912,7 +2966,7 @@ class Renderer:
         font = self._font(L, g, size)
         meas = lambda s, rtl=False: self._measure(font, s, rtl) + ls * len(s)  # noqa: E731
         split = L.raw.get("split")
-        apart = split == "chars" or ls  # each letter drawn on its own
+        apart = split == "chars" or ls or L.onpath is not None  # each letter drawn on its own
 
         def wmeas(w: str) -> float:
             """A word's width as drawn: letter by letter when they are drawn apart and the word needs more than
@@ -3052,8 +3106,9 @@ class Renderer:
                                         else C.parse(self.s.theme.get("paper", "#f2f0e8")))
         gpaint = None  # a gradient fill, across the text as a shape's goes across its box; emphasis stays a colour
         if isinstance(fill, (dict, C.Gradient)):
+            gx, gy, gw, gh = (ox, oy, lay.w, lay.h) if L.onpath is None else (ox, oy, bw - pad[1] * 2, bh - pad[0] * 2)
             gpaint = skia.Paint(AntiAlias=True, Shader=self._gradient(fill if isinstance(fill, dict) else fill.spec(),
-                                                                      ox, oy, lay.w, lay.h, 1.0))
+                                                                      gx, gy, gw, gh, 1.0))
             fill = (1.0, 1.0, 1.0, 1.0)  # only its alpha counts under the shader
         emph = g("emph") if "emph" in L.props else C.parse(self.s.theme.get("accent", "#ff633f"))
         act = g("active") if "active" in L.props else emph
@@ -3073,6 +3128,7 @@ class Renderer:
         unit_keys = {k for k in ("unitX", "unitY", "unitRotate", "unitScale", "unitOpacity") if k in L.props}
         cols, pop = (fill, emph, act), active is not None and L.raw.get("mode") == "pop"  # captions only
         painted = None  # (which colour, alpha) fpaint holds
+        onpath = self._on_path(L, t, T, g, lay, font, track) if L.onpath is not None else None
         for ui, (runs, x0, x1) in enumerate(units):
             um = IDENT
             if enter is not None:
@@ -3090,22 +3146,36 @@ class Renderer:
             blurred = um.blur > 0.1
             if moved:  # a unit drawn where it lies needs no save and restore: most of them, once they are in
                 c.save()
-                ucx, ucy = ox + (x0 + x1) / 2, oy + runs[0][0].line * lay.lh + lay.lh / 2
-                c.translate(ucx + ux, ucy + uy)
+                if onpath is None:
+                    ucx, ucy = ox + (x0 + x1) / 2, oy + runs[0][0].line * lay.lh + lay.lh / 2
+                    c.translate(ucx + ux, ucy + uy)
+                else:  # along and across the path where the unit's middle is
+                    ucx, ucy, ang = onpath.pivot((x0 + x1) / 2, runs[0][0].line)
+                    c.translate(ucx, ucy)
+                    c.rotate(ang)
+                    c.translate(ux, uy)
                 if um.rx or um.ry or um.dz:
                     c.concat(space.to_skia(space.tilt(um.dz, um.rx, um.ry)))
                 if urot:
                     c.rotate(urot)
                 if usc != 1:
                     c.scale(usc, usc)
+                if onpath is not None:
+                    c.rotate(-ang)
                 c.translate(-ucx, -ucy)
-            if blurred:
+            if blurred and onpath is not None:  # bounded by the letters on the CPU, as _blur_bounds does
+                out = 3 * um.blur + (spaint.getStrokeWidth() if spaint is not None else 0.0)
+                left, top, right, bottom = onpath.bounds
+                bounds = skia.Rect.MakeLTRB(left - out, top - out, right + out, bottom + out) if (
+                    self.backend == "cpu" and right >= left) else None
+            elif blurred:
                 bounds = self._blur_bounds(c, um.blur, ox + x1 + max(0.0, track * (runs[-1][0].char0 - c00)),
                                            oy + (runs[-1][0].line + 1) * lay.lh, size, spaint)
                 area = skia.Rect.Make(c.getDeviceClipBounds())  # the layer: the clip, as far as the bounds reach
                 if bounds is None or area.intersect(c.getTotalMatrix().mapRect(bounds)):
                     self.filtered += area.width() * area.height()
                 c.saveLayer(bounds, skia.Paint(ImageFilter=skia.ImageFilters.Blur(um.blur, um.blur)))
+            batch: dict = {}  # on a path: (colour, alpha): the letters drawn as they are, and their RSXforms
             for r, pcs in runs:
                 text = r.text
                 if visible_chars is not None:
@@ -3126,6 +3196,9 @@ class Renderer:
                         gpaint.setAlphaf(ua)
                     painted = (k, ua)
                 ink = gpaint if gpaint is not None and k == 0 else fpaint
+                if onpath is not None:
+                    self._path_run(c, onpath, r, pcs, text, font, (k, ua), ink, spaint, batch)
+                    continue
                 y = oy + r.line * lay.lh + lay.baseline0
                 x = ox + r.x + track * (r.char0 - c00) if track else ox + r.x
                 if text != r.text:  # typed so far: a right-to-left word grows from its right edge
@@ -3138,6 +3211,18 @@ class Renderer:
                 if spaint is not None:
                     self._draw_pieces(c, pcs, text, x, y, font, spaint)
                 self._draw_pieces(c, pcs, text, x, y, font, ink)
+            for (k, ua), (letters, xforms) in batch.items():  # one blob a colour
+                blob = skia.TextBlob.MakeFromRSXform("".join(letters), xforms, font)
+                if blob is None:
+                    continue
+                if spaint is not None:
+                    c.drawTextBlob(blob, 0, 0, spaint)
+                if gpaint is not None and k == 0:
+                    gpaint.setAlphaf(ua)
+                    c.drawTextBlob(blob, 0, 0, gpaint)
+                else:
+                    c.drawTextBlob(blob, 0, 0, skia.Paint(AntiAlias=True, Color=_argb(cols[k], ua)))
+                painted = None
             if blurred:
                 c.restore()
             if moved:
@@ -3151,14 +3236,121 @@ class Renderer:
             if last is not None:
                 vis = last.text[: max(0, int(visible_chars - last.char0))]
                 cw = max(3, size * 0.06)
-                if last.rtl:  # left of what is typed so far
-                    cx = (ox + last.x + self._measure(font, last.text, True, last.ctx)
-                          - self._measure(font, vis, True, last.ctx) - 4 - cw)
-                else:
-                    cx = ox + last.x + self._measure(font, vis) + 4
-                cy = oy + last.line * lay.lh
-                c.drawRect(skia.Rect.MakeXYWH(cx, cy + lay.lh * 0.15, cw, lay.lh * 0.7),
-                           skia.Paint(Color=_argb(emph)))
+                f = onpath.frames.get(id(last)) if onpath is not None else None
+                if onpath is not None and f is not None:  # after the letter, turned with it
+                    c.save()
+                    c.concat(skia.Matrix.MakeAll(f[0], -f[1], f[2], f[1], f[0], f[3], 0, 0, 1))
+                    c.drawRect(skia.Rect.MakeXYWH(self._measure(font, vis) + 4, lay.lh * 0.15 - lay.baseline0, cw,
+                                                  lay.lh * 0.7), skia.Paint(Color=_argb(emph)))
+                    c.restore()
+                elif onpath is None:
+                    if last.rtl:  # left of what is typed so far
+                        cx = (ox + last.x + self._measure(font, last.text, True, last.ctx)
+                              - self._measure(font, vis, True, last.ctx) - 4 - cw)
+                    else:
+                        cx = ox + last.x + self._measure(font, vis) + 4
+                    cy = oy + last.line * lay.lh
+                    c.drawRect(skia.Rect.MakeXYWH(cx, cy + lay.lh * 0.15, cw, lay.lh * 0.7),
+                               skia.Paint(Color=_argb(emph)))
+
+    def _text_route(self, L: Layer, T: float) -> tuple[skia.PathMeasure, float]:
+        """The measure of text layer L's textPath and its length: its d, or the path layer it names as that layer
+        draws it (its x, y, rotate, scale and anchor), in the space they share. Its first contour carries the text."""
+        d, key = L.onpath, ("textPath", L.id)
+        hit = self._routes.get(key)
+        if not d.startswith("#"):
+            if hit is None:
+                meas = skia.PathMeasure(svgpath.parse(d), False)
+                hit = self._routes[key] = (None, None, meas, meas.getLength())
+            return hit[2], hit[3]
+        route = self.s.by_id[d[1:]]
+        rt = T - route.t_in
+        rg = lambda name, default=None: route.get(name, rt, T, 0, default)  # noqa: E731
+        path = self._path(route, rt, T, rg)
+        placing = tuple(float(v) for v in route.placed(rt, T)[:6])
+        if hit is None or hit[0] is not path or hit[1] != placing:
+            x, y, rot, sc, sx, sy = placing
+            m = skia.Matrix.Translate(x, y)
+            m.preRotate(rot)
+            m.preScale(sc * sx, sc * sy)
+            if "anchor" in route.raw:  # _draw_path's shift
+                box, b = self._box(route, rt, T, rg), path.computeTightBounds()
+                m.preTranslate(box[0] - b.left(), box[1] - b.top())
+            out = skia.Path()
+            path.transform(m, out)
+            meas = skia.PathMeasure(out, False)
+            hit = self._routes[key] = (path, placing, meas, meas.getLength())
+        return hit[2], hit[3]
+
+    def _on_path(self, L: Layer, t, T, g, lay: Layout, font: skia.Font, track: float = 0.0) -> PathText:
+        """Where each letter of text layer L stands on its textPath at t: on its line's baseline, turned to the path
+        where the letter's middle is. Line 0 sits on the path and the lines after it below. An open path leaves out
+        the letters past its ends; a closed one takes them round again."""
+        meas, n = self._text_route(L, T)
+        off = float(g("textPath offset", 0.0))
+        key = (off, track, meas)
+        hit = self._pathtext.get(L.id)
+        if hit is not None and hit.lay is lay and hit.key == key:
+            return hit
+        k = {"start": 0.0, "center": 0.5, "end": 1.0}.get(L.raw["textPath"].get("align", "start"), 0.0)
+        start = off * n - k * lay.w
+        m = font.getMetrics()
+        c00 = lay.runs[0].char0 if lay.runs else 0
+        frames: dict = {}
+        parts = []
+        for r in lay.runs:
+            w = self._measure(font, r.text, r.rtl, r.ctx)
+            x = r.x + track * (r.char0 - c00)
+            f = frames[id(r)] = _on_contour(meas, n, start + x + w / 2, -w / 2, r.line * lay.lh)
+            if f is None:
+                continue
+            co, si, tx, ty = f
+            corners = [(tx + co * gx - si * gy, ty + si * gx + co * gy)
+                       for gx, gy in ((0.0, m.fAscent), (w, m.fAscent), (0.0, m.fDescent), (w, m.fDescent))]
+            parts.append((min(p[0] for p in corners), min(p[1] for p in corners), max(p[0] for p in corners),
+                          max(p[1] for p in corners)))
+        bounds = ((min(p[0] for p in parts), min(p[1] for p in parts), max(p[2] for p in parts),
+                   max(p[3] for p in parts)) if parts else (0.0, 0.0, -1.0, -1.0))
+        hit = self._pathtext[L.id] = PathText(lay, key, frames, bounds, parts, meas, n, start)
+        return hit
+
+    def _path_run(self, c, onpath: PathText, r: Run, pcs, text: str, font: skia.Font, paint: tuple, ink, spaint,
+                  batch: dict):
+        """Run r of a text on a path (its text so far): drawn as it is, its glyphs go in the batch for the unit's
+        blob; shaped or from another font, or taken by a combining group, it is drawn in its own turned frame."""
+        f = onpath.frames.get(id(r))
+        if f is None or not text:
+            return
+        co, si, tx, ty = f
+        if text != r.text:
+            pcs = self._pieces(font, text, r.rtl, r.ctx)
+        if pcs is None and self._capture is None:
+            letters, xforms = batch.setdefault(paint, ([], []))
+            letters.append(text)
+            xforms.extend(skia.RSXform(co, si, tx + co * gx, ty + si * gx)
+                          for gx in font.getXPos(font.textToGlyphs(text)))
+            return
+        m = skia.Matrix.MakeAll(co, -si, tx, si, co, ty, 0, 0, 1)
+        if self._capture is not None:  # a combining group takes the letters' outlines
+            out = skia.Path()
+            self._letters(pcs, text, 0.0, 0.0, font).transform(m, out)
+            self._take(c, out)
+            return
+        c.save()
+        c.concat(m)
+        if spaint is not None:
+            self._draw_pieces(c, pcs, text, 0.0, 0.0, font, spaint)
+        self._draw_pieces(c, pcs, text, 0.0, 0.0, font, ink)
+        c.restore()
+
+    def off_path(self, L: Layer) -> tuple[float, float] | None:
+        """(the text's length, the path's) when text layer L's textPath is open and too short for it at its start,
+        else None."""
+        t, T = 0.0, L.t_in
+        g = lambda name, default=None: L.get(name, t, T, 0, default)  # noqa: E731
+        lay = self._text_layout(L, t, T, g, self._text_of(L, t, T, g))
+        meas, n = self._text_route(L, T)
+        return (lay.w, n) if not meas.isClosed() and lay.w > n + 0.5 else None
 
     def _draw_captions(self, c, L, t, T, g, box, reveal, mods):
         cues = L.raw.get("cues") or []

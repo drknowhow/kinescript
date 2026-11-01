@@ -277,6 +277,12 @@ def _draw_depth(c, depths: list, ox: float, oy: float, tw: float, th: float):
     c.drawImage(skia.Image.fromarray(px, skia.kRGBA_8888_ColorType), ox, oy)
 
 
+def _area(a: list, b: list | None = None) -> float:
+    """The area of rect a (left, top, right, bottom), or of where it meets rect b."""
+    b = b or a
+    return max(0.0, min(a[2], b[2]) - max(a[0], b[0])) * max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+
+
 def _behind(boxes: dict, lid: str, a: list, w: int, h: int) -> str | None:
     """The shape or media layer drawn before `lid` that covers most of its box, if any.
     `boxes` is in draw order, so every entry before `lid` is underneath it. Layers that fill the
@@ -787,6 +793,11 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
                 iy = min(a[3], b2[3]) - max(a[1], b2[1])
                 if ix > 4 and iy > 4:
                     area = min((a[2] - a[0]) * (a[3] - a[1]), (b2[2] - b2[0]) * (b2[3] - b2[1])) or 1
+                    pa, pb = r.letters.get(texts[i][0]), r.letters.get(texts[j][0])
+                    if pa or pb:  # a text on a path: its letters, not the box round the curve they stand on
+                        pa, pb = pa or [a], pb or [b2]
+                        area = min(sum(_area(p) for p in pa), sum(_area(p) for p in pb)) or 1
+                        ix, iy = sum(_area(p, q) for p in pa for q in pb), 1.0
                     if ix * iy / area > 0.15:
                         add("warning", "text-overlap", f"{texts[i][0]}+{texts[j][0]}", T,
                             "two text layers overlap", "offset one of them or separate them in time")
@@ -891,6 +902,12 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
     for layer in scene.all_layers():
         if not (layer.type in ("text", "counter", "captions") or layer.type == "model" and layer.raw.get("shape") == "text"):
             continue
+        over = r.off_path(layer) if layer.onpath is not None else None
+        if over:
+            add("warning", "text-off-path", layer.id, layer.t_in, f"the text is {over[0]:.0f} px long and its path "
+                f"{over[1]:.0f} px, so the letters past the path's end are not drawn",
+                "make the text or its size smaller, the path longer, or close the path to take the text round",
+                until=layer.t_out)
         missing, emoji, flat = r.undrawable(layer)
         if missing:
             them = "it" if len(missing) == 1 else "them"

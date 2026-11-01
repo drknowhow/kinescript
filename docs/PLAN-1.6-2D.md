@@ -259,6 +259,11 @@ Status (2026-11-01): moves to 1.6.1 (decision 1).
 
 - Text on a path: `textPath` (`{"d": "...", "offset": [[0, 0], [2, 1]], "align": "start"}`) lays the letters along a
   curve, each turned to it, through `TextBlob.MakeFromRSXform`. Split units and their keys still apply.
+  Status (2026-11-01): in its own PR, with `textpath.json`. `d` is also `"#id"` of a path, line, arrow or polygon in
+  the same group, taken where that layer draws it, and counters take `textPath` too. Each letter turns where its
+  middle is. A closed path takes the letters round again; an open one leaves out those past its ends and warns
+  `text-off-path`. `anchor` is ignored on a path, and `text-overlap` reads each letter's rect rather than the box
+  round the curve.
 - Per-unit keys `unitFill` and `unitBlur`, and an expression helper `sweep(i, n, p, soft)` that is 1 for units the
   sweep has passed and 0 for the rest, with a soft edge, so a highlight running across a line is one expression:
   `"unitFill": "=mix('#f2f0e8', '#ff633f', sweep(i, n, p, 3))"`. `n` (the unit count) joins `i` in unit expressions.
