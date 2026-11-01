@@ -19,8 +19,8 @@ from .timing import Timeline, parse_clock
 
 LAYER_TYPES = {"rect", "circle", "ellipse", "path", "line", "arrow", "polygon", "text", "counter",
                "image", "video", "group", "captions", "shader", "model", "particles"}
-STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "children", "layers", "src", "trim", "texture",
-          "speed", "fit", "text", "cues", "d", "points", "font", "split", "format", "align", "anchor",
+STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "emphasis", "children", "layers", "src", "trim",
+          "texture", "speed", "fit", "text", "cues", "d", "points", "font", "split", "format", "align", "anchor",
           "blend", "clip", "mode", "volume", "hidden", "note", "words", "stops", "cap", "join", "loop",
           "allowOffscreen", "style", "audio", "shadow", "box", "fx", "fill", "stroke", "emph", "active",
           "sksl", "preset", "uniforms", "caret", "case", "italic", "smooth", "closed", "focus", "use",
@@ -71,7 +71,7 @@ def _where(owner, message: str) -> str:
 
 
 class Layer:
-    __slots__ = ("id", "type", "raw", "t_in", "t_out", "props", "enter", "exit", "children", "parent",
+    __slots__ = ("id", "type", "raw", "t_in", "t_out", "props", "enter", "exit", "emphasis", "children", "parent",
                  "index", "src", "video", "ahead", "ctx", "parts", "copies", "xf", "along", "turn", "clock",
                  "rough", "morph", "mask", "looks", "warp", "particles", "seq", "onpath")
 
@@ -80,6 +80,7 @@ class Layer:
         self.t_in = self.t_out = 0.0
         self.props: dict[str, Prop] = {}
         self.enter = self.exit = None
+        self.emphasis: list[P.Emphasis] = []
         self.children: list[Layer] = []
         self.src: str | None = None
         self.video: media.VideoSource | None = None
@@ -557,6 +558,12 @@ class Scene:
                               f"wholly outside {within} ({lo:.3f}s to {hi:.3f}s), so it is never shown",
                               "move at into that span, or set \"hidden\": true to keep it off on purpose")
                     continue
+                for k, e in enumerate(L.emphasis):
+                    if e.at >= L.dur - 1e-9:
+                        where = f"emphasis[{k}]" if isinstance(L.raw.get("emphasis"), list) else "emphasis"
+                        self.note("warning", "late-emphasis", L.id, f"{where} ({'+'.join(e.names)}) starts {e.at:g}s "
+                                  f"into '{L.id}', which lasts {L.dur:.3f}s, so it never plays",
+                                  f"give it an at under {L.dur:.3f}, or make the layer last longer")
                 if L.clock is None:  # a group with a clock of its own shows its children at other times
                     walk(L.children, max(lo, L.t_in), min(hi, L.t_out), f"its group '{L.id}'")
 
@@ -973,6 +980,7 @@ class Scene:
                         layer.props["u_" + un] = compile_prop("u_" + un, uv, pctx)
                 layer.enter = P.parse(raw.get("enter"), key="enter")
                 layer.exit = P.parse(raw.get("exit"), key="exit")
+                layer.emphasis = P.parse_emphasis(raw.get("emphasis"))
             except (ValueError, SyntaxError) as e:
                 raise SceneError(f"layer '{lid}': {e}", layer=lid) from e
             out.append(layer)

@@ -1221,6 +1221,9 @@ class Renderer:
                 mods = mods.combine(m.mods(p))
         if L.exit and d - t < L.exit.dur:
             mods = mods.combine(L.exit.mods((d - t) / L.exit.dur))
+        for e in L.emphasis:
+            if not (split and e.stagger):  # a staggered one plays unit by unit (_draw_text)
+                mods = mods.combine(e.mods(t))
         alpha = max(0.0, min(1.0, float(g("opacity")) * mods.alpha))
         if alpha <= 0.002:
             return
@@ -1504,7 +1507,8 @@ class Renderer:
         """[from, to, None]: the scene times in which every layer inside group L draws the same on each frame (none
         when to is not after from), or [] when one never does. Each is a shape or a group with constant keys, after
         its enter (its group's staggered one too) and before its exit, with nothing that draws it apart from the rest:
-        a mask, an effect, a blend, repeat, a route, rough, a morph or a clock."""
+        a mask, an effect, a blend, repeat, a route, rough, a morph or a clock. An emphasis holds it back until its
+        last cycle ends."""
         if L.clock is not None or L.raw.get("combine") or not L.children:
             return []
         lo, hi, todo = -math.inf, math.inf, list(L.children)
@@ -1525,6 +1529,8 @@ class Renderer:
                 lo = max(lo, K.parent.t_in + K.turn + K.parent.enter.dur + 1e-9)
             if K.exit:
                 hi = min(hi, K.t_out - K.exit.dur - 1e-9)
+            if K.emphasis:  # still once its last emphasis has played
+                lo = max(lo, K.t_in + max(e.end for e in K.emphasis) + 1e-9)
             todo.extend(K.children)
         return [lo, hi, None]
 
@@ -1540,7 +1546,7 @@ class Renderer:
                 r.join(self._ink)
         if self._copying and L.id in self.boxes:  # another copy of it: one box holds them all
             r.join(skia.Rect(*self.boxes[L.id]["rect"]))
-        sc = 1.0 if drawn else math.sqrt(abs(m.getScaleX() * m.getScaleY())) or abs(m.getSkewX())
+        sc = 1.0 if drawn else math.sqrt(abs(m.getScaleX() * m.getScaleY() - m.getSkewX() * m.getSkewY()))
         o = m.mapXY(0, 0)  # its anchor, where x and y put it
         info = {"rect": [round(r.left(), 1), round(r.top(), 1), round(r.right(), 1), round(r.bottom(), 1)],
                 "pos": [round(o.x(), 1), round(o.y(), 1)], "alpha": round(alpha * parent_alpha, 3),
@@ -3269,6 +3275,8 @@ class Renderer:
         turn = None  # each unit's turn in the stagger, when it is not its place in the text
         if enter is not None and enter.order != "start":
             turn = P.turns(len(units), enter.order, enter.seed)
+        waves = [(e, None if e.order == "start" else P.turns(len(units), e.order, e.seed))
+                 for e in L.emphasis if e.stagger] if split else []  # emphases that run across the units
         typing = enter is None and L.enter and "type" in L.enter.names and t < L.enter.dur
         visible_chars = lay.nchars * reveal if (reveal < 1 or typing) else None
         track = mods.track
@@ -3286,6 +3294,8 @@ class Renderer:
                 p = (t - (ui if turn is None else turn[ui]) * stagger) / enter.dur if enter.dur else 1.0
                 if p < 1:
                     um = enter.mods(p)
+            for e, order in waves:
+                um = um.combine(e.mods(t - (ui if order is None else order[ui]) * e.stagger))
             if um.alpha <= 0.002:
                 continue
             ux = um.dx + (float(fx(ui)) if fx else 0)

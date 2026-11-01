@@ -50,6 +50,10 @@ BOX_ALIAS = {"color": "fill", "colour": "fill", "background": "fill", "bg": "fil
 MOTION = {"name", "dur", "ease", "stagger", "dist", "from", "amount", "deg", "order", "seed", "bounces", "count"}
 MOTION_ALIAS = {"type": "name", "preset": "name", "duration": "dur", "easing": "ease", "distance": "dist",
                 "delay": "stagger"}
+EMPHASIS = {"name", "at", "dur", "repeat", "loop", "ease", "stagger", "order", "seed", "dist", "amount", "deg"}
+EMPHASIS_ALIAS = {"type": "name", "preset": "name", "duration": "dur", "easing": "ease", "distance": "dist",
+                  "times": "repeat", "count": "repeat", "repeats": "repeat", "start": "at", "time": "at",
+                  "loops": "loop"}
 TWEEN = {"from", "to", "dur", "delay", "ease", "keys", "smooth"}
 TWEEN_ALIAS = {"duration": "dur", "easing": "ease", "start": "from", "end": "to", "begin": "from"}
 GRADIENT = {"linear", "radial", "sweep", "angle", "stops"}
@@ -140,7 +144,8 @@ SHADOWS_ALIAS = {"alpha": "opacity", "strength": "opacity", "softness": "soft", 
 GROUND_ALIAS = {"alpha": "opacity", "strength": "opacity", "softness": "blur", "radius": "blur", "level": "y"}
 
 COMMON = {"id", "type", "at", "dur", "until", "x", "y", "anchor", "opacity", "scale", "scaleX", "scaleY", "rotate",
-          "blur", "blend", "shadow", "fx", "enter", "exit", "hidden", "allowOffscreen", "z", "rotateX", "rotateY",
+          "blur", "blend", "shadow", "fx", "enter", "exit", "emphasis", "hidden", "allowOffscreen", "z", "rotateX",
+          "rotateY",
           "backface", "fixed", "sound", "along", "mask", "glow", "outline", "innerShadow", "displace"}
 # Layer effects: their keys, the key a number (or a colour) stands for, the keys that animate and their aliases.
 LOOKS = {
@@ -224,7 +229,8 @@ ALIAS = {"color": "fill", "colour": "fill", "fillColor": "fill", "backgroundColo
          "textAlign": "align", "text_align": "align", "letter_spacing": "letterSpacing", "tracking": "letterSpacing",
          "line_height": "lineHeight", "leading": "lineHeight", "max_width": "maxWidth", "wrap": "maxWidth",
          "animation": "enter", "animate": "enter", "entrance": "enter", "in": "enter", "intro": "enter",
-         "out": "exit", "outro": "exit", "exitAnimation": "exit", "transform": None, "kids": "children",
+         "out": "exit", "outro": "exit", "exitAnimation": "exit", "emphasize": "emphasis", "emphasise": "emphasis",
+         "attention": "emphasis", "emphases": "emphasis", "transform": None, "kids": "children",
          "items": "children", "elements": "children", "visible": None, "zIndex": None,
          "rotationX": "rotateX", "rotationY": "rotateY", "rotateZ": "rotate", "rotationZ": "rotate",
          "translateZ": "z", "backfaceVisibility": "backface", "sfx": "sound", "audio": "sound",
@@ -307,6 +313,7 @@ REQUIRED = {"text": ("text",), "image": ("src", "frames", "sheet"), "video": ("s
             "model": ("shape", "parts", "src"), "particles": ("rate", "burst", "preset")}
 # Keys whose value is an object of their own: never a tween, even with a "from" key (a light's direction).
 OBJECTS = {"light", "lights", "env", "ground", "shadow", "shadows", "box", "fx", "uniforms", "sound", "enter", "exit",
+           "emphasis",
            "parts", "transition", "texture", "edges", "animation", "repeat", "along", "rough", "mask", "glow",
            "outline", "innerShadow", "displace", "textPath"}
 # Props that cannot be below 0, and the least each may be.
@@ -733,6 +740,37 @@ def _motion(raw: dict, key: str, rep: Report, lid):
             rep.add("error", "bad-motion", lid, f"{key}: " + unknown("motion", n, PRESETS))
 
 
+def _emphasis(raw: dict, rep: Report, lid):
+    """emphasis: a name, an object or a list of them, each with numbers it can use and a name it knows."""
+    from .presets import EMPHASES, canonical_emphasis, emphasis_problem
+    v = raw.get("emphasis")
+    if v in (None, False, "", []):
+        return
+    for k, item in enumerate(v if isinstance(v, list) else [v]):
+        where = f"emphasis[{k}]: " if isinstance(v, list) else "emphasis: "
+        if isinstance(item, str):
+            item = {"name": item}
+        if not isinstance(item, dict):
+            rep.add("error", "bad-value", lid, f"{where}each is a name like \"pulse\" or an object "
+                    f"{{\"name\": \"pulse\", \"at\": 1.2}}, got {type(item).__name__}")
+            continue
+        _keys(item, EMPHASIS, EMPHASIS_ALIAS, rep, lid, where)
+        for key, x in item.items():
+            if why := emphasis_problem(key, x):
+                rep.add("error", "bad-ease" if key == "ease" else "bad-value", lid, where + why)
+        for n in str(item.get("name", "pulse")).split("+"):
+            n = n.strip()
+            if n and canonical_emphasis(n) is None:
+                rep.add("error", "bad-motion", lid, where + unknown("emphasis", n, EMPHASES))
+        if item.get("stagger") and not (raw.get("split") and raw.get("type") in ("text", "counter")):
+            rep.add("warning", "ignored-key", lid, f"{where}stagger plays it unit by unit across a split text, and "
+                    "this layer is not one, so it plays once on the whole layer",
+                    "drop stagger, or split the text: \"split\": \"chars\"")
+        if item.get("loop") is True and item.get("repeat") is not None:
+            rep.add("warning", "ignored-key", lid, f"{where}loop plays it until the layer ends, so repeat is not read",
+                    "drop repeat, or loop")
+
+
 def _id(obj: dict, rep: Report, path: str) -> str:
     """The id issues are reported under: the layer's or audio entry's own id, or its path when it has none."""
     v = obj.get("id")
@@ -900,6 +938,7 @@ def _layer(raw, rep: Report, path: str, comps: dict):
                 rep.add("error", "bad-component", lid, unknown("component", name, list(BUILTIN) + list(comps)))
         for key in ("enter", "exit"):
             _motion(raw, key, rep, lid)
+        _emphasis(raw, rep, lid)
         _layer_sound(raw, rep, lid)
         _timing(raw, rep, lid)
         return  # parameters are checked when the component expands (components.Params)
@@ -983,6 +1022,7 @@ def _layer(raw, rep: Report, path: str, comps: dict):
     _along(raw, rep, lid)
     _text_path(raw, rep, lid)
     _effects(raw, rep, lid)
+    _emphasis(raw, rep, lid)
     _mask(raw, rep, lid)
     _looks(raw, rep, lid, t)
     _layer_sound(raw, rep, lid)

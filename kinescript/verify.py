@@ -495,9 +495,9 @@ def curve(src, spec: str) -> dict:
             notes.append(f"'{lid}' is not shown at any frame")
         elif top is None:
             notes.append(f"{key} holds still at every frame '{lid}' is shown")
-        if (L.enter or L.exit or L.along is not None) and set(names) & {*PLACED, "opacity"}:
-            notes.append(f"its enter, exit or along changes how it is drawn as well: this is {key} as its keys set "
-                         "it; kine look --trails shows where it is drawn")
+        if (L.enter or L.exit or L.emphasis or L.along is not None) and set(names) & {*PLACED, "opacity"}:
+            notes.append(f"its enter, exit, emphasis or along changes how it is drawn as well: this is {key} as its "
+                         "keys set it; kine look --trails shows where it is drawn")
         if notes:
             out["notes"] = notes
         return out

@@ -1,0 +1,53 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 6, "bg": "#0a0c10"},
+  "layers": [
+    {"id": "title", "type": "text", "text": "ATTENTION, PLEASE", "x": "50%", "y": "14%", "size": 72,
+     "weight": 700, "letterSpacing": 8, "fill": "$sheet", "split": "chars", "at": 0.1,
+     "enter": {"name": "rise", "dur": 0.5, "stagger": 0.03},
+     "emphasis": {"name": "bob", "at": 1.2, "dur": 0.5, "dist": 22, "stagger": 0.04}},
+    {"id": "subtitle", "type": "text", "text": "\"emphasis\": a motion in the middle of a layer's life",
+     "font": "$mono", "size": 30, "x": "50%", "y": "22%", "fill": "$annotation", "at": 0.4,
+     "enter": {"name": "fade", "dur": 0.5}},
+
+    {"id": "pulse", "type": "group", "x": "14%", "y": "46%", "anchor": "center", "w": 300, "h": 150,
+     "radius": 22, "fill": "$cue", "at": 0.3, "enter": {"name": "fade", "dur": 0.4},
+     "emphasis": {"name": "pulse", "loop": true, "dur": 1.2}, "children": [
+      {"id": "pulse-name", "type": "text", "text": "pulse", "font": "$mono", "size": 40, "fill": "$void"}]},
+    {"id": "heartbeat", "type": "group", "x": "32%", "y": "46%", "anchor": "center", "w": 300, "h": 150,
+     "radius": 22, "fill": "$sheet", "at": 0.38, "enter": {"name": "fade", "dur": 0.4},
+     "emphasis": {"name": "heartbeat", "loop": true, "dur": 1.4}, "children": [
+      {"id": "heartbeat-name", "type": "text", "text": "heartbeat", "font": "$mono", "size": 40, "fill": "$void"}]},
+    {"id": "shake", "type": "group", "x": "50%", "y": "46%", "anchor": "center", "w": 300, "h": 150,
+     "radius": 22, "fill": "$key", "at": 0.46, "enter": {"name": "fade", "dur": 0.4},
+     "emphasis": [{"name": "shake", "at": 1.4}, {"name": "shake", "at": 3.6}], "children": [
+      {"id": "shake-name", "type": "text", "text": "shake", "font": "$mono", "size": 40, "fill": "$void"}]},
+    {"id": "wiggle", "type": "group", "x": "68%", "y": "46%", "anchor": "center", "w": 300, "h": 150,
+     "radius": 22, "fill": "$track", "at": 0.54, "enter": {"name": "fade", "dur": 0.4},
+     "emphasis": [{"name": "wiggle", "at": 1.8}, {"name": "wiggle", "at": 4.0}], "children": [
+      {"id": "wiggle-name", "type": "text", "text": "wiggle", "font": "$mono", "size": 40, "fill": "$sheet"}]},
+    {"id": "wobble", "type": "group", "x": "86%", "y": "46%", "anchor": "center", "w": 300, "h": 150,
+     "radius": 22, "fill": "$cue", "at": 0.62, "enter": {"name": "fade", "dur": 0.4},
+     "emphasis": [{"name": "wobble", "at": 2.2}, {"name": "wobble", "at": 4.4}], "children": [
+      {"id": "wobble-name", "type": "text", "text": "wobble", "font": "$mono", "size": 40, "fill": "$void"}]},
+    {"id": "float", "type": "group", "x": "14%", "y": "74%", "anchor": "center", "w": 300, "h": 150,
+     "radius": 22, "fill": "$track", "at": 0.7, "enter": {"name": "fade", "dur": 0.4},
+     "emphasis": {"name": "float", "loop": true, "dur": 2.4}, "children": [
+      {"id": "float-name", "type": "text", "text": "float", "font": "$mono", "size": 40, "fill": "$sheet"}]},
+    {"id": "bob", "type": "group", "x": "32%", "y": "74%", "anchor": "center", "w": 300, "h": 150,
+     "radius": 22, "fill": "$key", "at": 0.78, "enter": {"name": "fade", "dur": 0.4},
+     "emphasis": {"name": "bob", "loop": true}, "children": [
+      {"id": "bob-name", "type": "text", "text": "bob", "font": "$mono", "size": 40, "fill": "$void"}]},
+    {"id": "flash", "type": "group", "x": "50%", "y": "74%", "anchor": "center", "w": 300, "h": 150,
+     "radius": 22, "fill": "$sheet", "at": 0.86, "enter": {"name": "fade", "dur": 0.4},
+     "emphasis": [{"name": "flash", "at": 2.6}, {"name": "flash", "at": 4.8}], "children": [
+      {"id": "flash-name", "type": "text", "text": "flash", "font": "$mono", "size": 40, "fill": "$void"}]},
+    {"id": "tada", "type": "group", "x": "68%", "y": "74%", "anchor": "center", "w": 300, "h": 150,
+     "radius": 22, "fill": "$cue", "at": 0.94, "enter": {"name": "fade", "dur": 0.4},
+     "emphasis": [{"name": "tada", "at": 3.0}], "children": [
+      {"id": "tada-name", "type": "text", "text": "tada", "font": "$mono", "size": 40, "fill": "$void"}]},
+    {"id": "spin", "type": "group", "x": "86%", "y": "74%", "anchor": "center", "w": 300, "h": 150,
+     "radius": 22, "fill": "$sheet", "at": 1.02, "enter": {"name": "fade", "dur": 0.4},
+     "emphasis": {"name": "spin", "loop": true, "dur": 2, "at": 1}, "children": [
+      {"id": "spin-name", "type": "text", "text": "spin", "font": "$mono", "size": 40, "fill": "$void"}]}
+  ]
+}
