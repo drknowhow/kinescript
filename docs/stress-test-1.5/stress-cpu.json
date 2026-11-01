@@ -1,0 +1,92 @@
+[
+ {
+  "scene": "models-30",
+  "ok": true,
+  "load_s": 0.036,
+  "frames": 120,
+  "w": 1920,
+  "h": 1080,
+  "check_s": 2.02,
+  "errors": 0,
+  "warnings": 1,
+  "codes": [
+   "triangle-budget"
+  ],
+  "render_s": 12.48,
+  "fps": 9.6,
+  "workers": 2,
+  "size_mb": 0.93,
+  "audio": false,
+  "frames_ok": true,
+  "frames_out": 120,
+  "peak_mb": 294,
+  "total_s": 15.03
+ },
+ {
+  "scene": "stage-16",
+  "ok": true,
+  "load_s": 0.003,
+  "frames": 120,
+  "w": 1920,
+  "h": 1080,
+  "check_s": 4.53,
+  "errors": 0,
+  "warnings": 1,
+  "codes": [
+   "triangle-budget"
+  ],
+  "render_s": 42.2,
+  "fps": 2.8,
+  "workers": 2,
+  "size_mb": 0.72,
+  "audio": false,
+  "frames_ok": true,
+  "frames_out": 120,
+  "peak_mb": 718,
+  "total_s": 47.2
+ },
+ {
+  "scene": "textured-100k",
+  "ok": true,
+  "load_s": 0.553,
+  "frames": 120,
+  "w": 1920,
+  "h": 1080,
+  "check_s": 3.95,
+  "errors": 0,
+  "warnings": 0,
+  "codes": [],
+  "render_s": 41.86,
+  "fps": 2.9,
+  "workers": 2,
+  "size_mb": 0.41,
+  "audio": false,
+  "frames_ok": true,
+  "frames_out": 120,
+  "peak_mb": 600,
+  "total_s": 46.99
+ },
+ {
+  "scene": "dof-stage",
+  "ok": true,
+  "load_s": 0.003,
+  "frames": 120,
+  "w": 1920,
+  "h": 1080,
+  "check_s": 49.8,
+  "errors": 0,
+  "warnings": 1,
+  "codes": [
+   "slow-depth-of-field"
+  ],
+  "render_s": 209.53,
+  "fps": 0.6,
+  "workers": 2,
+  "size_mb": 0.54,
+  "audio": false,
+  "frames_ok": true,
+  "frames_out": 120,
+  "peak_mb": 1883,
+  "total_s": 259.81
+ }
+]
