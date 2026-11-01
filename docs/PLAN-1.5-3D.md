@@ -244,9 +244,16 @@ nine rounds: a floor reaching to just in front of the camera took eight.
   the part's number). The mesh merges again when a moving part's values change, kept by those values; a part's
   primitive is kept at its size, so a move places the same mesh again. Material slots come from the parts' raw
   keys, so animating a colour never changes how many slots there are; a slot's values are read for its first part.
+  Merged (#77).
 - `repeat`: `{"count": n, "x": "...", "y": "...", "z": "...", "rotateY": "...", "scale": "...", "fill": "..."}`,
   with expressions over `i`, `n` and `t` in the existing AST-checked expression engine. The copies merge into one
   mesh and sort together, so a waving grid of 400 cubes is one layer.
+  Built on branch `repeat-copies`: `props.Copies` evaluates each key for every copy, once for keys that read no
+  time; `render3d._copies` places the model's mesh (shape, parts or a posed file) for each and merges them, keeping
+  the triangles while the base mesh holds. Each distinct fill takes a material slot (64 in all, `COPY_SLOTS`), the
+  rest snap to the nearest kept colour; `_effect`'s if-chain compiles for 64 slots on the GPU. Edges and creases
+  come from one copy (`mesh.tiled`). Expressions gained `hsl` and `mix`. `examples/cubes.json` (144 copies, 15,552
+  triangles): 23.3 ms a frame at 1080p on the GPU, 151 ms on the CPU; `bench/same.py` finds no frame that differs.
 - `kine probe` on a model file lists its animations with durations, skins, morph targets, textures and texture
   coordinate sets.
 - Check rules: `unknown-animation` (naming the clips the file has), `skin-influences` (a vertex with more than
@@ -292,6 +299,7 @@ nine rounds: a floor reaching to just in front of the camera took eight.
   whose body takes `label.png` as an embedded base colour texture, under a steel lid, rim and ring pull. It turns on
   a table in a stage with shadows and depth of field, two more cans out of focus behind it. 180 frames render in
   16.0 s on the GPU (6 workers). `character.json` and `cubes.json` wait for Phase 5.
+  `cubes.json` came with `repeat` (branch `repeat-copies`): a ripple through 144 cubes in one model layer.
 - README 3D section and its limitations line, `kine docs`, site/, CHANGELOG with measured numbers, version 1.5.0.
   A 3D shot in the launch video is optional and means re-measuring the promo.
   Built on branch `release-1.5.0`: the README's model files and limits, the site's 3D section rewritten for 1.5

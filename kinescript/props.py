@@ -13,6 +13,7 @@ A property is one of:
 from __future__ import annotations
 
 import ast
+import colorsys
 import math
 import re
 from typing import Any, Callable
@@ -47,9 +48,26 @@ def noise(x: float, seed: float = 0.0) -> float:
     return h(i) * (1 - u) + h(i + 1) * u
 
 
+def _hex(c) -> str:
+    out = "#" + "".join(f"{round(max(0.0, min(1.0, float(v))) * 255):02x}" for v in c[:3])
+    return out + (f"{round(max(0.0, min(1.0, float(c[3]))) * 255):02x}" if len(c) > 3 and c[3] < 1 else "")
+
+
+def hsl(h: float, s: float = 0.7, l: float = 0.55) -> str:  # noqa: E741 - the name everyone knows
+    """A colour from its hue in degrees (0 red, 120 green, 240 blue, and round again), saturation and lightness
+    from 0 to 1, as #rrggbb."""
+    return _hex(colorsys.hls_to_rgb((float(h) / 360.0) % 1.0, max(0.0, min(1.0, float(l))),
+                                    max(0.0, min(1.0, float(s)))))
+
+
+def mix(a, b, t: float) -> str:
+    """The colour t of the way from colour a to colour b (t from 0 to 1), mixed as keyframes mix a fill."""
+    return _hex(C.mix(C.parse(a), C.parse(b), max(0.0, min(1.0, float(t)))))
+
+
 EXPR_ENV: dict[str, Any] = {k: getattr(math, k) for k in (
     "sin", "cos", "tan", "pi", "sqrt", "floor", "ceil", "exp", "log", "atan2", "hypot", "tau")}
-EXPR_ENV.update(abs=abs, min=min, max=max, round=round, noise=noise,
+EXPR_ENV.update(abs=abs, min=min, max=max, round=round, noise=noise, hsl=hsl, mix=mix,
                 clamp=lambda v, a=0.0, b=1.0: max(a, min(b, v)),
                 lerp=lambda a, b, t: a + (b - a) * t,
                 wiggle=lambda freq, amp, t, seed=0: noise(t * freq, seed) * amp,
@@ -279,3 +297,85 @@ def compile_prop(name: str, raw, ctx: Ctx) -> Prop:
             return pts[-1][1]
         return Prop(False, fn=fk, keys=points)
     return Prop(True, _norm(length(raw, name, ctx)))
+
+
+PLACE = ("x", "y", "z", "rotateX", "rotateY", "rotate", "scale")  # where a copy of a model is (Copies)
+PLACE_DEFAULT = {k: (1.0 if k == "scale" else 0.0) for k in PLACE}
+_MOVES = {"t", "p", "T"}  # an expression reading none of these gives each copy the same value at every frame
+
+
+class Copies:
+    """A model's "repeat": `n` copies of its mesh, each placed by x, y, z, rotateX, rotateY, rotate and scale and
+    coloured by fill. A key is a number (fill: a colour), a list taken in turn (copy i takes item i, round again),
+    or an expression over i (the copy, from 0), n and the layer's t, d, p and T. Keys that do not change over time
+    are worked out once, so a still grid of 1000 copies costs nothing a frame."""
+    __slots__ = ("n", "keys", "env", "still")
+
+    def __init__(self, raw: dict, ctx: Ctx):
+        self.n = int(raw.get("count", 1))
+        self.env = dict(EXPR_ENV, W=ctx.w, H=ctx.h, fps=ctx.fps, n=self.n)
+        self.keys: dict[str, tuple] = {}  # key -> ("expr", code, moves) | ("list", values) | ("const", value)
+        self.still: dict[str, list] = {}
+        for k in (*PLACE, "fill"):
+            v = raw.get(k)
+            if v is None:
+                continue
+            if isinstance(v, str) and v.startswith("="):
+                try:
+                    code = compile_expr(v[1:], f"repeat {k}", set(self.env) | {"t", "d", "p", "T", "i"})
+                except SyntaxError as e:
+                    raise ValueError(f"repeat {k}: '{v}' is not an expression Kinescript reads ({e.msg})") from None
+                self.keys[k] = ("expr", code, bool(_MOVES & set(code.co_names)))
+            elif isinstance(v, list):
+                self.keys[k] = ("list", [self._value(k, x, j) for j, x in enumerate(v)])
+            else:
+                self.keys[k] = ("const", self._value(k, v, 0))
+
+    @staticmethod
+    def _value(k: str, v, i: int):
+        """v as copy i's value of key k: a finite number, or for fill a colour as (r, g, b, a)."""
+        if k == "fill":
+            if isinstance(v, tuple) and len(v) == 4:
+                return v
+            if not C.is_color(v):
+                raise ValueError(f"repeat fill gives {_show(v)} for copy {i}, not a colour")
+            return C.parse(v)
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not _finite(v):
+            raise ValueError(f"repeat {k} gives {_show(v)} for copy {i}, not a finite number")
+        return float(v)
+
+    def _column(self, k: str, t: float, d: float, T: float) -> list:
+        kind, *spec = self.keys[k]
+        if kind == "const":
+            return [spec[0]] * self.n
+        if kind == "list":
+            return [spec[0][i % len(spec[0])] for i in range(self.n)]
+        loc = dict(self.env, t=t, d=d, p=(t / d if d else 0.0), T=T)
+        out = []
+        for i in range(self.n):
+            loc["i"] = i
+            try:
+                v = eval(spec[0], _GLOBALS, loc)
+            except OverflowError:
+                raise ValueError(f"repeat {k} gives a number too large for a float for copy {i}") from None
+            except (ArithmeticError, ValueError, TypeError) as e:
+                raise ValueError(f"repeat {k} failed for copy {i}: {type(e).__name__}: {e}") from None
+            out.append(self._value(k, v, i))
+        return out
+
+    def at(self, t: float, d: float, T: float = 0.0) -> tuple[dict[str, list], list | None]:
+        """Each copy's placement at the layer's time t (scene time T), as a list per key it sets, and each copy's
+        fill as (r, g, b, a), or None when it sets none."""
+        cols = {}
+        for k, spec in self.keys.items():
+            if spec[0] == "expr" and spec[2]:
+                cols[k] = self._column(k, t, d, T)
+            else:
+                if k not in self.still:
+                    self.still[k] = self._column(k, t, d, T)
+                cols[k] = self.still[k]
+        return {k: v for k, v in cols.items() if k != "fill"}, cols.get("fill")
+
+    def moves(self) -> bool:
+        """Whether a key changes over time."""
+        return any(s[0] == "expr" and s[2] for s in self.keys.values())

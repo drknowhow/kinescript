@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- `repeat` on a model layer draws copies of it, merged into one mesh that sorts as one model:
+  `{"count", "x", "y", "z", "rotateX", "rotateY", "rotate", "scale", "fill"}`, each a number (fill: a colour), a list
+  taken in turn, or an expression of `i` (the copy, from 0), `n` and the layer's times. Keys that read no time are
+  worked out once. A copy's fill recolours what the layer's fill would, each colour a material of its own up to 64;
+  past that a copy takes the nearest kept colour and `kine check` warns `repeat-colours`. Edges and crease angles are
+  worked out for one copy and repeated. `examples/cubes.json` waves 144 cubes (15,552 triangles) at 23.3 ms a frame
+  at 1080p on the GPU and 151 ms on the CPU, 0.73 ms of it placing and colouring the copies.
+- Expressions take `hsl(hue, sat, light)` and `mix(a, b, p)`, which give colours: `"fill": "=hsl(i * 30)"`.
 - Parts animate. A part's keys take keyframes and expressions like a layer's, with `i` its number from 0 in an
   expression: its place, turn, scale, size and material. The parts merge into one mesh again only on frames where a
   part moves or changes size, and the mesh is kept while their values hold; parts whose keys are plain values merge

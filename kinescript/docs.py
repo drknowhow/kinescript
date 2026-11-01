@@ -309,6 +309,16 @@ DEPTH AND CAMERA (3D)
             merged again on the frames where a part moves or changes size. Parts with the same
             material keys share a material, its values read for the first of them. A part takes
             the model's material keys it does not set. A model may have shape (or src), parts, or both.
+  repeat    {"count": 100, "x": "=(i % 10 - 4.5) * 50", "z": "=(floor(i / 10) - 4.5) * 50",
+            "y": "=sin(t * 2 + i) * 20", "rotateX", "rotateY", "rotate", "scale", "fill": "=hsl(i * 3.6)"}
+            draws count copies of the model (shape, parts or src, posed), up to 10,000, merged into
+            one mesh that sorts as one model. Each key is a number (fill: a colour), a list taken in
+            turn (copy i takes item i, round again) or an expression of i (the copy, from 0), n (the
+            count) and the layer's t, d, p and T. A copy is placed from the model's centre, as a part
+            is, and its fill recolours what the layer's fill would. Keys that read no time are worked
+            out once. A model draws at most 64 colours: past that, each copy takes the nearest kept
+            one (check warns repeat-colours). Copies cost what that many triangles cost: use "detail":
+            "low" for many.
   src       a model file: .glb or .gltf (glTF 2.0), or .obj with its .mtl. Colours, shine and metal
             come from the file; a fill on the layer recolours all of it. It fits inside w and/or h
             keeping its shape, else its longest side is 300 px. Node transforms, skins (up to four
@@ -409,7 +419,9 @@ ANIMATING A VALUE (any number or colour key)
                T = seconds since the scene started   i = unit index (split text)   W, H, fps
                helpers: sin cos tan sqrt abs min max round floor ceil exp log atan2 hypot pi tau
                         clamp(v, lo, hi)  lerp(a, b, p)  noise(x, seed)  wiggle(freq, amp, t, seed)
-                        ease("outCubic", p)
+                        ease("outCubic", p)  hsl(hue, sat, light)  mix(colour, colour, p)
+               hsl takes a hue in degrees and saturation and lightness from 0 to 1; hsl and mix give
+               a colour, so "fill": "=mix('#ff633f', '#7b5cff', p)" works.
   Colours animate too: "fill": {"from": "#ff633f", "to": "#b9f45d", "dur": 1}.
   Gradient fill: "fill": {"linear": [[0, 0], [1, 1]], "stops": ["#ff633f", "#7b5cff"]}
                  or {"radial": [0.5, 0.5, 0.6], "stops": [...]}; points are 0..1 of the layer box.
