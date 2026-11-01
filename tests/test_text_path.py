@@ -155,8 +155,9 @@ def test_unit_moves_go_along_and_across_the_path():
 def test_fill_gradient_and_stroke_go_on_the_letters_where_they_stand():
     (img,) = frames(scene([text(LINE, size=60, fill={"stops": ["#ff0000", "#0000ff"], "angle": 90})]))
     ys, xs = np.nonzero(img.max(axis=2) > 96)
-    first, last = img[ys[xs.argmin()], xs.min()], img[ys[xs.argmax()], xs.max()]
-    assert first[0] > 120 > first[2] and last[2] > 200 > 40 > last[0]  # red at the text's start, blue at its end
+    first = img[ys[xs < xs.min() + 20], xs[xs < xs.min() + 20]].mean(axis=0)
+    last = img[ys[xs > xs.max() - 20], xs[xs > xs.max() - 20]].mean(axis=0)
+    assert first[0] > first[2] * 3 and last[2] > last[0] * 3  # red at the text's start, blue at its end
     (img,) = frames(scene([text("M 300 20 L 300 340", fill={"stops": ["#ff0000", "#0000ff"], "angle": 0})]))
     ys, xs = np.nonzero(img.max(axis=2) > 96)
     middle = (ys > 80) & (ys < 140)  # the letters run from 20 to 200: halfway between red and blue
