@@ -63,6 +63,10 @@ def main(argv=None) -> int:
                     "the frames dimmed")
     lk.add_argument("--audio", action="store_true", help="draw the sound under the frames (a lane per role and the "
                     "mix, with levels, the duck and issues) and print its measurements")
+    lk.add_argument("--trails", action="store_true", help="draw each moving layer's path over the frames, a dot a "
+                    "frame, so their spacing shows speed, eases and stops")
+    lk.add_argument("--onion", type=int, default=0, metavar="N", help="draw the N frames before each frame over it, "
+                    "fainter the older they are")
     lk.add_argument("-o", "--out")
 
     ck = sub.add_parser("check", help="lint layout, timing, contrast, reading time and sound; prints JSON")
@@ -191,7 +195,7 @@ def _run(a) -> int:
         from .verify import contact_sheet
         out = a.out or _default_out(a.scene, "_sheet.png")
         _emit(dict(ok=True, **contact_sheet(a.scene, out, a.count, a.cols, a.width, a.at, a.boxes, a.audio,
-                                            wire=a.wire, depth=a.depth)))
+                                            wire=a.wire, depth=a.depth, trails=a.trails, onion=a.onion)))
         return 0
     if a.cmd == "voice":
         from .voice import generate

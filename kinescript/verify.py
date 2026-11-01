@@ -105,13 +105,74 @@ def _times(scene: Scene, count: int, times=None) -> list[float]:
     return [min(scene.duration - 1 / scene.fps, step * (k + 0.5)) for k in range(count)]
 
 
+TRAIL_FRAMES = 600  # the most frames --trails draws a dot for; a longer scene gets a dot every few frames
+TRAIL_LAYERS = 24  # the most layers it draws a path for, those that travel furthest
+TRAIL_COLOURS = ("#ff633f", "#4a7dff", "#b9f45d", "#ffd166", "#3ddbd9", "#ef476f", "#c39bff", "#f2f0e8")
+
+
+def _trails(scene: Scene, scale: float) -> tuple[dict[str, list], int]:
+    """Where each moving layer's anchor is on the frame, in thumbnail px, at every `step`th frame:
+    {id: [(frame, x, y), or None where it is not drawn]} for the TRAIL_LAYERS that travel furthest, and the step."""
+    frames = max(1, int(round(scene.duration * scene.fps)))
+    step = max(1, math.ceil(frames / TRAIL_FRAMES))
+    ns = list(range(0, frames, step))
+    # Anchors come from the layers' matrices, so a quarter of the thumbnail's scale finds them as well, and the CPU
+    # draws a stress scene's frame in 4 to 8 ms instead of 24 to 38.
+    r = Renderer(scene, track=True, scale=scale / 4)
+    r.footage = False  # anchors, not pixels
+    seen: dict[str, list] = {}
+    for j, n in enumerate(ns):
+        r.draw(n / scene.fps)
+        for lid, b in r.boxes.items():
+            if b["alpha"] >= 0.05 and not b.get("mask"):
+                seen.setdefault(lid, [None] * len(ns))[j] = (n, 4 * b["pos"][0], 4 * b["pos"][1])
+
+    def travel(pts):
+        on = [p for p in pts if p]
+        return sum(math.dist(a[1:], b[1:]) for a, b in zip(on, on[1:]))
+    far = sorted((lid for lid, pts in seen.items() if travel(pts) > 2), key=lambda lid: -travel(seen[lid]))
+    return {lid: seen[lid] for lid in far[:TRAIL_LAYERS]}, step
+
+
+def _draw_trails(c, trails: dict, n: int, step: int, ox: float, oy: float, tw: float, th: float):
+    """Each moving layer's path, a dot at each frame, so the dots' spacing shows its speed and where it eases or
+    stops; the dot at this tile's frame n is ringed."""
+    c.save()
+    c.clipRect(skia.Rect.MakeXYWH(ox, oy, tw, th))
+    ring = skia.Paint(AntiAlias=True, Style=skia.Paint.kStroke_Style, StrokeWidth=1.5, Color=_argb("#f2f0e8"))
+    for k, pts in enumerate(trails.values()):
+        hue = TRAIL_COLOURS[k % len(TRAIL_COLOURS)]
+        dot = skia.Paint(AntiAlias=True, Color=_argb(hue))
+        line = skia.Paint(AntiAlias=True, Style=skia.Paint.kStroke_Style, StrokeWidth=1, Color=_argb(hue, 0.45))
+        path, gap = skia.Path(), True
+        for p in pts:
+            if p is None:
+                gap = True
+            elif gap:
+                path.moveTo(ox + p[1], oy + p[2])
+                gap = False
+            else:
+                path.lineTo(ox + p[1], oy + p[2])
+        c.drawPath(path, line)
+        for p in pts:
+            if p is not None:
+                c.drawCircle(ox + p[1], oy + p[2], 1.6, dot)
+        here = pts[n // step] if n // step < len(pts) else None
+        if here is not None:
+            c.drawCircle(ox + here[1], oy + here[2], 3.5, dot)
+            c.drawCircle(ox + here[1], oy + here[2], 4.5, ring)
+    c.restore()
+
+
 def contact_sheet(src, out: str, count: int = 12, cols: int | None = None, width: int = 480,
                   times=None, boxes: bool = False, audio: bool = False, wire: bool = False,
-                  depth: bool = False) -> dict:
+                  depth: bool = False, trails: bool = False, onion: int = 0) -> dict:
     """One PNG of `count` evenly spaced frames, each labelled with its time and frame number.
     boxes=True outlines every visible layer with its id. audio=True adds the sound under the frames, one lane per
     role and one for the mix, and returns its measurements. wire=True draws every model's drawn triangles over
-    it; depth=True dims the frame and shows each stage's depth image on it, nearer brighter."""
+    it; depth=True dims the frame and shows each stage's depth image on it, nearer brighter. trails=True draws each
+    moving layer's path, a dot a frame; onion=N draws the N frames before each one over it, fainter the older they
+    are, so only what moves shows twice."""
     from .output import IMAGE, at_note, out_path, save_image
     scene = load(src)
     try:
@@ -121,6 +182,8 @@ def contact_sheet(src, out: str, count: int = 12, cols: int | None = None, width
             raise ValueError(f"cols must be a whole number, 1 or more, got {cols!r}")
         if isinstance(width, bool) or not isinstance(width, int) or not 16 <= width <= 4096:
             raise ValueError(f"width must be a whole number of pixels from 16 to 4096, got {width!r}")
+        if isinstance(onion, bool) or not isinstance(onion, int) or not 0 <= onion <= 12:
+            raise ValueError(f"onion must be a whole number of frames from 0 to 12, got {onion!r}")
         cols = min(cols or 4, len(ts))
         out = str(out_path(scene, out, IMAGE))
     except ValueError:
@@ -141,13 +204,20 @@ def contact_sheet(src, out: str, count: int = 12, cols: int | None = None, width
     mono = skia.Typeface.MakeFromFile(str(FONT_DIR / "IBMPlexMono-Medium.ttf"))
     font = skia.Font(mono, 15)
     small = skia.Font(mono, 11)
+    paths, step = _trails(scene, scale) if trails else ({}, 1)
     for k, T in enumerate(ts):
         n = int(round(T * scene.fps))
+        ghosts = [(j, skia.Image.fromarray(r.frame(n - j).copy(), colorType=skia.kRGBA_8888_ColorType))
+                  for j in range(onion, 0, -1) if n - j >= 0]  # drawn before n, so the boxes are n's
         arr = r.frame(n)
         img = skia.Image.fromarray(np.ascontiguousarray(arr), colorType=skia.kRGBA_8888_ColorType)
         x = gap + (k % cols) * (tw + gap)
         y = gap + (k // cols) * (th + label_h + gap)
         c.drawImage(img, x, y + label_h)
+        for j, ghost in ghosts:  # where a ghost is the same as the frame, it changes it by a level at most
+            c.drawImage(ghost, x, y + label_h, skia.SamplingOptions(), skia.Paint(Alphaf=0.35 * (onion - j + 1) / onion))
+        if trails:
+            _draw_trails(c, paths, n, step, x, y + label_h, tw, th)
         if depth:
             staged += bool(r.depths)
             _draw_depth(c, r.depths, x, y + label_h, tw, th)
@@ -165,6 +235,12 @@ def contact_sheet(src, out: str, count: int = 12, cols: int | None = None, width
         info["audio"] = listen.summary(rep)
     if depth and not staged:
         notes.append('no stage drew in these frames: --depth shows the depth of groups with "sort": "pixel"')
+    if trails:
+        info["trails"] = list(paths)
+        if not paths:
+            notes.append("nothing moved: --trails draws the path of layers whose anchor moves on the frame")
+        if step > 1:
+            notes.append(f"--trails drew a dot every {step} frames: the scene has more than {TRAIL_FRAMES}")
     if notes:
         info["notes"] = notes
     return info

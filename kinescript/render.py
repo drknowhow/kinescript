@@ -1297,8 +1297,10 @@ class Renderer:
             if self._ink is not None:  # a stroke reaches half its width past the shape, an arrow's head further
                 r.join(self._ink)
             sc = 1.0 if drawn else math.sqrt(abs(m.getScaleX() * m.getScaleY())) or abs(m.getSkewX())
+            o = m.mapXY(0, 0)  # its anchor, where x and y put it
             info = {"rect": [round(r.left(), 1), round(r.top(), 1), round(r.right(), 1), round(r.bottom(), 1)],
-                    "alpha": round(alpha * parent_alpha, 3), "type": L.type, "scale": round(sc, 4)}
+                    "pos": [round(o.x(), 1), round(o.y(), 1)], "alpha": round(alpha * parent_alpha, 3),
+                    "type": L.type, "scale": round(sc, 4)}
             if L.type in ("text", "counter", "captions"):
                 # The colour _draw_text uses, so checks see default-coloured text too.
                 fill = (g("fill") if "fill" in L.props else None if isinstance(L.raw.get("fill"), dict)

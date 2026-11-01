@@ -267,6 +267,9 @@ blur or shadow, the estimate came within 2% below to 35% above the measured time
 
 - `kine look --trails` draws each moving layer's anchor path over its tiles, a dot per frame, so spacing shows speed
   and an agent can see arcs, eases and stops without watching. `--onion 3` ghosts the three frames before each tile.
+  Status (2026-11-01): in its own PR. The renderer records each tracked layer's anchor (`pos`, also in `probe`);
+  the trails come from a pass over every frame at a quarter of the thumbnails' scale, since anchors come from the
+  matrices, which on the CPU took a stress frame from 24 to 38 ms down to 4 to 8.
 - `kine probe scene.json --curve title.x` samples a value and its speed at every frame, with stops and the fastest
   frame, as JSON.
 - Examples: `logo.json` (an SVG logo draws on, morphs into a wordmark and glows), `kinetic.json` (stagger orders,
