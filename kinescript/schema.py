@@ -152,7 +152,8 @@ TYPES: dict[str, set[str]] = {
     "video": MEDIA | {"trim", "speed", "volume", "loop", "fadeIn", "fadeOut"},
     "captions": TEXT | {"src", "cues", "mode", "active", "voice"},
     "shader": {"preset", "uniforms", "sksl", "w", "h"},
-    "group": {"children", "layers", "w", "h", "clip", "radius", "fill", "sort", "shadows"},
+    "group": {"children", "layers", "w", "h", "clip", "radius", "fill", "sort", "shadows", "speed", "loop",
+              "timeRemap"},
     "model": PART - {"x", "y", "z", "rotateX", "rotateY", "rotate", "scale"} | {"detail", "parts", "explode",
                                                                               "draw", "light", "lights", "env",
                                                                               "src", "ground", "edges",
@@ -240,7 +241,7 @@ SCALAR = {"x", "y", "w", "h", "r", "opacity", "scale", "scaleX", "scaleY", "rota
           "strokeWidth", "draw", "drawStart", "zoom", "value", "radius", "dimOutside", "sides", "inner", "x1", "y1",
           "x2", "y2", "bend", "head", "maxWidth", "lineHeight", "letterSpacing", "focusX", "focusY", "speed",
           "unitX", "unitY", "unitRotate", "unitScale", "unitOpacity", "z", "rotateX", "rotateY", "fov",
-          "depth", "tube", "shine", "metal", "rim", "bands", "explode", "bevel", "transparency"}
+          "depth", "tube", "shine", "metal", "rim", "bands", "explode", "bevel", "transparency", "timeRemap"}
 REQUIRED = {"text": ("text",), "image": ("src",), "video": ("src",), "path": ("d", "points"), "line": ("points",),
             "captions": ("cues", "src", "voice"), "shader": ("preset", "sksl"), "model": ("shape", "parts", "src")}
 # Keys whose value is an object of their own: never a tween, even with a "from" key (a light's direction).
@@ -851,6 +852,7 @@ def _layer(raw, rep: Report, path: str, comps: dict):
         _model(raw, rep, lid)
     if t == "group":
         _shadows(raw, rep, lid)
+        _clock(raw, rep, lid)
     kids = raw.get("children") if raw.get("children") is not None else raw.get("layers")
     if t == "group" and raw.get("children") is not None and raw.get("layers") is not None:
         rep.add("error", "duplicate-key", lid, "a group lists its layers under 'children' or 'layers', not both",
@@ -885,6 +887,20 @@ def _position(pos) -> dict | None:
         return {a: dict(pos, to=pos["to"][j], **({"from": pos["from"][j]} if "from" in pos else {}))
                 for j, a in enumerate("xyz"[:n])}
     return None
+
+
+def _clock(raw: dict, rep: Report, lid):
+    """A group's own clock for its children: speed (a number above 0), loop (seconds, above 0) and timeRemap."""
+    sp, lp = raw.get("speed"), raw.get("loop")
+    if sp is not None and not (_finite(sp) and sp > 0):
+        rep.add("error", "bad-value", lid, f"speed is {_show(sp)}; on a group it is a number above 0, how fast its "
+                "children's time runs", "\"speed\": 0.5 for half speed; to change it over time, write timeRemap")
+    if lp is not None and not (_finite(lp) and lp > 0):
+        rep.add("error", "bad-value", lid, f"loop is {_show(lp)}; on a group it is the seconds after which its "
+                "children's time starts again", "\"loop\": 1.2")
+    if "timeRemap" in raw and sp is not None:
+        rep.add("warning", "ignored-key", lid, "speed is ignored: timeRemap gives the children's time itself",
+                "drop speed, or fold it into timeRemap")
 
 
 def _shadows(raw: dict, rep: Report, lid):

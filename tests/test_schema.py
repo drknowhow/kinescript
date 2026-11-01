@@ -159,6 +159,15 @@ def test_stagger_order_is_checked_and_needs_a_stagger_to_order():
     assert s is not None and "ignored-key" not in got  # split text staggers 0.04 s unless told
 
 
+def test_a_groups_clock_is_checked():
+    for clock in ({"speed": 0}, {"speed": [[0, 1], [1, 2]]}, {"loop": -1}, {"loop": True},
+                  {"timeRemap": [[0, 0], [1, "slow"]]}):
+        assert "bad-value" in codes(scene([dict({"type": "group"}, **clock)]))[0], clock
+    got, s = codes(scene([{"type": "group", "speed": 2, "timeRemap": "=t"}]))
+    assert s is not None and "ignored-key" in got
+    assert "unknown-key" in codes(scene([{"type": "rect", "loop": 1}]))[0]
+
+
 def test_flat_list_is_not_keyframes():
     assert "flat-keyframes" in codes(scene([{"type": "rect", "x": [0, 100]}]))[0]
 

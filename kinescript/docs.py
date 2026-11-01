@@ -182,6 +182,10 @@ LAYER TYPES (defaults in brackets)
             (see 3D MODELS).
   group     children [layers], w, h, clip (true cuts children off at w x h), radius, fill.
             Children are placed from the group's x, y and start at the group's "at".
+            Its children's time: speed (2 runs them twice as fast), loop (seconds after which they
+            start again, so a looping icon is one group with "loop": 1.2) and timeRemap (keyframes
+            or an expression giving their time in seconds at the group's time t; a number freezes
+            them there). Sounds keep the scene's time.
   sequence  clips [{"src": "a.mp4", "trim": [0, 4]}, ...] (an image clip needs dur) and transition
             {"type": "fade", "dur": 0.4} (fade|wipe|slide|zoom|blur|cut; dur defaults to 0.5, cut
             takes none, and no transition is a cut). Becomes a group of back-to-back layers named
