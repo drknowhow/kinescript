@@ -1,4 +1,5 @@
-"""glTF animation: node channels, morph target weights and skins, played on a model layer's clock."""
+"""Motion inside a model: glTF animation (node channels, morph target weights and skins, played on a model
+layer's clock) and parts whose keys animate."""
 import base64
 import json
 import math
@@ -264,6 +265,51 @@ def test_the_sample_arm_bends_on_its_joints():
     top = rest[:, 1] < rest[:, 1].min() + 1  # y runs down: the tip
     assert (P[top, 0] - rest[top, 0]).mean() < -50  # curled over to the left
     assert np.allclose(P[rest[:, 1] > rest[:, 1].max() - 1], rest[rest[:, 1] > rest[:, 1].max() - 1], atol=1e-4)
+
+
+def _parts(*parts, **layer):
+    return scene([dict({"id": "m", "type": "model", "x": 160, "y": 90, "parts": list(parts)}, **layer)],
+                 bg="#000000")
+
+
+def test_a_part_moves_on_its_keyframes_and_its_mesh_is_kept_while_it_holds():
+    spec = _parts({"shape": "sphere", "r": 20, "x": -60}, {"shape": "cube", "w": 30, "h": 30, "depth": 2,
+                                                          "x": [[0, 0], [1, 60]]})
+    r = _shot(spec, 0)
+    x1 = r.boxes["m"]["rect"][2]
+    r.draw(1.2)
+    held = r._models[("parts", "m")][1]
+    assert r.boxes["m"]["rect"][2] == pytest.approx(x1 + 60, abs=3)
+    r.draw(1.5)  # past its last key: the same values, the same mesh
+    assert r._models[("parts", "m")][1] is held
+    still = _shot(_parts({"shape": "sphere", "r": 20, "x": -60}), 0)
+    assert ("parts", "m") not in still._models  # plain values merge once, as before
+
+
+def test_a_parts_fill_animates_and_expressions_see_the_parts_number():
+    blink = {"shape": "cube", "w": 40, "h": 40, "depth": 4, "y": "=i*60 - 30", "fill": [[0, "#ff0000"], [1, "#0000ff"]]}
+    spec = _parts(blink, dict(blink), light="flat")
+    for T, hue in ((0, 0), (1, 2)):
+        r = Renderer(k.Scene(spec), backend="cpu", track=True)
+        r.draw(T)
+        img = r.snapshot().toarray()[..., :3].astype(int)
+        for y in (60, 120):  # the two parts, 60 px apart by their numbers
+            assert img[y, 160].argmax() == hue and img[y, 160].max() > 200, (T, y, img[y, 160])
+        assert img[90, 160].max() < 30  # the gap between them
+
+
+def test_animated_part_frames_are_pure_and_their_expressions_are_checked():
+    spec = _parts({"shape": "torus", "r": 40, "tube": 10, "rotateX": "=t*200", "scale": [[0, 0.5], [1, 1.2]]},
+                  {"shape": "cone", "r": 15, "h": 40, "y": "=sin(t*6)*30", "fill": "=lerp(0, 1, t)"}, edges=True)
+    spec["layers"][0]["parts"][1]["fill"] = [[0, "#22ccff"], [1, "#ffcc22"]]
+    spec["canvas"]["duration"] = 1
+    r = Renderer(k.Scene(spec), backend="cpu")
+    sequential = [r.frame(n).copy() for n in range(0, 20)]
+    alone = Renderer(k.Scene(spec), backend="cpu").frame(13).copy()
+    assert np.array_equal(sequential[13], alone)
+    bad = check(_parts({"shape": "cube", "x": "=1/(t-0.5)"}))
+    hit = [i for i in bad["issues"] if i["code"] == "bad-expression"]
+    assert hit and "parts[0]: x" in hit[0]["message"], bad["issues"]
 
 
 def test_animation_keys_are_read_the_way_agents_write_them(tmp_path):

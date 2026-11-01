@@ -564,23 +564,59 @@ def _kept(r, slot, key, make):
     return hit[1]
 
 
-def _parts(r, L):
-    """The model's parts merged once: mesh, and for each material slot the part keys that override the layer."""
+def _parts(r, L, t: float = 0.0, T: float = 0.0):
+    """The model's parts merged: mesh, and for each material slot the part keys that override the layer, at the
+    layer's time t (scene time T). Parts whose keys are all plain values merge once; when one moves or changes
+    size, the mesh is merged again on the frames where its values change, and is kept while they hold. Parts with
+    the same material keys share a slot, whose values are read at t."""
     hit = r._models.get(L.id)
+    raw = L.raw.get("parts") or []
     if hit is None:
-        detail = L.raw.get("detail", "medium")
-        meshes, slots, keys = [], [], [{}]
-        for p in L.raw.get("parts") or []:
+        slots, keys, first = [], [{}], [None]  # each part's slot; each slot's keys and the part that set them
+        for i, p in enumerate(raw):
             own = {k: p[k] for k in MATERIAL if k in p}
             if own not in keys:
                 keys.append(own)
-            m = _shape(r, p.get("shape", "cube"), lambda k, d, p=p: p.get(k, d), p, detail)
-            meshes.append(mesh.placed(m, (1.0, 1.0, 1.0), mesh.part_matrix(p)))
+                first.append(i)
             slots.append(keys.index(own))
         if len(keys) > MAX_MATERIALS:
             raise ValueError(f"layer '{L.id}': {len(keys)} different materials; a model takes at most {MAX_MATERIALS}")
-        hit = r._models[L.id] = (mesh.merge(meshes, slots) if meshes else None, keys)
-    return hit
+        props = L.parts if len(L.parts) == len(raw) else [{} for _ in raw]
+        moving = [i for i, pp in enumerate(props) if any(not v.static for k, v in pp.items() if k not in MATERIAL)]
+        tinted = [s for s, i in enumerate(first) if i is not None and any(
+            not v.static for k, v in props[i].items() if k in MATERIAL)]
+        still = None if moving or not raw else _merge(r, L, raw, slots)
+        hit = r._models[L.id] = (still, keys, slots, first, props, moving, tinted)
+    still, keys, slots, first, props, moving, tinted = hit
+    if moving:
+        vals = [dict(p, **{k: L.part(i, k, t, T) for k in props[i] if k not in MATERIAL})
+                if i in moving else p for i, p in enumerate(raw)]
+        held = tuple(_hashable(vals[i]) for i in moving)
+        still = _kept(r, ("parts", L.id), held, lambda: _merge(r, L, vals, slots))
+    if tinted:
+        keys = [dict(o, **{k: L.part(first[s], k, t, T) for k in o if k != "texture"})
+                if s in tinted else o for s, o in enumerate(keys)]
+    return still, keys
+
+
+def _merge(r, L, parts: list, slots: list) -> mesh.Mesh:
+    """Parts with their values, placed in the model and merged into one mesh. A primitive's mesh at its size is
+    kept for each part, so moving a part places the same mesh again."""
+    detail = L.raw.get("detail", "medium")
+    meshes = []
+    for i, p in enumerate(parts):
+        m = _shape(r, p.get("shape", "cube"), lambda k, d, p=p: p.get(k, d), p, detail, ("part", L.id, i))
+        meshes.append(mesh.placed(m, (1.0, 1.0, 1.0), mesh.part_matrix(p)))
+    return mesh.merge(meshes, slots)
+
+
+def _hashable(v):
+    """A value as a key: lists and dicts as tuples."""
+    if isinstance(v, dict):
+        return tuple(sorted((k, _hashable(x)) for k, x in v.items()))
+    if isinstance(v, (list, tuple)):
+        return tuple(_hashable(x) for x in v)
+    return v
 
 
 def _imported(r, L, taken: int):
@@ -623,7 +659,7 @@ def _fit(g, size) -> float:
 def model(r, L, g, t: float = 0.0, T: float = 0.0) -> tuple[mesh.Mesh, list[tuple], list, list]:
     """The model's mesh in its own space at its time t (scene time T), its materials, and each material's texture
     and emission texture (a model file's) or None. "texture": false on the layer turns both off."""
-    parts, keys = _parts(r, L)
+    parts, keys = _parts(r, L, t, T)
     shape = L.raw.get("shape")
     meshes = [] if parts is None else [parts]
     if L.src:

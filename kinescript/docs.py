@@ -304,7 +304,10 @@ DEPTH AND CAMERA (3D)
             long to draw.
   parts     [{"shape": "sphere", "r": 30, "x": 0, "y": -120, "z": 0, "rotateX": 0, "rotateY": 0,
             "rotate": 0, "scale": 1, "fill": "#b9f45d", "shine": 0.9}, ...] placed from the
-            model's centre, in plain numbers (parts do not animate; the model does). A part takes
+            model's centre. Part keys take keyframes and expressions like layer keys, with i the
+            part's number from 0: "rotate": "=t*90" spins one part. The parts merge into one mesh,
+            merged again on the frames where a part moves or changes size. Parts with the same
+            material keys share a material, its values read for the first of them. A part takes
             the model's material keys it does not set. A model may have shape (or src), parts, or both.
   src       a model file: .glb or .gltf (glTF 2.0), or .obj with its .mtl. Colours, shine and metal
             come from the file; a fill on the layer recolours all of it. It fits inside w and/or h

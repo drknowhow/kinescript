@@ -237,8 +237,13 @@ nine rounds: a floor reaching to just in front of the camera took eight.
   edge cuts `_refine` made when the file was read (it now records them), so the posed mesh has the same triangles
   and sorts the same way. Skins and default morph weights apply at rest too. The model keeps its rest size and
   centre. Posing `arm.glb` (1,314 vertices) takes 0.36 ms; `bench/same.py` finds no frame that differs.
+  Merged (#76).
 - `parts` animate: part keys take keyframes and expressions like layer keys. The merged mesh is rebuilt only on
   frames where a part moves.
+  Built on branch `animated-parts`: part keys compile like layer keys (`Layer.parts`, read with `Layer.part`, `i`
+  the part's number). The mesh merges again when a moving part's values change, kept by those values; a part's
+  primitive is kept at its size, so a move places the same mesh again. Material slots come from the parts' raw
+  keys, so animating a colour never changes how many slots there are; a slot's values are read for its first part.
 - `repeat`: `{"count": n, "x": "...", "y": "...", "z": "...", "rotateY": "...", "scale": "...", "fill": "..."}`,
   with expressions over `i`, `n` and `t` in the existing AST-checked expression engine. The copies merge into one
   mesh and sort together, so a waving grid of 400 cubes is one layer.

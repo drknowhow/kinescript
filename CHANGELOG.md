@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Parts animate. A part's keys take keyframes and expressions like a layer's, with `i` its number from 0 in an
+  expression: its place, turn, scale, size and material. The parts merge into one mesh again only on frames where a
+  part moves or changes size, and the mesh is kept while their values hold; parts whose keys are plain values merge
+  once, as before. `kine check` evaluates part expressions at every frame, and names the part when one fails.
 - glTF animation. A model layer's `animation` plays a clip of its file on the layer's clock: its name, its number
   from 0, `true` for the first, or `{"name", "speed", "loop", "start"}`. Node translation, rotation and scale
   channels (LINEAR, STEP and CUBICSPLINE keys, rotations along the sphere), morph target weights and skins

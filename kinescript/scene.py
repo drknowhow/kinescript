@@ -24,6 +24,7 @@ STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "children", "laye
           "sksl", "preset", "uniforms", "caret", "case", "italic", "smooth", "closed", "focus", "use",
           "backface", "fixed", "sort", "shape", "detail", "parts", "light", "span", "sound", "voice",
           "fadeIn", "fadeOut", "sequence", "animation"}
+PART_STRUCT = {"shape", "texture", "text", "font", "d", "italic"}  # a part's keys that never animate
 # Property defaults by name; everything not listed defaults to None.
 DEFAULTS = {"x": 0.0, "y": 0.0, "opacity": 1.0, "scale": 1.0, "scaleX": 1.0, "scaleY": 1.0, "rotate": 0.0,
             "blur": 0.0, "draw": 1.0, "zoom": 1.0, "z": 0.0, "rotateX": 0.0, "rotateY": 0.0}
@@ -66,7 +67,7 @@ def _where(owner, message: str) -> str:
 
 class Layer:
     __slots__ = ("id", "type", "raw", "t_in", "t_out", "props", "enter", "exit", "children", "parent",
-                 "index", "src", "video", "ahead", "ctx")
+                 "index", "src", "video", "ahead", "ctx", "parts")
 
     def __init__(self, lid: str, ltype: str, raw: dict, parent: "Layer | None", index: int):
         self.id, self.type, self.raw, self.parent, self.index = lid, ltype, raw, parent, index
@@ -79,6 +80,7 @@ class Layer:
         # (size, decoder) opened before the clip first draws (Renderer._prime); it becomes .video when it does.
         self.ahead: tuple[tuple[int, int], media.VideoSource] | None = None
         self.ctx: Ctx | None = None
+        self.parts: list[dict[str, Prop]] = []  # a model's parts' keys, each compiled like a layer's
 
     @property
     def dur(self) -> float:
@@ -92,6 +94,14 @@ class Layer:
             return p.at(t, self.dur, T, i)
         except (ArithmeticError, ValueError, TypeError) as e:  # a user expression, e.g. 1/(t-0.7) at t=0.7
             raise SceneError(f"layer '{self.id}': {name} failed at t={t:.3f}s (scene {T:.3f}s): "
+                             f"{type(e).__name__}: {e}", layer=self.id) from e
+
+    def part(self, i: int, name: str, t: float, T: float = 0.0):
+        """Part i's value of `name` at the layer's time t, with i as the part's number in expressions."""
+        try:
+            return self.parts[i][name].at(t, self.dur, T, i)
+        except (ArithmeticError, ValueError, TypeError) as e:
+            raise SceneError(f"layer '{self.id}': parts[{i}]: {name} failed at t={t:.3f}s (scene {T:.3f}s): "
                              f"{type(e).__name__}: {e}", layer=self.id) from e
 
     def visible(self, T: float) -> bool:
@@ -458,21 +468,22 @@ class Scene:
         """An expression can fail at one moment only, like 1/(t-0.7) at t=0.7. `kine check` evaluates each at every
         frame its layer is on (every few frames past `budget` evaluations in all), so it finds that, not the render.
         Not part of loading: render workers load the scene too, and 2400 expressions take about 0.15 s."""
-        spans = [(L, name, prop, math.ceil(L.t_in * self.fps - 1e-6), math.ceil(L.t_out * self.fps - 1e-6))
-                 for L in self.all_layers() for name, prop in L.props.items()
-                 if not prop.static and isinstance(prop.value, str)]
+        spans = [(L, where + name, prop, i, math.ceil(L.t_in * self.fps - 1e-6), math.ceil(L.t_out * self.fps - 1e-6))
+                 for L in self.all_layers()
+                 for where, i, props in [("", 0, L.props)] + [(f"parts[{i}]: ", i, p) for i, p in enumerate(L.parts)]
+                 for name, prop in props.items() if not prop.static and isinstance(prop.value, str)]
         stride = max(1, -(-sum(n1 - n0 for *_, n0, n1 in spans) // budget))
-        for layer, name, prop, n0, n1 in spans:
+        for layer, name, prop, i, n0, n1 in spans:
             for n in range(n0, n1, stride):
                 T = n / self.fps
                 t = T - layer.t_in
                 try:
-                    v = prop.at(t, layer.dur, T, 0)
+                    v = prop.at(t, layer.dur, T, i)
                 except Exception as e:  # noqa: BLE001 - any failure inside a user expression
                     self.note("error", "bad-expression", layer.id, f"{name} failed at t={t:.2f}s (frame {n}): "
                               f"{type(e).__name__}: {e}", "guard the expression, e.g. max(…, 0.001) under a division")
                     break
-                if name in schema.COLOR_KEYS and not (isinstance(v, (tuple, list)) and len(v) in (3, 4)):
+                if name.split(": ")[-1] in schema.COLOR_KEYS and not (isinstance(v, (tuple, list)) and len(v) in (3, 4)):
                     self._bad_colour(v, f"{name} at t={t:.2f}s (frame {n})", layer.id)
                     break
 
@@ -667,6 +678,9 @@ class Scene:
                         layer.props[k] = compile_prop(k, v, pctx)  # a colour, or a tween of one; not a gradient
                     elif k not in STRUCT:
                         layer.props[k] = compile_prop(k, v, pctx)
+                if ltype == "model":
+                    layer.parts = [{k: compile_prop(k, v, pctx) for k, v in p.items() if k not in PART_STRUCT}
+                                   for p in raw.get("parts") or [] if isinstance(p, dict)]
                 for un, uv in (raw.get("uniforms") or {}).items():
                     if not isinstance(uv, (int, float, str)) or (isinstance(uv, str) and uv.startswith("=")):
                         layer.props["u_" + un] = compile_prop("u_" + un, uv, pctx)
