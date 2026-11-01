@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- New model shapes. A cube takes `r` (or `radius`) and rounds its edges and corners. `capsule` is a cylinder with
+  round ends (`r`, and `h` end to end). `lathe` turns a `profile`, `[[r, y], ...]` points or path data, round the
+  vertical axis: vases, cups, bottles. `tube` runs a round tube of radius `r` along SVG path data `d`, with round
+  ends, and its `draw` grows it along its length. `"shape": "tube"` without `d` is read as a cylinder, as before.
+  `kine check` names a lathe without a profile, a profile point left of the axis and path data that does not
+  parse. `examples/shapes.json` shows the four on a floor; its 180 frames render in 11.0 s on the development
+  machine's GPU, and the growing tube's mesh is rebuilt in 1.7 ms a frame.
 - `repeat` on a model layer draws copies of it, merged into one mesh that sorts as one model:
   `{"count", "x", "y", "z", "rotateX", "rotateY", "rotate", "scale", "fill"}`, each a number (fill: a colour), a list
   taken in turn, or an expression of `i` (the copy, from 0), `n` and the layer's times. Keys that read no time are

@@ -488,11 +488,11 @@ def _text_path(r, num, raw) -> tuple[skia.Path, float]:
     return path, size
 
 
-def _svg_path(num, raw) -> tuple[skia.Path, float]:
+def _svg_path(num, raw, stroke: bool = True) -> tuple[skia.Path, float]:
     """The `d` outline (or its stroke's, with round ends, given strokeWidth) centred on the origin, scaled to
     fit w and/or h when given, and its size."""
     path = svgpath.parse(str(raw.get("d", "")))
-    sw = float(num("strokeWidth", 0) or 0)
+    sw = float(num("strokeWidth", 0) or 0) if stroke else 0.0
     if sw > 0:
         outline = skia.Path()
         skia.Paint(Style=skia.Paint.kStroke_Style, StrokeWidth=sw, StrokeCap=skia.Paint.kRound_Cap,
@@ -545,12 +545,69 @@ def _extruded(r, shape: str, num, raw, detail: str) -> mesh.Mesh:
     return m
 
 
-def _shape(r, shape: str, num, raw, detail: str, slot=None) -> mesh.Mesh:
+def _traced(r, key, make):
+    """make(): a lathe's profile or a tube's path as lines, kept in r._solids by key."""
+    if len(r._solids) > 64:
+        r._solids.clear()
+    hit = r._solids.get(key)
+    if hit is None:
+        hit = r._solids[key] = make()
+    return hit
+
+
+def _profile(prof, k: float) -> tuple[list, float]:
+    """A lathe's profile as lines of [r, y] points with y centred on 0, and its size: [[r, y], ...] (closed when
+    the last point is the first) or path data, its x the distance from the axis."""
+    if isinstance(prof, str):
+        path = svgpath.parse(prof)
+        b = path.computeTightBounds()
+        lines = mesh.polylines(path, max(1.0, min(10.0, max(b.width(), b.height()) * 0.04)) / k)
+    elif isinstance(prof, list) and len(prof) >= 2:
+        q = np.asarray(prof, float).reshape(-1, 2)
+        shut = len(q) > 3 and bool(np.allclose(q[0], q[-1]))
+        lines = [(q[:-1] if shut else q, shut)]
+    else:
+        lines = []
+    if not lines:
+        return [], 0.0
+    ys = np.concatenate([q[:, 1] for q, _ in lines])
+    mid = (ys.min() + ys.max()) / 2
+    extent = max(float(np.ptp(ys)), 2 * max(float(np.abs(q[:, 0]).max()) for q, _ in lines))
+    return [(q - [0.0, mid], c) for q, c in lines], extent
+
+
+def _swept(r, shape: str, num, raw, detail: str, slot=None, grow: float = 1.0) -> mesh.Mesh:
+    """A lathe turned from its profile, or a tube of radius r along its path d (fitted to w and/or h as a path
+    shape is), at its size and centred on the origin. A tube draws the first `grow` share of its length. The
+    lines are kept per profile or path, the mesh in slot while its values hold."""
+    k = mesh.DETAIL.get(detail, 1.0)
+    around = max(6, round(24 * k))
+    if shape == "lathe":
+        prof = raw.get("profile")
+        key = ("lathe", _hashable(prof), k)
+
+        def turned():
+            lines, extent = _traced(r, key, lambda: _profile(prof, k))
+            return mesh.lathe(lines, 2 * around, 3 * max(1.0, min(10.0, extent * 0.04)) / k)
+        return _kept(r, slot, key, turned)
+    w, h, grow = num("w", None), num("h", None), round(max(0.0, min(1.0, grow)), 4)
+    route = ("tube", str(raw.get("d", "")), w, h, k)
+
+    def along():
+        path, extent = _svg_path(num, raw, stroke=False)
+        return mesh.polylines(path, max(1.0, min(10.0, extent * 0.04)) / k)
+    rad = max(0.1, round(float(num("r", 12)), 2))
+    return _kept(r, slot, route + (rad, grow), lambda: mesh.tube(_traced(r, route, along), rad, around, grow))
+
+
+def _shape(r, shape: str, num, raw, detail: str, slot=None, grow: float = 1.0) -> mesh.Mesh:
     """One shape's mesh at its size, centred on the origin. num(key, default) reads its numbers, raw its text.
     With a slot, a primitive is kept there while its size holds: placing it again each frame copied the mesh
-    and made every _fixed result be worked out again."""
+    and made every _fixed result be worked out again. A tube draws the first `grow` share of its length."""
     if shape in mesh.EXTRUDED:
         return _extruded(r, shape, num, raw, detail)
+    if shape in mesh.SWEPT:
+        return _swept(r, shape, num, raw, detail, slot, grow)
     s3, tube = mesh.size(shape, num)
     return _kept(r, slot, (shape, detail, tube, s3), lambda: mesh.placed(mesh.unit(shape, detail, tube), s3))
 
@@ -658,9 +715,10 @@ def _fit(g, size) -> float:
     return min(s) if s else 300.0 / max(float(size.max()), 1e-9)
 
 
-def model(r, L, g, t: float = 0.0, T: float = 0.0) -> tuple[mesh.Mesh, list[tuple], list, list]:
+def model(r, L, g, t: float = 0.0, T: float = 0.0, grow: float = 1.0) -> tuple[mesh.Mesh, list[tuple], list, list]:
     """The model's mesh in its own space at its time t (scene time T), its materials, and each material's texture
-    and emission texture (a model file's) or None. "texture": false on the layer turns both off."""
+    and emission texture (a model file's) or None. "texture": false on the layer turns both off. A tube shape
+    draws the first `grow` share of its length."""
     parts, keys = _parts(r, L, t, T)
     shape = L.raw.get("shape")
     meshes = [] if parts is None else [parts]
@@ -677,7 +735,7 @@ def model(r, L, g, t: float = 0.0, T: float = 0.0) -> tuple[mesh.Mesh, list[tupl
                 return m._replace(P=P * fit, N=N)
             meshes.insert(0, _kept(r, ("fit", L.id), (fit, play), posed))
     elif shape:
-        meshes.insert(0, _shape(r, shape, g, L.raw, L.raw.get("detail", "medium"), ("shape", L.id)))
+        meshes.insert(0, _shape(r, shape, g, L.raw, L.raw.get("detail", "medium"), ("shape", L.id), grow))
     if len(meshes) == 1:
         m = meshes[0]
     else:  # the same pieces as last frame: the same mesh (compared by identity, so the pieces are held)
@@ -1264,14 +1322,16 @@ def _combined(emit: bool = False) -> skia.RuntimeEffect:
 def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float = 0.0):
     """Draw model layer L on canvas c at its time t (scene_t on the scene's clock). Returns its projected bounds
     in device pixels, or None."""
-    m, mats, texs, glows = model(r, L, g, t, scene_t)
+    amt = max(0.0, min(1.0, float(g("draw")) * reveal))
+    grows = L.raw.get("shape") == "tube" and not L.src  # a tube is drawn along its length, not bottom to top
+    m, mats, texs, glows = model(r, L, g, t, scene_t, amt if grows else 1.0)
+    amt = 1.0 if grows else amt
     lt, more, env = _lighting(r, L, m, t, scene_t)
     fg = fog(r, scene_t) if r._stage is None else None  # a stage fogs each pixel it shows
     P, N, T, M = m.P, m.N, m.T, m.M
     U = None  # texture coordinates, when any material has a texture (a file without them: check says no-uvs)
     if any(tx is not None for tx in texs + glows):
         U = m.U if m.U is not None else np.zeros((len(P), 2))
-    amt = max(0.0, min(1.0, float(g("draw")) * reveal))
     tid = slice(None)  # each triangle's index in the whole mesh
     if amt < 1.0:
         tid = _fixed(r, L, m, "order", lambda: mesh.build_order(m))[:math.ceil(amt * len(T))]

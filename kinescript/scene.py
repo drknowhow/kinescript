@@ -23,8 +23,8 @@ STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "children", "laye
           "allowOffscreen", "style", "audio", "shadow", "box", "fx", "fill", "stroke", "emph", "active",
           "sksl", "preset", "uniforms", "caret", "case", "italic", "smooth", "closed", "focus", "use",
           "backface", "fixed", "sort", "shape", "detail", "parts", "light", "span", "sound", "voice",
-          "fadeIn", "fadeOut", "sequence", "animation", "repeat"}
-PART_STRUCT = {"shape", "texture", "text", "font", "d", "italic"}  # a part's keys that never animate
+          "fadeIn", "fadeOut", "sequence", "animation", "repeat", "profile"}
+PART_STRUCT = {"shape", "texture", "text", "font", "d", "italic", "profile"}  # a part's keys that never animate
 # Property defaults by name; everything not listed defaults to None.
 DEFAULTS = {"x": 0.0, "y": 0.0, "opacity": 1.0, "scale": 1.0, "scaleX": 1.0, "scaleY": 1.0, "rotate": 0.0,
             "blur": 0.0, "draw": 1.0, "zoom": 1.0, "z": 0.0, "rotateX": 0.0, "rotateY": 0.0}

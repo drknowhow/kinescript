@@ -97,7 +97,7 @@ TEXTURE_ALIAS = {"image": "src", "file": "src", "path": "src", "url": "src", "ti
                  "tiling": "repeat", "shift": "offset", "position": "offset"}
 PART = MATERIAL | {"shape", "w", "h", "depth", "r", "tube", "x", "y", "z", "rotateX", "rotateY", "rotate", "scale",
                    "text", "size", "font", "weight", "italic", "letterSpacing", "lineHeight", "d", "strokeWidth",
-                   "bevel"}
+                   "bevel", "profile"}
 MODEL_ALIAS = {"radius": "r", "thickness": "tube", "geometry": "shape", "primitive": "shape", "extrude": "depth",
                "extrusion": "depth", "chamfer": "bevel",
                "mesh": "shape", "gloss": "shine", "glossiness": "shine", "shininess": "shine",
@@ -209,7 +209,7 @@ ENUMS = {
               "color"),
     "backface": ("visible", "hidden"),
     "sort": ("order", "depth", "pixel"),
-    "shape": ("cube", "sphere", "cylinder", "cone", "torus", "plane", "text", "path"),
+    "shape": ("cube", "sphere", "cylinder", "cone", "torus", "plane", "capsule", "lathe", "tube", "text", "path"),
     "detail": ("low", "medium", "high"),
     "role": ("voice", "music", "sfx", "ambience"),
 }
@@ -218,7 +218,8 @@ ENUM_ALIAS = {"middle": "center", "centre": "center", "centered": "center", "mid
               "uppercase": "upper", "lowercase": "lower", "fill": "cover", "crop": "cover", "scale": "contain",
               "plus": "add", "additive": "add", "soft-light": "softLight", "softlight": "softLight",
               "box": "cube", "cuboid": "cube", "ball": "sphere", "globe": "sphere", "donut": "torus",
-              "doughnut": "torus", "ring": "torus", "tube": "cylinder", "can": "cylinder", "pipe": "cylinder",
+              "doughnut": "torus", "ring": "torus", "can": "cylinder", "pipe": "cylinder", "pill": "capsule",
+              "revolve": "lathe", "revolved": "lathe", "turned": "lathe", "spun": "lathe",
               "card": "plane", "quad": "plane", "svg": "path", "string": "text", "med": "medium", "hi": "high",
               "lo": "low", "vo": "voice", "voiceover": "voice", "narration": "voice", "narrator": "voice",
               "speech": "voice", "dialogue": "voice", "bed": "music", "bgm": "music", "song": "music",
@@ -973,15 +974,8 @@ def _structure(raw: dict, t: str, rep: Report, lid):
         if bad:
             rep.add("error", "bad-value", lid, f"format is {_show(fmt)}; {bad}. It is text with {{:...}} where the "
                     "number goes, like \"{:,.0f}\", \"{:.1f}%\" or \"$ {:,.2f}\"")
-    if t == "path" and isinstance(raw.get("d"), str) and "$" not in raw["d"]:
-        from .svgpath import parse as svg
-        try:
-            svg(raw["d"])
-        except (ValueError, IndexError) as e:
-            m = re.search(r"could not convert string to float: '(.*)'", str(e))
-            why = (f"'{m.group(1)}' is neither a number nor a path command (M, L, H, V, C, S, Q, T, A, Z)" if m
-                   else str(e) if isinstance(e, ValueError) else "it ends in the middle of a command")
-            rep.add("error", "bad-value", lid, f"d: {why}; d is SVG path data like \"M0 0 L100 0 Q150 50 100 100 Z\"")
+    if t == "path":
+        _path_data(raw.get("d"), "d", rep, lid)
     focus = raw.get("focus")
     if t in ("image", "video") and focus is not None and not isinstance(focus, str) and not (
             isinstance(focus, list) and len(focus) == 2 and all(map(_finite, focus))):
@@ -1231,13 +1225,63 @@ def _more_lights(obj: dict, rep: Report, lid, most: int):
         _light_values(x, ("azimuth", "elevation", "x", "y", "z", "intensity", "range"), rep, lid, where)
 
 
+def _path_data(d, what: str, rep: Report, lid):
+    """Path data that does not parse, named by what it is."""
+    if not isinstance(d, str) or "$" in d:
+        return
+    from .svgpath import parse as svg
+    try:
+        svg(d)
+    except (ValueError, IndexError) as e:
+        m = re.search(r"could not convert string to float: '(.*)'", str(e))
+        why = (f"'{m.group(1)}' is neither a number nor a path command (M, L, H, V, C, S, Q, T, A, Z)" if m
+               else str(e) if isinstance(e, ValueError) else "it ends in the middle of a command")
+        rep.add("error", "bad-value", lid, f"{what}: {why}; {what.split()[-1]} is SVG path data like "
+                "\"M0 0 L100 0 Q150 50 100 100 Z\"")
+
+
+def _turned(obj: dict, rep: Report, lid, where: str = ""):
+    """A lathe turns its profile round the vertical axis: [r, y] points, r out from the axis, or path data."""
+    prof = obj.get("profile")
+    if obj.get("shape") != "lathe":
+        if prof is not None:
+            rep.add("warning", "ignored-key", lid, f"{where}profile is ignored: only a lathe turns a profile",
+                    "\"shape\": \"lathe\"")
+        return
+    example = "\"profile\": [[0, -100], [70, -60], [50, 100], [0, 100]]"
+    if prof in (None, "", []):
+        rep.add("error", "missing-key", lid, f"{where}a lathe needs a profile: the outline it turns round the "
+                "vertical axis, as [r, y] points (r out from the axis, y down) or path data", example)
+    elif isinstance(prof, str):
+        _path_data(prof, f"{where}profile", rep, lid)
+    elif not (isinstance(prof, list) and len(prof) >= 2 and all(
+            isinstance(p, list) and len(p) == 2 and all(map(_finite, p)) for p in prof)):
+        rep.add("error", "bad-value", lid, f"{where}profile is {_show(prof)}; it is two or more [r, y] points, r out "
+                "from the axis and y down, or path data", example)
+    elif any(p[0] < 0 for p in prof):
+        rep.add("error", "bad-value", lid, f"{where}profile has a point with r below 0; r is the distance out from "
+                "the axis", "turn the profile to the right of the axis: [10, 0], not [-10, 0]")
+    elif all(p[0] == 0 for p in prof):
+        rep.add("error", "bad-value", lid, f"{where}profile's points are all on the axis (r 0), so the lathe has no "
+                "surface", example)
+
+
 def _outline(obj: dict, rep: Report, lid, where: str = ""):
-    """Text and path shapes need their outline; a number in `d` is a depth (d is the path data here)."""
+    """Text, path, tube and lathe shapes need their outline; a number in `d` is a depth (d is the path data
+    here). A tube without d is a cylinder, as it was read before tubes ran along a path."""
     d = obj.get("d")
     if isinstance(d, (int, float)) and not isinstance(d, bool) and "depth" not in obj:
         obj["depth"] = obj.pop("d")
         rep.add("info", "renamed-key", lid, f"{where}'d' read as 'depth'", "write 'depth'")
     shape = obj.get("shape")
+    if shape == "tube" and not isinstance(obj.get("d"), str):
+        obj["shape"] = shape = "cylinder"
+        rep.add("info", "renamed-value", lid, f"{where}shape 'tube' without d read as 'cylinder'",
+                "a tube runs along SVG path data: \"d\": \"M-200 0 C-100 -150 100 150 200 0\"; write cylinder for "
+                "a straight one")
+    if shape == "tube":
+        _path_data(obj["d"], f"{where}d", rep, lid)
+    _turned(obj, rep, lid, where)
     if shape == "text" and not str(obj.get("text", "")).strip():
         rep.add("error", "missing-key", lid, f"{where}a text model needs 'text'",
                 'add "text": "..."')
