@@ -286,15 +286,28 @@ DEPTH AND CAMERA (3D)
   fill      one colour [theme accent]   shine 0..1 [0.4]   metal 0..1 [0]   rim 0..1 [0.5] (edge
             light)   bands [0] (2 or more: flat toon steps)   glow 0..1 [0] (shows at least fill x
             glow however it is lit: neon, screens, lamps). These animate.
+  texture   an image file (png, jpg, webp, gif, bmp) drawn on the surface, or {"src": "wood.jpg",
+            "repeat": 2 or [across, down], "offset": [across, down] (in images, toward the right and
+            down)}. Once on each cube face and on a plane, upright from in front (on top and
+            underneath, its top is the far edge); round a sphere, cylinder or cone with its middle
+            facing you, and flat across their ends; once round a torus and its tube; across the
+            front and back of text and path shapes. The fill shows through clear pixels. A part
+            takes the layer's texture unless it sets its own; false draws its fill. Triangles are
+            cut where perspective would slide the image across them (check warns texture-swim
+            where that is not enough, right in front of the camera). It does not animate. A
+            textured model takes about twice as long to draw.
   parts     [{"shape": "sphere", "r": 30, "x": 0, "y": -120, "z": 0, "rotateX": 0, "rotateY": 0,
             "rotate": 0, "scale": 1, "fill": "#b9f45d", "shine": 0.9}, ...] placed from the
             model's centre, in plain numbers (parts do not animate; the model does). A part takes
             the model's material keys it does not set. A model may have shape (or src), parts, or both.
   src       a model file: .glb or .gltf (glTF 2.0), or .obj with its .mtl. Colours, shine and metal
             come from the file; a fill on the layer recolours all of it. It fits inside w and/or h
-            keeping its shape, else its longest side is 300 px. Node transforms apply; animation,
-            skins and textures do not (a texture gives its mean colour). Long triangles are cut to
-            1/24 of its size for the depth sort. Draco- or meshopt-compressed files are not read.
+            keeping its shape, else its longest side is 300 px. Node transforms apply; animation
+            and skins do not. A glTF base colour texture (with its TEXCOORD_n) or an .obj map_Kd is
+            drawn as a texture; "texture": false draws its mean colour, and a texture on the layer
+            replaces the file's (check warns no-uvs when the file has no texture coordinates).
+            Long triangles are cut to 1/24 of its size for the depth sort. Draco- or meshopt-
+            compressed files are not read.
   ground    true or {"opacity": 0.5, "blur": px, "y": px, "from": "above"}: a soft shadow on a level
             floor under the model, as if lit from above, fainter as the model rises. The floor sits at
             the model's lowest point before it turns, or at y in the layer's parent space (canvas px

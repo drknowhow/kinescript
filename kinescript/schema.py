@@ -90,7 +90,10 @@ ENV_ALIAS = {"name": "preset", "sky": "top", "ground": "bottom", "floor": "botto
              "strength": "amount", "intensity": "amount"}
 FOG = {"color", "near", "far", "amount"}
 FOG_ALIAS = {"colour": "color", "start": "near", "end": "far", "density": "amount", "strength": "amount"}
-MATERIAL = {"fill", "shine", "metal", "rim", "bands", "glow"}
+MATERIAL = {"fill", "shine", "metal", "rim", "bands", "glow", "texture"}
+TEXTURE = {"src", "repeat", "offset"}
+TEXTURE_ALIAS = {"image": "src", "file": "src", "path": "src", "url": "src", "tile": "repeat", "tiles": "repeat",
+                 "tiling": "repeat", "shift": "offset", "position": "offset"}
 PART = MATERIAL | {"shape", "w", "h", "depth", "r", "tube", "x", "y", "z", "rotateX", "rotateY", "rotate", "scale",
                    "text", "size", "font", "weight", "italic", "letterSpacing", "lineHeight", "d", "strokeWidth",
                    "bevel"}
@@ -99,7 +102,8 @@ MODEL_ALIAS = {"radius": "r", "thickness": "tube", "geometry": "shape", "primiti
                "mesh": "shape", "gloss": "shine", "glossiness": "shine", "shininess": "shine",
                "specular": "shine", "metallic": "metal", "metalness": "metal", "toon": "bands", "steps": "bands",
                "quality": "detail", "lighting": "light", "children": "parts", "meshes": "parts", "model": "src",
-               "floor": "ground", "groundShadow": "ground", "contactShadow": "ground"}
+               "floor": "ground", "groundShadow": "ground", "contactShadow": "ground", "map": "texture",
+               "image": "texture", "picture": "texture", "decal": "texture", "skin": "texture"}
 GROUND = {"y", "opacity", "blur", "from"}
 SHADOWS = {"opacity", "soft"}
 SHADOWS_ALIAS = {"alpha": "opacity", "strength": "opacity", "softness": "soft", "blur": "soft"}
@@ -218,7 +222,7 @@ REQUIRED = {"text": ("text",), "image": ("src",), "video": ("src",), "path": ("d
             "captions": ("cues", "src", "voice"), "shader": ("preset", "sksl"), "model": ("shape", "parts", "src")}
 # Keys whose value is an object of their own: never a tween, even with a "from" key (a light's direction).
 OBJECTS = {"light", "lights", "env", "ground", "shadow", "shadows", "box", "fx", "uniforms", "sound", "enter", "exit",
-           "parts", "transition"}
+           "parts", "transition", "texture"}
 # Props that cannot be below 0, and the least each may be.
 AT_LEAST = {"radius": 0, "r": 0, "sides": 3, "blur": 0, "strokeWidth": 0, "size": 0}
 COLOUR_FIX = f"write {C.FORMATS}"
@@ -1221,9 +1225,42 @@ def _outline(obj: dict, rep: Report, lid, where: str = ""):
                 'add "d": "M0 0 L100 0 L50 80 Z"')
 
 
+def _texture(obj: dict, rep: Report, lid, where: str = ""):
+    """`texture` is an image file, or {"src", "repeat", "offset"}; false draws the fill instead of the layer's
+    texture (on a part) or the model file's own."""
+    v = obj.get("texture")
+    if v is None or v is False:
+        return
+    if isinstance(v, dict):
+        _keys(v, TEXTURE, TEXTURE_ALIAS, rep, lid, f"{where}texture: ")
+        src = v.get("src")
+        if src is None:
+            rep.add("error", "missing-key", lid, f"{where}texture needs 'src', an image file",
+                    '"texture": {"src": "wood.jpg", "repeat": 2}')
+            return
+        for k, least in (("repeat", 0.0), ("offset", None)):
+            x = v.get(k)
+            pair = isinstance(x, list) and len(x) == 2 and all(_number(n) for n in x)
+            if x is not None and not (_number(x) or pair) or (
+                    least is not None and x is not None and min(x if pair else [x] if _number(x) else [1]) <= least):
+                what = "a number above 0, or [across, down]" if k == "repeat" else "a number, or [across, down]"
+                rep.add("error", "bad-value", lid, f"{where}texture {k} is {_show(x)}; it takes {what}",
+                        "\"repeat\": 2 shows the image twice across and down" if k == "repeat" else
+                        "\"offset\": [0.5, 0] moves the image half its width to the right")
+    else:
+        src = v
+    if not (isinstance(src, str) and src.strip()):
+        rep.add("error", "bad-value", lid, f"{where}texture is {_show(v)}; it takes an image file, or an object "
+                "like {\"src\": \"wood.jpg\", \"repeat\": 2}")
+    elif not src.lower().endswith(IMAGE_EXTS + (".gif",)):
+        rep.add("error", "bad-value", lid, f"{where}texture {src!r} is not an image file; a texture is a .png, .jpg, "
+                ".webp, .gif or .bmp", "use a still image")
+
+
 def _model(raw: dict, rep: Report, lid):
     _light(raw, rep, lid)
     _outline(raw, rep, lid)
+    _texture(raw, rep, lid)
     if raw.get("src") and raw.get("shape"):
         rep.add("warning", "ignored-key", lid, f"shape '{raw['shape']}' is ignored: the model comes from src",
                 "drop shape, or make the shape its own part")
@@ -1255,6 +1292,7 @@ def _model(raw: dict, rep: Report, lid):
         _values(p, "model", rep, lid)
         _text(p, rep, lid, where)
         _outline(p, rep, lid, where)
+        _texture(p, rep, lid, where)
         for k, v in p.items():  # what _values lets through for layers but a part cannot animate or resolve
             if k in SCALAR and (isinstance(v, (list, dict)) or (isinstance(v, str) and (v.startswith("=") or _lengthish(v)))):
                 rep.add("error", "bad-value", lid, f"{where}{k} is {v!r}; parts take plain numbers (they do not animate)",

@@ -1,0 +1,22 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 6, "bg": {"radial": [0.5, 0.3], "stops": ["#22252f", "#0b0c10"]}},
+  "camera": {"rotateX": 14, "rotateY": [[0, -14], ["end", 14, "inOutSine"]], "y": -40},
+  "light": {"preset": "studio", "follow": "world", "azimuth": -35, "elevation": 40},
+  "env": "studio",
+  "layers": [
+    {"id": "stage", "type": "group", "x": "50%", "y": "52%", "sort": "pixel", "shadows": {"opacity": 0.5, "soft": 3},
+     "children": [
+      {"id": "floor", "type": "model", "shape": "plane", "w": 2600, "h": 1800, "y": 180, "rotateX": 90,
+       "texture": {"src": "media/tiles.png", "repeat": [13, 9]}, "shine": 0.1},
+      {"id": "crate", "type": "model", "shape": "cube", "w": 240, "x": -520, "y": 60, "z": 120,
+       "rotateY": [[0, 25], ["end", -20]], "texture": "media/crate.png", "shine": 0.15},
+      {"id": "can", "type": "model", "y": 40, "rotateY": [[0, -40], ["end", 150]], "texture": "media/label.png",
+       "shine": 0.7, "parts": [{"shape": "cylinder", "r": 95, "h": 280},
+                               {"shape": "cylinder", "r": 95, "h": 10, "y": -145, "texture": false,
+                                "fill": "#c9ccd2", "metal": 0.6, "shine": 0.8}]},
+      {"id": "globe", "type": "model", "shape": "sphere", "r": 130, "x": 520, "y": 50, "z": -80,
+       "rotateY": [[0, 0], ["end", -120]], "rotate": 18, "texture": "media/globe.png", "shine": 0.55}]},
+    {"id": "title", "type": "text", "text": "boards on a cube, a label on a can, a map on a ball",
+     "x": "50%", "y": "92%", "size": 34, "weight": 400, "fill": "$muted", "fixed": true, "at": 0.4, "enter": "fade"}
+  ]
+}

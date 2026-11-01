@@ -66,7 +66,8 @@ no depth draw exactly as before.
   each other.
 - **Model layers.** `"type": "model"` draws a lit `cube`, `sphere`, `cylinder`, `cone`, `torus` or `plane`, or
   several shapes merged as `parts` so their triangles are depth-sorted together. Materials take `fill`, `shine`,
-  `metal`, `rim`, `bands` (toon steps) and `glow`. `light`, for the scene or one model, takes `studio`, `soft`,
+  `metal`, `rim`, `bands` (toon steps), `glow` and `texture`, an image file wrapped round the shape, with `repeat`
+  and `offset`. `light`, for the scene or one model, takes `studio`, `soft`,
   `dramatic` or `flat`, or your own amounts, and every amount, its `azimuth`, `elevation` and colour animate. It
   follows the camera, or with `"follow": "world"` stays in the scene as the camera orbits. `lights` adds up to three
   more, directional or point, and `env` gives shiny and metal models an environment to reflect. `explode` sends
@@ -74,7 +75,7 @@ no depth draw exactly as before.
 - **Extruded text and SVG paths.** `"shape": "text"` extrudes letters in any font and `"shape": "path"` extrudes
   SVG path data, filled, or stroked with `strokeWidth` for line icons. Both take a `depth` and a 45-degree `bevel`.
 - **Model files.** `src` reads `.glb` and `.gltf` (glTF 2.0) and `.obj` with its `.mtl`: node transforms, base
-  colours, and metallic and roughness as `metal` and `shine`. `ground` puts a soft shadow under any model, straight
+  colours and base colour textures, and metallic and roughness as `metal` and `shine`. `ground` puts a soft shadow under any model, straight
   down or, with `"from": "light"`, cast along its key light.
 
 A 3D title that builds in and turns to face the camera:
@@ -255,6 +256,8 @@ More scenes in [`examples/`](https://github.com/drknowhow/kinescript/tree/main/e
   that follows a ring past posts at several depths, orbiting it, then pans to a word, 6 s.
 - [`focus.json`](https://github.com/drknowhow/kinescript/blob/main/examples/focus.json): focus pulls from a cone
   to a ring to a cube in a stage, each pixel blurred by its own depth, 6 s.
+- [`textures.json`](https://github.com/drknowhow/kinescript/blob/main/examples/textures.json): boards on a crate,
+  a label on a can and a map on a globe, on a tiled floor, as the camera swings round, 6 s.
 - [`voiceover.json`](https://github.com/drknowhow/kinescript/blob/main/examples/voiceover.json): titles cued from
   the words of a voice-over, karaoke captions of it, and a music bed that dips under it, 5.4 s.
 - [`narrated.json`](https://github.com/drknowhow/kinescript/blob/main/examples/narrated.json): the same idea
@@ -290,8 +293,8 @@ Within one process, such as the MCP server, the workers stay warm for two minute
 - Without a usable GPU, Kinescript falls back to Skia's CPU rasteriser. With the Windows `skia-python` wheel this is
   very slow (about 0.65 s per 1080p frame for the launch video); use `--scale 0.5` for previews on such machines.
   `KINE_BACKEND=cpu` forces this path.
-- 3D is drawn by Skia with a depth sort, not a GL pipeline: models have no image textures, skeletal animation or
-  shadows cast on each other. Separate layers hide each other per pixel only inside a stage, and parts of one
+- 3D is drawn by Skia with a depth sort, not a GL pipeline: models have no skeletal animation, and cast shadows on
+  each other only inside a stage. Separate layers hide each other per pixel only inside a stage, and parts of one
   model that cut through each other meet at a stepped seam. Draco- and meshopt-compressed model files are not read.
 - Audio is mixing and levelling (trim, gain over time, fades, speed, loop, pan, role levels, ducking, a loudness
   target), with no effects such as EQ, compression of single sounds or reverb.

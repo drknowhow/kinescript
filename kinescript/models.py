@@ -1,6 +1,7 @@
 """Imported models: glTF 2.0 (.glb, .gltf) and Wavefront .obj files read with numpy into a Mesh and its
-materials. The geometry is static: node transforms apply, animation, skins and morph targets do not, and a
-textured material takes its texture's mean colour. Files are y up; the mesh comes out y down like space.py."""
+materials. The geometry is static: node transforms apply, animation, skins and morph targets do not. A glTF
+base colour texture or an .obj map_Kd is drawn as a texture, with its mean colour as the material's fill for when
+it is not. Files are y up; the mesh comes out y down like space.py."""
 from __future__ import annotations
 
 import base64
@@ -19,13 +20,14 @@ EXTENSIONS = (".glb", ".gltf", ".obj")
 _TYPES = {5120: "<i1", 5121: "<u1", 5122: "<i2", 5123: "<u2", 5125: "<u4", 5126: "<f4"}
 _WIDTH = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT2": 4, "MAT3": 9, "MAT4": 16}
 _COMPRESSED = ("KHR_draco_mesh_compression", "EXT_meshopt_compression")
+_WRAP = {33071: "clamp", 33648: "mirror", 10497: "repeat"}  # glTF sampler wrapS and wrapT
 EDGE = 1 / 24  # longest triangle edge kept, as a share of the model's longest side
 _CACHE: dict = {}
 
 
 class Imported(NamedTuple):
     mesh: Mesh  # centred on its bounding box, in file units; M indexes `materials`, -1 takes the layer's own
-    materials: list  # {"fill": (r, g, b), "shine": s, "metal": m}
+    materials: list  # {"fill": (r, g, b), "shine": s, "metal": m}, and "texture": {"image", "tint", "tile"}
     size: np.ndarray  # (3,) bounding box
 
 
@@ -67,16 +69,16 @@ def slots(imp: Imported, n: int) -> tuple[np.ndarray, list]:
     return np.where(M >= 0, lut[near][np.maximum(M, 0)], -1), [mats[k] for k in keep]
 
 
-def _flat(P: np.ndarray, T: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _flat(P: np.ndarray, T: np.ndarray, U: np.ndarray | None = None) -> tuple:
     """Each triangle its own three vertices with its face normal (files without normals)."""
     P = P[T].reshape(-1, 3)
     fn = np.cross(P[1::3] - P[0::3], P[2::3] - P[0::3])
-    return P, np.repeat(fn, 3, axis=0), np.arange(len(P)).reshape(-1, 3)
+    return P, np.repeat(fn, 3, axis=0), np.arange(len(P)).reshape(-1, 3), None if U is None else U[T].reshape(-1, 2)
 
 
 def _finish(pieces: list, mats: list) -> Imported:
-    """One mesh from (P, N, T, M) pieces in file space: turned y down, cleaned of degenerate triangles and
-    unused vertices, centred, and with repeated materials merged."""
+    """One mesh from (P, N, T, M, U) pieces in file space (U None without texture coordinates): turned y down,
+    cleaned of degenerate triangles and unused vertices, centred, and with repeated materials merged."""
     if not pieces:
         raise ValueError("no triangle meshes found")
     base = np.cumsum([0] + [len(p[0]) for p in pieces[:-1]])
@@ -84,6 +86,9 @@ def _finish(pieces: list, mats: list) -> Imported:
     N = np.concatenate([p[1] for p in pieces]) * (1.0, -1.0, 1.0)
     T = np.concatenate([p[2] + b for p, b in zip(pieces, base)])[:, [0, 2, 1]]  # y flipped: wind back
     M = np.concatenate([p[3] for p in pieces])
+    U = None
+    if any(p[4] is not None for p in pieces):
+        U = np.concatenate([np.zeros((len(p[0]), 2)) if p[4] is None else p[4] for p in pieces])
     a, b, c = P[T[:, 0]], P[T[:, 1]], P[T[:, 2]]
     area = np.linalg.norm(np.cross(b - a, c - a), axis=1)
     T = T[area > 1e-12 * max(float(np.ptp(P, axis=0).max()), 1e-9) ** 2]
@@ -91,22 +96,32 @@ def _finish(pieces: list, mats: list) -> Imported:
         raise ValueError("no triangle meshes found")
     used, inv = np.unique(T, return_inverse=True)
     P, N, M, T = P[used], N[used], M[used], inv.reshape(-1, 3)
+    extra = (N, M) if U is None else (N, M, U[used])
     lo, hi = P.min(0), P.max(0)
     # Long triangles sort by their middle and can be drawn over parts in front of them (the painter's
     # algorithm): cut every edge down to 1/24 of the model's size. Already fine meshes are unchanged.
-    P, T, N, M = _refine(P, T, float((hi - lo).max()) * EDGE, outline=True, extra=(N, M))
+    P, T, N, M, *U = _refine(P, T, float((hi - lo).max()) * EDGE, outline=True, extra=extra)
+    U = U[0] if U else None
     N = N / np.maximum(np.linalg.norm(N, axis=1, keepdims=True), 1e-12)
     T = T.astype(np.int32)
     seen: dict = {}
-    remap = np.array([seen.setdefault((tuple(np.round(m["fill"], 3)), m["shine"], m["metal"]), len(seen))
-                      for m in mats] + [-1], int)
+    looks: dict = {}  # each merged material's texture
+    remap = []
+    for m in mats:
+        t = m.get("texture")
+        k = seen.setdefault((tuple(np.round(m["fill"], 3)), m["shine"], m["metal"],
+                             None if t is None else (id(t["image"]), t["tint"], t["tile"])), len(seen))
+        looks.setdefault(k, t)
+        remap.append(k)
+    remap = np.array(remap + [-1], int)
     M = remap[np.where(M >= 0, M, len(mats))]
     kept = np.unique(M[M >= 0])  # materials no remaining triangle uses take no slot
     lut = np.full(len(seen) + 1, -1)
     lut[kept] = np.arange(len(kept))
     keys = list(seen)
-    merged = [dict(fill=tuple(map(float, keys[k][0])), shine=keys[k][1], metal=keys[k][2]) for k in kept]
-    return Imported(Mesh(P - (lo + hi) / 2, N, T, lut[M].astype(np.int32)), merged, hi - lo)
+    merged = [dict(fill=tuple(map(float, keys[k][0])), shine=keys[k][1], metal=keys[k][2],
+                   **({} if looks[k] is None else {"texture": looks[k]})) for k in kept]
+    return Imported(Mesh(P - (lo + hi) / 2, N, T, lut[M].astype(np.int32), U), merged, hi - lo)
 
 
 # ---- glTF -----------------------------------------------------------------------------------------------
@@ -179,13 +194,15 @@ def _gltf(p: Path) -> tuple[list, list]:
             out = np.maximum(out / np.iinfo(dt).max, -1.0)
         return out
 
-    means: dict = {}
+    pictures: dict = {}
 
-    def texture(t: dict | None) -> np.ndarray | None:
-        """Mean colour (linear) of a texture's image, or None when it cannot be read."""
+    def texture(t: dict | None) -> tuple | None:
+        """A texture's image, its mean colour (linear) and how it tiles across and down, or None when it cannot
+        be read."""
         try:
-            src = doc["textures"][t["index"]]["source"]
-            if src not in means:
+            tex = doc["textures"][t["index"]]
+            src = tex["source"]
+            if src not in pictures:
                 im = doc["images"][src]
                 if "bufferView" in im:
                     buf, off, _ = view(im["bufferView"])
@@ -195,21 +212,26 @@ def _gltf(p: Path) -> tuple[list, list]:
                 img = skia.Image.MakeFromEncoded(skia.Data.MakeWithCopy(raw))
                 px = img.toarray(colorType=skia.kRGBA_8888_ColorType)
                 px = px[::max(1, px.shape[0] // 64), ::max(1, px.shape[1] // 64), :3] / 255.0
-                means[src] = (px.reshape(-1, 3) ** 2.2).mean(0)
-            return means[src]
+                pictures[src] = (img, (px.reshape(-1, 3) ** 2.2).mean(0))
+            sampler = doc["samplers"][tex["sampler"]] if "sampler" in tex else {}
+            return (*pictures[src], tuple(_WRAP.get(sampler.get(k, 10497), "repeat") for k in ("wrapS", "wrapT")))
         except (KeyError, IndexError, TypeError, AttributeError, OSError):
             return None
 
-    mats = []
+    mats, sets = [], []  # each material, and which TEXCOORD_n its texture reads
     for mt in doc.get("materials", []):
         pbr = mt.get("pbrMetallicRoughness", {})
-        col = np.array(pbr.get("baseColorFactor", (1.0, 1.0, 1.0, 1.0))[:3], float)
-        mean = texture(pbr.get("baseColorTexture"))
-        col = col if mean is None else col * mean
+        factor = np.clip(np.array(pbr.get("baseColorFactor", (1.0, 1.0, 1.0, 1.0))[:3], float), 0, 1)
+        got = texture(pbr.get("baseColorTexture"))
+        col = factor if got is None else factor * got[1]
         metal, rough = float(pbr.get("metallicFactor", 1.0)), float(pbr.get("roughnessFactor", 1.0))
         # Rough metal looks like plain paint here; only smooth metal gets the tinted highlight.
         mats.append({"fill": tuple(np.clip(col, 0, 1) ** (1 / 2.2)), "shine": round(1 - rough, 3),
                      "metal": round(metal * (1 - rough), 3)})
+        if got is not None:  # the image times the base colour factor, as the file asks
+            tint = tuple(float(v) for v in np.round(factor ** (1 / 2.2), 4))
+            mats[-1]["texture"] = {"image": got[0], "tint": None if min(tint) >= 1 else tint, "tile": got[2]}
+        sets.append(int((pbr.get("baseColorTexture") or {}).get("texCoord", 0)))
     pieces = []
 
     def emit(mi: int, world: np.ndarray):
@@ -229,14 +251,17 @@ def _gltf(p: Path) -> tuple[list, list]:
             if np.linalg.det(A) < 0:
                 T = T[:, [0, 2, 1]]  # a mirroring node turns its faces inside out; turn them back
             P = P @ A.T + world[:3, 3]
+            mat = prim.get("material", -1)
+            uv = f"TEXCOORD_{sets[mat] if mat >= 0 else 0}"
+            U = accessor(at[uv])[:, :2] if uv in at else None
             if "NORMAL" in at:
                 N = accessor(at["NORMAL"])[:, :3] @ np.linalg.inv(A)
             else:
-                P, N, T = _flat(P, T)
-            mat = prim.get("material", -1)
+                P, N, T, U = _flat(P, T, U)
             if mat >= 0 and doc["materials"][mat].get("doubleSided"):
                 P, N, T = np.r_[P, P], np.r_[N, -N], np.r_[T, T[:, [0, 2, 1]] + len(P)]
-            pieces.append((P, N, T, np.full(len(P), mat)))
+                U = None if U is None else np.r_[U, U]
+            pieces.append((P, N, T, np.full(len(P), mat), U))
 
     nodes = doc.get("nodes", [])
     if doc.get("scenes"):
@@ -260,7 +285,7 @@ def _gltf(p: Path) -> tuple[list, list]:
 # ---- OBJ ------------------------------------------------------------------------------------------------
 
 def _mtl(path: Path) -> dict:
-    """Materials of an .mtl file: Kd is the colour, Ns (0..1000) the shine."""
+    """Materials of an .mtl file: Kd is the colour, Ns (0..1000) the shine, map_Kd a texture drawn as it is."""
     out: dict = {}
     cur = None
     if not path.is_file():
@@ -275,11 +300,16 @@ def _mtl(path: Path) -> dict:
             cur["fill"] = tuple(min(1.0, max(0.0, float(x))) for x in t[1:4])
         elif cur is not None and t[0] == "Ns" and len(t) >= 2:
             cur["shine"] = round(min(1.0, max(0.0, float(t[1]) / 1000)) ** 0.5, 3)
+        elif cur is not None and t[0] == "map_Kd" and len(t) >= 2:
+            f = path.parent / t[-1].replace("\\", "/")  # options such as -s come first; the file is last
+            img = skia.Image.MakeFromEncoded(skia.Data.MakeWithCopy(f.read_bytes())) if f.is_file() else None
+            if img is not None:
+                cur["texture"] = {"image": img, "tint": None, "tile": ("repeat", "repeat")}
     return out
 
 
 def _obj(p: Path) -> tuple[list, list]:
-    V, VN, tris, nrm, fm, fg = [], [], [], [], [], []
+    V, VN, VT, tris, nrm, uvs, fm, fg = [], [], [], [], [], [], [], []
     lib: dict = {}
     names: list = []
     mat, grp = -1, 0
@@ -296,13 +326,17 @@ def _obj(p: Path) -> tuple[list, list]:
             V.append(t[1:4])
         elif t[0] == "vn":
             VN.append(t[1:4])
+        elif t[0] == "vt":
+            VT.append((t[1:3] + ["0"])[:2])
         elif t[0] == "f" and len(t) >= 4:
             c = [tok.split("/") for tok in t[1:]]
             vi = [ix(x[0], len(V)) for x in c]
             ni = [ix(x[2], len(VN)) if len(x) > 2 and x[2] else -1 for x in c]
+            ti = [ix(x[1], len(VT)) if len(x) > 1 and x[1] else -1 for x in c]
             for k in range(1, len(c) - 1):  # a polygon as a fan
                 tris.append((vi[0], vi[k], vi[k + 1]))
                 nrm.append((ni[0], ni[k], ni[k + 1]))
+                uvs.append((ti[0], ti[k], ti[k + 1]))
                 fm.append(mat)
                 fg.append(grp)
         elif t[0] == "usemtl":
@@ -317,23 +351,26 @@ def _obj(p: Path) -> tuple[list, list]:
     if not tris:
         return [], []
     V = np.array(V, float)
-    cv, cn = np.array(tris).ravel(), np.array(nrm).ravel()
+    cv, cn, cu = np.array(tris).ravel(), np.array(nrm).ravel(), np.array(uvs).ravel()
     known = np.array([n in lib for n in names] + [False])
     fm = np.array(fm)
     fm = np.where(known[fm], fm, -1)  # usemtl of a material no .mtl defines: the layer's own
     cm, ct = np.repeat(fm, 3), np.repeat(np.arange(len(tris)), 3)
     if len(VN) and (cn >= 0).all():
-        key = np.stack([cv, cn, cm], 1)
+        key = np.stack([cv, cn, cm, cu], 1)
         _, first, inv = np.unique(key, axis=0, return_index=True, return_inverse=True)
         N = np.array(VN, float)[cn[first]]
     else:
         # No normals in the file: flat faces, smooth across the vertices of each smoothing group ("s 1").
         cg = np.repeat(np.array(fg), 3)
-        key = np.stack([cv, np.where(cg > 0, cg, -1 - ct), cm], 1)
+        key = np.stack([cv, np.where(cg > 0, cg, -1 - ct), cm, cu], 1)
         _, first, inv = np.unique(key, axis=0, return_index=True, return_inverse=True)
         a, b, c = V[cv[0::3]], V[cv[1::3]], V[cv[2::3]]
         N = np.zeros((len(first), 3))
         np.add.at(N, inv.ravel(), np.repeat(np.cross(b - a, c - a), 3, axis=0))
     inv = inv.ravel()
     mats = [lib[n] if n in lib else {"fill": (0.8, 0.8, 0.8), "shine": 0.0, "metal": 0.0} for n in names]
-    return [(V[cv[first]], N, inv.reshape(-1, 3), cm[first])], mats
+    U = None
+    if len(VT) and (cu >= 0).any():  # .obj images start at the bottom; these coordinates start at the top
+        U = np.where(cu[first, None] >= 0, np.array(VT, float)[np.maximum(cu[first], 0)] * (1, -1) + (0, 1), 0.0)
+    return [(V[cv[first]], N, inv.reshape(-1, 3), cm[first], U)], mats

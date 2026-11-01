@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Models take `texture`: an image file, or `{"src", "repeat", "offset"}`, on the layer or on one part. Every shape
+  has texture coordinates. The image goes once on each cube face and on a plane, upright from in front, and round a
+  sphere, cylinder or cone with its middle facing the camera, flat on their ends. It goes once round a torus and its
+  tube, and across the front and back of text and path shapes. The fill shows through clear pixels, and
+  `"texture": false` on a part draws its fill. A glTF file's base colour texture is drawn with its `TEXCOORD_n`,
+  and an `.obj` file's `map_Kd` with its `vt`; both used to give the texture's mean colour, which
+  `"texture": false` on the layer gives again. Skia spreads an image evenly across each triangle on screen, so
+  textured triangles are cut until perspective puts the image within 1 px of its place. `kine check` warns
+  (`texture-swim`) where nine rounds of cutting are not enough, right in front of the camera, and (`no-uvs`) when a
+  model file without texture coordinates is given a texture. A textured model draws its picture, the light on a
+  white surface, and its highlights, rim and reflection with the same sorted triangles, and combines them per
+  pixel. `examples/textures.json` renders in 13.2 s on the GPU against 6.5 s without its textures, and in
+  83.7 s on the CPU against 38.4 s. Models without textures draw the same bytes: `bench/same.py` finds no
+  difference against main on eleven 3D examples and `hello.json`, on either backend.
 - `camera` takes `aperture` and `focus` for depth of field. `aperture` is px of blur per 1000 px from the focus
   plane, and the blur grows as a lens's does: in proportion near the plane, never past `aperture` times the focus
   distance over 1000 however far behind it, faster toward the camera, and at most 48 px. `focus` is a z (px toward

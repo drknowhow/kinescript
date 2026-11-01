@@ -16,19 +16,25 @@ def scene(layers, **canvas):
     return {"canvas": dict({"w": 320, "h": 180, "fps": 30, "duration": 1}, **canvas), "layers": layers}
 
 
-def write_gltf(path, prims, nodes=None, roots=None, materials=(), binary=False, extra=None):
-    """A glTF file of `prims` [(P, T, N or None, material or None)], stored y up, faces counter-clockwise."""
+def write_gltf(path, prims, nodes=None, roots=None, materials=(), binary=False, extra=None, images=()):
+    """A glTF file of `prims` [(P, T, N or None, material or None[, texture coordinates])], stored y up, faces
+    counter-clockwise, with `images` (PNG bytes) stored in its buffer."""
     blob, views, accessors, meshes = bytearray(), [], [], []
 
-    def add(arr, ctype, kind):
-        b = arr.tobytes()
+    def view(b: bytes) -> int:
         views.append({"buffer": 0, "byteOffset": len(blob), "byteLength": len(b)})
         blob.extend(b + b"\0" * (-len(b) % 4))
-        accessors.append({"bufferView": len(views) - 1, "componentType": ctype, "count": len(arr), "type": kind})
+        return len(views) - 1
+
+    def add(arr, ctype, kind):
+        accessors.append({"bufferView": view(arr.tobytes()), "componentType": ctype, "count": len(arr), "type": kind})
         return len(accessors) - 1
 
-    for P, T, N, mat in prims:
+    pictures = [{"bufferView": view(png), "mimeType": "image/png"} for png in images]
+    for P, T, N, mat, *uv in prims:
         at = {"POSITION": add(np.asarray(P, "<f4"), 5126, "VEC3")}
+        if uv:
+            at["TEXCOORD_0"] = add(np.asarray(uv[0], "<f4"), 5126, "VEC2")
         if N is not None:
             at["NORMAL"] = add(np.asarray(N, "<f4"), 5126, "VEC3")
         prim = {"attributes": at, "indices": add(np.asarray(T, "<u4").ravel(), 5125, "SCALAR")}
@@ -38,6 +44,7 @@ def write_gltf(path, prims, nodes=None, roots=None, materials=(), binary=False, 
     nodes = nodes or [{"mesh": i} for i in range(len(meshes))]
     doc = {"asset": {"version": "2.0"}, "meshes": meshes, "accessors": accessors, "bufferViews": views,
            "materials": list(materials), "nodes": nodes, "scene": 0,
+           **({"images": pictures, "textures": [{"source": i} for i in range(len(pictures))]} if pictures else {}),
            "scenes": [{"nodes": roots if roots is not None else list(range(len(nodes)))}], **(extra or {})}
     if binary:
         doc["buffers"] = [{"byteLength": len(blob)}]

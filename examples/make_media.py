@@ -98,3 +98,61 @@ def rocket(path: Path):
 
 
 rocket(out / "rocket.glb")
+
+
+def textures():
+    """Images for examples/textures.json, made with numpy and Skia: crate boards, a can label, a globe's map (all
+    the way round, top to bottom) and floor tiles."""
+    import skia
+
+    def save(px, name):
+        skia.Image.fromarray(np.ascontiguousarray(np.clip(px, 0, 255).astype(np.uint8)),
+                             skia.kRGB_888x_ColorType).save(str(out / name))
+        print("wrote", out / name)
+
+    rng = np.random.default_rng(7)
+    y, x = np.mgrid[0:512, 0:512] / 512.0
+    board = np.floor(y * 4)  # four boards, each with its own shade and grain
+    grain = np.sin((x * 40 + np.sin(y * 9 + board * 2.1) * 1.6 + board * 5) * 3) * 0.5 + 0.5
+    shade = 0.82 + 0.18 * rng.random(4)[board.astype(int)]
+    wood = np.stack([196, 142, 88], -1) * (shade * (0.82 + 0.18 * grain))[..., None]
+    gap = (np.abs(y * 4 - np.round(y * 4)) * 128 < 3)[..., None]
+    rim = ((np.minimum(np.minimum(x, 1 - x), np.minimum(y, 1 - y)) * 512) < 34)[..., None]
+    crate = np.where(rim, wood * 0.72, np.where(gap, wood * 0.35, wood))
+    for cx, cy in ((17, 17), (495, 17), (17, 495), (495, 495)):  # a nail in each corner
+        crate[(np.hypot(x * 512 - cx, y * 512 - cy) < 6)] = (70, 72, 78)
+    save(np.dstack([crate, np.full((512, 512), 255)]), "crate.png")
+
+    surf = skia.Surface(1024, 512)
+    c = surf.getCanvas()
+    c.clear(skia.Color(0x24, 0x28, 0x32))
+    c.drawRect(skia.Rect(0, 150, 1024, 362), skia.Paint(Color=skia.Color(0xFF, 0x63, 0x3F)))
+    c.drawRect(skia.Rect(0, 372, 1024, 392), skia.Paint(Color=skia.Color(0xB9, 0xF4, 0x5D)))
+    font = skia.Font(skia.Typeface("Arial", skia.FontStyle.Bold()), 150)
+    for left in (40, 552):  # twice round the can, so a word faces the camera either way
+        c.drawString("KINE", left, 315, font, skia.Paint(Color=skia.Color(0xF2, 0xF0, 0xE8), AntiAlias=True))
+    small = skia.Font(skia.Typeface("Arial"), 28)
+    for left in (60, 572):
+        c.drawString("JSON SCENES IN, VIDEO OUT", left, 110, small, skia.Paint(Color=skia.Color(0x92, 0x99, 0xA8),
+                                                                                AntiAlias=True))
+    surf.makeImageSnapshot().save(str(out / "label.png"))
+    print("wrote", out / "label.png")
+
+    lat, lon = np.mgrid[0:512, 0:1024] / np.array([512.0, 1024.0])[:, None, None]
+    th, ph = lon * 2 * np.pi, lat * np.pi
+    land = sum(np.sin(th * f + rng.random() * 6.3) * np.sin(ph * g + rng.random() * 6.3) / (f + g)
+               for f, g in ((1, 2), (2, 3), (3, 1), (4, 5), (6, 4), (8, 7)))  # smooth all the way round
+    sea = np.stack([18 + 30 * lat, 60 + 40 * lat, 120 + 40 * (1 - lat)], -1)
+    green = np.stack([90 + 60 * land, 140 + 40 * land, 70 + 0 * land], -1)
+    ice = (np.abs(lat - 0.5) > 0.43)[..., None]
+    globe = np.where(ice, 236, np.where((land > 0.08)[..., None], green, sea))
+    save(np.dstack([globe, np.full(lat.shape, 255)]), "globe.png")
+
+    t = np.mgrid[0:256, 0:256] / 256.0
+    check = ((np.floor(t[0] * 2) + np.floor(t[1] * 2)) % 2)[..., None]
+    tiles = np.where(check > 0, (56, 62, 76), (44, 49, 61)) + rng.normal(0, 2.5, (256, 256, 1))
+    grout = ((np.abs(t * 2 - np.round(t * 2)) * 128 < 2).any(0))[..., None]
+    save(np.dstack([np.where(grout, (24, 27, 34), tiles), np.full((256, 256), 255)]), "tiles.png")
+
+
+textures()

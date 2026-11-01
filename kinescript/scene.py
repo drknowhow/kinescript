@@ -17,7 +17,7 @@ from .timing import Timeline, parse_clock
 
 LAYER_TYPES = {"rect", "circle", "ellipse", "path", "line", "arrow", "polygon", "text", "counter",
                "image", "video", "group", "captions", "shader", "model"}
-STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "children", "layers", "src", "trim",
+STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "children", "layers", "src", "trim", "texture",
           "speed", "fit", "text", "cues", "d", "points", "font", "split", "format", "align", "anchor",
           "blend", "clip", "mode", "volume", "hidden", "note", "words", "stops", "cap", "join", "loop",
           "allowOffscreen", "style", "audio", "shadow", "box", "fx", "fill", "stroke", "emph", "active",
@@ -208,10 +208,25 @@ class Scene:
         for layer in self.all_layers():
             if layer.src and not missing(layer.src, layer.id, f"{layer.type} src") and layer.type == "model":
                 try:
-                    models.load(layer.src)
+                    imp = models.load(layer.src)
                 except ValueError as e:
                     self.note("error", "bad-model", layer.id, f"model src {e}",
                               "export it again as glTF 2.0 (.glb) or .obj")
+                else:
+                    if layer.raw.get("texture") and imp.mesh.U is None:
+                        self.note("warning", "no-uvs", layer.id, f"{Path(layer.src).name} has no texture "
+                                  "coordinates, so its texture shows as one colour (its corner pixel)",
+                                  "export it again with UVs, or put the texture on a part instead")
+            if layer.type != "model":
+                continue
+            for spec in [layer.raw.get("texture")] + [p.get("texture") for p in layer.raw.get("parts") or []
+                                                      if isinstance(p, dict)]:
+                src = spec.get("src") if isinstance(spec, dict) else spec
+                if isinstance(src, str) and src.strip() and not missing(self.path(src), layer.id, "texture"):
+                    try:
+                        media.image(self.path(src))
+                    except media.MediaError as e:
+                        self.note("error", "bad-media", layer.id, f"texture {e}", "save it again as .png or .jpg")
         for s in self.audio:
             owner = s.layer or s.id
             if s.raw.get("text") and s.src and not Path(s.src).exists():
