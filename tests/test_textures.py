@@ -314,3 +314,14 @@ def test_emission_adds_to_a_textured_models_picture(tmp_path):
     blue = round(255 * 0.5 ** (1 / 2.2))
     assert near(lit[50, 120], (RED[0], RED[1], RED[2] + blue), 6)  # the picture, plus the emission
     assert (lit[..., :2] == plain[..., :2]).all()  # red and green untouched
+
+
+def test_the_sample_can_carries_its_label():
+    from pathlib import Path
+    from kinescript import models
+    can = Path(__file__).resolve().parents[1] / "examples" / "media" / "can.glb"  # examples/product.json's
+    if not can.exists():
+        pytest.skip("run examples/make_media.py first")
+    imp = models.load(str(can))
+    assert len(imp.materials) == 2 and "texture" in imp.materials[0] and imp.mesh.U is not None
+    assert imp.size[1] > 1.8 * imp.size[0]  # standing up

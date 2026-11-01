@@ -269,13 +269,16 @@ More scenes in [`examples/`](https://github.com/drknowhow/kinescript/tree/main/e
   outlines, a hidden-line wireframe ring and extruded letters with their creases drawn, 6 s.
 - [`glass.json`](https://github.com/drknowhow/kinescript/blob/main/examples/glass.json): a ball and a ring inside a
   glass case, and a ring that turns see-through, its inside showing, 6 s.
+- [`product.json`](https://github.com/drknowhow/kinescript/blob/main/examples/product.json): a glTF can, its label
+  a texture inside the file, turning on a table under a studio light and environment, with its shadow on the table
+  and two more cans out of focus behind it, 6 s.
 - [`voiceover.json`](https://github.com/drknowhow/kinescript/blob/main/examples/voiceover.json): titles cued from
   the words of a voice-over, karaoke captions of it, and a music bed that dips under it, 5.4 s.
 - [`narrated.json`](https://github.com/drknowhow/kinescript/blob/main/examples/narrated.json): the same idea
   with a voice written as text, a marked word and a click on it. Run `kine voice examples/narrated.json` first.
 
-`edit.json`, `import.json`, `textures.json`, `screens.json`, `edges.json`, `voiceover.json` and `narrated.json` read
-sample media: run `python examples/make_media.py` first to generate it.
+`edit.json`, `import.json`, `textures.json`, `screens.json`, `edges.json`, `product.json`, `voiceover.json` and
+`narrated.json` read sample media: run `python examples/make_media.py` first to generate it.
 
 ## Performance
 
