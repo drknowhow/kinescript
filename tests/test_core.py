@@ -1864,6 +1864,28 @@ def test_check_reports_a_mix_without_roles_that_is_quiet_or_at_its_limiter(tone)
     assert _heard(spec)["audio-peak"]["level"] == "warning"
 
 
+def test_look_draws_trails_and_onion_skins(tmp_path):
+    import skia
+    from kinescript.verify import contact_sheet
+    spec = scene([{"id": "dot", "type": "circle", "r": 6, "y": 90, "x": [[0, 40], [1, 280, "linear"]], "fill": "#ffffff"},
+                  {"id": "still", "type": "rect", "x": 160, "y": 40, "w": 20, "h": 20, "fill": "#4a7dff"}],
+                 duration=1, bg="#000000")
+
+    def sheet(name, **kw):
+        info = contact_sheet(spec, str(tmp_path / name), times=[0.5], width=320, **kw)
+        return info, skia.Image.open(info["out"]).toarray(colorType=skia.kRGBA_8888_ColorType)
+    _, plain = sheet("p.png")
+    info, trail = sheet("t.png", trails=True)
+    assert info["trails"] == ["dot"]  # the rect stands still
+    y = 34 + 90  # the tile starts 8 px in and 34 px down; the dot moves 8 px a frame, at x 160 in frame 15
+    assert plain[y, 8 + 240, :3].max() == 0 and trail[y, 8 + 240, 0] > 150 > trail[y, 8 + 240, 1]  # frame 25's dot
+    _, onion = sheet("o.png", onion=2)
+    assert 60 < onion[y, 8 + 152, 0] < 120 and 25 < onion[y, 8 + 144, 0] < 65  # frames 14 and 13, fainter
+    assert np.array_equal(onion[34 + 40, 8 + 160], plain[34 + 40, 8 + 160])  # what holds still is unchanged
+    assert contact_sheet(spec, str(tmp_path / "n.png"), count=1, width=320, trails=True)["trails"] == ["dot"]
+    assert probe(spec, at=0.5)["visible"]["dot"]["pos"] == [160.0, 90.0]
+
+
 def test_look_draws_the_sound_and_returns_its_measurements(mix_media, tmp_path):
     import skia
     from kinescript.verify import contact_sheet

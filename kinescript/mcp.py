@@ -25,7 +25,8 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"}}, "required": ["scene"]}},
     {"name": "kine_look", "description": "Contact sheet: `count` frames in one labelled image. boxes=true outlines each "
      "layer with its id. wire=true draws every model's drawn triangles; depth=true shows each stage's depth image, "
-     "nearer brighter. audio=true draws the sound under the frames on the same time axis (a lane per role and the "
+     "nearer brighter. trails=true draws each moving layer's path, a dot a frame, so their spacing shows speed, "
+     "eases and stops; onion=N draws the N frames before each frame over it, fainter. audio=true draws the sound under the frames on the same time axis (a lane per role and the "
      "mix, with levels, the duck and issues in red) and returns its measurements. times are read as kine_still reads "
      "at; one outside the scene draws its first or last frame, with a note. Use it to review motion, layout "
      "and sound without watching video.",
@@ -35,6 +36,8 @@ TOOLS = [
                                                       "boxes": {"type": "boolean", "default": False},
                                                       "wire": {"type": "boolean", "default": False},
                                                       "depth": {"type": "boolean", "default": False},
+                                                      "trails": {"type": "boolean", "default": False},
+                                                      "onion": {"type": "integer", "default": 0},
                                                       "audio": {"type": "boolean", "default": False},
                                                       "width": {"type": "integer", "default": 400}}, "required": ["scene"]}},
     {"name": "kine_still", "description": "One full-size frame at time `at` (seconds), returned as an image, then "
@@ -46,7 +49,7 @@ TOOLS = [
                                                       "scale": {"type": "number", "default": 0.5}},
                      "required": ["scene", "at"]}},
     {"name": "kine_probe", "description": "Resolved timeline (every layer's in/out) and, with `at`, every visible "
-     "layer's screen box, alpha and text at that time. Given a media file instead of a scene, its duration, size, "
+     "layer's screen box, anchor position (pos), alpha and text at that time. Given a media file instead of a scene, its duration, size, "
      "fps and audio.",
      "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"}, "at": {"type": "number"}},
                      "required": ["scene"]}},
@@ -123,7 +126,8 @@ def call(name: str, args: dict) -> list[dict]:
         out = str(Path(tempfile.gettempdir()) / f"kine_look_{os.getpid()}.png")
         info = contact_sheet(_scene(args), out, int(args.get("count", 12)), None, int(args.get("width", 400)),
                              args.get("times"), bool(args.get("boxes")), bool(args.get("audio")),
-                             wire=bool(args.get("wire")), depth=bool(args.get("depth")))
+                             wire=bool(args.get("wire")), depth=bool(args.get("depth")),
+                             trails=bool(args.get("trails")), onion=int(args.get("onion", 0)))
         del info["out"]  # a temporary file, gone once read
         return [_image(out), _text(info)]
     if name == "kine_still":

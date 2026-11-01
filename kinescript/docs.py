@@ -673,14 +673,17 @@ COMMANDS
                                   the JSON's "notes" say so), --width 480 (16 to 4096), --cols 4,
                                   -o (.png or .jpg). --wire draws every model's triangles over the
                                   frames; --depth dims them and shows each stage's depth image,
-                                  nearer brighter.
+                                  nearer brighter. --trails draws each moving layer's path, a dot
+                                  a frame, so their spacing shows its speed, eases and stops;
+                                  --onion 3 draws the 3 frames before each one over it, fainter.
                                   --audio adds the sound under the frames on the same time axis:
                                   a lane per role and one for the mix, the duck, and issues in red;
                                   its JSON gives each sound's loudness and gain and the mix's.
   kine still scene.json --at 2.5  one frame as PNG (-o to name it, .png or .jpg); --at -1 is 1 s
                                   before the end; --at end is the last frame; a time past the end
                                   draws the last frame, with a note. --scale 0.5 halves the size.
-  kine probe scene.json --at 2    every layer's and sound's start and end, and screen boxes at 2 s
+  kine probe scene.json --at 2    every layer's and sound's start and end, and at 2 s each visible
+                                  layer's screen box and anchor (pos)
   kine probe clip.mp4             a media file's kind (video, audio or image), duration, w and h as
                                   shown (after rotation), fps, audio, alpha and rotation; a note
                                   when it lists a video stream with no frames in it. A model file
