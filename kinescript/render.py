@@ -1220,7 +1220,8 @@ class Renderer:
                     "alpha": round(alpha * parent_alpha, 3), "type": L.type, "scale": round(sc, 4)}
             if L.type in ("text", "counter", "captions"):
                 # The colour _draw_text uses, so checks see default-coloured text too.
-                fill = g("fill") if "fill" in L.props else C.parse(self.s.theme.get("paper", "#f2f0e8"))
+                fill = (g("fill") if "fill" in L.props else None if isinstance(L.raw.get("fill"), dict)
+                        else C.parse(self.s.theme.get("paper", "#f2f0e8")))
                 info.update(size=float(g("size", 64)), fill=list(fill) if isinstance(fill, tuple) else None,
                             text=self._last_text if hasattr(self, "_last_text") else "")
             if not facing:
@@ -1354,6 +1355,18 @@ class Renderer:
         if "radial" in spec:
             cx, cy, r = (spec["radial"] + [0.5, 0.5, 0.6])[:3] if isinstance(spec["radial"], list) else (0.5, 0.5, 0.6)
             return skia.GradientShader.MakeRadial(skia.Point(x + cx * w, y + cy * h), max(1.0, r * max(w, h)), colors, pos)
+        if "sweep" in spec:  # round its middle from the top, clockwise, turned by angle (CSS conic-gradient's start)
+            cx, cy = (spec["sweep"] + [0.5, 0.5])[:2] if isinstance(spec["sweep"], list) else (0.5, 0.5)
+            px, py = x + cx * w, y + cy * h
+            return skia.GradientShader.MakeSweep(px, py, colors, pos, localMatrix=skia.Matrix.RotateDeg(
+                float(spec.get("angle") or 0) - 90, skia.Point(px, py)))
+        if "linear" not in spec and spec.get("angle") is not None:  # CSS's: 0 runs up, 90 to the right, corner to corner
+            a = math.radians(float(spec["angle"]))
+            dx, dy = math.sin(a), -math.cos(a)
+            half = (abs(w * dx) + abs(h * dy)) / 2
+            cx, cy = x + w / 2, y + h / 2
+            return skia.GradientShader.MakeLinear([skia.Point(cx - dx * half, cy - dy * half),
+                                                   skia.Point(cx + dx * half, cy + dy * half)], colors, pos)
         a, b = spec.get("linear", [[0, 0], [1, 1]])
         return skia.GradientShader.MakeLinear([skia.Point(x + a[0] * w, y + a[1] * h), skia.Point(x + b[0] * w, y + b[1] * h)],
                                               colors, pos)
@@ -1368,6 +1381,10 @@ class Renderer:
             p.setShader(self._gradient(raw, bx, by, bw, bh, alpha))
         else:
             col = g(key) if key in L.props else C.parse(raw) if isinstance(raw, str) else raw
+            if isinstance(col, C.Gradient):  # one that animates
+                p = skia.Paint(AntiAlias=True)
+                p.setShader(self._gradient(col.spec(), *box, alpha))
+                return p
             argb = _argb(col, alpha)
             p = self._solid.get(argb)
             if p is None:
@@ -1384,7 +1401,11 @@ class Renderer:
         if isinstance(raw, dict) and "stroke" not in L.props:  # a gradient
             p.setShader(self._gradient(raw, *box, alpha))
         else:
-            p.setColor(_argb(g("stroke") if "stroke" in L.props else C.parse(raw), alpha))
+            col = g("stroke") if "stroke" in L.props else C.parse(raw)
+            if isinstance(col, C.Gradient):  # one that animates
+                p.setShader(self._gradient(col.spec(), *box, alpha))
+            else:
+                p.setColor(_argb(col, alpha))
         cap = L.raw.get("cap", "round" if L.type in ("line", "arrow", "path") else "butt")
         p.setStrokeCap({"round": skia.Paint.kRound_Cap, "square": skia.Paint.kSquare_Cap}.get(cap, skia.Paint.kButt_Cap))
         p.setStrokeJoin({"round": skia.Paint.kRound_Join, "bevel": skia.Paint.kBevel_Join}.get(L.raw.get("join", "round"), skia.Paint.kMiter_Join))
@@ -2166,7 +2187,13 @@ class Renderer:
             c.drawRRect(skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(*box), r, r),
                         skia.Paint(AntiAlias=True, Color=_argb(bs.get("fill", "#000000b0"))))
         ox, oy = bx + pad[1], by + pad[0]
-        fill = g("fill") if "fill" in L.props else C.parse(self.s.theme.get("paper", "#f2f0e8"))
+        fill = (g("fill") if "fill" in L.props else L.raw["fill"] if isinstance(L.raw.get("fill"), dict)
+                else C.parse(self.s.theme.get("paper", "#f2f0e8")))
+        gpaint = None  # a gradient fill, across the text as a shape's goes across its box; emphasis stays a colour
+        if isinstance(fill, (dict, C.Gradient)):
+            gpaint = skia.Paint(AntiAlias=True, Shader=self._gradient(fill if isinstance(fill, dict) else fill.spec(),
+                                                                      ox, oy, lay.w, lay.h, 1.0))
+            fill = (1.0, 1.0, 1.0, 1.0)  # only its alpha counts under the shader
         emph = g("emph") if "emph" in L.props else C.parse(self.s.theme.get("accent", "#ff633f"))
         act = g("active") if "active" in L.props else emph
         fpaint = skia.Paint(AntiAlias=True)
@@ -2231,7 +2258,10 @@ class Renderer:
                     k = 1
                 if painted != (k, ua):
                     fpaint.setColor(_argb(cols[k], ua))
+                    if gpaint is not None:
+                        gpaint.setAlphaf(ua)
                     painted = (k, ua)
+                ink = gpaint if gpaint is not None and k == 0 else fpaint
                 y = oy + r.line * lay.lh + lay.baseline0
                 x = ox + r.x + track * (r.char0 - c00) if track else ox + r.x
                 if text != r.text:  # typed so far: a right-to-left word grows from its right edge
@@ -2240,7 +2270,7 @@ class Renderer:
                     pcs = self._pieces(font, text, r.rtl, r.ctx)
                 if spaint is not None:
                     self._draw_pieces(c, pcs, text, x, y, font, spaint)
-                self._draw_pieces(c, pcs, text, x, y, font, fpaint)
+                self._draw_pieces(c, pcs, text, x, y, font, ink)
             if blurred:
                 c.restore()
             if moved:
@@ -2307,7 +2337,8 @@ class Renderer:
             r = m.mapRect(skia.Rect.MakeXYWH(*cbox))
             self.boxes[L.id] = {"rect": [round(r.left(), 1), round(r.top(), 1), round(r.right(), 1), round(r.bottom(), 1)],
                                 "alpha": round(a, 3), "type": "captions", "size": float(g("size", 64)),
-                                "fill": list(g("fill")) if "fill" in L.props else None, "text": text, "scale": 1.0}
+                                "fill": list(f) if isinstance(f := g("fill") if "fill" in L.props else None, tuple)
+                                else None, "text": text, "scale": 1.0}
         if a < 1:
             c.restore()
         c.restore()

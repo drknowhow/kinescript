@@ -27,6 +27,12 @@
   they start again, so a looping icon is one group with `"loop": 1.2`) and `timeRemap` (keyframes or an expression
   giving their time at the group's time; a number freezes them). The group's own keys, enter and exit keep the
   scene's time, and so do sounds. `time` stays an alias of `at`, so the remap is named as in After Effects.
+- Gradients: `"angle": 90` gives a linear gradient by its direction, corner to corner as CSS draws one (0 runs up,
+  90 to the right), and `"sweep": [0.5, 0.5]` goes round its middle from the top, clockwise, turned by `angle`, as
+  CSS's conic-gradient does. A gradient animates into another of the same kind with as many stops, by keyframes or a
+  tween, its points, angle, stop positions and colours (mixed in OKLab) moving together; `kine check` says when the
+  kinds or stop counts differ. A text layer took a gradient fill without complaint but drew it in the paper colour;
+  it draws the gradient now, across the whole block of text, and emphasised words keep their colour.
 - `kine check` warns `strobe` where a layer moves more than 40 px a frame at 1080p for five frames running in a
   scene without motion blur, where the eye sees separate copies instead of one moving thing.
 - 2D frames cost less Python: keyframes find their segment by bisection, expressions compile once to a function,

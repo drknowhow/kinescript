@@ -107,13 +107,17 @@ def lerp(a, b, t: float):
         return a + (b - a) * t
     if isinstance(a, tuple) and isinstance(b, tuple) and len(a) == len(b) == 4:  # parsed colours
         return C.mix(a, b, t)
+    if isinstance(a, C.Gradient) and isinstance(b, C.Gradient):
+        return a.mix(b, t)
     if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)) and len(a) == len(b):
         return [lerp(x, y, t) for x, y in zip(a, b)]
     return b if t >= 1 else a
 
 
 def _norm(v):
-    """Colours become RGBA tuples once, so draw code never re-parses them."""
+    """Colours become RGBA tuples and gradients Gradients once, so draw code never re-parses them."""
+    if isinstance(v, dict) and "stops" in v:
+        return C.Gradient.of(v)
     return C.parse(v) if C.is_color(v) else v
 
 
