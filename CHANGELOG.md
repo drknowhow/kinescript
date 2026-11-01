@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.5.0 (2026-11-01)
 
 - Depth of field in a stage blurs by the render's scale: a `--scale 0.5` draft, or `kine look`'s small frames,
   used to blur twice or four times as much of the picture as the full frame. Full-size frames are unchanged.

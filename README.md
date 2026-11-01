@@ -78,8 +78,8 @@ no depth draw exactly as before.
 - **Extruded text and SVG paths.** `"shape": "text"` extrudes letters in any font and `"shape": "path"` extrudes
   SVG path data, filled, or stroked with `strokeWidth` for line icons. Both take a `depth` and a 45-degree `bevel`.
 - **Model files.** `src` reads `.glb` and `.gltf` (glTF 2.0) and `.obj` with its `.mtl`: node transforms, base
-  colours and base colour textures, emission (`emissiveFactor` and `emissiveTexture`, or `Ke` and `map_Ke`), and
-  metallic and roughness as `metal` and `shine`. `ground` puts a soft shadow under any model, straight
+  colours and base colour textures, emission (`emissiveFactor` and `emissiveTexture`, or `Ke` and `map_Ke`),
+  transparency (`alphaMode` `BLEND`, or `d` and `Tr`), and metallic and roughness as `metal` and `shine`. `ground` puts a soft shadow under any model, straight
   down or, with `"from": "light"`, cast along its key light.
 
 A 3D title that builds in and turns to face the camera:
@@ -308,9 +308,10 @@ Within one process, such as the MCP server, the workers stay warm for two minute
 - Without a usable GPU, Kinescript falls back to Skia's CPU rasteriser. With the Windows `skia-python` wheel this is
   very slow (about 0.65 s per 1080p frame for the launch video); use `--scale 0.5` for previews on such machines.
   `KINE_BACKEND=cpu` forces this path.
-- 3D is drawn by Skia with a depth sort, not a GL pipeline: models have no skeletal animation, and cast shadows on
-  each other only inside a stage. Separate layers hide each other per pixel only inside a stage, and parts of one
-  model that cut through each other meet at a stepped seam. Draco- and meshopt-compressed model files are not read.
+- 3D is drawn by Skia with a depth sort, not a GL pipeline: model files' animations and skins are not played, and
+  models cast shadows on each other only inside a stage. Separate layers hide each other per pixel only inside a
+  stage, and parts of one model that cut through each other meet at a stepped seam. A textured model is drawn
+  solid whatever its `transparency`. Draco- and meshopt-compressed model files are not read.
 - Audio is mixing and levelling (trim, gain over time, fades, speed, loop, pan, role levels, ducking, a loudness
   target), with no effects such as EQ, compression of single sounds or reverb.
 - Kinescript does not speak by itself: `kine voice` needs a plugin or a command. The Kokoro plugin times words

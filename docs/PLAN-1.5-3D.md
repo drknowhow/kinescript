@@ -1,7 +1,8 @@
 # Kinescript 1.5: 3D plan
 
-Proposal, 2026-10-31. Nothing here is built. Numbers marked "target" are budgets to measure against; the
-others come from the 1.4 CHANGELOG or from the spike below.
+Proposal, 2026-10-31. Released as 1.5.0 on 2026-11-01 with Phases 0 to 4 and 7 (#57 to #73); Phases 5 and 6
+move to 1.5.1 (decision 3). Each phase's status says what was built and how it differs from its bullets. Numbers
+marked "target" are budgets to measure against; the others come from the 1.4 CHANGELOG or from the spike below.
 
 ## Where 3D stands in 1.4
 
@@ -92,7 +93,7 @@ Each bullet is about one PR. Phases 2 and 3 can run in parallel once Phase 1 is 
 - `examples/stage.json`: two interlocking rings, a sphere passing through a card, a title in depth.
 - `stage-16` stress scene in `bench/stress.py`.
 
-Status (2026-10-31, branch `stage-pixel-depth`): built, not merged. Changes from the bullets above:
+Status (2026-10-31): merged (#57). Changes from the bullets above:
 - The GPU keeps depth in 24 bits of RGBA8 (no F32 targets), so a stage holds four frame-sized RGBA8 images at 2x,
   33 MB each at 1080p. The merge runs four passes, none drawing into an image it reads: drawing into a surface with
   a live snapshot makes Skia copy it, and with those copies 6 workers rendered `examples/stage.json` in 5.8 s
@@ -124,9 +125,9 @@ Status (2026-10-31, branch `stage-pixel-depth`): built, not merged. Changes from
 - Check rules: `light-behind` (the key light sits behind what the camera sees, so a model shows only ambient),
   `fog-hides` (a layer lies wholly past `far`).
 
-Status (2026-10-31): split into four PRs. Lights (branch `animated-lights`): `light` tweens, `azimuth`,
-`elevation`, `follow`, `lights` (directional and point), material `glow` and `light-behind` are built. Changes from
-the bullets above:
+Status (2026-10-31): merged as four PRs: lights (#58), `env` (#59), `fog` (#60) and shadows (#61). Lights:
+`light` tweens, `azimuth`, `elevation`, `follow`, `lights` (directional and point), material `glow` and
+`light-behind`. Changes from the bullets above:
 - The GPU shader gets no fragment position, so a point light lights a whole model from where its centre is.
 - `glow` is a floor, max(lit, fill x glow), not an addition: added to a lit surface it washed the colour to white.
 - glTF `emissiveFactor` is not read yet.
@@ -156,8 +157,8 @@ animate yet. That completes Phase 2.
 - Check rules: `camera-inside-model`, `focus-on-nothing` (the focus plane is nearer or farther than every layer).
 
 Status (2026-10-31): camera moves (#62, merged): `target`, `shake`, the `kine docs` recipes and
-`camera-inside-model`. Depth of field (branch `depth-of-field`): `aperture`, `focus`, `focus-on-nothing` and
-`slow-depth-of-field` are built, not merged. Changes from the bullets above:
+`camera-inside-model`. Depth of field (#63): `aperture`, `focus`, `focus-on-nothing` and
+`slow-depth-of-field`; a stage blurs by the render's scale since #73. Changes from the bullets above:
 x and y still pan from the target. A layer target follows the layer's keys and its parents', not its enter and exit
 motions, and keyframes pan between points and layer ids. `shake` turns the camera on its own spot, so near and far
 layers move alike, with a roll that moves the corners half as far; `amount` animates, `speed` and `seed` do not.
@@ -217,7 +218,7 @@ material's picture is now a small runtime shader: skia-python's `Shaders.Blend` 
 video frame on the GPU, and the same bytes come out for image textures. Changes from the bullets above: a missing or unreadable texture is `media-missing` or
 `bad-media`, as for other files, not `texture-missing`. `.obj` files' `vt` and `map_Kd` are read too.
 The pictures of a model's materials are drawn in one call a pass, a shader picking each material's by an offset
-on its texture coordinates (branch `textured-materials`, not merged): one call a run of a material in the sort
+on its texture coordinates (#71): one call a run of a material in the sort
 took 48 s a frame on a glTF can whose label and steel alternate in depth.
 `"texture": false` draws the fill (on a part, instead of the layer's texture; on a model file, its mean colour).
 Cylinder and cone ends take the image flat. On the GPU the picture, the light on a white surface and the added
@@ -260,7 +261,7 @@ nine rounds: a floor reaching to just in front of the camera took eight.
   a frame pixel's samples) while `look` asks for them.
 - Stress scenes `stage-16`, `textured-100k`, `skinned`, `repeat-1000` and `dof-stage`, each with frame time and
   peak memory in the 1.5 report.
-  Built on branch `stress-3d`, not merged: `textured-100k` (an .obj globe of 102,400 triangles with normals,
+  Merged (#70): `textured-100k` (an .obj globe of 102,400 triangles with normals,
   coordinates and a map_Kd image, turning under world light and `env`) and `dof-stage` (a stage of 10 models and
   3 cards on a floor with shadows, focus pulled from the near row to the far row to the cards). `skinned` and
   `repeat-1000` wait for Phase 5. Results in `docs/stress-test-1.5/`, 120 frames at 1080p each, render wall time
@@ -277,12 +278,14 @@ nine rounds: a floor reaching to just in front of the camera took eight.
   `slow-depth-of-field`.
 - Examples: `stage.json`, `product.json` (a textured glTF turntable under world lights with `env`, depth of field
   and a floor that takes its shadow), `character.json`, `cubes.json`.
-  `product.json` is built on branch `product-example`, not merged: `examples/make_media.py` writes `can.glb`, a can
+  `product.json` merged (#72): `examples/make_media.py` writes `can.glb`, a can
   whose body takes `label.png` as an embedded base colour texture, under a steel lid, rim and ring pull. It turns on
   a table in a stage with shadows and depth of field, two more cans out of focus behind it. 180 frames render in
   16.0 s on the GPU (6 workers). `character.json` and `cubes.json` wait for Phase 5.
 - README 3D section and its limitations line, `kine docs`, site/, CHANGELOG with measured numbers, version 1.5.0.
   A 3D shot in the launch video is optional and means re-measuring the promo.
+  Built on branch `release-1.5.0`: the README's model files and limits, the site's 3D section rewritten for 1.5
+  with a product turntable demo, version 1.5.0. The launch video is unchanged, so its numbers stand.
 
 ## Out of scope
 

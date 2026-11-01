@@ -314,8 +314,8 @@ DEPTH AND CAMERA (3D)
             replaces the file's (check warns no-uvs when the file has no texture coordinates).
             The light a material gives off (glTF emissiveFactor and emissiveTexture, .mtl Ke and
             map_Ke) is added to its colour however it is lit. A glTF material with alphaMode BLEND is
-            see-through by its base colour's alpha, an .mtl one by d or Tr. Long triangles are cut to 1/24 of its size for the depth sort. Draco- or meshopt-
-            compressed files are not read.
+            see-through by its base colour's alpha, an .mtl one by d or Tr. Long triangles are cut to
+            1/24 of its size for the depth sort. Draco- or meshopt-compressed files are not read.
   ground    true or {"opacity": 0.5, "blur": px, "y": px, "from": "above"}: a soft shadow on a level
             floor under the model, as if lit from above, fainter as the model rises. The floor sits at
             the model's lowest point before it turns, or at y in the layer's parent space (canvas px

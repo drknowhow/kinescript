@@ -1,6 +1,6 @@
 """Render the landing page's media (site/) with Kinescript, and write each demo's JSON and score into the page.
 
-    python examples/make_media.py        # once: footage and the rocket model the examples read
+    python examples/make_media.py        # once: footage, images and the models the examples read
     python marketing/build_site.py       # everything
     python marketing/build_site.py dolly hero  # only these videos and posters ("look" is the contact sheets)
     python marketing/build_site.py sound       # only make the voice demo's bed and click again
@@ -51,6 +51,7 @@ DEMO = {
     "materials": ("site/demos/materials.json", 3.5, 0.5),
     "title3d": ("examples/title3d.json", 3.2, 0.5),
     "import": ("examples/import.json", 3.0, 0.5),
+    "product": ("examples/product.json", 2.5, 0.5),
     "captions": ("site/demos/captions.json", 4.0, 0.5),
     "voice": ("site/demos/voice.json", 6.0, 0.5),
     "voices": ("site/demos/voices.json", 18.45, 0.5),
