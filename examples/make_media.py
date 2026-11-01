@@ -211,4 +211,85 @@ def can(path: Path):
     print("wrote", path)
 
 
+def arm(path: Path):
+    """A skinned, animated glTF binary: a capped tube 150 tall on three joints (at heights 0, 50 and 100), each
+    vertex weighted to the one or two joints it is between, with two clips: "wave", a 2 s loop of LINEAR
+    rotation keys, and "curl", 1.5 s from straight to curled through CUBICSPLINE keys that ease in and out."""
+    rings, seg, r, h = 31, 32, 14.0, 150.0
+    a = np.linspace(0, 2 * np.pi, seg, endpoint=False)
+    rim = np.stack([np.cos(a), np.zeros(seg), np.sin(a)], 1)
+    y = np.linspace(0, h, rings)
+    P = [(rim[None] * r + y[:, None, None] * [0, 1, 0]).reshape(-1, 3)]
+    N = [np.tile(rim, (rings, 1))]
+    i, j = np.arange(rings - 1)[:, None] * seg, np.arange(seg)[None]
+    a0, a1 = i + j, i + (j + 1) % seg
+    T = [np.stack([a0, a0 + seg, a1], -1).reshape(-1, 3), np.stack([a1, a0 + seg, a1 + seg], -1).reshape(-1, 3)]
+    for end, up in ((0.0, -1.0), (h, 1.0)):  # flat caps, faces outward (counter-clockwise seen from outside)
+        base = sum(len(p) for p in P)
+        P.append(np.r_[[[0, end, 0]], rim * r + [0, end, 0]])
+        N.append(np.tile([0, up, 0], (seg + 1, 1)))
+        k = np.arange(seg)
+        T.append(np.stack([np.full(seg, base), base + 1 + (k + 1) % seg if up > 0 else base + 1 + k,
+                           base + 1 + k if up > 0 else base + 1 + (k + 1) % seg], 1))
+    P, N, T = np.concatenate(P), np.concatenate(N), np.concatenate(T)
+    # The lower joint of each pair gives way to the upper one over 30 px round where they meet.
+    s = lambda b: (lambda u: u * u * (3 - 2 * u))(np.clip((P[:, 1] - b + 15) / 30, 0, 1))  # noqa: E731
+    w1, w2 = s(50), s(100)
+    weights = np.stack([1 - w1, w1 - w2, w2, np.zeros(len(P))], 1)
+    joints = np.tile([0, 1, 2, 0], (len(P), 1))
+    blob, views, accessors = bytearray(), [], []
+
+    def add(arr, ctype, kind):
+        views.append({"buffer": 0, "byteOffset": len(blob), "byteLength": arr.nbytes})
+        blob.extend(arr.tobytes() + b"\0" * (-arr.nbytes % 4))
+        acc = {"bufferView": len(views) - 1, "componentType": ctype, "count": len(arr), "type": kind}
+        if kind == "VEC3":
+            acc.update(min=arr.min(0).tolist(), max=arr.max(0).tolist())
+        accessors.append(acc)
+        return len(accessors) - 1
+
+    def quat(deg):  # about z, toward the viewer: the tube bends to the left
+        return [0.0, 0.0, math.sin(math.radians(deg) / 2), math.cos(math.radians(deg) / 2)]
+
+    attrs = {"POSITION": add(P.astype("<f4"), 5126, "VEC3"), "NORMAL": add(N.astype("<f4"), 5126, "VEC3"),
+             "JOINTS_0": add(joints.astype("<u1"), 5121, "VEC4"), "WEIGHTS_0": add(weights.astype("<f4"), 5126, "VEC4")}
+    ibm = np.stack([np.eye(4) - np.pad([[0, 0, 0, 0], [0, 0, 0, b], [0, 0, 0, 0]], ((0, 1), (0, 0)))
+                    for b in (0, 50, 100)])  # each joint's bind matrix inverted: down by its height
+    samplers, channels = [], []
+    clips = []
+    t = np.arange(17) / 8  # every 1/8 s over the loop
+    for node, angle in ((2, lambda t: 35 * np.sin(np.pi * t)), (3, lambda t: 50 * np.sin(np.pi * t - 0.9))):
+        samplers.append({"input": add(t.astype("<f4"), 5126, "SCALAR"),
+                         "output": add(np.array([quat(d) for d in angle(t)], "<f4"), 5126, "VEC4")})
+        channels.append({"sampler": len(samplers) - 1, "target": {"node": node, "path": "rotation"}})
+    clips.append({"name": "wave", "samplers": samplers, "channels": channels})
+    samplers, channels = [], []
+    for node, deg in ((2, 70), (3, 85)):  # in-tangent, value, out-tangent per key; flat tangents ease
+        keys = np.array([[0] * 4, quat(0), [0] * 4, [0] * 4, quat(deg), [0] * 4], "<f4")
+        samplers.append({"input": add(np.array([0, 1.5], "<f4"), 5126, "SCALAR"),
+                         "output": add(keys, 5126, "VEC4"), "interpolation": "CUBICSPLINE"})
+        channels.append({"sampler": len(samplers) - 1, "target": {"node": node, "path": "rotation"}})
+    clips.append({"name": "curl", "samplers": samplers, "channels": channels})
+    lin = [(v / 255) ** 2.2 for v in (0xff, 0x63, 0x3f)]  # the brand accent; baseColorFactor is linear
+    doc = {"asset": {"version": "2.0", "generator": "kinescript examples/make_media.py"}, "scene": 0,
+           "scenes": [{"nodes": [0, 4]}],
+           "nodes": [{"name": "rig", "children": [1]}, {"name": "base", "children": [2]},
+                     {"name": "elbow", "translation": [0, 50, 0], "children": [3]},
+                     {"name": "wrist", "translation": [0, 50, 0]}, {"name": "tube", "mesh": 0, "skin": 0}],
+           "skins": [{"name": "arm", "joints": [1, 2, 3],
+                      "inverseBindMatrices": add(ibm.transpose(0, 2, 1).reshape(3, 16).astype("<f4"), 5126,
+                                                 "MAT4")}],
+           "meshes": [{"name": "tube", "primitives": [{"attributes": attrs, "material": 0,
+                                                        "indices": add(T.astype("<u2").ravel(), 5123, "SCALAR")}]}],
+           "materials": [{"name": "accent", "pbrMetallicRoughness": {"baseColorFactor": [*lin, 1.0],
+                                                                     "metallicFactor": 0.0, "roughnessFactor": 0.4}}],
+           "animations": clips, "accessors": accessors, "bufferViews": views, "buffers": [{"byteLength": len(blob)}]}
+    js = json.dumps(doc).encode()
+    js += b" " * (-len(js) % 4)
+    body = struct.pack("<II", len(js), 0x4E4F534A) + js + struct.pack("<II", len(blob), 0x004E4942) + bytes(blob)
+    path.write_bytes(b"glTF" + struct.pack("<II", 2, 12 + len(body)) + body)
+    print("wrote", path)
+
+
 can(out / "can.glb")
+arm(out / "arm.glb")

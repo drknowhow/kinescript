@@ -308,14 +308,23 @@ DEPTH AND CAMERA (3D)
             the model's material keys it does not set. A model may have shape (or src), parts, or both.
   src       a model file: .glb or .gltf (glTF 2.0), or .obj with its .mtl. Colours, shine and metal
             come from the file; a fill on the layer recolours all of it. It fits inside w and/or h
-            keeping its shape, else its longest side is 300 px. Node transforms apply; animation
-            and skins do not. A glTF base colour texture (with its TEXCOORD_n) or an .obj map_Kd is
-            drawn as a texture; "texture": false draws its mean colour, and a texture on the layer
-            replaces the file's (check warns no-uvs when the file has no texture coordinates).
+            keeping its shape, else its longest side is 300 px. Node transforms, skins (up to four
+            joints a vertex; check warns skin-influences past that) and morph target weights apply,
+            and animation plays the file's clips. A glTF base colour texture (with its TEXCOORD_n)
+            or an .obj map_Kd is drawn as a texture; "texture": false draws its mean colour, and a
+            texture on the layer replaces the file's (check warns no-uvs when the file has no
+            texture coordinates).
             The light a material gives off (glTF emissiveFactor and emissiveTexture, .mtl Ke and
             map_Ke) is added to its colour however it is lit. A glTF material with alphaMode BLEND is
             see-through by its base colour's alpha, an .mtl one by d or Tr. Long triangles are cut to
             1/24 of its size for the depth sort. Draco- or meshopt-compressed files are not read.
+  animation a clip of the glTF file to play on the layer's clock: its name (kine probe lists them),
+            its number from 0, true for the first, or {"name": "Walk", "speed": 1, "loop": true,
+            "start": 0}. speed 2 plays twice as fast, -1 backwards; start is the seconds into the
+            clip at the layer's start; loop false holds the last pose. Node translation, rotation
+            and scale, morph target weights and skins move (LINEAR, STEP and CUBICSPLINE keys). The
+            model keeps the size and centre of its rest pose, so a clip that walks it moves it. A
+            name the file lacks is an error (unknown-animation) that lists the ones it has.
   ground    true or {"opacity": 0.5, "blur": px, "y": px, "from": "above"}: a soft shadow on a level
             floor under the model, as if lit from above, fainter as the model rises. The floor sits at
             the model's lowest point before it turns, or at y in the layer's parent space (canvas px
@@ -582,7 +591,9 @@ COMMANDS
   kine probe clip.mp4             a media file's kind (video, audio or image), duration, w and h as
                                   shown (after rotation), fps, audio, alpha and rotation; a note
                                   when it lists a video stream with no frames in it. A model file
-                                  (.glb, .gltf, .obj): its triangles, vertices, materials and size.
+                                  (.glb, .gltf, .obj): its triangles, vertices, materials, size,
+                                  animations with their durations, skins, morph targets, textures
+                                  and texture coordinate sets.
   kine render scene.json -o out.mp4 -q draft|standard|high
                                   standard is the default, draft the fastest, high the best.
                                   Also .mov or .webm (with --transparent for no background),

@@ -107,6 +107,10 @@ MODEL_ALIAS = {"radius": "r", "thickness": "tube", "geometry": "shape", "primiti
                "image": "texture", "picture": "texture", "decal": "texture", "skin": "texture", "outline": "edges",
                "outlines": "edges", "lines": "edges", "creases": "edges", "transmission": "transparency",
                "seeThrough": "transparency", "translucency": "transparency"}
+ANIMATION = {"name", "speed", "loop", "start"}  # a model file's clip, played on the layer's clock
+ANIMATION_ALIAS = {"clip": "name", "track": "name", "rate": "speed", "timeScale": "speed", "repeat": "loop",
+                   "offset": "start", "from": "start", "time": "start"}
+MODEL_FILES = (".glb", ".gltf", ".obj")
 GROUND = {"y", "opacity", "blur", "from"}
 EDGES = {"width", "color", "angle"}
 EDGES_ALIAS = {"colour": "color", "thickness": "width", "size": "width", "strokeWidth": "width", "crease": "angle",
@@ -140,7 +144,8 @@ TYPES: dict[str, set[str]] = {
     "group": {"children", "layers", "w", "h", "clip", "radius", "fill", "sort", "shadows"},
     "model": PART - {"x", "y", "z", "rotateX", "rotateY", "rotate", "scale"} | {"detail", "parts", "explode",
                                                                               "draw", "light", "lights", "env",
-                                                                              "src", "ground", "edges"},
+                                                                              "src", "ground", "edges",
+                                                                              "animation"},
 }
 SEQUENCE = COMMON | {"clips", "transition", "fit", "volume", "w", "h"}
 TRANSITION = {"type", "dur"}
@@ -228,7 +233,7 @@ REQUIRED = {"text": ("text",), "image": ("src",), "video": ("src",), "path": ("d
             "captions": ("cues", "src", "voice"), "shader": ("preset", "sksl"), "model": ("shape", "parts", "src")}
 # Keys whose value is an object of their own: never a tween, even with a "from" key (a light's direction).
 OBJECTS = {"light", "lights", "env", "ground", "shadow", "shadows", "box", "fx", "uniforms", "sound", "enter", "exit",
-           "parts", "transition", "texture", "edges"}
+           "parts", "transition", "texture", "edges", "animation"}
 # Props that cannot be below 0, and the least each may be.
 AT_LEAST = {"radius": 0, "r": 0, "sides": 3, "blur": 0, "strokeWidth": 0, "size": 0}
 COLOUR_FIX = f"write {C.FORMATS}"
@@ -713,7 +718,8 @@ def _layer(raw, rep: Report, path: str, comps: dict):
             rep.add("info", "renamed-key", lid, f"type '{name}' is a component; read as \"use\": \"{name}\"",
                     f"write \"use\": \"{name}\"")
     for wrap in [k for k in raw if k in WRAPPERS and isinstance(raw[k], dict)
-                 and not {"name", "type", "preset"} & set(raw[k])]:  # a motion object is not a wrapper
+                 and not {"name", "type", "preset"} & set(raw[k])  # a motion object is not a wrapper
+                 and not (k == "animation" and _model_file(raw))]:  # nor a model file's clip
         inner = raw.pop(wrap)
         for k, v in inner.items():
             if k in raw:
@@ -782,7 +788,8 @@ def _layer(raw, rep: Report, path: str, comps: dict):
         else:
             rep.add("error", "bad-value", lid, f"{key} is {_show(pos)}; it is read as x and y only when it is "
                     "[x, y], [x, y, z] or {\"x\": ..., \"y\": ...}", "write \"x\" and \"y\"")
-    _keys(raw, COMMON | TYPES[t], lalias, rep, lid, "")
+    # "animation" plays a clip of a model file; on any other layer it is read as "enter", as before.
+    _keys(raw, COMMON | TYPES[t] - (set() if _model_file(raw) else {"animation"}), lalias, rep, lid, "")
     _timing(raw, rep, lid)
     shape = raw.get("shape")
     if t == "model" and isinstance(shape, str) and shape.lower().endswith((".glb", ".gltf", ".obj")):
@@ -1306,7 +1313,46 @@ def _see_through(raw: dict, rep: Report, lid):
                 "put the see-through shape in a model layer of its own")
 
 
+def _model_file(raw: dict) -> bool:
+    """Whether the layer draws a model file, under src or a name agents write for it."""
+    return any(isinstance(raw.get(k), str) and raw[k].strip().lower().endswith(MODEL_FILES)
+               for k in ("src", "source", "file", "url", "model", "shape"))
+
+
+def _animation(raw: dict, rep: Report, lid):
+    """`animation` names a clip of the model file: a string, its number from 0, true for the first, or
+    {"name", "speed", "loop", "start"}. Whether the file has it is checked when the scene loads."""
+    if "animation" not in raw:
+        return
+    v = raw["animation"]
+    if v is None or v is False:
+        del raw["animation"]
+        return
+    named = lambda x: (isinstance(x, str) and x.strip()) or x is True or (  # noqa: E731
+        isinstance(x, int) and not isinstance(x, bool) and x >= 0)
+    if not isinstance(v, dict):
+        if not named(v):
+            rep.add("error", "bad-value", lid, f"animation is {_show(v)}; it names a clip of the model file: "
+                    "its name, its number from 0, or an object like {\"name\": \"Walk\", \"speed\": 1}",
+                    "\"animation\": \"Walk\" (kine probe lists the file's clips)")
+        return
+    _keys(v, ANIMATION, ANIMATION_ALIAS, rep, lid, "animation: ")
+    if "name" in v and not named(v["name"]):
+        rep.add("error", "bad-value", lid, f"animation name is {_show(v['name'])}; it is the clip's name or its "
+                "number from 0", "kine probe lists the file's clips")
+    for k, what in (("speed", "how fast it plays: 1 as made, 2 twice as fast, -1 backwards"),
+                    ("start", "the seconds into the clip at the layer's start")):
+        if k in v and not _finite(v[k]):
+            rep.add("error", "bad-value", lid, f"animation {k} is {_show(v[k])}; it is a number, {what}")
+    if isinstance(v.get("loop"), str) and v["loop"].lower() in ("true", "false", "yes", "no"):
+        v["loop"] = v["loop"].lower() in ("true", "yes")
+    if "loop" in v and not isinstance(v["loop"], bool):
+        rep.add("error", "bad-value", lid, f"animation loop is {_show(v['loop'])}; it takes true (the default: the "
+                "clip repeats) or false (it holds its last pose)")
+
+
 def _model(raw: dict, rep: Report, lid):
+    _animation(raw, rep, lid)
     _light(raw, rep, lid)
     _outline(raw, rep, lid)
     _texture(raw, rep, lid)

@@ -360,12 +360,14 @@ def shape2d(rings: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray, np.ndarray
 
 
 def _refine(P: np.ndarray, T: np.ndarray, most: float, outline: bool = False, extra: tuple = (), long=None,
-            rounds: int = 12) -> tuple:
+            rounds: int = 12, trail: list | None = None) -> tuple:
     """Split edges longer than `most` at their midpoints until none is left, so a surface is made of small
     triangles the painter's sort can order against nearby walls and parts. Returns P, T and the per-vertex
     arrays in `extra` grown to match (a new vertex takes the mean of its edge's ends, or the first end's
     integer). `outline=False` never splits edges on the outline, so a cap still meets its walls.
-    long(P, extra, a, b), when given, says which edges (from vertices a to vertices b) are too long instead."""
+    long(P, extra, a, b), when given, says which edges (from vertices a to vertices b) are too long instead.
+    `trail`, when given, gets each round's cut edges (a, b): the new vertices of that round are their midpoints,
+    in order, so the same cuts can be made again on the vertices moved somewhere else."""
     extra = list(extra)
     for _ in range(rounds):
         e = np.sort(T[:, [[0, 1], [1, 2], [2, 0]]].reshape(-1, 2), axis=1)  # edges ab, bc, ca of each triangle
@@ -381,6 +383,8 @@ def _refine(P: np.ndarray, T: np.ndarray, most: float, outline: bool = False, ex
         mid = np.full(len(edges), -1)
         mid[cut] = len(P) + np.arange(cut.sum())
         a, b = edges[cut, 0], edges[cut, 1]
+        if trail is not None:
+            trail.append((a, b))
         P = np.concatenate([P, (P[a] + P[b]) / 2])
         extra = [np.concatenate([x, x[a] if x.dtype.kind in "iu" else (x[a] + x[b]) / 2]) for x in extra]
         M = mid[inv.ravel()].reshape(-1, 3)

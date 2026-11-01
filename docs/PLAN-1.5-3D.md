@@ -232,6 +232,11 @@ nine rounds: a floor reaching to just in front of the camera took eight.
 - glTF animation: node translation, rotation and scale channels (LINEAR, STEP, CUBICSPLINE), morph target weights,
   and skins (`JOINTS_0`, `WEIGHTS_0`, inverse bind matrices; linear blend skinning in numpy). The layer key
   `animation` takes a clip name or `{"name", "speed", "loop", "start"}` on the layer's clock.
+  Built on branch `gltf-animation`, with the probe, check and make_media bullets below: `models.pose` sets the
+  clip's channels on the node tree, blends morph targets and skins on the file's own primitives, then replays the
+  edge cuts `_refine` made when the file was read (it now records them), so the posed mesh has the same triangles
+  and sorts the same way. Skins and default morph weights apply at rest too. The model keeps its rest size and
+  centre. Posing `arm.glb` (1,314 vertices) takes 0.36 ms; `bench/same.py` finds no frame that differs.
 - `parts` animate: part keys take keyframes and expressions like layer keys. The merged mesh is rebuilt only on
   frames where a part moves.
 - `repeat`: `{"count": n, "x": "...", "y": "...", "z": "...", "rotateY": "...", "scale": "...", "fill": "..."}`,
