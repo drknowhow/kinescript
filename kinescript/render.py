@@ -1245,6 +1245,10 @@ class Renderer:
                 tilt = space.tilt(z, rx, ry)
                 m = m @ tilt
             m = m @ space.rotate_z(rot) @ space.scale(sx, sy)
+            if mods.sx != 1 or mods.sy != 1 or mods.hinge:
+                px, py = self._pivot(box, mods)
+                m = m @ space.translate(px, py) @ space.rotate_z(mods.hinge) @ space.scale(mods.sx, mods.sy) @ (
+                    space.translate(-px, -py))
             if box is not None:
                 xy, w = space.project(m, box)
                 if w.min() < space.NEAR:
@@ -1286,6 +1290,13 @@ class Renderer:
             c.rotate(rot)
         if sx != 1 or sy != 1:
             c.scale(sx, sy)
+        if mods.sx != 1 or mods.sy != 1 or mods.hinge:  # a squash, stretch or swing, about its own pivot
+            px, py = self._pivot(box, mods)
+            c.translate(px, py)
+            if mods.hinge:
+                c.rotate(mods.hinge)
+            c.scale(mods.sx, mods.sy)
+            c.translate(-px, -py)
         blur = float(blur) + mods.blur
         if defocus > 0.05:
             blur = math.hypot(blur, defocus)
@@ -1293,7 +1304,9 @@ class Renderer:
         fx = L.raw.get("fx")
         # A masked or displaced layer blends once it is cut (_masked) or warped (_warped).
         blend = None if L is self._cutting or L is self._warping else L.raw.get("blend")
-        effects = blur > 0.05 or shadow or fx or (blend and blend != "normal") or L.looks
+        glitch = mods.glitch if mods.glitch > 0.01 and box is not None else 0.0
+        effects = (blur > 0.05 or shadow or fx or (blend and blend != "normal") or L.looks or mods.smear > 0.05
+                   or glitch)
         cf = None
         if fogf > 0.002:
             if not effects and self._one_draw(L):
@@ -1316,15 +1329,18 @@ class Renderer:
         elif layered:
             paint = skia.Paint(Alphaf=alpha)
             filt, work, reach = self._looks(L, g, t) if L.looks else (None, 0.0, 0.0)
-            if blur > 0.05:
-                filt = skia.ImageFilters.Blur(blur, blur, skia.TileMode.kDecal, filt)
-                work, reach = work + 1, max(reach, 3 * blur)
+            if blur > 0.05 or mods.smear > 0.05:  # a whip smears it across
+                filt = skia.ImageFilters.Blur(blur + mods.smear, blur, skia.TileMode.kDecal, filt)
+                work, reach = work + 1, max(reach, 3 * (blur + mods.smear))
             if shadow:
                 sh = shadow if isinstance(shadow, dict) else {}
                 sig = float(sh.get("blur", 16)) / 2
                 dx, dy = float(sh.get("x", 0)), float(sh.get("y", 6))
                 filt = skia.ImageFilters.DropShadow(dx, dy, sig, sig, _argb(sh.get("color", "#00000099")), filt)
                 work, reach = work + 1.2, max(reach, 3 * sig + max(abs(dx), abs(dy)))  # a blur, moved and merged
+            if glitch:
+                filt = self._glitch(f"{L.id}/{mods.seed}", box, mods, glitch, filt)
+                work += 3  # the slices, then two coloured copies of them and the slices again, merged
             if filt:
                 paint.setImageFilter(filt)
             if fx:
@@ -1351,10 +1367,7 @@ class Renderer:
             if mods.wipe and mods.reveal < 1:
                 if L.copies is not None and L.type != "model":  # its copies wipe on as one
                     bx, by, bw, bh = self._copies_box(L, t, T, box)
-                r = max(0.0, mods.reveal)
-                clip = {"right": (bx, by, bx + bw * r, by + bh), "left": (bx + bw * (1 - r), by, bx + bw, by + bh),
-                        "down": (bx, by, bx + bw, by + bh * r), "up": (bx, by + bh * (1 - r), bx + bw, by + bh)}[mods.wipe]
-                c.clipRect(skia.Rect(*clip), doAntiAlias=True)
+                self._wipe(c, mods, bx, by, bw, bh)
         reveal = mods.reveal if not mods.wipe else 1.0
         self._ink, self._alpha, self._cf, self._t = None, paint_alpha, cf, t
         if L.copies is not None and L.type != "model":  # a model's copies are merged into its mesh (render3d)
@@ -1369,6 +1382,63 @@ class Renderer:
         self._m3d = outer
         if self.stop_after == L.id:
             self._stopped = True
+
+    @staticmethod
+    def _pivot(box, mods) -> tuple[float, float]:
+        """Where a squash, stretch or swing acts, in the layer's own space: the middle of its box, or of the box's top
+        or bottom edge."""
+        if box is None:
+            return 0.0, 0.0
+        bx, by, bw, bh = box
+        return bx + bw / 2, by + (0.0 if mods.pivot == "top" else bh if mods.pivot == "bottom" else bh / 2)
+
+    @staticmethod
+    def _wipe(c, mods, bx, by, bw, bh):
+        """c clipped to what a wipe has shown of the box so far; a rise-mask also moves what is drawn up into it from
+        below its bottom edge."""
+        r, w = max(0.0, mods.reveal), mods.wipe
+        if w in ("right", "left", "down", "up"):
+            clip = {"right": (bx, by, bx + bw * r, by + bh), "left": (bx + bw * (1 - r), by, bx + bw, by + bh),
+                    "down": (bx, by, bx + bw, by + bh * r), "up": (bx, by + bh * (1 - r), bx + bw, by + bh)}[w]
+            c.clipRect(skia.Rect(*clip), doAntiAlias=True)
+        elif w == "rise":
+            c.clipRect(skia.Rect.MakeXYWH(bx, by, bw, bh), doAntiAlias=True)
+            c.translate(0, bh * (1 - r))
+        else:
+            cx, cy, far = bx + bw / 2, by + bh / 2, math.hypot(bw, bh) / 2
+            path = skia.Path()
+            if w == "iris":  # a circle from the middle that reaches the corners
+                path.addCircle(cx, cy, far * r)
+            elif w == "clock":  # a hand sweeping round from twelve o'clock
+                path.moveTo(cx, cy)
+                path.arcTo(skia.Rect.MakeLTRB(cx - far - 1, cy - far - 1, cx + far + 1, cy + far + 1), -90, 360 * r,
+                           False)
+                path.close()
+            else:  # blinds: strips that each open downwards
+                n = max(1, mods.count)
+                for k in range(n):
+                    path.addRect(skia.Rect.MakeXYWH(bx, by + bh * k / n, bw, bh / n * r))
+            c.clipPath(path, doAntiAlias=True)
+
+    @staticmethod
+    def _glitch(key: str, box, mods, amount, src):
+        """An image filter for a glitch: the box cut into bands, about half of them jumped sideways, with a red copy of
+        them pulled left and a cyan one right behind. How far by amount (0..1), which bands by key and mods.step."""
+        bx, by, bw, bh = box
+        far = int(bw + bh) + 1  # crop rects as wide as the layer could reach
+        bands = []
+        for top, bottom, shift in P.slices(key, mods.step):
+            crop = skia.IRect.MakeLTRB(int(math.floor(bx)) - far, int(round(by + bh * top)), int(math.ceil(bx + bw)) + far,
+                                       int(round(by + bh * bottom)))
+            if not crop.isEmpty():
+                bands.append(skia.ImageFilters.Offset(shift * amount * bw * 0.12, 0, src, crop))
+        cut = skia.ImageFilters.Merge(bands)
+        split = amount * max(4.0, min(bw, bh) * 0.06)
+        red = skia.ColorFilters.Matrix([0, 0, 0, 0, 1, 0, 0, 0, 0, 0.16, 0, 0, 0, 0, 0.26, 0, 0, 0, 1, 0])
+        cyan = skia.ColorFilters.Matrix([0, 0, 0, 0, 0.1, 0, 0, 0, 0, 0.9, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0])
+        return skia.ImageFilters.Merge([skia.ImageFilters.ColorFilter(red, skia.ImageFilters.Offset(-split, 0, cut)),
+                                        skia.ImageFilters.ColorFilter(cyan, skia.ImageFilters.Offset(split, 0, cut)),
+                                        cut])
 
     def _body(self, c, L: Layer, t, T, g, box, reveal, mods, alpha, parent_alpha, facing):
         """L drawn on c in the space _layer set up, its box noted (track), then its children if it is a group."""
@@ -3209,6 +3279,7 @@ class Renderer:
         cols, pop = (fill, emph, act), active is not None and L.raw.get("mode") == "pop"  # captions only
         painted = None  # (which colour, alpha) fpaint holds
         onpath = self._on_path(L, t, T, g, lay, font, track) if L.onpath is not None else None
+        own = None  # the text's own letters, which a scramble shows for those outside A to Z
         for ui, (runs, x0, x1) in enumerate(units):
             um = IDENT
             if enter is not None:
@@ -3225,10 +3296,14 @@ class Renderer:
             ublur = um.blur + (max(0.0, float(fb(ui))) if fb else 0)
             uf = ff(ui) if ff else None  # its plain letters' colour
             ucols = cols if uf is None else (uf, emph, act)
-            moved = ux or uy or urot or usc != 1 or um.rx or um.ry or um.dz
+            moved = ux or uy or urot or usc != 1 or um.rx or um.ry or um.dz or um.sx != 1 or um.sy != 1 or um.hinge
+            wiped = um.wipe and um.reveal < 1 and onpath is None
+            uglitch = um.glitch if um.glitch > 0.01 and onpath is None else 0.0
+            ublur, ublur_y = ublur + um.smear, ublur  # across and down: a whip smears each unit across
             blurred = ublur > 0.1
-            if moved:  # a unit drawn where it lies needs no save and restore: most of them, once they are in
+            if moved or wiped:  # a unit drawn where it lies needs no save and restore: most of them, once they are in
                 c.save()
+            if moved:
                 if onpath is None:
                     ucx, ucy = ox + (x0 + x1) / 2, oy + runs[0][0].line * lay.lh + lay.lh / 2
                     c.translate(ucx + ux, ucy + uy)
@@ -3243,9 +3318,27 @@ class Renderer:
                     c.rotate(urot)
                 if usc != 1:
                     c.scale(usc, usc)
+                if um.sx != 1 or um.sy != 1 or um.hinge:  # about the middle of the unit's line, or its top or bottom
+                    lift = {"top": -lay.lh / 2, "bottom": lay.lh / 2}.get(um.pivot, 0.0)
+                    c.translate(0, lift)
+                    c.rotate(um.hinge)
+                    c.scale(um.sx, um.sy)
+                    c.translate(0, -lift)
                 if onpath is not None:
                     c.rotate(-ang)
                 c.translate(-ucx, -ucy)
+            if wiped or uglitch:  # over the unit's own line, a little wider than its letters
+                edge = size * 0.12
+                left = ox + x0 + track * (runs[0][0].char0 - c00) - edge
+                right = ox + x1 + track * (runs[-1][0].char0 + len(runs[-1][0].text) - 1 - c00) + edge
+                ubox = (left, oy + runs[0][0].line * lay.lh, right - left, lay.lh)
+            if wiped:
+                self._wipe(c, um, *ubox)
+            if uglitch:
+                area = c.getDeviceClipBounds()
+                self.filtered += 3 * area.width() * area.height()
+                c.saveLayer(None, skia.Paint(ImageFilter=self._glitch(f"{L.id}/{ui}/{um.seed}", ubox, um, uglitch,
+                                                                      None)))
             if blurred and onpath is not None:  # bounded by the letters on the CPU, as _blur_bounds does
                 out = 3 * ublur + (spaint.getStrokeWidth() if spaint is not None else 0.0)
                 left, top, right, bottom = onpath.bounds
@@ -3257,14 +3350,22 @@ class Renderer:
                 area = skia.Rect.Make(c.getDeviceClipBounds())  # the layer: the clip, as far as the bounds reach
                 if bounds is None or area.intersect(c.getTotalMatrix().mapRect(bounds)):
                     self.filtered += area.width() * area.height()
-                c.saveLayer(bounds, skia.Paint(ImageFilter=skia.ImageFilters.Blur(ublur, ublur)))
+                c.saveLayer(bounds, skia.Paint(ImageFilter=skia.ImageFilters.Blur(ublur, ublur_y)))
             batch: dict = {}  # on a path: (colour, alpha): the letters drawn as they are, and their RSXforms
+            mess = um.scramble or mods.scramble  # a unit's own scramble settles its letters, the layer's all of them
+            if mess > 0:
+                base, n = (runs[0][0].char0, sum(len(r.text) for r, _ in runs)) if um.scramble else (c00, lay.nchars)
+                if own is None:
+                    own = "".join(sorted({ch for r in lay.runs for ch in r.text if ch.isalnum()}))
+                key, step = f"{L.id}/{um.seed if um.scramble else mods.seed}", um.step if um.scramble else mods.step
             for r, pcs in runs:
                 text = r.text
                 if visible_chars is not None:
                     if r.char0 >= visible_chars:
                         continue
                     text = text[: max(0, int(visible_chars - r.char0))]
+                if mess > 0:
+                    text = P.scrambled(text, r.char0, mess, base, n, key, step, own)
                 k = 0
                 if active is not None:
                     if r.word <= active:
@@ -3308,7 +3409,9 @@ class Renderer:
                 painted = None
             if blurred:
                 c.restore()
-            if moved:
+            if uglitch:
+                c.restore()
+            if moved or wiped:
                 c.restore()
         if visible_chars is not None and L.raw.get("caret") and (int(T * 2) % 2 == 0 or reveal < 1) and (
                 self._capture is None):

@@ -299,6 +299,13 @@ Status (2026-11-01): moves to 1.6.1 (decision 1).
   behind a cut line, the usual title reveal), `scramble` (text settles from random characters, seeded), `glitch`
   (RGB split and slice offsets), `whip` (a fast slide with directional blur), `stretch`. The bouncing drop is
   `land` (decision 2).
+  Status (2026-11-01): in its own PR, with `motions.json`. `squash` is `land` with the squash and stretch, its bottom
+  edge kept on the ground; `stretch` opens sideways from the middle. `Mods` gained a squash, stretch and turn about a
+  pivot (the box's middle, top or bottom), a blur across, glitch and scramble amounts with a step and seed for their
+  random picks, and wipe shapes `iris`, `clock`, `blinds` and `rise`. Glitch is an image filter on the layer: bands
+  shifted by `Offset` with crop rects, and a red and a cyan copy merged behind. On split text, each unit takes all of
+  them in its own box, wipes included, which used to show every unit whole from the first frame. Bounces and swings
+  default to longer `dur`s.
 - `emphasis`: motions in the middle of a layer's life, `[{"name": "pulse", "at": 1.2, "dur": 0.4, "repeat": 2}]`, or
   `"loop": true` for idle ones. Names: `pulse`, `shake`, `wiggle`, `wobble`, `float`, `bob`, `heartbeat`, `flash`,
   `tada`, `spin`. They use the same `Mods` as enter and exit, so they combine with them.

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Twelve enter and exit motions. `land` drops in from above and bounces, each bounce a quarter as high (`bounces`
+  [3], `dist` [160]); `squash` does too, long as it falls and flat as it lands, with its bottom edge on the ground
+  (`amount` [0.35] is how far it flattens). `elastic` grows in with a springy overshoot, `swing` hangs from its top
+  edge and swings down to rest (`deg` [60]), and `stretch` opens sideways from its middle. `iris` opens a circle from
+  the middle, `clock` sweeps round from twelve o'clock, `blinds` opens in strips (`count` [6]) and `rise-mask` rises
+  from behind its own bottom edge. `scramble` settles text from random letters and digits, left to right, and
+  `glitch` splits the colours and jumps slices of the layer sideways, both picked by `seed`. `whip` slides in fast
+  from the right, blurred along the way (`dist` [400], below 0 from the left; `amount` [48] px of blur). As exits they
+  play backwards. With `split`, each unit wipes, rises, scrambles, glitches or swings in its own box, so `"split":
+  "lines"` with `rise-mask` brings each line up from behind its own edge; a wipe on split text used to show every
+  unit whole from the first frame. land, squash, swing, elastic and scramble take longer than 0.5 s unless given a
+  `dur` (1, 1, 1.2, 0.9 and 0.8 s), since bounces and swings need the time to settle. `bounce` stays `pop`.
+  `examples/motions.json` brings on all twelve.
 - The svg layer: `{"type": "svg", "src": "logo.svg"}` turns an svg file into a group of path layers, one for each
   path, rect, circle, ellipse, line, polyline and polygon, with the file's transforms, fill, fill-rule, stroke (width,
   caps, joins and dashes), opacity and linear and radial gradients, so each piece draws on, enters, moves and morphs as

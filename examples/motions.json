@@ -1,0 +1,60 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 7, "bg": "#0a0c10"},
+  "layers": [
+    {"id": "title", "type": "text", "text": "TWELVE WAYS IN", "x": "50%", "y": "11%", "size": 72, "weight": 700,
+     "letterSpacing": 8, "fill": "$sheet", "at": 0.1, "enter": {"name": "rise-mask", "dur": 0.7}},
+    {"id": "subtitle", "type": "text", "text": "one word in \"enter\" or \"exit\"", "font": "$mono", "size": 30,
+     "x": "50%", "y": "19%", "fill": "$annotation", "at": 0.4, "enter": {"name": "scramble", "dur": 1.2, "seed": 1}},
+
+    {"id": "land", "type": "group", "x": "20%", "y": "37%", "w": 360, "h": 170, "radius": 22, "fill": "$cue",
+     "at": 0.7, "enter": "land", "children": [
+      {"id": "land-name", "type": "text", "text": "land", "x": 180, "y": 85, "font": "$mono", "size": 44,
+       "fill": "$void"}]},
+    {"id": "squash", "type": "group", "x": "40%", "y": "37%", "w": 360, "h": 170, "radius": 22, "fill": "$sheet",
+     "at": 1.05, "enter": "squash", "children": [
+      {"id": "squash-name", "type": "text", "text": "squash", "x": 180, "y": 85, "font": "$mono", "size": 44,
+       "fill": "$void"}]},
+    {"id": "swing", "type": "group", "x": "60%", "y": "37%", "w": 360, "h": 170, "radius": 22, "fill": "$key",
+     "at": 1.4, "enter": "swing", "children": [
+      {"id": "swing-name", "type": "text", "text": "swing", "x": 180, "y": 85, "font": "$mono", "size": 44,
+       "fill": "$void"}]},
+    {"id": "elastic", "type": "group", "x": "80%", "y": "37%", "w": 360, "h": 170, "radius": 22, "fill": "$track",
+     "at": 1.75, "enter": "elastic", "children": [
+      {"id": "elastic-name", "type": "text", "text": "elastic", "x": 180, "y": 85, "font": "$mono", "size": 44,
+       "fill": "$sheet"}]},
+
+    {"id": "stretch", "type": "group", "x": "20%", "y": "59%", "w": 360, "h": 170, "radius": 22, "fill": "$sheet",
+     "at": 2.1, "enter": "stretch", "children": [
+      {"id": "stretch-name", "type": "text", "text": "stretch", "x": 180, "y": 85, "font": "$mono", "size": 44,
+       "fill": "$void"}]},
+    {"id": "iris", "type": "group", "x": "40%", "y": "59%", "w": 360, "h": 170, "radius": 22, "fill": "$key",
+     "at": 2.45, "enter": "iris", "children": [
+      {"id": "iris-name", "type": "text", "text": "iris", "x": 180, "y": 85, "font": "$mono", "size": 44,
+       "fill": "$void"}]},
+    {"id": "clock", "type": "group", "x": "60%", "y": "59%", "w": 360, "h": 170, "radius": 22, "fill": "$track",
+     "at": 2.8, "enter": "clock", "children": [
+      {"id": "clock-name", "type": "text", "text": "clock", "x": 180, "y": 85, "font": "$mono", "size": 44,
+       "fill": "$sheet"}]},
+    {"id": "blinds", "type": "group", "x": "80%", "y": "59%", "w": 360, "h": 170, "radius": 22, "fill": "$cue",
+     "at": 3.15, "enter": "blinds", "children": [
+      {"id": "blinds-name", "type": "text", "text": "blinds", "x": 180, "y": 85, "font": "$mono", "size": 44,
+       "fill": "$void"}]},
+
+    {"id": "rise-mask", "type": "group", "x": "20%", "y": "81%", "w": 360, "h": 170, "radius": 22, "fill": "$key",
+     "at": 3.5, "enter": {"name": "fade", "dur": 0.3}, "children": [
+      {"id": "rise-mask-name", "type": "text", "text": "rise-mask", "x": 180, "y": 85, "font": "$mono", "size": 44,
+       "fill": "$void", "at": 0.2, "enter": {"name": "rise-mask", "dur": 0.7}}]},
+    {"id": "scramble", "type": "group", "x": "40%", "y": "81%", "w": 360, "h": 170, "radius": 22, "fill": "$track",
+     "at": 3.85, "enter": {"name": "fade", "dur": 0.3}, "children": [
+      {"id": "scramble-name", "type": "text", "text": "scramble", "x": 180, "y": 85, "font": "$mono", "size": 44,
+       "fill": "$sheet", "at": 0.2, "enter": {"name": "scramble", "dur": 1, "seed": 4}}]},
+    {"id": "glitch", "type": "group", "x": "60%", "y": "81%", "w": 360, "h": 170, "radius": 22, "fill": "$cue",
+     "at": 4.2, "enter": {"name": "glitch", "dur": 0.7}, "children": [
+      {"id": "glitch-name", "type": "text", "text": "glitch", "x": 180, "y": 85, "font": "$mono", "size": 44,
+       "fill": "$void"}]},
+    {"id": "whip", "type": "group", "x": "80%", "y": "81%", "w": 360, "h": 170, "radius": 22, "fill": "$sheet",
+     "at": 4.55, "enter": "whip", "children": [
+      {"id": "whip-name", "type": "text", "text": "whip", "x": 180, "y": 85, "font": "$mono", "size": 44,
+       "fill": "$void"}]}
+  ]
+}

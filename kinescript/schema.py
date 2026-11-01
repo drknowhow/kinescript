@@ -47,7 +47,7 @@ SHADOW_ALIAS = {"colour": "color", "fill": "color", "offsetX": "x", "offsetY": "
 BOX = {"fill", "pad", "radius"}
 BOX_ALIAS = {"color": "fill", "colour": "fill", "background": "fill", "bg": "fill", "padding": "pad",
              "borderRadius": "radius", "cornerRadius": "radius"}
-MOTION = {"name", "dur", "ease", "stagger", "dist", "from", "amount", "deg", "order", "seed"}
+MOTION = {"name", "dur", "ease", "stagger", "dist", "from", "amount", "deg", "order", "seed", "bounces", "count"}
 MOTION_ALIAS = {"type": "name", "preset": "name", "duration": "dur", "easing": "ease", "distance": "dist",
                 "delay": "stagger"}
 TWEEN = {"from", "to", "dur", "delay", "ease", "keys", "smooth"}
@@ -722,11 +722,13 @@ def _motion(raw: dict, key: str, rep: Report, lid):
         for k, x in v.items():
             if why := option_problem(k, x):
                 rep.add("error", "bad-ease" if k == "ease" else "bad-value", lid, f"{key}: {why}")
-    if isinstance(v, dict) and (v.get("order") not in (None, "start") or v.get("seed") is not None)             and not v.get("stagger") and not (raw.get("split") and raw.get("type") in ("text", "counter")):
+    names = [n.strip() for n in str(spec.get("name", "fade")).split("+")]
+    picks = any(canonical(n) in ("scramble", "glitch") for n in names if n)  # seed picks their random letters and bands
+    if isinstance(v, dict) and (v.get("order") not in (None, "start") or v.get("seed") is not None and not picks) \
+            and not v.get("stagger") and not (raw.get("split") and raw.get("type") in ("text", "counter")):
         rep.add("warning", "ignored-key", lid, f"{key}: order sets who goes first in a stagger, and there is none: "
                 "a group enters child by child only with a stagger", "add \"stagger\": 0.08")
-    for n in str(spec.get("name", "fade")).split("+"):
-        n = n.strip()
+    for n in names:
         if n and canonical(n) is None:
             rep.add("error", "bad-motion", lid, f"{key}: " + unknown("motion", n, PRESETS))
 
