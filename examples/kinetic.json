@@ -1,0 +1,33 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 6, "bg": "#0a0c10"},
+  "layers": [
+    {"id": "line1", "type": "text", "text": "Write it", "x": 960, "y": 330, "size": 180, "weight": 700,
+     "letterSpacing": -4, "split": "chars",
+     "enter": {"name": "rise", "dur": 0.6, "stagger": 0.05, "order": "center", "dist": 90}},
+    {"id": "line2", "type": "text", "text": "as **data.**", "x": 960, "y": 520, "size": 180, "weight": 700,
+     "letterSpacing": -4, "emph": "#ff633f", "split": "chars", "at": 0.5,
+     "enter": {"name": "pop", "dur": 0.5, "stagger": 0.06, "order": "random", "seed": 4}},
+    {"id": "badge", "type": "group", "x": 1560, "y": 300, "rotate": -8, "combine": "subtract", "fill": "#ff633f",
+     "at": 1.4, "enter": {"name": "pop", "dur": 0.5},
+     "children": [
+       {"id": "plate", "type": "rect", "w": 250, "h": 130, "radius": 40},
+       {"id": "version", "type": "text", "text": "1.6", "size": 96, "weight": 700}
+     ]},
+    {"id": "rule", "type": "line", "points": [[-560, 0], [560, 0]], "x": 960, "y": 690, "stroke": "#242832",
+     "strokeWidth": 4, "at": 1.0, "enter": {"name": "draw", "dur": 0.7}},
+    {"id": "below", "type": "rect", "anchor": "top", "x": 960, "y": 694, "w": 1400, "h": 220, "fill": "#ffffff"},
+    {"id": "sub", "type": "text", "text": "One file. Every frame. Any diff.", "x": 960, "size": 56, "weight": 500,
+     "fill": "#9299a8", "mask": "below", "at": 1.6, "y": [[0, 640], [0.7, 770, "outCubic"]]},
+    {"id": "track", "type": "line", "points": [[-600, 0], [600, 0]], "x": 960, "y": 940, "stroke": "#242832",
+     "strokeWidth": 6, "dash": [18, 12], "dashOffset": "=-T * 60", "at": 1.2, "enter": "fade"},
+    {"id": "beat", "type": "group", "x": 960, "y": 940, "loop": 1.6, "at": 1.8,
+     "children": [
+       {"id": "key1", "type": "rect", "x": -300, "w": 28, "h": 28, "rotate": 45, "fill": "#b9f45d",
+        "scale": [[0, 0], [0.3, 1, "outBack"], [1.2, 1], [1.5, 0]]},
+       {"id": "key2", "type": "rect", "x": 0, "w": 28, "h": 28, "rotate": 45, "fill": "#b9f45d",
+        "scale": [[0.15, 0], [0.45, 1, "outBack"], [1.2, 1], [1.5, 0]]},
+       {"id": "key3", "type": "rect", "x": 300, "w": 28, "h": 28, "rotate": 45, "fill": "#b9f45d",
+        "scale": [[0.3, 0], [0.6, 1, "outBack"], [1.2, 1], [1.5, 0]]}
+     ]}
+  ]
+}

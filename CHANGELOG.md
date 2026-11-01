@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Examples of the 2D features: `logo.json` (draw on, morphing, a mask and a glow), `kinetic.json` (stagger orders,
+  `combine`, a mask, marching dashes and a looping group) and `explainer.json` (`rough` with `boil`, a dashed route
+  ridden with `along`, a lens mask and a glow).
 - Smooth keyframes: `"x": {"keys": [[0, 200], [1, 700], [2, 960]], "smooth": true}` passes through each key without
   stopping, on a monotone cubic through the keys (Fritsch-Butland), so no value overshoots its neighbours. It is at
   rest only at the first and last key, at a turn, and around a `hold` key; other eases on the keys are ignored. It
