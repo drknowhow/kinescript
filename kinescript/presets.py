@@ -8,6 +8,7 @@ from __future__ import annotations
 import math
 import random
 import re
+import zlib
 from dataclasses import dataclass, field
 
 from . import ease as E
@@ -27,11 +28,24 @@ class Mods:
     rx: float = 0.0          # added to rotateX, rotateY (degrees) and z (px)
     ry: float = 0.0
     dz: float = 0.0
+    sx: float = 1.0          # a squash or stretch, and a turn (degrees), about pivot
+    sy: float = 1.0
+    hinge: float = 0.0
+    pivot: str = ""          # where sx, sy and hinge act: "" the middle of the box, "top" or "bottom" its edge
+    smear: float = 0.0       # blur across (px), on top of blur
+    glitch: float = 0.0      # how far the colours split and slices jump, 0..1
+    scramble: float = 0.0    # the share of letters not settled yet, 0..1
+    count: int = 0           # strips of blinds
+    step: int = 0            # which random pick glitch and scramble show, with seed
+    seed: int = 0
 
     def combine(self, o: "Mods") -> "Mods":
         return Mods(self.alpha * o.alpha, self.dx + o.dx, self.dy + o.dy, self.scale * o.scale,
                     self.rotate + o.rotate, self.blur + o.blur, min(self.reveal, o.reveal),
-                    o.wipe or self.wipe, self.track + o.track, self.rx + o.rx, self.ry + o.ry, self.dz + o.dz)
+                    o.wipe or self.wipe, self.track + o.track, self.rx + o.rx, self.ry + o.ry, self.dz + o.dz,
+                    self.sx * o.sx, self.sy * o.sy, self.hinge + o.hinge, o.pivot or self.pivot,
+                    self.smear + o.smear, max(self.glitch, o.glitch), max(self.scramble, o.scramble),
+                    o.count or self.count, o.step or self.step, o.seed or self.seed)
 
 
 IDENT = Mods()
@@ -98,6 +112,104 @@ def _push(p, o):
     return Mods(alpha=p, dz=(1 - p) * -o.get("dist", 600))
 
 
+def fall(p: float, bounces: int, contact: float = 0.0) -> tuple[float, float, float]:
+    """A dropped thing at p of its motion: its height (1 where it starts, 0 on the ground), its speed (1 as it first
+    lands) and how far it is squashed (0..1). It falls under gravity and bounces `bounces` times, each half as fast
+    as the one before, so a quarter as high; with contact, each landing holds it on the ground for that share of the
+    fall's time (times the landing's speed) while it squashes and recovers, the last one included."""
+    segs = [("fall", 1.0, 1.0)]
+    for k in range(bounces + 1):
+        v = 0.5 ** k  # how fast it lands the k+1th time
+        if contact > 0:
+            segs.append(("land", contact * v, v))
+        if k < bounces:
+            segs.append(("air", 1.0 * v, v / 2))  # up and down again at half the speed: 2 * v / 2 of the fall's time
+    tau = max(0.0, min(1.0, p)) * sum(d for _, d, _ in segs)
+    for kind, d, v in segs:
+        if tau <= d:
+            break
+        tau -= d
+    if kind == "fall":
+        return 1 - tau * tau, tau, 0.0
+    if kind == "air":  # thrown up at v (in landing speeds: 2v in heights over the fall's time)
+        return max(0.0, 2 * v * tau - tau * tau), abs(v - tau), 0.0
+    return 0.0, 0.0, v * math.sin(math.pi * min(1.0, tau / d))
+
+
+def _land(p, o):
+    h, _, _ = fall(p, int(o.get("bounces", 3)))
+    return Mods(alpha=min(1.0, p * 8), dy=-h * o.get("dist", 160))
+
+
+def _squash(p, o):
+    h, v, q = fall(p, int(o.get("bounces", 2)), 0.35)
+    sy = (1 + 0.25 * v) * (1 - o.get("amount", 0.35) * q)  # long as it falls, flat as it lands
+    return Mods(alpha=min(1.0, p * 8), dy=-h * o.get("dist", 160), sx=1 / max(sy, 0.05), sy=sy, pivot="bottom")
+
+
+def _elastic(p, o):
+    f = o.get("from", 0.0)
+    return Mods(alpha=min(1.0, max(0.0, p) * 4), scale=f + (1 - f) * p)
+
+
+def _swing(p, o):
+    """Hung from its top edge, it swings down into place: each swing smaller, at rest when the motion ends."""
+    calm = (1 - p) ** 2 * (1 + 2 * p)  # 1 at the start, 0 at the end, still at both
+    return Mods(alpha=min(1.0, p * 5), hinge=o.get("deg", 60) * calm * math.cos(3 * math.pi * p), pivot="top")
+
+
+def _stretch(p, o):
+    return Mods(alpha=min(1.0, max(0.0, p) * 4), sx=max(0.0, p), sy=1 + 0.4 * (1 - p))
+
+
+def _scramble(p, o):
+    return Mods(alpha=min(1.0, p * 10), scramble=1 - p, step=int(p * 16), seed=int(o.get("seed", 0)))
+
+
+def _glitch(p, o):
+    return Mods(alpha=min(1.0, p * 3), glitch=1 - p, step=int(p * 12), seed=int(o.get("seed", 0)))
+
+
+def _whip(p, o):
+    return Mods(alpha=min(1.0, p * 3), dx=(1 - p) * o.get("dist", 400), smear=(1 - p) * o.get("amount", 48))
+
+
+def _shown(kind):
+    return lambda p, o: Mods(reveal=p, wipe=kind, count=int(o.get("count", 6)) if kind == "blinds" else 0)
+
+
+def slices(key: str, step: int, n: int = 6) -> list[tuple[float, float, float]]:
+    """The n bands glitch cuts a layer into at a step, top to bottom, as (top, bottom, shift): top and bottom as shares
+    of its height, shift from -1 to 1 as a share of the farthest a band jumps, 0 for about half the bands."""
+    rnd = random.Random(zlib.crc32(f"{key}/{step}".encode()))
+    cuts = [0.0] + sorted(rnd.random() for _ in range(n - 1)) + [1.0]
+    return [(a, b, rnd.uniform(-1, 1) if rnd.random() < 0.5 else 0.0) for a, b in zip(cuts, cuts[1:])]
+
+
+_POOLS = ("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz", "0123456789")
+
+
+def scrambled(text: str, first: int, s: float, base: int, n: int, key: str, step: int, own: str) -> str:
+    """text, whose first character is number `first` of the text, with the share s of its letters and digits not yet
+    settled shown as others: a letter of the same case, a digit, or one of `own` (the text's own characters) for
+    letters outside A to Z. Each settles in turn from number `base` of `n`, a little early or late by key, and shows
+    a new character at each step."""
+    out = []
+    for j, ch in enumerate(text):
+        if not ch.isalnum():
+            out.append(ch)
+            continue
+        i = first + j - base
+        late = (zlib.crc32(f"{key}/{i}".encode()) & 0xFFFF) / 0x10000
+        if 1 - s >= (i + late) / max(n, 1):
+            out.append(ch)
+            continue
+        pool = (_POOLS[0] if "A" <= ch <= "Z" else _POOLS[1] if "a" <= ch <= "z" else _POOLS[2] if "0" <= ch <= "9"
+                else own or ch)
+        out.append(pool[zlib.crc32(f"{key}/{i}/{step}".encode()) % len(pool)])
+    return "".join(out)
+
+
 PRESETS = {
     "none": lambda p, o: IDENT, "fade": _fade,
     "rise": _move(0, 1), "drop": _move(0, -1), "left": _move(1, 0), "right": _move(-1, 0),
@@ -107,11 +219,18 @@ PRESETS = {
     "wipe-up": _wipe("up"), "wipe-down": _wipe("down"),
     "type": _reveal, "draw": _reveal, "snap": _snap,
     "flip": _flip, "flip-up": _flip_up, "tumble": _tumble, "push": _push,
+    "land": _land, "squash": _squash, "elastic": _elastic, "swing": _swing, "stretch": _stretch,
+    "iris": _shown("iris"), "clock": _shown("clock"), "blinds": _shown("blinds"), "rise-mask": _shown("rise"),
+    "scramble": _scramble, "glitch": _glitch, "whip": _whip,
 }
 # Motions that turn or move a layer in depth; a scene using one gets a camera.
 DEPTH = {"flip", "flip-up", "tumble", "push"}
 DEFAULT_EASE = {"pop": "outBack", "spin": "outBack", "type": "linear", "draw": "inOutCubic", "snap": "outQuart",
-                "flip": "outBack", "flip-up": "outBack"}
+                "flip": "outBack", "flip-up": "outBack", "land": "linear", "squash": "linear", "swing": "linear",
+                "elastic": "outElastic", "stretch": "outBack", "scramble": "linear", "whip": "outExpo",
+                "rise-mask": "outQuart"}
+# Motions that take longer than dur's 0.5 s unless given one: bounces and swings need the time to settle.
+DEFAULT_DUR = {"land": 1.0, "squash": 1.0, "swing": 1.2, "elastic": 0.9, "scramble": 0.8}
 
 
 # Names other tools use for the same motions. Keys are lower case without dashes.
@@ -120,7 +239,12 @@ ALIASES = {"typewriter": "type", "typing": "type", "slide": "left", "scale": "po
            "down": "drop", "fall": "drop", "blurin": "blur", "focus": "blur", "rotate": "spin", "reveal": "wipe",
            "write": "draw", "stroke": "draw", "build": "draw", "assemble": "draw", "letterspacing": "track", "tracking": "track",
            "flipy": "flip", "flipx": "flip-up", "rotatey": "flip", "rotatex": "flip-up", "dolly": "push",
-           "fly": "push"}
+           "fly": "push", "dropbounce": "land", "bouncedrop": "land", "squashstretch": "squash",
+           "spring": "elastic", "springy": "elastic", "pendulum": "swing", "hinge": "swing", "circle": "iris",
+           "radial": "clock", "radialwipe": "clock", "clockwipe": "clock", "venetian": "blinds", "shutters": "blinds",
+           "mask": "rise-mask", "masked": "rise-mask", "linereveal": "rise-mask", "risemask": "rise-mask",
+           "decode": "scramble", "shuffle": "scramble", "rgbsplit": "glitch", "chromatic": "glitch",
+           "swish": "whip", "whippan": "whip", "smear": "whip"}
 
 
 def canonical(name: str) -> str | None:
@@ -181,7 +305,9 @@ def turns(n: int, order: str = "start", seed: int = 0) -> list[float]:
 
 # Motion options that are numbers, and what each one is.
 NUMBERS = {"dur": "seconds, 0 or more", "stagger": "seconds between units, 0 or more", "dist": "px moved",
-           "amount": "px (blur, track) or a scale step (snap)", "deg": "degrees", "from": "the start scale"}
+           "amount": "px (blur, track, whip), a scale step (snap) or how far squash flattens", "deg": "degrees",
+           "from": "the start scale", "bounces": "a whole number from 0 to 20",
+           "count": "a whole number from 1 to 100"}
 
 
 def option_problem(key: str, v) -> str | None:
@@ -198,6 +324,9 @@ def option_problem(key: str, v) -> str | None:
         ok = not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v)
     except OverflowError:  # an int past the float range
         ok = False
+    if ok and key in ("bounces", "count"):
+        lo, hi = (0, 20) if key == "bounces" else (1, 100)
+        ok = float(v).is_integer() and lo <= v <= hi
     if not ok or (key in ("dur", "stagger") and v < 0):
         return f"{key} is {v!r}; it takes a number: {NUMBERS[key]}"
     return None
@@ -223,8 +352,10 @@ def parse(spec, default_dur: float = 0.5, key: str = "motion") -> Motion | None:
         why = option_problem(k, v)
         if why:
             raise ValueError(f"{key}: {why}")
-    opts = {k: v for k, v in spec.items() if k not in ("name", "dur", "ease", "stagger", "order", "seed")
+    opts = {k: v for k, v in spec.items() if k not in ("name", "dur", "ease", "stagger", "order")
             and v is not None}
     dur, stagger = spec.get("dur"), spec.get("stagger")
-    return Motion(names, float(default_dur if dur is None else dur), spec.get("ease") or "",
+    if dur is None:
+        dur = max(DEFAULT_DUR.get(n, default_dur) for n in names) if names else default_dur
+    return Motion(names, float(dur), spec.get("ease") or "",
                   float(stagger or 0), opts, spec.get("order") or "start", int(spec.get("seed") or 0))

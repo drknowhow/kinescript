@@ -581,10 +581,15 @@ ANIMATING A VALUE (any number or colour key)
 
 ENTER AND EXIT
   "enter": "rise"   or   {"name": "rise", "dur": 0.5, "ease": "outCubic", "stagger": 0.03}
-  Defaults: dur 0.5, ease outCubic (pop and spin: outBack; type: linear; draw: inOutCubic;
-  snap: outQuart). An exit plays during the LAST dur seconds of the layer and ends with it.
-  Combine with +: "rise+blur". Options: dist (px moved by rise, drop, left, right; default 48),
-  from (start scale of pop [0.4] and zoom [1.25]), amount (blur px [24], track px [40]).
+  Defaults: dur 0.5 (land and squash 1, swing 1.2, elastic 0.9, scramble 0.8), ease outCubic
+  (pop, spin and stretch: outBack; elastic: outElastic; whip: outExpo; snap and rise-mask:
+  outQuart; draw: inOutCubic; type, land, squash, swing and scramble: linear, as their timing
+  is their own). An exit plays during the LAST dur seconds of the layer and ends with it.
+  Combine with +: "rise+blur". Options: dist (px moved by rise, drop, left, right [48], land
+  and squash [160], whip [400; below 0 it comes from the left]), from (start scale of pop
+  [0.4], zoom [1.25] and elastic [0]), amount (blur px [24], track px [40], whip's blur px
+  [48], how far squash flattens [0.35]), deg (swing's first swing [60]), bounces (land [3],
+  squash [2]), count (strips of blinds [6]), seed (scramble's and glitch's random picks).
   With "split" on text, each unit enters in turn: unit k starts k x stagger seconds after the
   layer starts, so the whole reveal takes dur + (units - 1) x stagger. On a group, an enter
   with a stagger, such as {"name": "rise", "stagger": 0.08}, enters its children in turn the
@@ -595,7 +600,15 @@ ENTER AND EXIT
   rise moves up into place, drop moves down, left moves left, right moves right. type is a
   typewriter. draw draws a stroke or path on, and builds a model (build is the same). wipe reveals left to right. snap is a hard cut in
   with a small settle. flip, flip-up, tumble and push move in depth (see DEPTH AND CAMERA).
-  none is no motion.
+  land drops in from above and bounces, each bounce a quarter as high as the one before;
+  squash does too, long as it falls and flat as it lands. elastic grows in with a springy
+  overshoot, swing hangs from its top edge and swings down to rest, stretch opens sideways from
+  its middle. iris opens a circle from the middle, clock sweeps round from twelve o'clock,
+  blinds opens in strips, rise-mask rises from behind its own bottom edge (with "split":
+  "lines", each line from behind its own: the usual title reveal). scramble settles text from
+  random letters and digits, left to right. glitch splits the colours and jumps slices of the
+  layer sideways. whip slides in fast from the right, blurred along the way. With split, each
+  unit wipes, rises or glitches in its own box. none is no motion.
 
 EASES  {eases}, spring, spring(stiffness, damping), bezier(x1, y1, x2, y2), steps(n)
   in* starts slow, out* ends slow (the most natural for entrances), inOut* does both.
