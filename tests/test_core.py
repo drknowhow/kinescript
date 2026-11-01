@@ -1881,7 +1881,8 @@ def test_look_draws_trails_and_onion_skins(tmp_path):
     assert plain[y, 8 + 240, :3].max() == 0 and trail[y, 8 + 240, 0] > 150 > trail[y, 8 + 240, 1]  # frame 25's dot
     _, onion = sheet("o.png", onion=2)
     assert 60 < onion[y, 8 + 152, 0] < 120 and 25 < onion[y, 8 + 144, 0] < 65  # frames 14 and 13, fainter
-    assert np.array_equal(onion[34 + 40, 8 + 160], plain[34 + 40, 8 + 160])  # what holds still is unchanged
+    still = onion[34 + 40, 8 + 160].astype(int) - plain[34 + 40, 8 + 160]  # what holds still looks the same:
+    assert np.abs(still).max() <= 1  # the same on the GPU, a level off at most where the CPU blends it
     assert contact_sheet(spec, str(tmp_path / "n.png"), count=1, width=320, trails=True)["trails"] == ["dot"]
     assert probe(spec, at=0.5)["visible"]["dot"]["pos"] == [160.0, 90.0]
 

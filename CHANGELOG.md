@@ -97,8 +97,8 @@
 - `kine look --trails` draws each moving layer's path over the frames, a dot where its anchor is on each frame, so
   the dots' spacing shows its speed and where it eases, overshoots or stops; each tile rings the dot for its own
   frame. It draws the 24 layers that travel furthest, and a dot every few frames past 600 frames. `kine look --onion
-  3` draws the three frames before each one over it, fainter the older they are, so what holds still comes out
-  unchanged. `kine probe --at` gives each visible layer's `pos`, its anchor on the frame. The trails draw every frame
+  3` draws the three frames before each one over it, fainter the older they are, so only what moves shows
+  twice. `kine probe --at` gives each visible layer's `pos`, its anchor on the frame. The trails draw every frame
   at a quarter of the thumbnails' scale: 5 to 6 ms a frame on the GPU and 4 to 8 ms on the CPU for the `glow-text`
   and `masks-50` stress scenes.
 - `kine check` warns `strobe` where a layer moves more than 40 px a frame at 1080p for five frames running in a

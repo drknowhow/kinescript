@@ -214,7 +214,7 @@ def contact_sheet(src, out: str, count: int = 12, cols: int | None = None, width
         x = gap + (k % cols) * (tw + gap)
         y = gap + (k // cols) * (th + label_h + gap)
         c.drawImage(img, x, y + label_h)
-        for j, ghost in ghosts:  # where a ghost is the same as the frame, it changes nothing
+        for j, ghost in ghosts:  # where a ghost is the same as the frame, it changes it by a level at most
             c.drawImage(ghost, x, y + label_h, skia.SamplingOptions(), skia.Paint(Alphaf=0.35 * (onion - j + 1) / onion))
         if trails:
             _draw_trails(c, paths, n, step, x, y + label_h, tw, th)
