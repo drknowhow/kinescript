@@ -158,6 +158,57 @@ def textures():
 textures()
 
 
+def flipbook():
+    """Frames for examples/flipbook.json: a walk cycle as a sheet of eight 32 px cells, drawn without anti-aliasing to
+    be scaled up pixelated, and a flame as twelve numbered files, flame/flame_01.png to flame_12.png. Both loop: frame
+    i is drawn at phase i / n of a turn."""
+    import skia
+
+    cell, n = 32, 8
+    surf = skia.Surface(cell * n, cell)
+    c = surf.getCanvas()
+    c.clear(skia.ColorTRANSPARENT)
+    pen = lambda hexa, w: skia.Paint(Color=skia.Color(*bytes.fromhex(hexa[1:])), StrokeWidth=w,  # noqa: E731
+                                     Style=skia.Paint.kStroke_Style, StrokeCap=skia.Paint.kSquare_Cap)
+    fill = lambda hexa: skia.Paint(Color=skia.Color(*bytes.fromhex(hexa[1:])))  # noqa: E731
+    for i in range(n):
+        a = i / n * 2 * math.pi
+        x0, bob = i * cell + 16, round(abs(math.sin(a)))  # up on the passing pose
+        for k, leg in enumerate((math.sin(a), -math.sin(a))):  # the far leg darker
+            ang = 0.7 * leg
+            c.drawLine(x0, 20 - bob, round(x0 + 10 * math.sin(ang)), round(30 - 10 * (1 - math.cos(ang))) - bob,
+                       pen("#9299a8" if k else "#f2f0e8", 3))
+        c.drawRect(skia.Rect(x0 - 3, 11 - bob, x0 + 4, 21 - bob), fill("#ff633f"))  # the body
+        c.drawLine(x0, 13 - bob, round(x0 - 6 * math.sin(a)), 19 - bob, pen("#f2f0e8", 2))  # the near arm swings
+        c.drawRect(skia.Rect(x0 - 4, 2 - bob, x0 + 5, 11 - bob), fill("#f2f0e8"))  # the head
+        c.drawRect(skia.Rect(x0 + 1, 4 - bob, x0 + 5, 7 - bob), fill("#b9f45d"))  # its visor, facing right
+    surf.makeImageSnapshot().save(str(out / "walk.png"))
+    print("wrote", out / "walk.png")
+
+    flame = out / "flame"
+    flame.mkdir(exist_ok=True)
+    for i in range(12):
+        a = i / 12 * 2 * math.pi
+        surf = skia.Surface(160, 240)
+        c = surf.getCanvas()
+        c.clear(skia.ColorTRANSPARENT)
+        for scale, colour, lean in ((1.0, "#ff633f", 0.0), (0.62, "#ffb347", 0.8), (0.32, "#f2f0e8", 1.6)):
+            r = 52 * scale
+            tip_x = 80 + (18 * math.sin(a + lean) + 7 * math.sin(2 * a + 1 + lean)) * scale
+            tip_y = 228 - r - (130 + 14 * math.sin(3 * a + 0.5 + lean)) * scale
+            p = skia.Path()
+            p.moveTo(tip_x, tip_y)
+            p.cubicTo(tip_x - 6 * scale, tip_y + 60 * scale, 80 - r, 228 - r * 1.4, 80 - r, 228 - r)
+            p.arcTo(skia.Rect(80 - r, 228 - 2 * r, 80 + r, 228), 180, -180, False)
+            p.cubicTo(80 + r, 228 - r * 1.4, tip_x + 10 * scale, tip_y + 50 * scale, tip_x, tip_y)
+            c.drawPath(p, skia.Paint(AntiAlias=True, Color=skia.Color(*bytes.fromhex(colour[1:]))))
+        surf.makeImageSnapshot().save(str(flame / f"flame_{i + 1:02d}.png"))
+    print("wrote", flame / "flame_01.png", "to flame_12.png")
+
+
+flipbook()
+
+
 def can(path: Path):
     """A drinks can as a glTF binary for examples/product.json: the body's base colour texture is label.png,
     embedded in the file and read through TEXCOORD_0, under a steel lid with a rolled rim and a ring pull."""

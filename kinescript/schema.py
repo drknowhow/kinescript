@@ -176,7 +176,7 @@ TYPES: dict[str, set[str]] = {
     "arrow": SHAPE | {"x1", "y1", "x2", "y2", "bend", "head", "repeat"},
     "text": TEXT | {"repeat"},
     "counter": TEXT | {"value", "format", "repeat"},
-    "image": MEDIA | {"repeat"},
+    "image": MEDIA | {"repeat", "frames", "sheet", "fps", "loop", "pixelated"},
     "video": MEDIA | {"trim", "speed", "volume", "loop", "fadeIn", "fadeOut", "repeat"},
     "captions": TEXT | {"src", "cues", "mode", "active", "voice"},
     "shader": {"preset", "uniforms", "sksl", "w", "h", "repeat"},
@@ -227,7 +227,10 @@ TYPE_ALIASES = {
     "circle": {"radius": "r", "size": "r"}, "polygon": {"radius": "r", "points": "sides"},
     "line": {"color": "stroke", "colour": "stroke", "fill": "stroke", "width": "strokeWidth"},
     "arrow": {"color": "stroke", "colour": "stroke", "fill": "stroke", "width": "strokeWidth"},
-    "image": {"path": "src", "image": "src"}, "video": {"path": "src", "video": "src", "mute": None},
+    "image": {"path": "src", "image": "src", "sequence": "frames", "images": "frames", "spritesheet": "sheet",
+              "spriteSheet": "sheet", "sprite": "sheet", "atlas": "sheet", "frameRate": "fps", "framerate": "fps",
+              "pixelArt": "pixelated"},
+    "video": {"path": "src", "video": "src", "mute": None},
     "counter": {"number": "value", "to": "value"},
     "captions": {"subtitles": "cues", "lines": "cues"},
     "shader": {"shader": "preset", "code": "sksl", "source": "sksl"},
@@ -291,9 +294,9 @@ SCALAR = {"x", "y", "w", "h", "r", "opacity", "scale", "scaleX", "scaleY", "rota
           "unitX", "unitY", "unitRotate", "unitScale", "unitOpacity", "z", "rotateX", "rotateY", "fov",
           "depth", "tube", "shine", "metal", "rim", "bands", "explode", "bevel", "transparency", "timeRemap",
           "dashOffset", "corner"}
-REQUIRED = {"text": ("text",), "image": ("src",), "video": ("src",), "path": ("d", "points"), "line": ("points",),
-            "captions": ("cues", "src", "voice"), "shader": ("preset", "sksl"), "model": ("shape", "parts", "src"),
-            "particles": ("rate", "burst", "preset")}
+REQUIRED = {"text": ("text",), "image": ("src", "frames", "sheet"), "video": ("src",), "path": ("d", "points"),
+            "line": ("points",), "captions": ("cues", "src", "voice"), "shader": ("preset", "sksl"),
+            "model": ("shape", "parts", "src"), "particles": ("rate", "burst", "preset")}
 # Keys whose value is an object of their own: never a tween, even with a "from" key (a light's direction).
 OBJECTS = {"light", "lights", "env", "ground", "shadow", "shadows", "box", "fx", "uniforms", "sound", "enter", "exit",
            "parts", "transition", "texture", "edges", "animation", "repeat", "along", "rough", "mask", "glow",
@@ -469,7 +472,7 @@ def _values(raw: dict, ltype: str, rep: Report, lid):
         if w:
             raw["weight"] = w
             rep.add("info", "renamed-value", lid, f"weight '{v}' read as {w}", "weight takes 100..900")
-    for k in ("italic", "hidden", "clip", "loop", "smooth", "closed", "allowOffscreen", "fixed"):
+    for k in ("italic", "hidden", "clip", "loop", "smooth", "closed", "allowOffscreen", "fixed", "pixelated"):
         if isinstance(raw.get(k), str) and raw[k].lower() in ("true", "false", "yes", "no"):
             raw[k] = raw[k].lower() in ("true", "yes")
     if isinstance(raw.get("italic"), str) and raw["italic"].lower() in ("italic", "oblique", "normal"):
@@ -950,6 +953,8 @@ def _layer(raw, rep: Report, path: str, comps: dict):
         _model(raw, rep, lid)
     if t == "particles":
         _particles(raw, rep, lid)
+    if t == "image":
+        _frames(raw, rep, lid)
     if t == "group":
         _shadows(raw, rep, lid)
         _clock(raw, rep, lid)
@@ -1817,6 +1822,74 @@ EMITTER_ALIAS = {"dot": "point", "center": "point", "centre": "point", "origin":
 RANGE_LEAST = {"life": 0.001, "size": 0, "drag": 0, "flip": 0}
 RANGE_EXAMPLE = {"life": "[1.5, 3]", "speed": "[200, 600]", "angle": "[-120, -60]", "size": "[6, 14]",
                  "spin": "[-360, 360]", "drag": "1.5", "flip": "[1, 3]"}
+
+
+SHEET = {"src", "cols", "rows", "count"}
+SHEET_ALIAS = {"image": "src", "file": "src", "path": "src", "columns": "cols", "across": "cols", "down": "rows",
+               "frames": "count", "cells": "count", "total": "count"}
+PINGPONG = ("pingpong", "bounce", "yoyo", "boomerang", "alternate")  # loop values read as "pingpong"
+
+
+def _frames(raw: dict, rep: Report, lid):
+    """An image layer's frame-by-frame animation: frames (a pattern, glob, folder or list of files) or sheet
+    ({"src", "cols", "rows", "count"}), played at fps with loop. Whether the files are there is checked on load."""
+    fr, sh = raw.get("frames"), raw.get("sheet")
+    if isinstance(sh, str) and sh.strip():
+        raw["sheet"] = sh = {"src": sh}
+    if isinstance(sh, dict) and sh.get("src") in (None, "") and isinstance(raw.get("src"), str) and raw["src"]:
+        sh["src"] = raw.pop("src")
+        rep.add("info", "renamed-key", lid, f"src '{sh['src']}' read as the sheet's src",
+                f"write \"sheet\": {{\"src\": \"{sh['src']}\", ...}}")
+    given = [k for k in ("src", "frames", "sheet") if raw.get(k) not in (None, "", [])]
+    if len(given) > 1:
+        rep.add("error", "duplicate-key", lid, f"an image shows one of src, frames and sheet; this one has "
+                f"{' and '.join(given)}", "keep one")
+    if fr is not None and not (isinstance(fr, str) and fr.strip() or isinstance(fr, list) and fr and all(
+            isinstance(x, str) and x.strip() for x in fr)):
+        rep.add("error", "bad-value", lid, f"frames is {_show(fr)}; it is a file pattern with the frame number in "
+                "it, a folder of images, or a list of files", "\"frames\": \"run/run_%03d.png\"")
+    if sh is not None and not isinstance(sh, dict):
+        rep.add("error", "bad-value", lid, f"sheet is {_show(sh)}; it is an image of frames in a grid",
+                "\"sheet\": {\"src\": \"run.png\", \"cols\": 8, \"rows\": 2}")
+    elif sh is not None:
+        _keys(sh, SHEET, SHEET_ALIAS, rep, lid, "sheet: ")
+        if not (isinstance(sh.get("src"), str) and sh["src"].strip()):
+            rep.add("error", "missing-key", lid, "a sheet needs src, the image of its frames",
+                    "\"sheet\": {\"src\": \"run.png\", \"cols\": 8, \"rows\": 2}")
+        ok = True
+        for k in ("cols", "rows", "count"):
+            v = sh.get(k)
+            if v is None:
+                continue
+            if _finite(v) and v >= 1 and float(v).is_integer():
+                sh[k] = int(v)
+            else:
+                ok = False
+                rep.add("error", "bad-value", lid, f"sheet {k} is {_show(v)}; it is a whole number, 1 or more")
+        if sh.get("cols") is None and sh.get("rows") is None:
+            rep.add("error", "missing-key", lid, "a sheet needs cols, rows or both: how many frames across and down",
+                    "\"cols\": 8, \"rows\": 2")
+        elif ok and sh.get("count") is not None and sh["count"] > sh.get("cols", 1) * sh.get("rows", 1):
+            rep.add("error", "bad-value", lid, f"sheet count is {sh['count']}, more than its {sh.get('cols', 1)} x "
+                    f"{sh.get('rows', 1)} cells", "count the frames in the sheet, or give more cols or rows")
+    v = raw.get("fps")
+    if v is not None and not (_finite(v) and v > 0):
+        rep.add("error", "bad-value", lid, f"fps is {_show(v)}; it is how many frames of the sequence play a "
+                "second, above 0", "\"fps\": 12")
+    v = raw.get("loop")
+    if isinstance(v, str) and re.sub(r"[-_ ]", "", v.lower()) in PINGPONG:
+        raw["loop"] = "pingpong"
+    elif v is not None and not isinstance(v, bool):
+        rep.add("error", "bad-value", lid, f"loop is {_show(v)}; on an image it is true (start again after the last "
+                "frame, the default), false (hold the last frame) or \"pingpong\" (play back to the first)")
+    v = raw.get("pixelated")
+    if v is not None and not isinstance(v, bool):
+        rep.add("error", "bad-value", lid, f"pixelated is {_show(v)}; it is true or false")
+    if not any(k in given for k in ("frames", "sheet")):
+        for k in ("fps", "loop"):
+            if k in raw:
+                rep.add("warning", "ignored-key", lid, f"{k} plays frames or a sheet, and this image has neither",
+                        "drop it, or give frames or sheet")
 
 
 def _particles(raw: dict, rep: Report, lid):

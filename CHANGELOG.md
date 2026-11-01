@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Image sequences: an `image` layer plays `frames`, numbered files named by a pattern (`"run/run_%03d.png"` or
+  `"run/run_####.png"`), a glob, a folder or a list, or the cells of a `sheet` (`{"src": "walk.png", "cols": 8,
+  "rows": 2, "count": 14}`), at `fps` (12 unless given). `loop` starts again after the last frame (the default),
+  holds it (`false`) or plays back to the first (`"pingpong"`). The frame comes from the layer's own time, so any
+  frame renders alone, and a motion-blur sub-frame shows its frame's drawing. A number missing from the files shows
+  the frame before it, and `kine check` warns `missing-frames`; a sheet that its columns and rows do not divide warns
+  `sheet-grid`. Cells draw strictly inside their own rectangle, so a neighbour's edge never shows. `pixelated` scales
+  any image with hard pixel edges. `examples/flipbook.json` walks a pixel-art sprite sheet up to a flame drawn as
+  twelve files.
 - A `particles` layer: an emitter with `rate` (particles a second; keyframes taper it) and `burst` (how many leave at
   once, or `[[time, count], ...]`), or one of the presets `confetti`, `sparks`, `snow`, `dust` and `bubbles`. Each
   particle draws its own `life`, `speed`, `angle`, `size`, `spin`, `drag` and `flip` from a number or `[min, max]`,

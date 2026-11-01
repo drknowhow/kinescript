@@ -337,9 +337,11 @@ More scenes in [`examples/`](https://github.com/drknowhow/kinescript/tree/main/e
   mask lighting the route round the dot, 6 s.
 - [`confetti.json`](https://github.com/drknowhow/kinescript/blob/main/examples/confetti.json): a counter runs to a
   million and three confetti bursts go off behind and beside it, over drifting dust, 6 s.
+- [`flipbook.json`](https://github.com/drknowhow/kinescript/blob/main/examples/flipbook.json): a pixel-art figure
+  from an eight-cell sprite sheet walks up to a flame drawn as twelve numbered files, 6 s.
 
-`edit.json`, `import.json`, `textures.json`, `screens.json`, `edges.json`, `product.json`, `voiceover.json` and
-`narrated.json` read sample media: run `python examples/make_media.py` first to generate it.
+`edit.json`, `import.json`, `textures.json`, `screens.json`, `edges.json`, `product.json`, `voiceover.json`,
+`narrated.json` and `flipbook.json` read sample media: run `python examples/make_media.py` first to generate it.
 
 ## Performance
 
