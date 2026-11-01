@@ -1,8 +1,9 @@
 """Do frames come out as the same bytes as at another revision? Draws the same frames of each scene with this tree
 and with a git revision (checked out in a temporary worktree), on the GPU and on the CPU, and compares them.
 
-    python bench/same.py                          # the 3D examples and hello.json, against main
+    python bench/same.py                          # the examples, the promo and the 2D stress scenes, against main
     python bench/same.py --rev 050f36b a.json     # other scenes, another revision
+    python bench/same.py stress:text-split        # a scene from bench/stress.py, as this tree writes it
 
 Exits 1 when any frame differs, and says by how many levels and in how many pixels."""
 from __future__ import annotations
@@ -19,7 +20,8 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 SCENES = ["examples/3d.json", "examples/model.json", "examples/title3d.json", "examples/import.json",
-          "examples/hello.json"]
+          "examples/hello.json", "examples/edit.json", "marketing/promo.json", "stress:layers-2000",
+          "stress:groups-deep", "stress:text-split", "stress:expressions", "stress:keys-dense", "stress:counters"]
 SAMPLES = 5  # frames a scene, spread over its length
 
 # Run by each tree's own Python path: writes every sampled frame of every scene to one .npz.
@@ -56,10 +58,17 @@ def main() -> int:
     ap.add_argument("--rev", default="main", help="git revision to compare with (default main)")
     ap.add_argument("--backend", choices=("gpu", "cpu", "both"), default="both")
     a = ap.parse_args()
-    scenes = [str(Path(s).resolve()) for s in a.scenes]
     backends = ("gpu", "cpu") if a.backend == "both" else (a.backend,)
     differ = 0
     with tempfile.TemporaryDirectory() as tmp:
+        scenes = []
+        for s in a.scenes:
+            if s.startswith("stress:"):  # written once, so both trees draw the same scene
+                sys.path.insert(0, str(ROOT / "bench"))
+                import stress
+                name, s = s[7:], Path(tmp) / f"{s[7:]}.json"
+                s.write_text(json.dumps(stress.SCENES[name][0]()), encoding="utf-8")
+            scenes.append(str(Path(s).resolve()))
         base = Path(tmp) / "base"
         subprocess.run(["git", "worktree", "add", "--detach", str(base), a.rev], check=True, cwd=ROOT,
                        capture_output=True)

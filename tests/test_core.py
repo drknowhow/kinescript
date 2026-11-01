@@ -72,6 +72,17 @@ def test_keyframes_negative_time_counts_from_layer_end():
     assert p.at(3.5, 4) == pytest.approx(50)
 
 
+def test_keys_at_the_same_time_jump_and_any_key_count_interpolates_its_own_segment():
+    p = compile_prop("x", [[0, 0], [1, 10, "linear"], [1, 50], [2, 60, "linear"]], Ctx(100, 100, 30))
+    assert [p.at(t, 2) for t in (0.5, 1.0, 1.5, 3.0)] == [pytest.approx(5), 50, pytest.approx(55), 60]
+    keys = [[i * 0.1, (i * 37) % 11, "linear"] for i in range(121)]
+    dense = compile_prop("x", keys, Ctx(100, 100, 30))
+    for t in (0.0, 0.05, 3.33, 7.95, 12.0, 13.0):
+        j = min(int(t / 0.1), 119)
+        u = min(1.0, (t - j * 0.1) / 0.1)
+        assert dense.at(t, 12) == pytest.approx(keys[j][1] + (keys[j + 1][1] - keys[j][1]) * u)
+
+
 def test_percent_lengths_use_matching_axis():
     ctx = Ctx(1920, 1080, 30)
     assert compile_prop("x", "50%", ctx).value == 960

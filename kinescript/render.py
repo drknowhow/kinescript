@@ -560,6 +560,7 @@ class Renderer:
         self._fonts: dict = {}
         self._shaped: dict = {}  # (typeface, size, text, rtl) -> how _draw_pieces draws it (_pieces)
         self._paths: dict = {}
+        self._solid: dict[int, skia.Paint] = {}  # an antialiased fill paint for each colour (_fill_paint)
         self._shaders: dict = {}
         self.stop_at: str | None = None
         self.stop_after: str | None = None
@@ -1076,10 +1077,11 @@ class Renderer:
         if alpha <= 0.002:
             return
         box = self._box(L, t, T, g)
-        x, y = float(g("x")) + mods.dx, float(g("y")) + mods.dy
-        rot = float(g("rotate")) + mods.rotate
-        sc = float(g("scale")) * mods.scale
-        sx, sy = sc * float(g("scaleX")), sc * float(g("scaleY"))
+        x, y, rot, sc, sx, sy, blur = L.placed(t, T)
+        x, y = float(x) + mods.dx, float(y) + mods.dy
+        rot = float(rot) + mods.rotate
+        sc = float(sc) * mods.scale
+        sx, sy = sc * float(sx), sc * float(sy)
         outer, tilt, facing = self._m3d, None, True
         defocus = 0.0  # the blur the camera's depth of field gives this layer, in its own px
         fg, fogf = None, 0.0  # the fog, and how much of it covers this layer
@@ -1131,7 +1133,7 @@ class Renderer:
             c.rotate(rot)
         if sx != 1 or sy != 1:
             c.scale(sx, sy)
-        blur = float(g("blur")) + mods.blur
+        blur = float(blur) + mods.blur
         if defocus > 0.05:
             blur = math.hypot(blur, defocus)
         shadow = L.raw.get("shadow")
@@ -1325,13 +1327,18 @@ class Renderer:
         raw = L.raw.get(key, default)
         if raw is None:
             return None
-        p = skia.Paint(AntiAlias=True)
         if isinstance(raw, dict) and key not in L.props:  # a gradient; a colour tween is compiled into props
+            p = skia.Paint(AntiAlias=True)
             bx, by, bw, bh = box
             p.setShader(self._gradient(raw, bx, by, bw, bh, alpha))
         else:
             col = g(key) if key in L.props else C.parse(raw) if isinstance(raw, str) else raw
-            p.setColor(_argb(col, alpha))
+            argb = _argb(col, alpha)
+            p = self._solid.get(argb)
+            if p is None:
+                if len(self._solid) >= 4096:  # colours that animate make a new paint on most frames
+                    self._solid.clear()
+                p = self._solid[argb] = skia.Paint(AntiAlias=True, Color=argb)
         return p
 
     def _stroke_paint(self, L: Layer, g, box, alpha=1.0):
@@ -1380,6 +1387,7 @@ class Renderer:
         fp = self._fill_paint(L, g, box, alpha=amt * self._alpha,
                               default=None if has_stroke else self.s.theme.get("paper", "#f2f0e8"))
         if fp is not None and self._cf is not None:
+            fp = skia.Paint(fp)  # a kept solid paint is shared
             fp.setColorFilter(self._cf)
         if fp is not None and amt > 0:
             c.drawPath(path, fp)

@@ -29,6 +29,7 @@ PART_STRUCT = {"shape", "texture", "text", "font", "d", "italic", "profile"}  # 
 DEFAULTS = {"x": 0.0, "y": 0.0, "opacity": 1.0, "scale": 1.0, "scaleX": 1.0, "scaleY": 1.0, "rotate": 0.0,
             "blur": 0.0, "draw": 1.0, "zoom": 1.0, "z": 0.0, "rotateX": 0.0, "rotateY": 0.0}
 DEPTH_PROPS = ("z", "rotateX", "rotateY")
+PLACED = ("x", "y", "rotate", "scale", "scaleX", "scaleY", "blur")  # what Layer.placed gives, in this order
 
 
 class SceneError(ValueError):
@@ -67,7 +68,7 @@ def _where(owner, message: str) -> str:
 
 class Layer:
     __slots__ = ("id", "type", "raw", "t_in", "t_out", "props", "enter", "exit", "children", "parent",
-                 "index", "src", "video", "ahead", "ctx", "parts", "copies")
+                 "index", "src", "video", "ahead", "ctx", "parts", "copies", "xf")
 
     def __init__(self, lid: str, ltype: str, raw: dict, parent: "Layer | None", index: int):
         self.id, self.type, self.raw, self.parent, self.index = lid, ltype, raw, parent, index
@@ -82,6 +83,7 @@ class Layer:
         self.ctx: Ctx | None = None
         self.parts: list[dict[str, Prop]] = []  # a model's parts' keys, each compiled like a layer's
         self.copies: Copies | None = None  # a model's "repeat"
+        self.xf: tuple[list, list] | None = None  # placed(): the constant values, and which of PLACED change
 
     @property
     def dur(self) -> float:
@@ -91,11 +93,26 @@ class Layer:
         p = self.props.get(name)
         if p is None:
             return DEFAULTS.get(name, default)
+        if p.static:
+            return p.value
         try:
-            return p.at(t, self.dur, T, i)
+            return p.fn(t, self.t_out - self.t_in, T, i)
         except (ArithmeticError, ValueError, TypeError) as e:  # a user expression, e.g. 1/(t-0.7) at t=0.7
             raise SceneError(f"layer '{self.id}': {name} failed at t={t:.3f}s (scene {T:.3f}s): "
                              f"{type(e).__name__}: {e}", layer=self.id) from e
+
+    def placed(self, t: float, T: float = 0.0) -> list:
+        """The values of PLACED at t, as get gives them, with the constant ones read once. Do not change the list."""
+        if self.xf is None:
+            self.xf = ([self.get(k, 0.0) for k in PLACED],
+                       [(j, k) for j, k in enumerate(PLACED) if k in self.props and not self.props[k].static])
+        still, moving = self.xf
+        if not moving:
+            return still
+        out = still.copy()
+        for j, k in moving:
+            out[j] = self.get(k, t, T)
+        return out
 
     def part(self, i: int, name: str, t: float, T: float = 0.0):
         """Part i's value of `name` at the layer's time t, with i as the part's number in expressions."""
