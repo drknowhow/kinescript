@@ -291,5 +291,130 @@ def arm(path: Path):
     print("wrote", path)
 
 
+def figure(path: Path):
+    """A skinned, animated glTF binary: a blocky figure 182 tall facing the viewer (+z), a torso, head, arms and
+    legs on 11 joints, each limb bending at its elbow or knee, with two loops: "walk" (1 s: legs and arms swing,
+    knees bend in the swing, the body bobs twice) and "wave" (2 s: the right arm raised, its forearm waving)."""
+    bones = [("hips", None, (0, 92)), ("chest", 0, (0, 128)), ("head", 1, (0, 156)), ("shoulderL", 1, (-25, 150)),
+             ("elbowL", 3, (-25, 121)), ("shoulderR", 1, (25, 150)), ("elbowR", 5, (25, 121)),
+             ("hipL", 0, (-10, 90)), ("kneeL", 7, (-10, 47)), ("hipR", 0, (10, 90)), ("kneeR", 9, (10, 47))]
+    at = {name: k for k, (name, _, _) in enumerate(bones)}
+    ease = lambda u: (lambda c: c * c * (3 - 2 * c))(np.clip(u, 0, 1))  # noqa: E731
+
+    def tube(x, y0, y1, r, rings=24, seg=24):
+        """A capped tube from y0 up to y1 at x: points, normals and triangles counter-clockwise from outside."""
+        a = np.linspace(0, 2 * np.pi, seg, endpoint=False)
+        rim = np.stack([np.cos(a), np.zeros(seg), np.sin(a)], 1)
+        y = np.linspace(y0, y1, rings)
+        P = [(rim[None] * r + y[:, None, None] * [0, 1, 0]).reshape(-1, 3) + [x, 0, 0]]
+        N = [np.tile(rim, (rings, 1))]
+        i, j = np.arange(rings - 1)[:, None] * seg, np.arange(seg)[None]
+        a0, a1 = i + j, i + (j + 1) % seg
+        T = [np.stack([a0, a0 + seg, a1], -1).reshape(-1, 3), np.stack([a1, a0 + seg, a1 + seg], -1).reshape(-1, 3)]
+        for end, up in ((y0, -1.0), (y1, 1.0)):
+            base = sum(len(p) for p in P)
+            P.append(np.r_[[[x, end, 0]], rim * r + [x, end, 0]])
+            N.append(np.tile([0, up, 0], (seg + 1, 1)))
+            k = np.arange(seg)
+            T.append(np.stack([np.full(seg, base), base + 1 + (k + 1) % seg if up > 0 else base + 1 + k,
+                               base + 1 + k if up > 0 else base + 1 + (k + 1) % seg], 1))
+        return np.concatenate(P), np.concatenate(N), np.concatenate(T)
+
+    def ball(c, r):
+        sp = mesh.unit("sphere")  # y down, wound clockwise on screen: turn both round for glTF
+        return sp.P * [1, -1, 1] * r + c, sp.N * [1, -1, 1], sp.T[:, [0, 2, 1]]
+
+    def limb(x, top, bend, bottom, r, upper, lower):
+        """A tube from top down to bottom, the upper joint giving way to the lower over 16 round bend."""
+        P, N, T = tube(x, bottom, top, r)
+        w = ease((bend + 8 - P[:, 1]) / 16)
+        return P, N, T, np.stack([1 - w, w], 1), [at[upper], at[lower]]
+
+    pieces = {"suit": [limb(0, 152, 118, 86, 17, "chest", "hips"),
+                       limb(-25, 152, 121, 92, 6, "shoulderL", "elbowL"),
+                       limb(25, 152, 121, 92, 6, "shoulderR", "elbowR")],
+              "legs": [limb(-10, 86, 47, 2, 7.5, "hipL", "kneeL"), limb(10, 86, 47, 2, 7.5, "hipR", "kneeR")],
+              "head": [(*ball([0, 170, 0], 14), np.ones((1, 2)) * [1, 0], [at["head"], at["head"]])]}
+    blob, views, accessors = bytearray(), [], []
+
+    def add(arr, ctype, kind):
+        views.append({"buffer": 0, "byteOffset": len(blob), "byteLength": arr.nbytes})
+        blob.extend(arr.tobytes() + b"\0" * (-arr.nbytes % 4))
+        acc = {"bufferView": len(views) - 1, "componentType": ctype, "count": len(arr), "type": kind}
+        if kind == "VEC3":
+            acc.update(min=arr.min(0).tolist(), max=arr.max(0).tolist())
+        accessors.append(acc)
+        return len(accessors) - 1
+
+    prims = []
+    for m, name in enumerate(pieces):
+        Ps, Ns, Ts, Js, Ws, base = [], [], [], [], [], 0
+        for P, N, T, w, js in pieces[name]:
+            Ps.append(P)
+            Ns.append(N)
+            Ts.append(T + base)
+            Js.append(np.tile([js[0], js[1], 0, 0], (len(P), 1)))
+            Ws.append(np.c_[np.broadcast_to(w, (len(P), 2)), np.zeros((len(P), 2))])
+            base += len(P)
+        attrs = {"POSITION": add(np.concatenate(Ps).astype("<f4"), 5126, "VEC3"),
+                 "NORMAL": add(np.concatenate(Ns).astype("<f4"), 5126, "VEC3"),
+                 "JOINTS_0": add(np.concatenate(Js).astype("<u1"), 5121, "VEC4"),
+                 "WEIGHTS_0": add(np.concatenate(Ws).astype("<f4"), 5126, "VEC4")}
+        prims.append({"attributes": attrs, "material": m,
+                      "indices": add(np.concatenate(Ts).astype("<u2").ravel(), 5123, "SCALAR")})
+    nodes = []
+    for name, parent, (x, y) in bones:
+        px, py = (0, 0) if parent is None else bones[parent][2]
+        kids = [k for k, b in enumerate(bones) if b[1] == at[name]]
+        nodes.append({"name": name, "translation": [x - px, y - py, 0], **({"children": kids} if kids else {})})
+    nodes.append({"name": "body", "mesh": 0, "skin": 0})
+    ibm = np.tile(np.eye(4), (len(bones), 1, 1))
+    ibm[:, 0, 3], ibm[:, 1, 3] = [-b[2][0] for b in bones], [-b[2][1] for b in bones]
+
+    def turn(axis, deg):  # quaternions about an axis, one per angle
+        h = np.radians(np.asarray(deg, float)) / 2
+        return np.c_[np.outer(np.sin(h), axis), np.cos(h)]
+
+    X, Y, Z = (1, 0, 0), (0, 1, 0), (0, 0, 1)
+    s = lambda t, f=1, ph=0.0: np.sin(2 * np.pi * f * t + ph)  # noqa: E731
+    walk_t, wave_t = np.arange(17) / 16, np.arange(33) / 16
+    clips = {"walk": (walk_t, [("hipL", X, -26 * s(walk_t)), ("hipR", X, 26 * s(walk_t)),
+                               ("kneeL", X, 40 * np.maximum(0, s(walk_t, ph=np.pi / 2))),
+                               ("kneeR", X, 40 * np.maximum(0, -s(walk_t, ph=np.pi / 2))),
+                               ("shoulderL", X, 20 * s(walk_t)), ("shoulderR", X, -20 * s(walk_t)),
+                               ("elbowL", X, -16 - 6 * s(walk_t)), ("elbowR", X, -16 + 6 * s(walk_t)),
+                               ("chest", Y, 7 * s(walk_t)), ("hips", None, 92 + 2.5 * s(walk_t, 2, np.pi / 2))]),
+             "wave": (wave_t, [("shoulderR", Z, 145 + 5 * s(wave_t, 0.5)), ("elbowR", Z, 25 * s(wave_t, 1.5)),
+                               ("shoulderL", Z, -4 - 3 * s(wave_t, 0.5)), ("chest", Z, 3 * s(wave_t, 0.5)),
+                               ("hips", None, 92 + s(wave_t, 0.5))])}
+    anims = []
+    for clip, (t, chans) in clips.items():
+        samplers, channels = [], []
+        for name, axis, v in chans:
+            values = turn(axis, v) if axis else np.c_[np.zeros(len(t)), v, np.zeros(len(t))]
+            samplers.append({"input": add(t.astype("<f4"), 5126, "SCALAR"),
+                             "output": add(values.astype("<f4"), 5126, "VEC4" if axis else "VEC3")})
+            channels.append({"sampler": len(samplers) - 1,
+                             "target": {"node": at[name], "path": "rotation" if axis else "translation"}})
+        anims.append({"name": clip, "samplers": samplers, "channels": channels})
+    lin = lambda h: [(int(h[k:k + 2], 16) / 255) ** 2.2 for k in (1, 3, 5)] + [1.0]  # noqa: E731
+    doc = {"asset": {"version": "2.0", "generator": "kinescript examples/make_media.py"}, "scene": 0,
+           "scenes": [{"nodes": [0, len(bones)]}], "nodes": nodes,
+           "skins": [{"name": "figure", "joints": list(range(len(bones))),
+                      "inverseBindMatrices": add(ibm.transpose(0, 2, 1).reshape(-1, 16).astype("<f4"), 5126, "MAT4")}],
+           "meshes": [{"name": "body", "primitives": prims}],
+           "materials": [{"name": name, "pbrMetallicRoughness": {"baseColorFactor": lin(c), "metallicFactor": 0.0,
+                                                                 "roughnessFactor": rough}}
+                         for name, c, rough in (("suit", "#ff633f", 0.45), ("legs", "#2b3242", 0.6),
+                                                ("head", "#f2f0e8", 0.35))],
+           "animations": anims, "accessors": accessors, "bufferViews": views, "buffers": [{"byteLength": len(blob)}]}
+    js = json.dumps(doc).encode()
+    js += b" " * (-len(js) % 4)
+    body = struct.pack("<II", len(js), 0x4E4F534A) + js + struct.pack("<II", len(blob), 0x004E4942) + bytes(blob)
+    path.write_bytes(b"glTF" + struct.pack("<II", 2, 12 + len(body)) + body)
+    print("wrote", path)
+
+
 can(out / "can.glb")
 arm(out / "arm.glb")
+figure(out / "figure.glb")

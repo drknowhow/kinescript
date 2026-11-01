@@ -260,6 +260,8 @@ nine rounds: a floor reaching to just in front of the camera took eight.
   four joints; the extra weights are dropped).
 - `examples/make_media.py` writes a skinned, animated glTF (a tube bending on three joints) and a textured one, so
   tests and examples need no downloaded assets.
+  With the stress scenes (branch `phase5-stress`) it also writes `figure.glb`: a figure of 8,352 triangles on 11
+  joints, with a 1 s `walk` loop and a 2 s `wave` loop, for `examples/character.json`.
 
 ### Phase 6: shapes, 3D text, compressed files
 
@@ -280,9 +282,12 @@ nine rounds: a floor reaching to just in front of the camera took eight.
   peak memory in the 1.5 report.
   Merged (#70): `textured-100k` (an .obj globe of 102,400 triangles with normals,
   coordinates and a map_Kd image, turning under world light and `env`) and `dof-stage` (a stage of 10 models and
-  3 cards on a floor with shadows, focus pulled from the near row to the far row to the cards). `skinned` and
-  `repeat-1000` wait for Phase 5. Results in `docs/stress-test-1.5/`, 120 frames at 1080p each, render wall time
-  and peak memory of the render processes (development machine, 2026-10-31):
+  3 cards on a floor with shadows, focus pulled from the near row to the far row to the cards).
+  `skinned` and `repeat-1000` came after Phase 5 (branch `phase5-stress`): `skinned` is six snakes from a 24-joint
+  glTF of 23,040 triangles and twelve `arm.glb`, each on its own clip and start; `repeat-1000` is 1,000 cubes on a
+  40 by 25 grid in one layer, each rising, turning and coloured by `hsl`, with edges. Results in
+  `docs/stress-test-1.5/`, 120 frames at 1080p each, render wall time and peak memory of the render processes
+  (development machine, 2026-10-31; `skinned` and `repeat-1000` 2026-11-01):
 
   | scene | GPU, 4 workers | CPU, 2 workers |
   |---|---|---|
@@ -290,16 +295,21 @@ nine rounds: a floor reaching to just in front of the camera took eight.
   | `stage-16` | 2.90 s, 41 fps, 736 MB | 42.2 s, 3 fps, 718 MB |
   | `textured-100k` | 3.15 s, 38 fps, 999 MB | 41.9 s, 3 fps, 600 MB |
   | `dof-stage` | 2.66 s, 45 fps, 1000 MB | 209.5 s, 0.6 fps, 1883 MB |
+  | `skinned` | 3.89 s, 31 fps, 866 MB | 12.1 s, 10 fps, 298 MB |
+  | `repeat-1000` | 6.60 s, 18 fps, 1371 MB | 27.3 s, 4 fps, 557 MB |
 
   `kine check` of `dof-stage` takes 1.0 s on the GPU and 49.8 s on the CPU, where it warns
-  `slow-depth-of-field`.
+  `slow-depth-of-field`. `skinned` warns `triangle-budget` on both backends.
 - Examples: `stage.json`, `product.json` (a textured glTF turntable under world lights with `env`, depth of field
   and a floor that takes its shadow), `character.json`, `cubes.json`.
   `product.json` merged (#72): `examples/make_media.py` writes `can.glb`, a can
   whose body takes `label.png` as an embedded base colour texture, under a steel lid, rim and ring pull. It turns on
   a table in a stage with shadows and depth of field, two more cans out of focus behind it. 180 frames render in
-  16.0 s on the GPU (6 workers). `character.json` and `cubes.json` wait for Phase 5.
+  16.0 s on the GPU (6 workers).
   `cubes.json` came with `repeat` (branch `repeat-copies`): a ripple through 144 cubes in one model layer.
+  `character.json` came with the stress scenes (branch `phase5-stress`): two copies of `figure.glb` walk across a
+  floor in a stage with shadows, one near and one far, while a third waves. 180 frames render in 6.2 s on the GPU
+  (6 workers).
 - README 3D section and its limitations line, `kine docs`, site/, CHANGELOG with measured numbers, version 1.5.0.
   A 3D shot in the launch video is optional and means re-measuring the promo.
   Built on branch `release-1.5.0`: the README's model files and limits, the site's 3D section rewritten for 1.5

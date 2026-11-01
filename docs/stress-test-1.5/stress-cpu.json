@@ -88,5 +88,49 @@
   "frames_out": 120,
   "peak_mb": 1883,
   "total_s": 259.81
+ },
+ {
+  "scene": "skinned",
+  "ok": true,
+  "load_s": 0.047,
+  "frames": 120,
+  "w": 1920,
+  "h": 1080,
+  "check_s": 2.39,
+  "errors": 0,
+  "warnings": 1,
+  "codes": [
+   "triangle-budget"
+  ],
+  "render_s": 12.1,
+  "fps": 9.9,
+  "workers": 2,
+  "size_mb": 0.95,
+  "audio": false,
+  "frames_ok": true,
+  "frames_out": 120,
+  "peak_mb": 298,
+  "total_s": 15.03
+ },
+ {
+  "scene": "repeat-1000",
+  "ok": true,
+  "load_s": 0.002,
+  "frames": 120,
+  "w": 1920,
+  "h": 1080,
+  "check_s": 5.23,
+  "errors": 0,
+  "warnings": 0,
+  "codes": [],
+  "render_s": 27.34,
+  "fps": 4.4,
+  "workers": 2,
+  "size_mb": 14.1,
+  "audio": false,
+  "frames_ok": true,
+  "frames_out": 120,
+  "peak_mb": 557,
+  "total_s": 33.06
  }
 ]
