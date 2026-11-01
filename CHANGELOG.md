@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `slow-effects` counts the letters of a split text that blur as they enter, which on the CPU each blur a layer
+  reaching from the frame's top left corner to the letter. `text-split` takes up to 179 s a CPU frame while its
+  letters blur in, and `kine check` did not warn; its estimates for three frames are now 1.04, 28.6 and 165 s
+  against a measured 1.05, 36.0 and 179 s.
 - Examples of the 2D features: `logo.json` (draw on, morphing, a mask and a glow), `kinetic.json` (stagger orders,
   `combine`, a mask, marching dashes and a looping group) and `explainer.json` (`rough` with `boil`, a dashed route
   ridden with `along`, a lens mask and a glow).

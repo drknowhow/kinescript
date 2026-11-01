@@ -1339,6 +1339,8 @@ def test_check_warns_about_slow_effects_on_the_cpu(monkeypatch):
     soft = scene([{"id": "soft", "type": "rect", "x": 160, "y": 90, "w": 40, "h": 40, "blur": 4}], duration=1)
     glowing = scene([{"id": "g", "type": "text", "text": "Hi", "x": 160, "y": 90, "size": 40, "glow": 12}], duration=1)
     plain = scene([{"id": "p", "type": "rect", "x": 160, "y": 90, "w": 40, "h": 40}], duration=1)
+    letters = scene([{"id": "s", "type": "text", "text": "Hello", "x": 160, "y": 90, "size": 40, "split": "chars",
+                      "enter": {"name": "blur", "dur": 1}}], duration=1)  # each letter blurs in a layer of its own
     monkeypatch.setattr(V, "SLOW_EFFECTS", 0.0005)  # 320x180 frames are too small to be slow
     try:
         on_gpu = {i["code"] for i in check(soft)["issues"]}
@@ -1349,6 +1351,7 @@ def test_check_warns_about_slow_effects_on_the_cpu(monkeypatch):
     warned = [i for i in check(soft)["issues"] if i["code"] == "slow-effects"]
     assert warned and "0.44 s for a 1080p layer" in warned[0]["message"], warned
     assert any(i["code"] == "slow-effects" for i in check(glowing)["issues"])
+    assert any(i["code"] == "slow-effects" for i in check(letters)["issues"])
     assert not any(i["code"] == "slow-effects" for i in check(plain)["issues"])
 
 

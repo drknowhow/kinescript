@@ -214,7 +214,9 @@ frame-sized layers in 1.6, since bounding them changes pixels; the CPU blurs a 1
 Status (2026-11-01), `slow-effects`: in its own PR. The renderer counts, each frame, the pixels its offscreen effects
 blur (an outline's copies, a mask's two layers and displace count as the share of a blur they take), at 0.44 s for a
 1080p layer; `check` warns past 0.25 s a frame when it draws on the CPU. On the stress scenes and on layers with
-blur or shadow, the estimate came within 2% below to 35% above the measured time.
+blur or shadow, the estimate came within 2% below to 35% above the measured time. The letters of a split text that
+blur in were left out until the stress report found `text-split` taking up to 179 s a CPU frame with no warning;
+counted, they bring its estimates to 1% to 21% below the measured time.
 
 ### Phase 4: many things at once
 

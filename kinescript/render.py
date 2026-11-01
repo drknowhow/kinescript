@@ -2679,9 +2679,12 @@ class Renderer:
                     c.scale(usc, usc)
                 c.translate(-ucx, -ucy)
             if blurred:
-                c.saveLayer(self._blur_bounds(c, um.blur, ox + x1 + max(0.0, track * (runs[-1][0].char0 - c00)),
-                                              oy + (runs[-1][0].line + 1) * lay.lh, size, spaint),
-                            skia.Paint(ImageFilter=skia.ImageFilters.Blur(um.blur, um.blur)))
+                bounds = self._blur_bounds(c, um.blur, ox + x1 + max(0.0, track * (runs[-1][0].char0 - c00)),
+                                           oy + (runs[-1][0].line + 1) * lay.lh, size, spaint)
+                area = skia.Rect.Make(c.getDeviceClipBounds())  # the layer: the clip, as far as the bounds reach
+                if bounds is None or area.intersect(c.getTotalMatrix().mapRect(bounds)):
+                    self.filtered += area.width() * area.height()
+                c.saveLayer(bounds, skia.Paint(ImageFilter=skia.ImageFilters.Blur(um.blur, um.blur)))
             for r, pcs in runs:
                 text = r.text
                 if visible_chars is not None:
