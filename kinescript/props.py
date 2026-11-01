@@ -265,7 +265,27 @@ def _tween_secs(raw: dict, key: str, default: float, name: str) -> float:
     return float(v)
 
 
-def compile_prop(name: str, raw, ctx: Ctx) -> Prop:
+HOLD = E.EASES["hold"]
+
+
+def _slopes(pts: list) -> list[float]:
+    """The speed at each of a smooth prop's keys: Fritsch-Butland, so no value passes either neighbour, and zero where a
+    run of keys starts or ends: at the first and last key, at a hold, and where two keys share a time."""
+    m = [0.0] * len(pts)
+    for k in range(1, len(pts) - 1):
+        (t0, v0, _), (t1, v1, e1), (t2, v2, e2) = pts[k - 1], pts[k], pts[k + 1]
+        if e1 is HOLD or e2 is HOLD or not t0 < t1 < t2:
+            continue
+        a, b = (v1 - v0) / (t1 - t0), (v2 - v1) / (t2 - t1)
+        if a * b > 0:
+            h0, h1 = t1 - t0, t2 - t1
+            m[k] = 3 * (h0 + h1) / ((2 * h1 + h0) / a + (h1 + 2 * h0) / b)
+    return m
+
+
+def compile_prop(name: str, raw, ctx: Ctx, smooth: bool = False) -> Prop:
+    """smooth: keyframes pass through every key without stopping, at rest only where a run of keys starts and ends,
+    and each key's ease is ignored except hold."""
     if name in NOT_ANIMATABLE:
         return Prop(True, raw)
     if isinstance(raw, str) and raw.startswith("="):
@@ -282,24 +302,45 @@ def compile_prop(name: str, raw, ctx: Ctx) -> Prop:
         return Prop(False, raw, fn=fx)  # value keeps the source: Scene.check_expressions finds expressions by it
     if isinstance(raw, dict) and ("to" in raw or "keys" in raw):
         if "keys" in raw:
-            return compile_prop(name, raw["keys"], ctx)
+            return compile_prop(name, raw["keys"], ctx, smooth=raw.get("smooth") is True)
         delay, dur = (_tween_secs(raw, k, default, name) for k, default in (("delay", 0), ("dur", 0.6)))
         keys = [[delay, raw.get("from", raw["to"])], [delay + dur, raw["to"], raw.get("ease", "outCubic")]]
         return compile_prop(name, keys, ctx)
     if is_keyframes(raw):
         keys = [(k[0], _norm(length(k[1], name, ctx)), E.get(k[2] if len(k) > 2 else "inOutCubic")) for k in raw]
         fps = ctx.fps
-        cache: dict[float, tuple[list, list[float]]] = {}  # layer length -> (keys in time order, their times)
+        if smooth and not all(isinstance(v, (int, float)) and not isinstance(v, bool) for _, v, _ in keys):
+            raise ValueError(f"{name}: smooth moves numbers through their keys; colours and lists mix key to key, so "
+                             "leave smooth out")
+        cache: dict[float, tuple] = {}  # layer length -> (keys in time order, their times, smooth's slopes)
 
         def sorted_keys(d):
             hit = cache.get(d)
             if hit is None:
                 pts = sorted(((key_time(k, d, fps), v, e) for k, v, e in keys), key=lambda x: x[0])
-                hit = cache[d] = (pts, [p[0] for p in pts])
+                hit = cache[d] = (pts, [p[0] for p in pts], _slopes(pts) if smooth else None)
             return hit
 
+        def fs(t, d, T, i):  # cubic Hermite between keys, with the slopes _slopes gives
+            pts, times, m = sorted_keys(d)
+            if t <= times[0]:
+                return pts[0][1]
+            j = bisect_right(times, t)
+            if j == len(pts):
+                return pts[-1][1]
+            t0, v0, _ = pts[j - 1]
+            t1, v1, e1 = pts[j]
+            if e1 is HOLD:
+                return v0
+            h = t1 - t0
+            s = (t - t0) / h
+            s2 = s * s
+            s3 = s2 * s
+            return (2 * s3 - 3 * s2 + 1) * v0 + (s3 - 2 * s2 + s) * h * m[j - 1] + (3 * s2 - 2 * s3) * v1 \
+                + (s3 - s2) * h * m[j]
+
         def fk(t, d, T, i):
-            pts, times = sorted_keys(d)
+            pts, times, _ = sorted_keys(d)
             if t <= times[0]:
                 return pts[0][1]
             j = bisect_right(times, t)  # the first key after t; keys at equal times leave the later one in force
@@ -308,7 +349,7 @@ def compile_prop(name: str, raw, ctx: Ctx) -> Prop:
             t0, v0, _ = pts[j - 1]
             t1, v1, e1 = pts[j]
             return lerp(v0, v1, e1((t - t0) / (t1 - t0)))
-        return Prop(False, fn=fk, keys=lambda d: sorted_keys(d)[0])
+        return Prop(False, fn=fs if smooth else fk, keys=lambda d: sorted_keys(d)[0])
     return Prop(True, _norm(length(raw, name, ctx)))
 
 

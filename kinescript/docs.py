@@ -94,7 +94,8 @@ KEYS EVERY LAYER HAS
   id, type, at, dur, until
   x, y          position of the anchor. A number (px), "50%" (of the canvas, or of the group's
                 w and h), "50%-120", "10vw", "5vh", or an expression. "position": [x, y],
-                [x, y, z] or {"x": ..., "y": ...} is read as x and y (and z).
+                [x, y, z] or {"x": ..., "y": ...} is read as x and y (and z); so are keyframes of
+                points, [[0, [200, 540]], [2, [960, 300]]], and smooth keys or a tween of points.
   anchor        center (default) | topleft | top | topright | left | right | bottomleft | bottom |
                 bottomright. Video and shader default to topleft, even with x and y set; an image
                 defaults to topleft without x and to center with it.
@@ -425,8 +426,11 @@ ANIMATING A VALUE (any number or colour key)
                Each keyframe is [time, value] or [time, value, ease into it]. Time is seconds from
                the layer start ("500ms", "12f" also work); a negative time counts back from its
                end; "40%" is a share of its length; "end" is its end. Between keyframes the default
-               ease is inOutCubic.
+               ease is inOutCubic, which slows to a stop at every key.
                A flat list such as [0, 100] is NOT keyframes.
+  smooth keys  "x": {"keys": [[0, 200], [1, 700], [2, 960], [3, 1700]], "smooth": true}
+               Passes through each key without stopping: at rest only at the first and last key,
+               at a turn, and around a "hold" key. Other eases on the keys are ignored. Numbers only.
   expression   "y": "=540 + sin(t * 3) * 40"   (a string starting with "=")
                t = seconds since the layer started   d = the layer's length   p = t / d (0..1)
                T = seconds since the scene started   i = unit index (split text)   W, H, fps

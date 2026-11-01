@@ -114,11 +114,16 @@ Each bullet is about one PR. Phase 0 goes first so new features are measured aga
   stress scenes that measure later phases (`morph-200`, `masks-50`, `glow-text`, `repeat-10k`, `particles-5k`,
   `svg-500`, `along-100`) arrive with the feature each one measures.
 
+Status (2026-11-01): merged (#84) without the picture cache, which moves to Phase 5, where SVG pieces give it
+constant groups to replay. Frame times on the GPU, frames 50 to 89: `layers-2000` 16.8 ms, `expressions` 9.7 ms,
+`keys-dense` 10.2 ms. Draw time per frame against 1.5.1, alternating runs: 15.8 to 12.5, 7.3 to 5.4 and 9.1 to
+5.8 ms. `bench/same.py` finds no frame that differs on either backend.
+
 ### Phase 1: motion that flows
 
 - `"smooth": true` on the keyframes object (`{"keys": [...], "smooth": true}`, a form `compile_prop` already
   reads) passes through every key with no stop: a monotone cubic through the values, so it does not overshoot
-  them, with the first and last keys' eases kept. `"hold"` as a key's ease keeps its value until the next key.
+  them, at rest at the first and last keys. `"hold"` as a key's ease keeps its value until the next key.
 - `position` keyframes: `"position": [[0, [100, 300]], [1, [500, 120]], [2, [900, 300]]]` moves the anchor through
   the points, and with `smooth` along a curve through them. The `schema.py:789` misread becomes this.
 - `along` moves a layer along a path: `"along": {"d": "M0 0 C 300 -200 600 200 900 0", "p": [[0, 0], [2, 1]],

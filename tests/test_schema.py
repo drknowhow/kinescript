@@ -107,6 +107,32 @@ def test_canvas_limits(canvas, code):
     assert code in codes(scene([{"type": "rect"}], **canvas))[0]
 
 
+def test_position_keyframes_and_tweens_of_points_split_into_x_and_y():
+    def layer(pos):
+        got, s = codes(scene([{"id": "a", "type": "rect", "w": 10, "h": 10, "position": pos}]))
+        assert s is not None and "renamed-key" in got, got
+        return s.by_id["a"]
+    r = layer([[0, [10, 20]], [1, [30, 40], "linear"]]).raw
+    assert (r["x"], r["y"]) == ([[0, 10], [1, 30, "linear"]], [[0, 20], [1, 40, "linear"]])
+    r = layer({"keys": [[0, [10, 20, 5]], [1, [30, 40, 0]]], "smooth": True}).raw
+    assert r["x"] == {"keys": [[0, 10], [1, 30]], "smooth": True} and r["z"]["keys"] == [[0, 5], [1, 0]]
+    r = layer({"from": [0, 0], "to": [100, 50], "dur": 2}).raw
+    assert (r["x"], r["y"]) == ({"from": 0, "to": 100, "dur": 2}, {"from": 0, "to": 50, "dur": 2})
+    a = layer([[0, [10, 20]], [0.5, [30, 40]]])
+    assert (a.get("x", 0.5), a.get("y", 0.5)) == (30, 40)
+    for bad in ([[0, [10, 20]], [1, [30, 40, 0]]], {"from": [0], "to": [100, 50]}, [[0, 10], [1, 20]]):
+        assert "bad-value" in codes(scene([{"id": "a", "type": "rect", "position": bad}]))[0], bad
+
+
+def test_smooth_is_a_boolean_beside_keys_on_numbers():
+    ok = {"keys": [[0, 0], [1, 100], [2, 300]], "smooth": True}
+    assert not [c for c in codes(scene([{"type": "rect", "x": ok}]))[0] if c == "bad-value"]
+    for k_, v in (("x", {"smooth": True}), ("x", dict(ok, smooth="yes")),
+                  ("fill", {"keys": [[0, "#000000"], [1, "#ffffff"]], "smooth": True})):
+        assert "bad-value" in codes(scene([{"type": "rect", k_: v}]))[0], v
+    assert "bad-value" in codes(scene([{"type": "rect", "x": {"keys": [0, 100]}}]))[0]  # keys object still checked
+
+
 def test_flat_list_is_not_keyframes():
     assert "flat-keyframes" in codes(scene([{"type": "rect", "x": [0, 100]}]))[0]
 
