@@ -285,7 +285,9 @@ DEPTH AND CAMERA (3D)
   detail    low | medium (default) | high: how many triangles. A medium sphere has about 2,200.
   fill      one colour [theme accent]   shine 0..1 [0.4]   metal 0..1 [0]   rim 0..1 [0.5] (edge
             light)   bands [0] (2 or more: flat toon steps)   glow 0..1 [0] (shows at least fill x
-            glow however it is lit: neon, screens, lamps). These animate.
+            glow however it is lit: neon, screens, lamps)   transparency 0..1 [0] (see-through: the far
+            side and what is behind show, faces drawn far to near; a model with a texture draws solid,
+            check warns). These animate. opacity fades the drawn model as a whole, as on any layer.
   texture   an image (png, jpg, webp, gif, bmp) or video file drawn on the surface, "#groupId", or
             an object: {"src": "wood.jpg", "repeat": 2 or [across, down], "offset": [across, down]
             (in images, toward the right and down)}. A video plays on the model's clock, with "loop", "trim" and
@@ -311,7 +313,8 @@ DEPTH AND CAMERA (3D)
             drawn as a texture; "texture": false draws its mean colour, and a texture on the layer
             replaces the file's (check warns no-uvs when the file has no texture coordinates).
             The light a material gives off (glTF emissiveFactor and emissiveTexture, .mtl Ke and
-            map_Ke) is added to its colour however it is lit. Long triangles are cut to 1/24 of its size for the depth sort. Draco- or meshopt-
+            map_Ke) is added to its colour however it is lit. A glTF material with alphaMode BLEND is
+            see-through by its base colour's alpha, an .mtl one by d or Tr. Long triangles are cut to 1/24 of its size for the depth sort. Draco- or meshopt-
             compressed files are not read.
   ground    true or {"opacity": 0.5, "blur": px, "y": px, "from": "above"}: a soft shadow on a level
             floor under the model, as if lit from above, fainter as the model rises. The floor sits at

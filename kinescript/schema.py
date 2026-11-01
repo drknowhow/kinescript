@@ -90,7 +90,7 @@ ENV_ALIAS = {"name": "preset", "sky": "top", "ground": "bottom", "floor": "botto
              "strength": "amount", "intensity": "amount"}
 FOG = {"color", "near", "far", "amount"}
 FOG_ALIAS = {"colour": "color", "start": "near", "end": "far", "density": "amount", "strength": "amount"}
-MATERIAL = {"fill", "shine", "metal", "rim", "bands", "glow", "texture"}
+MATERIAL = {"fill", "shine", "metal", "rim", "bands", "glow", "texture", "transparency"}
 TEXTURE = {"src", "repeat", "offset", "loop", "trim", "speed"}
 CLIP_KEYS = ("loop", "trim", "speed")  # a video texture's, as on a video layer
 TEXTURE_ALIAS = {"image": "src", "file": "src", "path": "src", "url": "src", "tile": "repeat", "tiles": "repeat",
@@ -105,7 +105,8 @@ MODEL_ALIAS = {"radius": "r", "thickness": "tube", "geometry": "shape", "primiti
                "quality": "detail", "lighting": "light", "children": "parts", "meshes": "parts", "model": "src",
                "floor": "ground", "groundShadow": "ground", "contactShadow": "ground", "map": "texture",
                "image": "texture", "picture": "texture", "decal": "texture", "skin": "texture", "outline": "edges",
-               "outlines": "edges", "lines": "edges", "creases": "edges"}
+               "outlines": "edges", "lines": "edges", "creases": "edges", "transmission": "transparency",
+               "seeThrough": "transparency", "translucency": "transparency"}
 GROUND = {"y", "opacity", "blur", "from"}
 EDGES = {"width", "color", "angle"}
 EDGES_ALIAS = {"colour": "color", "thickness": "width", "size": "width", "strokeWidth": "width", "crease": "angle",
@@ -222,7 +223,7 @@ SCALAR = {"x", "y", "w", "h", "r", "opacity", "scale", "scaleX", "scaleY", "rota
           "strokeWidth", "draw", "drawStart", "zoom", "value", "radius", "dimOutside", "sides", "inner", "x1", "y1",
           "x2", "y2", "bend", "head", "maxWidth", "lineHeight", "letterSpacing", "focusX", "focusY", "speed",
           "unitX", "unitY", "unitRotate", "unitScale", "unitOpacity", "z", "rotateX", "rotateY", "fov",
-          "depth", "tube", "shine", "metal", "rim", "bands", "explode", "bevel"}
+          "depth", "tube", "shine", "metal", "rim", "bands", "explode", "bevel", "transparency"}
 REQUIRED = {"text": ("text",), "image": ("src",), "video": ("src",), "path": ("d", "points"), "line": ("points",),
             "captions": ("cues", "src", "voice"), "shader": ("preset", "sksl"), "model": ("shape", "parts", "src")}
 # Keys whose value is an object of their own: never a tween, even with a "from" key (a light's direction).
@@ -1296,11 +1297,21 @@ def _edges(raw: dict, rep: Report, lid):
         rep.add("error", "bad-value", lid, f"edges color is {_show(v['color'])}; it takes a colour, or keyframes")
 
 
+def _see_through(raw: dict, rep: Report, lid):
+    """A model with a texture draws solid: its passes are combined per pixel, the nearest face's alone."""
+    parts = [p for p in raw.get("parts") or [] if isinstance(p, dict)] if isinstance(raw.get("parts"), list) else []
+    if any(o.get("transparency") not in (None, 0) for o in [raw, *parts]) and any(
+            o.get("texture") not in (None, False) for o in [raw, *parts]):
+        rep.add("warning", "ignored-key", lid, "transparency is ignored on a model with a texture: it draws solid",
+                "put the see-through shape in a model layer of its own")
+
+
 def _model(raw: dict, rep: Report, lid):
     _light(raw, rep, lid)
     _outline(raw, rep, lid)
     _texture(raw, rep, lid)
     _edges(raw, rep, lid)
+    _see_through(raw, rep, lid)
     if raw.get("src") and raw.get("shape"):
         rep.add("warning", "ignored-key", lid, f"shape '{raw['shape']}' is ignored: the model comes from src",
                 "drop shape, or make the shape its own part")

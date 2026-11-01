@@ -192,18 +192,24 @@ one in front of it. On the CPU the stage blurs at halved sizes and mixes in nump
 
 Status (2026-11-01): image textures merged (#64): coordinates on every shape, `texture` with `repeat` and
 `offset` on layers and parts, glTF `TEXCOORD_n` and `baseColorTexture`, the passes, the cutting, `no-uvs` and
-`texture-swim`. Video and `"#groupId"` textures merged (#65). Emission merged (#66). `edges` is built on branch
-`edges`, not merged: corners at the same place are welded into points, so each edge is found once with the face on
+`texture-swim`. Video and `"#groupId"` textures merged (#65). Emission merged (#66). `edges` merged (#67): corners at the same place are welded into points, so each edge is found once with the face on
 either side; a face drawn back to back counts once. Each frame, an edge whose faces turn by more than `angle`, or
 where a face toward the camera meets one turned away or none, gets a quad `width` px wide with square ends. Its four
 vertices join the sorted triangles after every face at either end (by each face's nearest corner on a textured
 model, whose triangles are cut later), in an extra material slot drawn in the line's colour, unlit. A line taken
 from a face toward the camera moves with it when the model explodes. `"edges": true` uses 2 px, theme `ink` and
-30 degrees; `"all"` is angle 0. In a stage the quads write their depth too. Emission:
+30 degrees; `"all"` is angle 0. In a stage the quads write their depth too. See-through models are built on
+branch `opacity`, not merged, as a material key `transparency` (layer, part, and glTF `alphaMode` `BLEND` or
+`.mtl` `d` and `Tr`) instead of the layer's `opacity`: `opacity` and the enter and exit fades fade every layer as
+a flat image, and keyframed fades of models would have started showing their far side. A see-through face turned
+away is drawn too, lit from inside, unless it is the back of a face drawn back to back; the colour is
+premultiplied by the opacity in the shader (GPU) or the vertex colour's alpha (CPU), and the sorted triangles
+blend far to near. A textured model draws solid (`ignored-key`): its passes are combined per pixel, nearest face
+only. Emission:
 glTF `emissiveFactor` (with `KHR_materials_emissive_strength`) and `emissiveTexture`, and `.mtl` `Ke` and
 `map_Ke` are an emission colour per material, added in the shader (GPU) or per vertex (CPU) of an untextured
 model, and drawn as one more pass of a textured one. It is not a layer key: `glow` stays the way to light a
-model of your own. Then model `opacity`. Video and group textures: a video texture takes `loop`, `trim` and
+model of your own. Video and group textures: a video texture takes `loop`, `trim` and
 `speed` as a video layer does and plays on the model's clock. A group named by a texture is drawn only on the
 model, its box (its `w` and `h`, else the canvas) filling the image, its layers as in a scene without a camera
 (those that move in depth seen by a camera of the image's size, with no fog or depth of field). `kine check`

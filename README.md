@@ -66,7 +66,8 @@ no depth draw exactly as before.
   each other.
 - **Model layers.** `"type": "model"` draws a lit `cube`, `sphere`, `cylinder`, `cone`, `torus` or `plane`, or
   several shapes merged as `parts` so their triangles are depth-sorted together. Materials take `fill`, `shine`,
-  `metal`, `rim`, `bands` (toon steps), `glow` and `texture`, wrapped round the shape with `repeat` and `offset`: an
+  `metal`, `rim`, `bands` (toon steps), `glow`, `transparency` (see-through, the far side showing) and `texture`,
+  wrapped round the shape with `repeat` and `offset`: an
   image, a video that plays on the model, or `"#groupId"`, a group of layers drawn on it at each frame's time, such as
   an app on a phone's screen. `light`, for the scene or one model, takes `studio`, `soft`,
   `dramatic` or `flat`, or your own amounts, and every amount, its `azimuth`, `elevation` and colour animate. It
@@ -265,6 +266,8 @@ More scenes in [`examples/`](https://github.com/drknowhow/kinescript/tree/main/e
   phone's screen and footage round a turning drum: a group and a video as textures, 6 s.
 - [`edges.json`](https://github.com/drknowhow/kinescript/blob/main/examples/edges.json): a toon-shaded rocket with
   outlines, a hidden-line wireframe ring and extruded letters with their creases drawn, 6 s.
+- [`glass.json`](https://github.com/drknowhow/kinescript/blob/main/examples/glass.json): a ball and a ring inside a
+  glass case, and a ring that turns see-through, its inside showing, 6 s.
 - [`voiceover.json`](https://github.com/drknowhow/kinescript/blob/main/examples/voiceover.json): titles cued from
   the words of a voice-over, karaoke captions of it, and a music bed that dips under it, 5.4 s.
 - [`narrated.json`](https://github.com/drknowhow/kinescript/blob/main/examples/narrated.json): the same idea
