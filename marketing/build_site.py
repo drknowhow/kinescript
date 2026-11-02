@@ -59,6 +59,9 @@ DEMO = {
     "logo": ("examples/logo.json", 4.5, 0.5),
     "kinetic": ("examples/kinetic.json", 3.5, 0.5),
     "explainer": ("examples/explainer.json", 4.9, 0.5),
+    "motions": ("examples/motions.json", 5.0, 0.5),
+    "transitions": ("examples/transitions.json", 2.2, 0.5),
+    "charts": ("examples/charts.json", 4.5, 0.5),
 }
 HERO = ("marketing/hero.json", 3.6, 2 / 3)
 LOOK = "card-flip"          # the contact sheet shown in the agent section
