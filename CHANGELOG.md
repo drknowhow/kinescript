@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.6.1 (2026-11-01)
 
 - Chart components `barChart`, `lineChart` and `pieChart`, each taking `data` as numbers, `[label, number]` pairs or
   `{"label": ..., "value": ...}` objects. A bar chart's bars grow from a baseline in turn, each value counting up

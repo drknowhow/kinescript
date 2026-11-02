@@ -1,7 +1,7 @@
 # Kinescript 1.6: 2D plan
 
 Proposal, 2026-11-01; the decisions at the end were agreed the same day. Released as 1.6.0 on 2026-11-01 with
-Phases 0 to 3 and 7 (#84 to #103); Phases 4 to 6 move to 1.6.1 (decision 1). Each phase's status says what was
+Phases 0 to 3 and 7 (#84 to #103), and as 1.6.1 the same day with Phases 4 to 6 (#105 to #115; decision 1). Each phase's status says what was
 built and how it differs from its bullets. Numbers marked "target" are budgets to measure against. The others were
 measured on the development machine on 2026-11-01 (RTX 5060 Ti, skia-python 144.1, Python 3.14) or come from the
 2026-10-31 stress report.
@@ -222,14 +222,14 @@ counted, they bring its estimates to 1% to 21% below the measured time.
 
 ### Phase 4: many things at once
 
-Status (2026-11-01): moves to 1.6.1 (decision 1).
+Status (2026-11-01): in 1.6.1 (decision 1), #105 to #107.
 
 - `repeat` on 2D layers (shapes, text, images, groups) with the model's keys plus `opacity` and `stroke`, through
   the same `Copies` class: `{"count": 60, "rotate": "=i * 6", "x": "=cos(i * 0.1047) * 300", "fill":
   "=hsl(i * 6)"}`. Copies draw in one loop under the layer's transform with kept paints; a constant group draws
   once into a picture and replays per copy. Up to 10,000. Target: `repeat-10k` (10,000 circles moving) 30 fps on
   the GPU.
-  Status (2026-11-01): in its own PR. Every 2D layer but captions takes it; `z`, `rotateX` and `rotateY` stay a
+  Status (2026-11-01): merged (#105). Every 2D layer but captions takes it; `z`, `rotateX` and `rotateY` stay a
   model's, as a 2D layer's copies lie in its plane. A shape's copies draw in one loop, recoloured. Text, images and
   groups are recorded once each frame, whether they move or not, and replayed for each copy, and drawn copy by copy
   when the copies change their fill or stroke. `repeat-10k` renders at 39 to 41 fps on the GPU.
@@ -240,7 +240,7 @@ Status (2026-11-01): moves to 1.6.1 (decision 1).
   turbulence, so frame n needs no frame before it. Computed in numpy, drawn with `drawAtlas` from one sprite per
   shape and colour. Presets: `confetti`, `sparks`, `snow`, `dust`, `bubbles`. Target: `particles-5k` (5,000 alive)
   30 fps on the GPU. Check: `particle-cost` on the CPU.
-  Status (2026-11-01): in its own PR, with `confetti.json`. The over-life keys are `sizeOverLife`,
+  Status (2026-11-01): merged (#106), with `confetti.json`. The over-life keys are `sizeOverLife`,
   `opacityOverLife` and `fillOverLife`, since a particles layer's `size` and `fill` are the particles' own and its
   `opacity` fades the whole layer. `flip`, `align` and `prewarm` joined the keys for confetti, sparks and snow. A
   character is `text` and an image `src`. One sprite is drawn for the layer, white, and each particle tinted by its
@@ -248,18 +248,18 @@ Status (2026-11-01): moves to 1.6.1 (decision 1).
   to 159 fps on the GPU.
 - Image sequences: `image` with `frames` (`"frames/run_%03d.png"` or a folder) or `sheet` (`{"src": "run.png",
   "cols": 8, "rows": 2}`), `fps` and `loop`, for frame-by-frame animation. Check: `missing-frames`.
-  Status (2026-11-01): in its own PR, with `flipbook.json`. `frames` also takes `####`, a glob or a list, and `sheet`
+  Status (2026-11-01): merged (#107), with `flipbook.json`. `frames` also takes `####`, a glob or a list, and `sheet`
   a `count`; `fps` is 12 unless given, `loop` true unless given, and `"pingpong"` plays back to the first frame. A
   missing number holds the frame before it rather than closing the gap, so the rest keep their times. `pixelated`
   joined for pixel-art sheets, and `sheet-grid` warns when cols and rows do not divide the sheet.
 
 ### Phase 5: type and vector art
 
-Status (2026-11-01): moves to 1.6.1 (decision 1).
+Status (2026-11-01): in 1.6.1 (decision 1), #108 to #111.
 
 - Text on a path: `textPath` (`{"d": "...", "offset": [[0, 0], [2, 1]], "align": "start"}`) lays the letters along a
   curve, each turned to it, through `TextBlob.MakeFromRSXform`. Split units and their keys still apply.
-  Status (2026-11-01): in its own PR, with `textpath.json`. `d` is also `"#id"` of a path, line, arrow or polygon in
+  Status (2026-11-01): merged (#108), with `textpath.json`. `d` is also `"#id"` of a path, line, arrow or polygon in
   the same group, taken where that layer draws it, and counters take `textPath` too. Each letter turns where its
   middle is. A closed path takes the letters round again; an open one leaves out those past its ends and warns
   `text-off-path`. `anchor` is ignored on a path, and `text-overlap` reads each letter's rect rather than the box
@@ -267,7 +267,7 @@ Status (2026-11-01): moves to 1.6.1 (decision 1).
 - Per-unit keys `unitFill` and `unitBlur`, and an expression helper `sweep(i, n, p, soft)` that is 1 for units the
   sweep has passed and 0 for the rest, with a soft edge, so a highlight running across a line is one expression:
   `"unitFill": "=mix('#f2f0e8', '#ff633f', sweep(i, n, p, 3))"`. `n` (the unit count) joins `i` in unit expressions.
-  Status (2026-11-01): in its own PR, with `sweep.json`. `n` is in unit keys only. `unitFill` colours a unit's plain
+  Status (2026-11-01): merged (#109), with `sweep.json`. `n` is in unit keys only. `unitFill` colours a unit's plain
   letters and leaves emphasis its colour. Loading and `kine check` try unit expressions on the first and the last
   unit, counting `n` from the text, since the renderer's count comes from the layout.
 - SVG files. An `image` with an `.svg` src draws through `SVGDOM` as vectors, sharp at any zoom. An `svg` layer
@@ -276,12 +276,12 @@ Status (2026-11-01): moves to 1.6.1 (decision 1).
   file's ids, so `draw`, a staggered enter, morphing and masks work on each piece. What it skips (CSS in `<style>`,
   filters, `<text>`, clip paths) is listed by `kine check` as `svg-unsupported`. Constant pieces replay from a
   picture (Phase 0). Target: `svg-500` (a 500-element drawing, static) under 2 ms a frame on the GPU.
-  Status (2026-11-01): split in two. `.svg` in image layers is in its own PR, with `vector.json`. skia-python's
+  Status (2026-11-01): split in two. `.svg` in image layers merged (#110), with `vector.json`. skia-python's
   `SVGDOM` draws shapes, strokes, gradients, patterns, clip paths, masks and most filters, but no `<text>`, `<style>`,
   `<symbol>`, `<image>`, markers or `<switch>`, and follows `xlink:href` only, so plain `href` is rewritten to it;
   `svg-unsupported` names what it leaves out. Textures and particle sprites take the svg as pixels. The `svg` layer,
   the picture cache and `svg-500` come in the second PR.
-  Status (2026-11-01): the svg layer in its own PR, with `svg.json`. Changes from the bullet: it reads stroke caps,
+  Status (2026-11-01): the svg layer merged (#111), with `svg.json`. Changes from the bullet: it reads stroke caps,
   joins and dashes, fill-rule (path layers gain `fillRule`), `<use>`, `<symbol>` and nested `<svg>` viewports, and
   `hsl()` colours, which `SVGDOM` does not; `<style>` sheets stay out. Pieces are path layers centred on their own
   bounds, so they turn and scale about their middles. The picture cache records any group whose layers are shapes and
@@ -292,14 +292,14 @@ Status (2026-11-01): moves to 1.6.1 (decision 1).
 
 ### Phase 6: motion library
 
-Status (2026-11-01): moves to 1.6.1 (decision 1).
+Status (2026-11-01): in 1.6.1 (decision 1), #112 to #115.
 
 - Enter and exit motions: a drop with real bounces, `elastic`, `squash` (squash and stretch on landing), `swing`,
   `iris` (a circle opening from the middle), `clock` (a radial wipe), `blinds`, `rise-mask` (each line rises from
   behind a cut line, the usual title reveal), `scramble` (text settles from random characters, seeded), `glitch`
   (RGB split and slice offsets), `whip` (a fast slide with directional blur), `stretch`. The bouncing drop is
   `land` (decision 2).
-  Status (2026-11-01): in its own PR, with `motions.json`. `squash` is `land` with the squash and stretch, its bottom
+  Status (2026-11-01): merged (#112), with `motions.json`. `squash` is `land` with the squash and stretch, its bottom
   edge kept on the ground; `stretch` opens sideways from the middle. `Mods` gained a squash, stretch and turn about a
   pivot (the box's middle, top or bottom), a blur across, glitch and scramble amounts with a step and seed for their
   random picks, and wipe shapes `iris`, `clock`, `blinds` and `rise`. Glitch is an image filter on the layer: bands
@@ -309,14 +309,14 @@ Status (2026-11-01): moves to 1.6.1 (decision 1).
 - `emphasis`: motions in the middle of a layer's life, `[{"name": "pulse", "at": 1.2, "dur": 0.4, "repeat": 2}]`, or
   `"loop": true` for idle ones. Names: `pulse`, `shake`, `wiggle`, `wobble`, `float`, `bob`, `heartbeat`, `flash`,
   `tada`, `spin`. They use the same `Mods` as enter and exit, so they combine with them.
-  Status (2026-11-01): in its own PR, with `emphasis.json`. `emphasis` takes a name, an object or a list; `repeat` may
+  Status (2026-11-01): merged (#113), with `emphasis.json`. `emphasis` takes a name, an object or a list; `repeat` may
   be fractional, and each cycle starts and ends at rest so repeats and loops join without a jump. `stagger` on a split
   text plays it unit by unit as a wave, with `order` and `seed` as for enter. `late-emphasis` warns of one that starts
   after its layer ends. The picture cache waits for a group's emphases to end; a loop keeps the group drawn layer by
   layer.
 - Sequence transitions: `iris`, `push` (both clips move), `whip`, `luma` (wipe by a gradient's or an image's
   brightness, with `soft`) and `glitch`.
-  Status (2026-11-01): in its own PR, with `transitions.json`. Each is an enter on the incoming clip, and push, whip
+  Status (2026-11-01): merged (#114), with `transitions.json`. Each is an enter on the incoming clip, and push, whip
   and glitch add an exit on the outgoing one. `"fade": false`, new for enter and exit, keeps push and whip opaque;
   the two clips overlap by 2 px (a whip by 4) so the background never shows between their edges, and a whip's
   blur clamps at a pixel inside each clip's box instead of fading out. `luma` is a motion too: a colour matrix turns
@@ -324,7 +324,7 @@ Status (2026-11-01): moves to 1.6.1 (decision 1).
 - Optional, if the phase has room: chart components `bar-chart`, `line-chart` and `pie-chart`, built from today's
   layers (bars grow, values count up, the line draws on, slices sweep). The bar recipe in `kine docs` is what they
   replace.
-  Status (2026-11-01): in its own PR, with `charts.json`, named `barChart`, `lineChart` and `pieChart` like the other
+  Status (2026-11-01): merged (#115), with `charts.json`, named `barChart`, `lineChart` and `pieChart` like the other
   built-in components. A bar and its value share an outQuad tween over 1 s, so the value rides 40 px above the bar
   and a 600 px chart stays under the strobe warning, which outCubic over 0.8 s set off. A line's dots pop when its
   inOutSine draw reaches them. Each slice draws on linearly between the times one eased sweep reaches its edges, and
@@ -360,6 +360,9 @@ Status (2026-11-01): moves to 1.6.1 (decision 1).
   effects on the CPU, the site's 2D section with the logo, kinetic and explainer demos and a `--trails` sheet in
   the agent section, version 1.6.0. Each feature's `kine docs` lines came with its PR; `kine docs` is 742
   lines. The launch video is unchanged, so its numbers stand.
+  Status for 1.6.1 (2026-11-01): built on branch `release-1.6.1`: the README's 2D section gains Phases 4 to 6 and
+  its limits what SVG files lose, the site's 2D section gains the motions, transitions and charts demos, version
+  1.6.1. The launch video and the stress report are unchanged; Phases 4 and 5 measured their targets in their PRs.
 
 ## Out of scope
 

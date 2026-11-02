@@ -69,6 +69,21 @@ function of the scene and its number alone.
   modes: hardLight, colorDodge, colorBurn, exclusion, hue, saturation and luminosity.
 - **Layer effects.** `glow`, `outline`, `innerShadow` and `displace` (noise waves that slide), sized by keys that
   animate.
+- **Many at once.** `repeat` copies a shape, text, image or group up to 10,000 times, each copy placed and coloured
+  by an expression of its number `i`. A `particles` layer emits by `rate` or `burst`, with `life`, `speed`,
+  `gravity`, `drag`, and size, opacity and fill over each particle's life; `confetti`, `sparks`, `snow`, `dust` and
+  `bubbles` are presets. Each particle comes from its number and a `seed`, so any frame renders on its own. An
+  `image` with `frames` or a `sheet` plays frame-by-frame animation.
+- **Type on curves.** `textPath` lays text along a path, each letter turned to it, and `offset` slides it along.
+  `unitFill` and `unitBlur` colour and blur each letter by an expression, and `sweep(i, n, p, soft)` runs a
+  highlight across a line.
+- **SVG files.** An `.svg` in an image layer draws as vectors, sharp at any size. An `svg` layer turns the file's
+  shapes into layers named by their ids, so each piece can draw on, enter in turn, morph or take a mask.
+- **Motion library.** Twelve more enter and exit motions, among them `land` (drops in and bounces), `squash`,
+  `elastic`, `rise-mask`, `scramble`, `glitch` and `whip`. `emphasis` plays `pulse`, `shake`, `float` and seven more
+  in the middle of a layer's life, once, repeated or looped. Sequences also cut by `iris`, `push`, `whip`, `glitch`
+  and `luma`, and `barChart`, `lineChart` and `pieChart` are charts whose bars grow, line draws on and slices sweep
+  round.
 - **Motion an agent can read.** `kine look --trails` draws each moving layer's path over the frames, a dot a frame,
   so the spacing shows eases, overshoots and stops; `--onion 3` draws the three frames before each one over it.
   `kine probe --curve title.x` gives a key's value and speed at every frame. `kine check` warns `stop-and-go`,
@@ -413,6 +428,9 @@ Within one process, such as the MCP server, the workers stay warm for two minute
   bidi algorithm applied to whole words; explicit embeddings and isolates are not supported. `split: "chars"` and
   `letterSpacing` draw each letter on its own, so Arabic letters do not join there (`kine check` warns
   `unjoined-letters`).
+- An `svg` layer leaves out text, `<style>` sheets, `<image>`, clip paths, masks, filters, patterns, markers and the
+  file's own animation, and an `.svg` in an image layer leaves out text, `<style>` sheets, `<symbol>`, `<image>` and
+  markers; `kine check` names what a file loses (`svg-unsupported`). Turn text into paths when saving.
 - Expressions are limited to arithmetic and the listed helpers; attribute access and other names are rejected.
 
 ## Project layout
