@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kinescript editor</title>
+<style>
+  :root { --bg:#0e1117; --block:#171b24; --line:#2a303c; --fg:#e8eaf0; --dim:#9299a8; --accent:#ffd400; --ok:#6ee7a8; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.4 system-ui, sans-serif; min-height:100vh; }
+  header { padding:12px 16px 0; color:var(--dim); font-weight:600; }
+  #grid { display:grid; gap:12px; padding:12px 16px 16px;
+          grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+          grid-template-areas: "player notes" "timeline notes" "layers notes"; align-items:start; }
+  @media (max-width: 800px) { #grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "player" "timeline" "layers" "notes"; } }
+  .block { background:var(--block); border:1px solid var(--line); border-radius:8px; padding:12px; min-width:0; }
+  .block > h2 { margin:0 0 10px; font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--dim); font-weight:600;
+                display:flex; justify-content:space-between; align-items:center; }
+  #b-player { grid-area:player; } #b-timeline { grid-area:timeline; } #b-layers { grid-area:layers; } #b-notes { grid-area:notes; }
+  #stage { position:relative; background:#000; cursor:crosshair; width:100%; }
+  #stage img, #stage video { display:block; width:100%; height:100%; }
+  #stage video { position:absolute; inset:0; display:none; }
+  #pins { position:absolute; inset:0; pointer-events:none; }
+  .pin { position:absolute; width:18px; height:18px; margin:-9px 0 0 -9px; border:2px solid var(--accent); border-radius:50%; background:rgba(0,0,0,.45); }
+  .pin.stale { border-style:dashed; border-color:var(--dim); }
+  #tools { display:flex; gap:8px; align-items:center; }
+  #tools input[type=range] { flex:1; min-width:0; }
+  button { background:var(--line); color:var(--fg); border:0; padding:6px 12px; border-radius:6px; cursor:pointer; font:inherit; }
+  button:hover { background:#3a4252; }
+  button.primary { background:var(--accent); color:#111; font-weight:600; }
+  button:focus-visible, input:focus-visible, textarea:focus-visible, .chip:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+  #time { font-variant-numeric: tabular-nums; min-width:76px; text-align:right; color:var(--dim); }
+  #chips { display:flex; flex-wrap:wrap; gap:6px; min-height:28px; }
+  .chip { border:1px solid var(--line); background:var(--bg); color:var(--fg); padding:3px 10px; border-radius:999px; cursor:pointer; font-size:13px; }
+  .chip[aria-pressed=true] { border-color:var(--accent); color:var(--accent); }
+  .empty { color:var(--dim); font-size:13px; }
+  #compose { display:none; margin-bottom:10px; padding:10px; border:1px solid var(--accent); border-radius:6px; }
+  #compose textarea { width:100%; height:64px; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:6px; resize:vertical; font:inherit; }
+  #compose .row { display:flex; gap:8px; margin-top:8px; align-items:center; }
+  #compose .where { color:var(--dim); font-size:12px; flex:1; }
+  .note { padding:10px; margin-bottom:8px; background:var(--bg); border:1px solid var(--line); border-radius:6px; }
+  .note .meta { color:var(--dim); font-size:12px; display:flex; gap:10px; flex-wrap:wrap; margin-bottom:4px; }
+  .note .meta a { color:var(--accent); cursor:pointer; text-decoration:underline; }
+  .note.resolved { opacity:.65; } .note.resolved .txt { text-decoration:line-through; }
+  .reply { margin:4px 0 0 10px; color:var(--dim); font-size:12px; }
+  #msg { color:#ff8a80; min-height:1.2em; font-size:12px; }
+  label { color:var(--dim); font-size:12px; font-weight:400; text-transform:none; letter-spacing:0; }
+</style>
+</head>
+<body>
+<header id="title">Loading…</header>
+<div id="grid">
+  <section class="block" id="b-player" aria-label="Player">
+    <h2>Player <span class="empty">click the frame to pin a note</span></h2>
+    <div id="stage"><img id="frame" alt="Frame at the playhead"><video id="vid" muted playsinline></video><div id="pins"></div></div>
+  </section>
+  <section class="block" id="b-timeline" aria-label="Timeline">
+    <h2>Timeline</h2>
+    <div id="tools">
+      <button id="prev" title="Previous frame (←)">◀</button>
+      <button id="play" title="Play the rendered video (space)">Play</button>
+      <button id="next" title="Next frame (→)">▶</button>
+      <input id="scrub" type="range" min="0" max="1" step="0.001" value="0" aria-label="Time">
+      <span id="time">0.00 s</span>
+    </div>
+  </section>
+  <section class="block" id="b-layers" aria-label="Layers">
+    <h2>On screen now <span class="empty">pick one to note it without a point</span></h2>
+    <div id="chips"></div>
+  </section>
+  <section class="block" id="b-notes" aria-label="Notes">
+    <h2>Notes <label><input type="checkbox" id="showAll"> show resolved</label></h2>
+    <form id="compose">
+      <textarea id="text" placeholder="What should change here?" aria-label="Note"></textarea>
+      <div class="row"><span class="where" id="where"></span>
+        <button type="button" id="cancel">Cancel</button><button type="submit" class="primary">Add note</button></div>
+    </form>
+    <div id="msg" role="status"></div>
+    <div id="list"></div>
+  </section>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+let info = null, t = 0, draft = null, notes = [], seq = 0, layers = [], picked = null;
+
+const fmt = s => s.toFixed(2) + " s";
+const say = m => { $("msg").textContent = m || ""; };
+const post = body => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  const body = (r.headers.get("content-type") || "").includes("json") ? await r.json() : r;
+  if (!r.ok) throw new Error(body.error || r.statusText);
+  return body;
+}
+
+function show(time) {
+  t = Math.max(0, Math.min(time, info.duration));
+  $("scrub").value = t; $("time").textContent = fmt(t);
+  const mine = ++seq;
+  const img = new Image();
+  img.onload = () => { if (mine === seq) { $("frame").src = img.src; say(""); } };
+  img.onerror = () => { if (mine === seq) say("Could not draw this frame; the scene may be mid-edit."); };
+  img.src = "/frame?t=" + t.toFixed(3) + "&scale=" + (info.w > 960 ? 0.5 : 1) + "&_=" + Date.now();
+  drawPins(); loadLayers(mine);
+}
+
+async function loadLayers(mine) {
+  try {
+    const h = await api("/hit?x=0&y=0&t=" + t);
+    if (mine !== seq) return;
+    layers = h.layers;
+    if (picked && !layers.includes(picked)) picked = null;
+    drawChips();
+  } catch (e) { /* the frame request reports scene errors */ }
+}
+function drawChips() {
+  $("chips").replaceChildren(...(layers.length ? layers.map(id => {
+    const b = document.createElement("button"); b.className = "chip"; b.textContent = id; b.setAttribute("aria-pressed", id === picked);
+    b.onclick = () => { picked = id === picked ? null : id; drawChips(); if (picked) startDraft({ t, layer: picked }, "layer " + picked); };
+    return b;
+  }) : [Object.assign(document.createElement("span"), { className: "empty", textContent: "Nothing visible at this time." })]));
+}
+
+function startDraft(d, where) {
+  draft = d;
+  $("where").textContent = `${fmt(d.t)} · ${where}`;
+  $("compose").style.display = "block"; $("text").focus(); drawPins();
+}
+
+function drawPins() {
+  const near = n => Math.abs(n.t - t) < 0.5 / info.fps + 1e-6;
+  const mk = (n, cls) => { const d = document.createElement("div"); d.className = "pin " + cls;
+    d.style.left = n.x * 100 + "%"; d.style.top = n.y * 100 + "%"; d.title = n.text || ""; return d; };
+  const els = notes.filter(n => n.x !== undefined && near(n)).map(n => mk(n, n.stale ? "stale" : ""));
+  if (draft && draft.x !== undefined && near(draft)) els.push(mk(draft, ""));
+  $("pins").replaceChildren(...els);
+}
+
+async function loadNotes() {
+  notes = (await api("/notes?status=" + ($("showAll").checked ? "all" : "open"))).notes;
+  const els = notes.map(n => {
+    const el = document.createElement("div"); el.className = "note " + n.status;
+    const meta = document.createElement("div"); meta.className = "meta";
+    const go = document.createElement("a"); go.textContent = fmt(n.t); go.onclick = () => show(n.t);
+    meta.append(go);
+    if (n.layer) meta.append(n.layer);
+    if (n.stale) meta.append("scene changed since");
+    const act = document.createElement("a"); act.textContent = n.status === "open" ? "resolve" : "reopen";
+    act.onclick = async () => { try { await api("/notes", post({ action: n.status === "open" ? "resolve" : "reopen", id: n.id })); loadNotes(); } catch (e) { say(e.message); } };
+    meta.append(act);
+    const txt = document.createElement("div"); txt.className = "txt"; txt.textContent = n.text;
+    el.append(meta, txt);
+    for (const r of n.replies) { const d = document.createElement("div"); d.className = "reply"; d.textContent = r.by + ": " + r.text; el.append(d); }
+    return el;
+  });
+  $("list").replaceChildren(...(els.length ? els : [Object.assign(document.createElement("div"), { className: "empty", textContent: "No notes yet." })]));
+  drawPins();
+}
+
+$("stage").addEventListener("click", async e => {
+  if (!$("vid").paused) return;
+  const r = $("stage").getBoundingClientRect();
+  const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+  let layer = null;
+  try { layer = (await api(`/hit?x=${x}&y=${y}&t=${t}`)).layer; } catch (err) { say(err.message); }
+  startDraft({ t, x, y, layer }, `${layer || "no layer"} · ${Math.round(x * 100)}%, ${Math.round(y * 100)}%`);
+});
+$("cancel").onclick = () => { draft = null; $("compose").style.display = "none"; drawPins(); };
+$("compose").addEventListener("submit", async e => {
+  e.preventDefault();
+  if (!draft) return;
+  try {
+    await api("/notes", post({ action: "add", ...draft, text: $("text").value }));
+    $("text").value = ""; $("cancel").click(); loadNotes();
+  } catch (err) { say(err.message); }
+});
+$("showAll").onchange = loadNotes;
+$("scrub").oninput = e => { $("vid").pause(); show(parseFloat(e.target.value)); };
+$("prev").onclick = () => show(t - 1 / info.fps);
+$("next").onclick = () => show(t + 1 / info.fps);
+$("play").onclick = () => {
+  const v = $("vid");
+  if (!info.video) { say("No rendered video next to the scene yet (kine render)."); return; }
+  if (v.paused) { v.style.display = "block"; v.src = "/video?_=" + Date.now(); v.currentTime = t; v.play(); $("play").textContent = "Pause"; }
+  else v.pause();
+};
+$("vid").addEventListener("timeupdate", () => { $("scrub").value = $("vid").currentTime; $("time").textContent = fmt($("vid").currentTime); });
+$("vid").addEventListener("pause", () => { const v = $("vid"); v.style.display = "none"; $("play").textContent = "Play"; show(v.currentTime); });
+document.addEventListener("keydown", e => {
+  if (["TEXTAREA", "INPUT", "BUTTON"].includes(e.target.tagName)) return;
+  if (e.key === "ArrowLeft") $("prev").click();
+  else if (e.key === "ArrowRight") $("next").click();
+  else if (e.key === " ") { e.preventDefault(); $("play").click(); }
+});
+
+(async () => {
+  try {
+    info = await api("/scene");
+    $("title").textContent = `${info.name} · ${info.w}×${info.h} · ${info.duration} s`;
+    $("scrub").max = info.duration;
+    $("stage").style.aspectRatio = info.w + " / " + info.h;
+    await loadNotes(); show(0);
+  } catch (e) { $("title").textContent = "Could not load the scene: " + e.message; }
+})();
+</script>
+</body>
+</html>

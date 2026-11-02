@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- `kine edit scene.json` opens a browser editor laid out in blocks: the frame (click it to pin a note on the layer under
+  the pointer), a timeline, the layers on screen at the playhead, and the notes. It serves on 127.0.0.1 only and
+  draws frames on the CPU.
+- `kine_feedback` (MCP): review notes kept in `<scene>.feedback.json` beside the scene. Each has a time, an optional
+  point and layer id, and a status; `list`, `get`, `reply` and `resolve` work on them, and `still` returns the frame at
+  the note's time with its point ringed. A note is `stale` once the scene file has changed.
+
 ## 1.6.1 (2026-11-01)
 
 - Chart components `barChart`, `lineChart` and `pieChart`, each taking `data` as numbers, `[label, number]` pairs or

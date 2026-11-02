@@ -96,6 +96,11 @@ def main(argv=None) -> int:
     w.add_argument("scene")
     w.add_argument("-n", "--count", type=int, default=12)
 
+    ed = sub.add_parser("edit", help="open a browser editor: scrub the scene and leave notes for the agent")
+    ed.add_argument("scene")
+    ed.add_argument("--port", type=int, default=8765, help="0 picks a free port")
+    ed.add_argument("--no-open", action="store_true", help="do not open the browser")
+
     sub.add_parser("mcp", help="run the MCP server on stdio")
     sub.add_parser("doctor", help="report ffmpeg, GPU and font availability")
 
@@ -160,6 +165,10 @@ def _run(a) -> int:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(STARTER, indent=2), encoding="utf-8")
         _emit({"ok": True, "out": str(p)})
+        return 0
+    if a.cmd == "edit":
+        from .editor import serve
+        serve(a.scene, a.port, not a.no_open)
         return 0
     if a.cmd == "mcp":
         from .mcp import serve

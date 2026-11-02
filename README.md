@@ -226,6 +226,7 @@ An agent cannot watch a video, so Kinescript gives it things it can read:
 | `kine probe scene.json --curve title.x` | the value and its speed at every frame, where it holds still and its fastest frame |
 | `kine still` / `kine render` | a frame, a range (`--from/--to`), a draft (`-q draft --scale 0.5`) or the final file |
 | `kine watch scene.json` | the contact sheet, made again every time the file is saved |
+| `kine edit scene.json` | a browser page to scrub the scene and pin notes on frames for an agent (`--port`, `--no-open`) |
 | `kine voice scene.json` | each sound with text spoken into its file, with its word times, skipping what has not changed |
 
 `kine check` reports unknown keys and bad values, missing media and out-of-range trims, text off the canvas or
@@ -238,8 +239,9 @@ ceiling. An unknown key names the intended key first. Common names from other to
 errors.
 
 The same tools are available over MCP (`kine mcp`) as `kine_docs`, `kine_check`, `kine_look`, `kine_still`,
-`kine_probe`, `kine_render` and `kine_voice`. They take a scene as a file path or as the JSON object itself, and `kine_look`
-and `kine_still` return images inline.
+`kine_probe`, `kine_render`, `kine_voice` and `kine_feedback`. They take a scene as a file path or as the JSON object itself, and `kine_look`
+and `kine_still` return images inline. `kine_feedback` lists, answers and resolves the review notes kept in
+`<scene>.feedback.json` (`list` returns open notes in time order, marked `stale` when the scene changed after the note).
 
 ```json
 {
