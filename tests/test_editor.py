@@ -205,6 +205,14 @@ def vsrv(tmp_path, monkeypatch):
     httpd.server_close()
 
 
+def test_audio_serves_a_sound_file_with_ranges(vsrv):
+    port, scene = vsrv
+    status, body, hdr = req(port, "GET", "/audio?id=vo", headers={"Range": "bytes=0-43"})
+    assert status == 206 and body[:4] == b"RIFF" and len(body) == 44 and "audio/wav" in hdr["Content-Type"]
+    assert req(port, "GET", "/audio?id=nope")[0] == 404
+    assert req(port, "GET", "/audio")[0] == 404
+
+
 def test_scene_lists_sounds_and_caption_cues(vsrv):
     port, _ = vsrv
     info = json.loads(req(port, "GET", "/scene")[1])

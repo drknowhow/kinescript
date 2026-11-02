@@ -82,6 +82,10 @@ def _controls(raw: dict, keys) -> list:
             for k in keys]
 
 
+AUDIO_TYPES = {".wav": "audio/wav", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac",
+               ".ogg": "audio/ogg", ".opus": "audio/ogg", ".flac": "audio/flac"}
+
+
 def scene_info(path: Path) -> dict:
     from .schema import loads
     from .verify import probe
@@ -276,10 +280,20 @@ def make_handler(path: Path):
                 return self._json({"notes": feedback.listing(path, None if status == "all" else status)})
             if u.path == "/video":
                 return self._video()
+            if u.path == "/audio":
+                return self._audio(q.get("id", [""])[0])
             self._json({"error": "not found"}, 404)
 
-        def _video(self):
-            vid = path.with_suffix(".mp4")
+        def _audio(self, sound_id):
+            """The file behind one of the scene's sounds, so the page can play it on its own."""
+            src = next((s["src"] for s in scene_info(path)["sounds"] if s["id"] == sound_id), None)
+            f = (path.parent / src) if src else None
+            if f is None or not f.is_file() or f.suffix.lower() not in AUDIO_TYPES:
+                return self._json({"error": "no audio file for that sound"}, 404)
+            self._video(f, AUDIO_TYPES[f.suffix.lower()])
+
+        def _video(self, vid=None, mime="video/mp4"):
+            vid = vid or path.with_suffix(".mp4")
             if not vid.is_file():
                 return self._json({"error": "no render yet"}, 404)
             size = vid.stat().st_size
@@ -293,7 +307,7 @@ def make_handler(path: Path):
                     start = max(size - int(m[2]), 0)
                 end = min(end, size - 1)
                 if start > end:
-                    return self._send(416, b"", "video/mp4", {"Content-Range": f"bytes */{size}"})
+                    return self._send(416, b"", mime, {"Content-Range": f"bytes */{size}"})
             else:
                 m = None
             with vid.open("rb") as f:
@@ -302,7 +316,7 @@ def make_handler(path: Path):
             extra = {"Accept-Ranges": "bytes"}
             if m:
                 extra["Content-Range"] = f"bytes {start}-{end}/{size}"
-            self._send(206 if m else 200, body, "video/mp4", extra)
+            self._send(206 if m else 200, body, mime, extra)
 
         def _post(self):
             if urlparse(self.path).path not in ("/notes", "/prop"):

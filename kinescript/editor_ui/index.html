@@ -68,6 +68,7 @@
   .lab.layer .nm { overflow:hidden; text-overflow:ellipsis; } .lab .cnt { background:var(--accent); color:#111; border-radius:999px; font-size:10px; padding:0 5px; font-weight:600; flex:none; }
   .lab.layer.gone { color:var(--dim); text-decoration:line-through; }
   .eye { background:none; border:1px solid var(--line); color:var(--fg); width:20px; height:18px; padding:0; border-radius:4px; font-size:11px; line-height:1; flex:none; }
+  .eye.play { color:var(--accent); } .eye.play.on { background:var(--accent); color:#111; }
   .eye[aria-pressed=false] { color:var(--dim); border-style:dashed; opacity:.7; }
   .track.lyr { height:16px; } .track.lyr .bar { top:2px; bottom:2px; opacity:.55; background:var(--dim); } .track.lyr.on .bar { background:var(--live); opacity:.85; } .track.lyr.sel .bar { background:var(--accent); opacity:1; }
   .track.lyr.gone .bar { background:repeating-linear-gradient(45deg, #3a4252, #3a4252 3px, transparent 3px, transparent 6px); opacity:1; }
@@ -120,6 +121,7 @@ let info = null, t = 0, notes = [], boxes = {}, pos = {}, selected = null, tgt =
 let pin = null, drag = null, seq = 0, perr = "", moreOpen = false, drawMode = false, ink = [], cur = null;
 let hid = new Set(), storeKey = "kine-hidden";
 let hl = null, ctrl = false, lastEl = null;
+const aud = new Audio(); let playing = null, playHl = null;
 const ROLE = { voice: "var(--voice)", music: "var(--music)", sfx: "var(--sfx)" };
 /* groups: every layer, sound and note belongs to one; each has a color and a filter chip */
 const GROUPS = [["text", "Text"], ["shape", "Shapes"], ["media", "Media"], ["group", "Groups"], ["cap", "Captions"], ["voice", "Voice"], ["music", "Music"], ["sfx", "SFX"], ["scene", "Scene notes"]];
@@ -181,7 +183,8 @@ function drawOverlay() {
   const kids = [];
   if (hover && hover !== selected && boxes[hover] && !drag && !drawMode) kids.push(boxEl(hover, "hover"));
   if (selected && boxes[selected]) kids.push(drag?.moved ? boxEl(selected, "drag", drag.dx, drag.dy) : boxEl(selected, "sel"));
-  if (hl && boxes[hl]) { const d = boxEl(hl, "hl"); d.append(mk("span", "hltag", hl)); kids.push(d); }
+  const lit = hl || playHl;
+  if (lit && boxes[lit]) { const d = boxEl(lit, "hl"); d.append(mk("span", "hltag", lit)); kids.push(d); }
   const dot = (n, cls) => { const d = mk("div", "pin " + cls); d.style.left = n.x * 100 + "%"; d.style.top = n.y * 100 + "%"; d.title = n.text || ""; return d; };
   for (const n of notes) if (n.x !== undefined && near(n) && n.kind !== "prop") kids.push(dot(n, n.stale ? "stale" : ""));
   if (pin && selected) kids.push(dot(pin, ""));
@@ -221,6 +224,30 @@ function lane(label, build, hlId) {
   tr.onclick = e => { if (e.target === tr || e.target.classList.contains("bar")) { const r = tr.getBoundingClientRect(); show((e.clientX - r.left) / r.width * info.duration); } };
   return [l, tr, mk("span")];
 }
+/* play one sound (or one word of it) on its own; the layer it belongs to is outlined while it plays */
+function stopSound() { if (!playing) return; aud.pause(); playing = null; playHl = null; renderAll(); }
+function playSound(S, a, b) {
+  const same = playing && playing.id === S.id && playing.a === a; stopSound(); if (same) return;
+  $("vid").pause(); aud.src = "/audio?id=" + encodeURIComponent(S.id);
+  aud.addEventListener("loadedmetadata", () => { aud.currentTime = Math.max(0, a - S.in); }, { once: true });
+  playing = { id: S.id, a, to: b - S.in, s: S }; playHl = captionLayerFor(S.id) || null;
+  aud.play().then(() => { show(a); }).catch(e => { playing = null; playHl = null; say("Could not play " + S.id + ": " + e.message); renderAll(); });
+}
+aud.addEventListener("timeupdate", () => {
+  if (!playing) return;
+  if (aud.currentTime >= playing.to) { stopSound(); return; }
+  const tt = playing.s.in + aud.currentTime; if (Math.abs(tt - t) > 0.2) show(tt);
+});
+aud.addEventListener("ended", stopSound);
+function playBtn(S, a = S.in, b = S.out) {
+  const on = playing && playing.id === S.id && playing.a === a, btn = mk("button", "eye play" + (on ? " on" : ""), on ? "■" : "▶");
+  btn.title = (on ? "Stop " : "Play ") + S.id + (a !== S.in ? " from this word" : ""); btn.setAttribute("aria-label", btn.title);
+  btn.onclick = e => { e.stopPropagation(); playSound(S, a, b); }; return btn;
+}
+function withPlay(S, r) {
+  const lab = r[0]; lab.style.justifyContent = "flex-start"; lab.style.borderLeft = "3px solid " + gvar(S.role); lab.style.paddingLeft = "4px";
+  lab.replaceChildren(playBtn(S), mk("span", "nm", S.id)); return r;
+}
 function chip(tr, a, b, text, color, sel, has, onclick, title) {
   const c = mk("button", "chip" + (sel ? " sel" : "") + (has ? " has" : ""), text); c.style.left = pct(a) + "%"; c.style.width = Math.max(1.2, pct(b) - pct(a) - 0.2) + "%";
   c.style.background = color; c.title = title || text; c.onclick = e => { e.stopPropagation(); onclick(); }; tr.append(c);
@@ -252,13 +279,13 @@ function renderStrip() {
     tr.onclick = e => { const r = tr.getBoundingClientRect(); show((e.clientX - r.left) / r.width * info.duration); select(L.id); };
     rows.push([lab, tr, mk("span")]);
   }
-  for (const S of info.sounds) if (!off.has(S.role)) rows.push(lane(S.id, tr => {
+  for (const S of info.sounds) if (!off.has(S.role)) rows.push(withPlay(S, lane(S.id, tr => {
     const bar = mk("div", "bar"); bar.style.left = pct(S.in) + "%"; bar.style.width = Math.max(0.5, pct(S.out) - pct(S.in)) + "%"; bar.style.background = ROLE[S.role] || "var(--dim)"; tr.append(bar);
     if (S.words.length) S.words.forEach(([w, a, b], i) => chip(tr, a, b, clean(w), ROLE[S.role] || "var(--voice)", tgt?.kind === "word" && tgt.sound === S.id && tgt.idx === i,
       openCount(x => x.sound === S.id && x.word === w), () => { show(a); selectTarget({ kind: "word", sound: S.id, idx: i, word: w, a, b }); }, fmt(a) + " " + clean(w)));
     else chip(tr, S.in, S.out, S.role, ROLE[S.role] || "var(--dim)", tgt?.kind === "sound" && tgt.id === S.id, openCount(x => x.sound === S.id && !x.word),
       () => { show(S.in); selectTarget({ kind: "sound", id: S.id }); }, S.id + " (" + S.role + ")");
-  }, captionLayerFor(S.id)));
+  }, captionLayerFor(S.id))));
   for (const L of info.layers) if (L.cues.length && !off.has("cap")) rows.push(lane(L.id, tr => {
     L.cues.forEach(([a, b, text], i) => chip(tr, a, b, text, "var(--cap)", tgt?.kind === "cue" && tgt.layer === L.id && tgt.idx === i,
       openCount(x => x.layer === L.id && x.word === text), () => { show(a); selectTarget({ kind: "cue", layer: L.id, idx: i, text, a, b }); }, fmt(a) + " " + text));
@@ -318,11 +345,11 @@ function renderPop() {
       top.append(mk("b", "", "Scene note"), mk("span", "", fmt(t)), closeBtn(() => selectTarget(null)));
       kids = [top, noteForm(() => ({}), "Note on the whole scene at " + fmt(t) + "…", () => {})];
     } else if (tgt.kind === "sound") {
-      const S = soundOf(tgt.id); top.append(mk("b", "", S.id), mk("span", "", S.role + " · " + fmt(S.in) + "–" + fmt(S.out)), closeBtn(() => selectTarget(null)));
+      const S = soundOf(tgt.id); top.append(mk("b", "", S.id), mk("span", "", S.role + " · " + fmt(S.in) + "–" + fmt(S.out)), playBtn(S), closeBtn(() => selectTarget(null)));
       kids = [top, controlsBlock({ id: S.id, sound: true, controls: S.controls }), ...(S.speaks ? [mk("div", "hintline", "Changing the text needs kine_voice to speak it again.")] : []),
         noteForm(() => ({ sound: S.id }), "Note on this sound…", () => {})];
     } else if (tgt.kind === "word") {
-      top.append(mk("b", "", tgt.sound), mk("span", "", fmt(tgt.a) + "–" + fmt(tgt.b)), closeBtn(() => selectTarget(null)));
+      top.append(mk("b", "", tgt.sound), mk("span", "", fmt(tgt.a) + "–" + fmt(tgt.b)), playBtn(soundOf(tgt.sound), tgt.a, tgt.b), closeBtn(() => selectTarget(null)));
       const q = mk("div", "quote"); q.append("Word: ", mk("b", "", clean(tgt.word)));
       kids = [top, q, noteForm(() => ({ sound: tgt.sound, word: tgt.word, ...(captionLayerFor(tgt.sound) ? { layer: captionLayerFor(tgt.sound) } : {}) }), "Comment on this word (wording, pronunciation, timing)…", () => {})];
     } else if (tgt.kind === "cue") {
@@ -413,7 +440,7 @@ stage.addEventListener("pointercancel", () => { drag = null; cur = null; renderA
 
 async function loadNotes() { notes = (await api("/notes?status=" + ($("showAll").checked ? "all" : "open"))).notes; }
 $("showAll").onchange = async () => { await loadNotes(); renderAll(); };
-$("scrub").oninput = e => { $("vid").pause(); show(parseFloat(e.target.value)); };
+$("scrub").oninput = e => { stopSound(); $("vid").pause(); show(parseFloat(e.target.value)); };
 $("prev").onclick = () => show(t - 1 / info.fps);
 $("next").onclick = () => show(t + 1 / info.fps);
 $("drawBtn").onclick = () => { drawMode = !drawMode; if (!drawMode) { ink = []; } syncDraw(); };
@@ -431,7 +458,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "ArrowLeft") $("prev").click(); else if (e.key === "ArrowRight") $("next").click();
   else if (e.key === " ") { e.preventDefault(); $("play").click(); }
   else if (e.key === "d" || e.key === "D") $("drawBtn").click();
-  else if (e.key === "Escape") { ink = []; cur = null; drawMode = false; selected = null; tgt = null; syncDraw(); }
+  else if (e.key === "Escape") { stopSound(); ink = []; cur = null; drawMode = false; selected = null; tgt = null; syncDraw(); }
 });
 
 function fit() {
