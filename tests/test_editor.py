@@ -241,3 +241,20 @@ def test_notes_post_accepts_word_cue_and_strokes(vsrv):
     notes = {n["text"]: n for n in feedback.listing(scene)}
     assert status == 400 and notes["too fast"]["word"] == "there" and notes["typo"]["layer"] == "cc"
     assert notes["this bit"]["kind"] == "draw"
+
+
+def test_hide_removes_a_layer_from_the_frame_and_from_hits_without_touching_the_file(srv):
+    port, scene = srv
+    before = scene.read_bytes()
+    assert json.loads(req(port, "GET", "/hit?x=0.5&y=0.5&t=1")[1])["layer"] == "title"
+    hit = json.loads(req(port, "GET", "/hit?x=0.5&y=0.5&t=1&hide=title")[1])
+    assert hit["layer"] == "back" and "title" not in hit["layers"]
+    shown = req(port, "GET", "/frame?t=1")[1]
+    hidden = req(port, "GET", "/frame?t=1&hide=title")[1]
+    assert shown != hidden and hidden != req(port, "GET", "/frame?t=1&hide=title,back")[1]
+    assert scene.read_bytes() == before
+
+
+def test_hide_ignores_unknown_ids(srv):
+    port, _ = srv
+    assert req(port, "GET", "/frame?t=1&hide=nope")[1] == req(port, "GET", "/frame?t=1")[1]

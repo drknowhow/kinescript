@@ -10,7 +10,7 @@
   body { margin:0; background:var(--bg); color:var(--fg); font:13px/1.35 system-ui, sans-serif; height:100vh; display:flex; flex-direction:column; }
   header { padding:8px 14px; color:var(--dim); display:flex; gap:14px; align-items:baseline; border-bottom:1px solid var(--line); }
   header b { color:var(--fg); } header .hint { font-size:12px; } header label { margin-left:auto; }
-  #app { flex:1; min-height:0; display:grid; grid-template-columns: 220px minmax(0, 1fr); }
+  #app { flex:1; min-height:0; display:grid; grid-template-columns: 230px minmax(0, 1fr); }
   @media (max-width: 800px) { #app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; } #rail { max-height:34vh; order:2; border-right:0 !important; border-top:1px solid var(--line); } }
   #rail { border-right:1px solid var(--line); overflow:auto; padding:8px 0; }
   #rail h2 { margin:10px 14px 4px; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--dim); font-weight:600; display:flex; align-items:center; }
@@ -57,9 +57,18 @@
   button:focus-visible, input:focus-visible, summary:focus-visible, .row:focus-visible, .chip:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
   .perr { color:var(--err); font-size:11px; margin-top:4px; }
   #tools { display:flex; gap:8px; align-items:center; width:100%; }
-  #tl { display:grid; grid-template-columns: 56px minmax(0, 1fr) 60px; align-items:center; column-gap:6px; row-gap:3px; width:100%; }
+  #tl { display:grid; grid-template-columns: 112px minmax(0, 1fr) 60px; align-items:center; column-gap:6px; row-gap:3px; width:100%; }
+  #strip { width:100%; display:grid; grid-template-columns: 112px minmax(0, 1fr) 60px; align-items:center; column-gap:6px; row-gap:3px; max-height:var(--strip-h, 30vh); overflow-y:auto; overflow-x:hidden; }
   #tl input[type=range] { grid-column:2; width:100%; margin:0; } #time { font-variant-numeric:tabular-nums; text-align:right; color:var(--dim); }
-  .lab { color:var(--dim); font-size:10px; text-transform:uppercase; letter-spacing:.05em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; }
+  .lab { color:var(--dim); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:flex; align-items:center; gap:4px; justify-content:flex-end; min-width:0; }
+  .lab.layer { justify-content:flex-start; cursor:pointer; color:var(--fg); } .lab.layer:hover { color:var(--accent); } .lab.layer.sel { color:var(--accent); font-weight:600; }
+  .lab.layer .nm { overflow:hidden; text-overflow:ellipsis; } .lab .cnt { background:var(--accent); color:#111; border-radius:999px; font-size:10px; padding:0 5px; font-weight:600; flex:none; }
+  .lab.layer.gone { color:var(--dim); text-decoration:line-through; }
+  .eye { background:none; border:1px solid var(--line); color:var(--fg); width:20px; height:18px; padding:0; border-radius:4px; font-size:11px; line-height:1; flex:none; }
+  .eye[aria-pressed=false] { color:var(--dim); border-style:dashed; opacity:.7; }
+  .track.lyr { height:16px; } .track.lyr .bar { top:2px; bottom:2px; opacity:.55; background:var(--dim); } .track.lyr.on .bar { background:var(--live); opacity:.85; } .track.lyr.sel .bar { background:var(--accent); opacity:1; }
+  .track.lyr.gone .bar { background:repeating-linear-gradient(45deg, #3a4252, #3a4252 3px, transparent 3px, transparent 6px); opacity:1; }
+  .labbtn { background:none; border:0; color:var(--accent); padding:0; font-size:11px; text-decoration:underline; cursor:pointer; }
   .track { position:relative; height:22px; background:var(--card); border-radius:4px; cursor:pointer; overflow:hidden; }
   .track.ruler { height:12px; background:none; }
   .bar { position:absolute; top:3px; bottom:3px; border-radius:3px; opacity:.35; }
@@ -75,7 +84,7 @@
 <header><b id="title">Loading…</b><span class="hint">Click a layer to edit or drag it · click a word or sound below to comment · ✎ to draw on the frame</span>
   <label><input type="checkbox" id="showAll"> show resolved</label></header>
 <div id="app">
-  <nav id="rail" aria-label="Layers, sounds and notes"><h2>Layers</h2><div id="layers"></div><h2>Sounds</h2><div id="sounds"></div><h2>Notes <button id="sceneNote" title="Note on the whole scene at the playhead">+ scene</button></h2><div id="notes"></div></nav>
+  <nav id="rail" aria-label="Notes"><h2>Notes <button id="sceneNote" title="Note on the whole scene at the playhead">+ scene</button></h2><div id="notes"></div></nav>
   <main>
     <div id="wrap">
       <div id="stage"><img id="frame" alt="Frame at the playhead"><video id="vid" muted playsinline></video><div id="overlay"><svg id="ink" viewBox="0 0 1 1" preserveAspectRatio="none"></svg></div></div>
@@ -85,7 +94,8 @@
       <button id="prev" title="Previous frame (←)">◀</button><button id="play" title="Play the rendered video (space)">Play</button><button id="next" title="Next frame (→)">▶</button>
       <button id="drawBtn" title="Draw on the frame (D)">✎ Draw</button>
     </div>
-    <div id="tl"><span></span><input id="scrub" type="range" min="0" max="1" step="0.001" value="0" aria-label="Time"><span id="time">0.00 s</span><div id="strip" style="display:contents"></div></div>
+    <div id="tl"><span></span><input id="scrub" type="range" min="0" max="1" step="0.001" value="0" aria-label="Time"><span id="time">0.00 s</span></div>
+    <div id="strip"></div>
     <div id="msg" role="status"></div>
   </main>
 </div>
@@ -96,6 +106,7 @@ const NS = "http://www.w3.org/2000/svg";
 // boxes: layer id -> [left, top, right, bottom] as fractions of the frame; pos: layer id -> [x, y] in canvas pixels.
 let info = null, t = 0, notes = [], boxes = {}, pos = {}, selected = null, tgt = null, hover = null;
 let pin = null, drag = null, seq = 0, perr = "", moreOpen = false, drawMode = false, ink = [], cur = null;
+let hid = new Set(), storeKey = "kine-hidden";
 const ROLE = { voice: "var(--voice)", music: "var(--music)", sfx: "var(--sfx)" };
 
 const fmt = s => s.toFixed(2) + " s";
@@ -103,6 +114,9 @@ const say = m => { $("msg").textContent = m || ""; };
 const layerOf = id => info.layers.find(l => l.id === id);
 const soundOf = id => info.sounds.find(s => s.id === id);
 const clean = w => w.replace(/_\d+$/, "");
+const hideQ = () => hid.size ? "&hide=" + encodeURIComponent([...hid].join(",")) : "";
+function saveHid() { try { localStorage.setItem(storeKey, JSON.stringify([...hid])); } catch (e) { /* storage may be blocked */ } }
+function loadHid() { try { const v = JSON.parse(localStorage.getItem(storeKey) || "[]"); hid = new Set(v.filter(id => layerOf(id))); } catch (e) { hid = new Set(); } }
 async function api(path, opts) {
   const r = await fetch(path, opts);
   const body = (r.headers.get("content-type") || "").includes("json") ? await r.json() : r;
@@ -117,8 +131,8 @@ function show(time) {
   const mine = ++seq, img = new Image();
   img.onload = () => { if (mine === seq) { $("frame").src = img.src; say(""); } };
   img.onerror = () => { if (mine === seq) say("Could not draw this frame; the scene may be mid-edit."); };
-  img.src = "/frame?t=" + t.toFixed(3) + "&scale=" + (info.w > 960 ? 0.5 : 1) + "&_=" + Date.now();
-  api("/hit?x=0&y=0&t=" + t).then(h => { if (mine === seq) { boxes = h.boxes; pos = h.pos; renderAll(); } }).catch(() => {});
+  img.src = "/frame?t=" + t.toFixed(3) + "&scale=" + (info.w > 960 ? 0.5 : 1) + hideQ() + "&_=" + Date.now();
+  api("/hit?x=0&y=0&t=" + t + hideQ()).then(h => { if (mine === seq) { boxes = h.boxes; pos = h.pos; renderAll(); } }).catch(() => {});
   renderAll();
 }
 
@@ -154,24 +168,6 @@ function targetLabel(n) {
 }
 function openCount(pred) { return notes.filter(n => n.status === "open" && n.kind !== "prop" && pred(n)).length; }
 function renderRail() {
-  $("layers").replaceChildren(...info.layers.map(L => {
-    const on = t >= L.in && t < L.out;
-    const r = mk("div", "row" + (on ? " live" : " off") + (selected === L.id ? " sel" : "")); r.tabIndex = 0; r.setAttribute("role", "button");
-    r.append(mk("span", "dot"), mk("span", "id", L.id), mk("span", "type", L.type));
-    const n = openCount(x => x.layer === L.id); if (n) r.append(mk("span", "count", n));
-    r.title = fmt(L.in) + " to " + fmt(L.out);
-    const go = () => { if (!on) show(L.in); select(L.id); };
-    r.onclick = go; r.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } };
-    return r;
-  }));
-  $("sounds").replaceChildren(...(info.sounds.length ? info.sounds.map(S => {
-    const on = t >= S.in && t < S.out, r = mk("div", "row" + (on ? " live" : " off") + (tgt?.kind === "sound" && tgt.id === S.id ? " sel" : "")); r.tabIndex = 0; r.setAttribute("role", "button");
-    r.append(mk("span", "dot"), mk("span", "id", S.id), mk("span", "type", S.role));
-    const n = openCount(x => x.sound === S.id); if (n) r.append(mk("span", "count", n));
-    const go = () => { show(S.in); selectTarget({ kind: "sound", id: S.id }); };
-    r.onclick = go; r.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } };
-    return r;
-  }) : [mk("div", "empty", "No sounds.")]));
   $("notes").replaceChildren(...(notes.length ? notes.map(n => {
     const r = mk("div", "nrow " + n.status + (n.kind === "prop" ? " prop" : ""));
     r.append(mk("span", "tm", n.t.toFixed(1) + "s"), mk("span", "tx", (n.strokes ? "✎ " : "") + targetLabel(n) + ": " + n.text));
@@ -200,7 +196,25 @@ function renderStrip() {
     tr.classList.add("ruler");
     for (const n of notes) { const m = mk("div", "nmark" + (n.kind === "prop" ? " prop" : "")); m.style.left = pct(n.t) + "%"; m.title = targetLabel(n) + ": " + n.text; m.onclick = e => { e.stopPropagation(); show(n.t); }; tr.append(m); }
   });
+  if (hid.size) { const b = mk("button", "labbtn", "show all (" + hid.size + ")"); b.onclick = () => { hid.clear(); saveHid(); show(t); }; ruler[0].replaceChildren(b); }
   rows.push(ruler);
+  const depth = L => { let d = 0, p = L.parent; while (p && d < 6) { d++; p = layerOf(p)?.parent; } return d; };
+  for (const L of info.layers) {
+    const on = t >= L.in && t < L.out, gone = hid.has(L.id), n = openCount(x => x.layer === L.id);
+    const lab = mk("div", "lab layer" + (selected === L.id ? " sel" : "") + (gone ? " gone" : ""));
+    lab.style.paddingLeft = depth(L) * 8 + "px";
+    const eye = mk("button", "eye", gone ? "\u25cb" : "\u25c9"); eye.setAttribute("aria-pressed", String(!gone));
+    eye.title = (gone ? "Show " : "Hide ") + L.id + " in the preview"; eye.setAttribute("aria-label", eye.title);
+    eye.onclick = e => { e.stopPropagation(); if (gone) hid.delete(L.id); else hid.add(L.id); saveHid(); show(t); };
+    const nm = mk("span", "nm", L.id); nm.title = L.id + " \u00b7 " + L.type + " \u00b7 " + fmt(L.in) + " to " + fmt(L.out);
+    lab.append(eye, nm); if (n) lab.append(mk("span", "cnt", n));
+    lab.onclick = () => { if (!on) show(L.in); select(L.id); };
+    const tr = mk("div", "track lyr" + (on ? " on" : "") + (selected === L.id ? " sel" : "") + (gone ? " gone" : ""));
+    const bar = mk("div", "bar"); bar.style.left = pct(L.in) + "%"; bar.style.width = Math.max(0.6, pct(L.out) - pct(L.in)) + "%"; tr.append(bar);
+    tr.title = L.id + " (" + L.type + ")";
+    tr.onclick = e => { const r = tr.getBoundingClientRect(); show((e.clientX - r.left) / r.width * info.duration); select(L.id); };
+    rows.push([lab, tr, mk("span")]);
+  }
   for (const S of info.sounds) rows.push(lane(S.id, tr => {
     const bar = mk("div", "bar"); bar.style.left = pct(S.in) + "%"; bar.style.width = Math.max(0.5, pct(S.out) - pct(S.in)) + "%"; bar.style.background = ROLE[S.role] || "var(--dim)"; tr.append(bar);
     if (S.words.length) S.words.forEach(([w, a, b], i) => chip(tr, a, b, clean(w), ROLE[S.role] || "var(--voice)", tgt?.kind === "word" && tgt.sound === S.id && tgt.idx === i,
@@ -371,15 +385,16 @@ document.addEventListener("keydown", e => {
 });
 
 function fit() {
-  const main = document.querySelector("main"), extra = 80 + 26 * (1 + info.sounds.length + info.layers.filter(l => l.cues.length).length);
-  const availH = main.clientHeight - extra, availW = main.clientWidth - 32, ar = info.w / info.h;
+  const main = document.querySelector("main"), lanes = 1 + info.layers.length + info.sounds.length + info.layers.filter(l => l.cues.length).length;
+  const strip = Math.min(lanes * 25 + 4, window.innerHeight * 0.3); document.documentElement.style.setProperty("--strip-h", Math.round(strip) + "px");
+  const availH = main.clientHeight - strip - 110, availW = main.clientWidth - 32, ar = info.w / info.h;
   $("wrap").style.width = Math.max(200, Math.min(availW, availH * ar)) + "px"; place();
 }
 window.addEventListener("resize", () => info && fit());
 
 (async () => {
   try {
-    info = await api("/scene");
+    info = await api("/scene"); storeKey = "kine-hidden:" + info.name; loadHid();
     $("title").textContent = `${info.name} · ${info.w}×${info.h} · ${info.duration} s`;
     $("scrub").max = info.duration; $("stage").style.aspectRatio = info.w + " / " + info.h; fit();
     const q = new URLSearchParams(location.search), start = parseFloat(q.get("t"));

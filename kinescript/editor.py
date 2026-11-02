@@ -169,23 +169,44 @@ def set_props(path: Path, layer: str | None, changes: dict, base_hash: str, t: f
     return scene_info(path)
 
 
-def frame_png(path: Path, t: float, scale: float) -> bytes:
+def _hide_list(q: dict) -> list[str]:
+    raw = q.get("hide", [""])[0]
+    ids = [i for i in raw.split(",") if i]
+    if len(ids) > 500 or any(len(i) > 200 for i in ids):
+        raise BadRequest("hide lists too many layers")
+    return ids
+
+
+def preview_scene(path: Path, hide: list[str]):
+    """The scene to draw: the file's path, or, with layers hidden, a copy marked `hidden` (the file is untouched)."""
+    if not hide:
+        return str(path)
+    from .scene import Scene
+    from .schema import loads
+    doc = loads(path.read_text(encoding="utf-8"))[0]
+    for raw in _walk(doc.get("layers")):
+        if raw.get("id") in hide:
+            raw["hidden"] = True
+    return Scene(doc, str(path.parent))
+
+
+def frame_png(path: Path, t: float, scale: float, hide: list[str] = ()) -> bytes:
     from .output import still
     fd, tmp = tempfile.mkstemp(suffix=".png", prefix="kine_edit_")
     os.close(fd)
     try:
         with _draw_lock:
-            still(str(path), t, tmp, scale)
+            still(preview_scene(path, list(hide)), t, tmp, scale)
         return Path(tmp).read_bytes()
     finally:
         Path(tmp).unlink(missing_ok=True)
 
 
-def hit(path: Path, x: float, y: float, t: float) -> dict:
+def hit(path: Path, x: float, y: float, t: float, hide: list[str] = ()) -> dict:
     """The topmost layer whose box holds the point (x, y as fractions of the frame) at time t."""
     from .verify import probe
     with _draw_lock:
-        info = probe(str(path), t)
+        info = probe(preview_scene(path, list(hide)), t)
     c = info["canvas"]
     px, py = x * c["w"], y * c["h"]
     found = None
@@ -246,10 +267,10 @@ def make_handler(path: Path):
             if u.path == "/scene":
                 return self._json(scene_info(path))
             if u.path == "/frame":
-                png = frame_png(path, _num(q, "t", lo=0), _num(q, "scale", 0.5, 0.1, 1.0))
+                png = frame_png(path, _num(q, "t", lo=0), _num(q, "scale", 0.5, 0.1, 1.0), _hide_list(q))
                 return self._send(200, png, "image/png")
             if u.path == "/hit":
-                return self._json(hit(path, _num(q, "x", lo=0, hi=1), _num(q, "y", lo=0, hi=1), _num(q, "t", lo=0)))
+                return self._json(hit(path, _num(q, "x", lo=0, hi=1), _num(q, "y", lo=0, hi=1), _num(q, "t", lo=0), _hide_list(q)))
             if u.path == "/notes":
                 status = q.get("status", ["open"])[0]
                 return self._json({"notes": feedback.listing(path, None if status == "all" else status)})
@@ -286,13 +307,15 @@ def make_handler(path: Path):
         def _post(self):
             if urlparse(self.path).path not in ("/notes", "/prop"):
                 return self._json({"error": "not found"}, 404)
-            if "application/json" not in (self.headers.get("Content-Type") or ""):
-                raise BadRequest("send application/json")
             n = int(self.headers.get("Content-Length") or 0)
             if not 0 < n <= MAX_BODY:
+                self.close_connection = True
                 raise BadRequest("body is empty or too large")
+            data = self.rfile.read(n)  # read before refusing, so the client is not reset mid-send
+            if "application/json" not in (self.headers.get("Content-Type") or ""):
+                raise BadRequest("send application/json")
             try:
-                body = json.loads(self.rfile.read(n))
+                body = json.loads(data)
             except json.JSONDecodeError:
                 raise BadRequest("body is not valid JSON") from None
             if not isinstance(body, dict):
