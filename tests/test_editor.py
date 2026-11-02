@@ -266,3 +266,57 @@ def test_hide_removes_a_layer_from_the_frame_and_from_hits_without_touching_the_
 def test_hide_ignores_unknown_ids(srv):
     port, _ = srv
     assert req(port, "GET", "/frame?t=1&hide=nope")[1] == req(port, "GET", "/frame?t=1")[1]
+
+
+def _serve(tmp_path, scene):
+    p = tmp_path / "g.json"
+    p.write_text(json.dumps(scene), encoding="utf-8")
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), editor.make_handler(p))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd
+
+
+def test_hit_works_when_the_scene_has_captions(vsrv):
+    # captions record a box with no anchor; /hit used to fail on that, which made nothing selectable
+    port, _ = vsrv
+    status, body, _ = req(port, "GET", "/hit?x=0&y=0&t=0.5")
+    data = json.loads(body)
+    assert status == 200, data
+    assert "title" in data["boxes"]
+
+
+def test_group_gets_a_box_under_its_children_and_every_visible_layer_has_one(tmp_path, monkeypatch):
+    monkeypatch.setenv("KINE_BACKEND", "cpu")
+    scene = {**SCENE, "layers": [{"id": "grp", "type": "group", "x": 20, "y": 20, "children": [
+        {"id": "a", "type": "text", "text": "One", "x": 10, "y": 30, "size": 24, "anchor": "left"},
+        {"id": "b", "type": "text", "text": "Two", "x": 10, "y": 80, "size": 24, "anchor": "left"}]}]}
+    httpd = _serve(tmp_path, scene)
+    try:
+        data = json.loads(req(httpd.server_port, "GET", "/hit?x=0&y=0&t=1")[1])
+        assert {"grp", "a", "b"} <= set(data["boxes"])
+        assert data["layers"].index("grp") < data["layers"].index("a")  # the group lies under its children
+        ga, a = data["boxes"]["grp"], data["boxes"]["a"]
+        assert ga[0] <= a[0] and ga[1] <= a[1] and ga[2] >= a[2] and ga[3] >= a[3]
+        mid = [(a[0] + a[2]) / 2, (a[1] + a[3]) / 2]
+        assert json.loads(req(httpd.server_port, "GET", f"/hit?x={mid[0]}&y={mid[1]}&t=1")[1])["layer"] == "a"
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_layers_shown_as_a_texture_borrow_the_box_of_the_layer_that_shows_them(tmp_path, monkeypatch):
+    monkeypatch.setenv("KINE_BACKEND", "cpu")
+    scene = {**SCENE, "layers": [
+        {"id": "app", "type": "group", "w": 200, "h": 100, "children": [
+            {"id": "app-title", "type": "text", "text": "Hi", "x": 100, "y": 50, "size": 30}]},
+        {"id": "screen", "type": "model", "shape": "plane", "w": 200, "h": 100, "texture": "#app", "x": "50%", "y": "50%"}]}
+    httpd = _serve(tmp_path, scene)
+    try:
+        data = json.loads(req(httpd.server_port, "GET", "/hit?x=0&y=0&t=1")[1])
+        assert "screen" in data["boxes"], data
+        assert {"app", "app-title"} <= set(data["approx"])
+        assert data["boxes"]["app-title"] == data["boxes"]["screen"]
+        assert data["layers"].index("app-title") < data["layers"].index("screen")  # clicking still picks the screen
+    finally:
+        httpd.shutdown()
+        httpd.server_close()

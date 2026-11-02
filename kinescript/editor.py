@@ -212,16 +212,78 @@ def hit(path: Path, x: float, y: float, t: float, hide: list[str] = ()) -> dict:
     with _draw_lock:
         info = probe(preview_scene(path, list(hide)), t)
     c = info["canvas"]
+    rects = {lid: list(b["rect"]) for lid, b in info["visible"].items()}  # in draw order: the last match is on top
+    pos = {lid: b["pos"] for lid, b in info["visible"].items() if "pos" in b}  # captions record a box and no anchor
+    rows = {r["id"]: r for r in info["layers"]}
+    gone = set(hide)
+    for lid, r in rows.items():  # a hidden layer hides what is inside it
+        p = r["parent"]
+        while p:
+            if p in gone:
+                gone.add(lid)
+            p = rows[p]["parent"] if p in rows else None
+    kids: dict[str, list[str]] = {}
+    for lid, r in rows.items():
+        if r["parent"]:
+            kids.setdefault(r["parent"], []).append(lid)
+
+    def below(g):
+        for k in kids.get(g, ()):
+            yield k
+            yield from below(k)
+    shown = [lid for lid, r in rows.items() if r["in"] <= t < r["out"] and lid not in gone]
+    approx: dict[str, list[str]] = {}
+    unions: list[str] = []
+    for lid in shown:  # a group draws nothing itself: its box is what its children cover
+        if lid in rects or not kids.get(lid):
+            continue
+        under = [rects[k] for k in below(lid) if k in rects]
+        if under:
+            rects[lid] = [min(u[0] for u in under), min(u[1] for u in under), max(u[2] for u in under), max(u[3] for u in under)]
+            unions.append(lid)
+    covered: set[str] = set()
+    for lid in shown:  # a group drawn as a texture (a screen, a card face) leaves no boxes: borrow the layer that shows it
+        if lid in rects or lid in covered or rows[lid]["type"] != "group":
+            continue
+        inside = set(below(lid))
+        for d in rects:
+            if d != lid and d not in inside and _mentions(_raw_of(path, d), lid):
+                members = [m for m in (lid, *inside) if m in shown and m not in rects]
+                approx.setdefault(d, []).extend(members)
+                covered.update(members)
+                break
+    order: list[str] = list(unions)  # a group's box lies under everything it holds, so a click picks the child
+    for lid in list(rects):
+        if lid in unions:
+            continue
+        for a in approx.get(lid, ()):  # before the layer that shows them, so a click still picks that layer
+            order.append(a)
+            rects[a] = list(rects[lid])
+        order.append(lid)
+    order = [lid for lid in order if lid not in gone]
     px, py = x * c["w"], y * c["h"]
     found = None
-    for lid, b in info["visible"].items():  # boxes are recorded in draw order, so the last match is on top
-        left, top, right, bottom = b["rect"]
+    for lid in order:
+        left, top, right, bottom = rects[lid]
         if left <= px <= right and top <= py <= bottom:
             found = lid
-    boxes = {lid: [b["rect"][0] / c["w"], b["rect"][1] / c["h"], b["rect"][2] / c["w"], b["rect"][3] / c["h"]]
-             for lid, b in info["visible"].items()}
-    pos = {lid: b["pos"] for lid, b in info["visible"].items()}
-    return {"layer": found, "layers": list(info["visible"]), "boxes": boxes, "pos": pos}
+    boxes = {lid: [rects[lid][0] / c["w"], rects[lid][1] / c["h"], rects[lid][2] / c["w"], rects[lid][3] / c["h"]]
+             for lid in order}
+    return {"layer": found, "layers": order, "boxes": boxes, "pos": pos, "approx": sorted({a for v in approx.values() for a in v})}
+
+
+def _raw_of(path: Path, lid: str) -> dict:
+    from .schema import loads
+    return _raw_layers(loads(path.read_text(encoding="utf-8"))[0]).get(lid, {})
+
+
+def _mentions(raw, name: str) -> bool:
+    """Whether a layer's settings name another layer as a value (a model's texture, a mask)."""
+    if isinstance(raw, dict):
+        return any(_mentions(v, name) for k, v in raw.items() if k != "children")
+    if isinstance(raw, list):
+        return any(_mentions(v, name) for v in raw)
+    return raw == name or raw == "#" + name
 
 
 def make_handler(path: Path):

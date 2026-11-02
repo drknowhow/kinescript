@@ -127,7 +127,7 @@ const NS = "http://www.w3.org/2000/svg";
 let info = null, t = 0, notes = [], boxes = {}, pos = {}, selected = null, tgt = null, hover = null;
 let pin = null, drag = null, seq = 0, perr = "", moreOpen = false, drawMode = false, ink = [], cur = null;
 let hid = new Set(), storeKey = "kine-hidden";
-let hl = null, ctrl = false, lastEl = null;
+let hl = null, ctrl = false, lastEl = null, approx = new Set();
 const aud = new Audio(); let playing = null, playHl = null;
 const ROLE = { voice: "var(--voice)", music: "var(--music)", sfx: "var(--sfx)" };
 /* groups: every layer, sound and note belongs to one; each has a color and a filter chip */
@@ -172,24 +172,16 @@ function show(time) {
   img.onload = () => { if (mine === seq) { $("frame").src = img.src; say(""); } };
   img.onerror = () => { if (mine === seq) say("Could not draw this frame; the scene may be mid-edit."); };
   img.src = "/frame?t=" + t.toFixed(3) + "&scale=" + (info.w > 960 ? 0.5 : 1) + hideQ() + "&_=" + Date.now();
-  api("/hit?x=0&y=0&t=" + t + hideQ()).then(h => { if (mine === seq) { boxes = h.boxes; pos = h.pos; renderAll(); } }).catch(() => {});
+  api("/hit?x=0&y=0&t=" + t + hideQ()).then(h => { if (mine === seq) { boxes = h.boxes; pos = h.pos; approx = new Set(h.approx || []); renderAll(); } }).catch(e => { if (mine === seq) say("Could not read the layers on this frame: " + e.message); });
   renderAll(); followHead();
 }
 
 function topAt(x, y) {
   let f = null; for (const [id, [l, tp, r, b]] of Object.entries(boxes)) if (x >= l && x <= r && y >= tp && y <= b) f = id;
-  for (const L of info.layers) { const r = !boxes[L.id] && capBand(L.id); if (r && x >= r[0] && x <= r[2] && y >= r[1] && y <= r[3]) f = L.id; }  // captions sit on top and have no box
   return f;
 }
 function pt(e) { const r = $("stage").getBoundingClientRect(); return { x: Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)), y: Math.max(0, Math.min(1, (e.clientY - r.top) / r.height)), r }; }
-/* captions have no box of their own: outline the band they are drawn in */
-function capBand(id) {
-  const L = layerOf(id); if (!L || L.type !== "captions" || t < L.in || t >= L.out) return null;
-  const c = L.controls.find(k => k.key === "y"); let y = 0.86;
-  if (c && typeof c.value === "number") y = c.value / info.h; else if (c && /^[\d.]+%$/.test(c.value || "")) y = parseFloat(c.value) / 100;
-  y = Math.max(0.08, Math.min(0.94, y)); return [0.1, y - 0.07, 0.9, y + 0.06];
-}
-const rectOf = id => boxes[id] || capBand(id);
+const rectOf = id => boxes[id];
 function boxEl(id, cls, dx = 0, dy = 0) {
   const [l, tp, r, b] = rectOf(id), d = mk("div", "box " + cls);
   Object.assign(d.style, { left: (l + dx) * 100 + "%", top: (tp + dy) * 100 + "%", width: (r - l) * 100 + "%", height: (b - tp) * 100 + "%" });
@@ -446,6 +438,7 @@ stage.addEventListener("pointerdown", e => {
   const id = topAt(p.x, p.y);
   if (!id) { select(null); return; }
   if (layerOf(id).type === "captions") { select(id); return; }  // captions have no x to drag; pick the word from the strip
+  if (approx.has(id)) { select(id); return; }  // its box is the surface that shows it: select, do not drag
   if (id !== selected) { tgt = null; selected = id; perr = ""; }
   pin = { x: p.x, y: p.y };
   drag = { id, cx: e.clientX, cy: e.clientY, r: p.r, moved: false, dx: 0, dy: 0 };
