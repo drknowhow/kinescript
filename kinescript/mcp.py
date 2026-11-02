@@ -72,6 +72,17 @@ TOOLS = [
                                                       "quality": {"type": "string", "enum": ["draft", "standard", "high"]},
                                                       "scale": {"type": "number"}, "from": {"type": "number"},
                                                       "to": {"type": "number"}}, "required": ["scene", "out"]}},
+    {"name": "kine_feedback", "description": "Review notes a person left on a scene's video (kine edit), kept in \"<scene>.feedback.json\". "
+     "list gives the open notes in time order (status=resolved or all for others): time, layer id, point, text, and "
+     "stale=true when the scene changed after the note was made. get shows one note. resolve closes it, with an "
+     "optional text saying what changed; reply adds a text and leaves it open. still=true on get or list returns "
+     "the frame at each note's time with its point marked.",
+     "inputSchema": {"type": "object", "properties": {"scene": {"type": "string", "description": "Path to the scene .json"},
+                                                      "action": {"type": "string", "enum": ["list", "get", "resolve", "reply"]},
+                                                      "id": {"type": "string"}, "text": {"type": "string"},
+                                                      "status": {"type": "string", "enum": ["open", "resolved", "all"], "default": "open"},
+                                                      "still": {"type": "boolean", "default": False}},
+                     "required": ["scene", "action"]}},
 ]
 
 
@@ -156,6 +167,32 @@ def call(name: str, args: dict) -> list[dict]:
         res = render(sc, out, args.get("quality", "standard"), None, float(args.get("scale", 1.0)),
                      args.get("from"), args.get("to"))
         return [_text(res)]
+    if name == "kine_feedback":
+        from . import feedback as fb
+        path, action = _need(args, "scene"), _need(args, "action")
+        if not isinstance(path, str) or not Path(path).is_file():
+            raise ValueError("scene must be the path to a scene .json file")
+        try:
+            if action == "list":
+                status = args.get("status", "open")
+                notes = fb.listing(path, None if status == "all" else status)
+            elif action == "get":
+                notes = [fb.get(path, _need(args, "id"))]
+            elif action == "resolve":
+                fb.resolve(path, _need(args, "id"), args.get("text"))
+                notes = [fb.get(path, args["id"])]
+            elif action == "reply":
+                fb.reply(path, _need(args, "id"), _need(args, "text"))
+                notes = [fb.get(path, args["id"])]
+            else:
+                raise ValueError(f"unknown action {action}")
+        except fb.FeedbackError as e:
+            raise ValueError(str(e)) from e
+        out = [_text({"notes": notes})]
+        if args.get("still") and action in ("list", "get"):
+            for n in notes:
+                out.append(_image(fb.marked_still(_scene(args), n)))
+        return out
     raise ValueError(f"unknown tool {name}")
 
 
