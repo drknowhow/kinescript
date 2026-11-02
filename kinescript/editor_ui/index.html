@@ -38,6 +38,9 @@
   #ink polyline.old { stroke:#fff; opacity:.85; }
   .box { position:absolute; pointer-events:none; }
   .box.hover { border:1px dashed rgba(255,212,0,.7); } .box.sel { border:2px solid var(--accent); background:rgba(255,212,0,.07); } .box.drag { border:2px dashed var(--accent); }
+  .box.hl { border:2px solid #fff; background:rgba(255,212,0,.22); box-shadow:0 0 0 2px var(--accent), 0 0 18px rgba(255,212,0,.6); }
+  .hltag { position:absolute; left:0; top:0; background:var(--accent); color:#111; font-size:11px; font-weight:600; padding:0 5px; border-radius:0 0 3px 0; white-space:nowrap; }
+  body.ctrl #strip [data-hl] { cursor:crosshair; }
   .pin { position:absolute; width:16px; height:16px; margin:-8px 0 0 -8px; border:2px solid var(--accent); border-radius:50%; background:rgba(0,0,0,.45); }
   .pin.stale { border-style:dashed; border-color:var(--dim); }
   #pop { position:absolute; z-index:5; width:300px; background:var(--card); border:1px solid var(--accent); border-radius:8px; padding:8px; box-shadow:0 8px 24px rgba(0,0,0,.5); display:none; }
@@ -89,7 +92,7 @@
 </style>
 </head>
 <body>
-<header><b id="title">Loading…</b><span class="hint">Click a layer to edit or drag it · click a word or sound below to comment · ✎ to draw on the frame</span>
+<header><b id="title">Loading…</b><span class="hint">Click a layer to edit or drag it · click a word or sound below to comment · ✎ to draw on the frame · hold Ctrl and hover a lane to find it on the frame</span>
   <label><input type="checkbox" id="showAll"> show resolved</label></header>
 <div id="app">
   <nav id="rail" aria-label="Notes"><h2>Notes <button id="sceneNote" title="Note on the whole scene at the playhead">+ scene</button></h2><div id="notes"></div></nav>
@@ -116,6 +119,7 @@ const NS = "http://www.w3.org/2000/svg";
 let info = null, t = 0, notes = [], boxes = {}, pos = {}, selected = null, tgt = null, hover = null;
 let pin = null, drag = null, seq = 0, perr = "", moreOpen = false, drawMode = false, ink = [], cur = null;
 let hid = new Set(), storeKey = "kine-hidden";
+let hl = null, ctrl = false, lastEl = null;
 const ROLE = { voice: "var(--voice)", music: "var(--music)", sfx: "var(--sfx)" };
 /* groups: every layer, sound and note belongs to one; each has a color and a filter chip */
 const GROUPS = [["text", "Text"], ["shape", "Shapes"], ["media", "Media"], ["group", "Groups"], ["cap", "Captions"], ["voice", "Voice"], ["music", "Music"], ["sfx", "SFX"], ["scene", "Scene notes"]];
@@ -177,6 +181,7 @@ function drawOverlay() {
   const kids = [];
   if (hover && hover !== selected && boxes[hover] && !drag && !drawMode) kids.push(boxEl(hover, "hover"));
   if (selected && boxes[selected]) kids.push(drag?.moved ? boxEl(selected, "drag", drag.dx, drag.dy) : boxEl(selected, "sel"));
+  if (hl && boxes[hl]) { const d = boxEl(hl, "hl"); d.append(mk("span", "hltag", hl)); kids.push(d); }
   const dot = (n, cls) => { const d = mk("div", "pin " + cls); d.style.left = n.x * 100 + "%"; d.style.top = n.y * 100 + "%"; d.title = n.text || ""; return d; };
   for (const n of notes) if (n.x !== undefined && near(n) && n.kind !== "prop") kids.push(dot(n, n.stale ? "stale" : ""));
   if (pin && selected) kids.push(dot(pin, ""));
@@ -210,8 +215,9 @@ function renderRail() {
 
 /* time strip: ruler with note marks, one lane per sound, one per captions layer with cues */
 function pct(x) { return Math.max(0, Math.min(100, x / info.duration * 100)); }
-function lane(label, build) {
+function lane(label, build, hlId) {
   const l = mk("div", "lab", label), tr = mk("div", "track"); build(tr);
+  if (hlId) l.dataset.hl = tr.dataset.hl = hlId;
   tr.onclick = e => { if (e.target === tr || e.target.classList.contains("bar")) { const r = tr.getBoundingClientRect(); show((e.clientX - r.left) / r.width * info.duration); } };
   return [l, tr, mk("span")];
 }
@@ -238,10 +244,11 @@ function renderStrip() {
     const nm = mk("span", "nm", L.id); nm.title = L.id + " \u00b7 " + L.type + " \u00b7 " + fmt(L.in) + " to " + fmt(L.out);
     lab.append(eye, nm); if (n) lab.append(mk("span", "cnt", n));
     lab.onclick = () => { if (!on) show(L.in); select(L.id); };
+    lab.dataset.hl = L.id;
     const tr = mk("div", "track lyr" + (on ? " on" : "") + (selected === L.id ? " sel" : "") + (gone ? " gone" : ""));
     tr.style.setProperty("--g", gvar(layerGroup(L)));
     const bar = mk("div", "bar"); bar.style.left = pct(L.in) + "%"; bar.style.width = Math.max(0.6, pct(L.out) - pct(L.in)) + "%"; tr.append(bar);
-    tr.title = L.id + " (" + L.type + ")";
+    tr.title = L.id + " (" + L.type + ")"; tr.dataset.hl = L.id;
     tr.onclick = e => { const r = tr.getBoundingClientRect(); show((e.clientX - r.left) / r.width * info.duration); select(L.id); };
     rows.push([lab, tr, mk("span")]);
   }
@@ -251,11 +258,11 @@ function renderStrip() {
       openCount(x => x.sound === S.id && x.word === w), () => { show(a); selectTarget({ kind: "word", sound: S.id, idx: i, word: w, a, b }); }, fmt(a) + " " + clean(w)));
     else chip(tr, S.in, S.out, S.role, ROLE[S.role] || "var(--dim)", tgt?.kind === "sound" && tgt.id === S.id, openCount(x => x.sound === S.id && !x.word),
       () => { show(S.in); selectTarget({ kind: "sound", id: S.id }); }, S.id + " (" + S.role + ")");
-  }));
+  }, captionLayerFor(S.id)));
   for (const L of info.layers) if (L.cues.length && !off.has("cap")) rows.push(lane(L.id, tr => {
     L.cues.forEach(([a, b, text], i) => chip(tr, a, b, text, "var(--cap)", tgt?.kind === "cue" && tgt.layer === L.id && tgt.idx === i,
       openCount(x => x.layer === L.id && x.word === text), () => { show(a); selectTarget({ kind: "cue", layer: L.id, idx: i, text, a, b }); }, fmt(a) + " " + text));
-  }));
+  }, L.id));
   $("strip").replaceChildren(...rows.flat());
   $("strip").querySelectorAll(".track").forEach(tr => { const h = mk("div", "head"); h.style.left = pct(t) + "%"; tr.append(h); });
 }
@@ -344,6 +351,19 @@ function place() {
 function select(id) { if (id !== selected) { perr = ""; pin = null; } selected = id; tgt = null; renderAll(); }
 function selectTarget(x) { selected = null; pin = null; perr = ""; tgt = x; renderAll(); }
 function renderAll() { drawOverlay(); renderFilters(); renderRail(); renderStrip(); renderPop(); }
+/* hold Ctrl and hover a lane, word or caption to outline what it is on the frame */
+function setHl() {
+  const id = ctrl && lastEl ? lastEl.closest?.("[data-hl]")?.dataset.hl || null : null;
+  if (id === hl) return;
+  hl = id; drawOverlay();
+  if (id && !boxes[id]) say(id + " is not drawn at " + fmt(t) + " (move the playhead to where it is on screen)."); else if (!id) say("");
+}
+$("strip").addEventListener("mouseover", e => { lastEl = e.target; ctrl = e.ctrlKey; setHl(); });
+$("strip").addEventListener("mousemove", e => { lastEl = e.target; if (e.ctrlKey !== ctrl) { ctrl = e.ctrlKey; document.body.classList.toggle("ctrl", ctrl); } setHl(); });
+$("strip").addEventListener("mouseleave", () => { lastEl = null; setHl(); });
+window.addEventListener("keydown", e => { if (e.key === "Control") { ctrl = true; document.body.classList.add("ctrl"); setHl(); } });
+window.addEventListener("keyup", e => { if (e.key === "Control") { ctrl = false; document.body.classList.remove("ctrl"); setHl(); } });
+window.addEventListener("blur", () => { ctrl = false; document.body.classList.remove("ctrl"); setHl(); });
 function syncDraw() { $("drawBtn").classList.toggle("on", drawMode); $("stage").classList.toggle("draw", drawMode); renderAll(); }
 
 /* pointer: draw, or select and drag */
