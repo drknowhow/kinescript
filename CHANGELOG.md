@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Chart components `barChart`, `lineChart` and `pieChart`, each taking `data` as numbers, `[label, number]` pairs or
+  `{"label": ..., "value": ...}` objects. A bar chart's bars grow from a baseline in turn, each value counting up
+  above its bar and each label under the baseline; `highlight` colours bars by number (from 1) or label. A line
+  chart draws its line on through the points, and a dot and the value pop on at each point as the line reaches it;
+  it takes values below 0 and keeps its axis at 0. A pie chart's slices sweep round from twelve o'clock as one eased
+  sweep, each labelled outside with its share; `inner` leaves a hole for a doughnut. Their parts are ordinary layers
+  with the chart's id in front (`sales-bar1`, `sales-value1`). `kine docs` shows a `barChart` recipe in place of
+  the three layers it gave for one bar, and wraps the built-in components' parameters at 108 characters.
+  `examples/charts.json` plays all three.
 - Sequence transitions `iris`, `push`, `whip`, `luma` and `glitch`. `iris` opens the next clip in a circle from the
   middle. `push` moves both clips left by the sequence's width, side by side; `whip` does too, faster and blurred
   across inside each clip. `glitch` breaks the outgoing clip up over the first half and brings the next one in

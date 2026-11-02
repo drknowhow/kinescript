@@ -318,12 +318,17 @@ Status (2026-11-01): moves to 1.6.1 (decision 1).
   brightness, with `soft`) and `glitch`.
   Status (2026-11-01): in its own PR, with `transitions.json`. Each is an enter on the incoming clip, and push, whip
   and glitch add an exit on the outgoing one. `"fade": false`, new for enter and exit, keeps push and whip opaque;
-  the two clips overlap by a pixel (a whip by 4) so the background never shows between their edges, and a whip's
+  the two clips overlap by 2 px (a whip by 4) so the background never shows between their edges, and a whip's
   blur clamps at a pixel inside each clip's box instead of fading out. `luma` is a motion too: a colour matrix turns
   the map's brightness into alpha, drawn in over the layer (DstIn), so it takes a layer of its own.
 - Optional, if the phase has room: chart components `bar-chart`, `line-chart` and `pie-chart`, built from today's
   layers (bars grow, values count up, the line draws on, slices sweep). The bar recipe in `kine docs` is what they
   replace.
+  Status (2026-11-01): in its own PR, with `charts.json`, named `barChart`, `lineChart` and `pieChart` like the other
+  built-in components. A bar and its value share an outQuad tween over 1 s, so the value rides 40 px above the bar
+  and a 600 px chart stays under the strobe warning, which outCubic over 0.8 s set off. A line's dots pop when its
+  inOutSine draw reaches them. Each slice draws on linearly between the times one eased sweep reaches its edges, and
+  runs 0.6 degrees on under the next slice so no gap shows between them.
 
 ### Phase 7: tooling and release
 

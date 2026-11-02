@@ -10,6 +10,8 @@ import math
 import re
 from pathlib import Path
 
+from .props import FIELD
+
 THEME = {
     # Brand palette ("Kinetic Score"), plus the short names components use.
     "void": "#0a0c10", "sheet": "#f2f0e8", "track": "#242832", "cue": "#ff633f", "key": "#b9f45d",
@@ -122,19 +124,192 @@ def _kinetic(p, th):
             "children": kids}
 
 
+# A pie's slice colours in turn: the brand's cue and keyframe, then sheet, annotation and a darker grey.
+CHART_COLORS = ["#ff633f", "#b9f45d", "#f2f0e8", "#9299a8", "#5b6272"]
+
+
+def _series(p, name: str, negative: bool = False) -> tuple[list[str], list[float]]:
+    """A chart's data as labels and values: [12, 30, 22], [["Q1", 12], ...] or [{"label": "Q1", "value": 12}, ...],
+    with labels from "labels" where given."""
+    data = p.get("data")
+    shape = ("a list of numbers like [12, 30, 22], of [label, number] pairs or of {\"label\": \"Q1\", \"value\": 12} "
+             "objects")
+    if not isinstance(data, list) or not data:
+        raise ValueError(f"layer '{p['id']}': {name} data is {data!r}; it is {shape}")
+    labels, values = [], []
+    for d in data:
+        lab, v = (d.get("label"), d.get("value")) if isinstance(d, dict) else \
+            tuple(d) if isinstance(d, (list, tuple)) and len(d) == 2 else (None, d)
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or (v < 0 and not negative):
+            raise ValueError(f"layer '{p['id']}': {name} data has {d!r}; it is {shape}"
+                             + ("" if negative else ", each 0 or more"))
+        labels.append("" if lab is None else str(lab))
+        values.append(float(v))
+    given = p.get("labels")
+    if given is not None:
+        if not isinstance(given, list):
+            raise ValueError(f"layer '{p['id']}': {name} labels is {given!r}; it is a list of text, one for each value")
+        labels = [str(given[i]) if i < len(given) else labels[i] for i in range(len(values))]
+    return labels, values
+
+
+def _shown(p, v: float, default: str) -> str:
+    """v written with the chart's format, as a counter writes its value."""
+    fmt = p.get("format", default)
+    try:
+        return FIELD.sub(lambda m: format(v, m.group(1)), fmt)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"layer '{p['id']}': format is {fmt!r}; it is text with {{:...}} where the number goes, "
+                         f"like \"{{:,.0f}}\" or \"{{:.1f}}%\" ({e})") from None
+
+
+def _sine_at(f: float) -> float:
+    """When inOutSine reaches f (0..1), as a share of its time."""
+    return math.acos(max(-1.0, min(1.0, 1 - 2 * f))) / math.pi
+
+
+def _axis(pid: str, w: float, y: float, th) -> dict:
+    return {"id": f"{pid}-axis", "type": "line", "points": [[-w / 2, round(y, 3)], [w / 2, round(y, 3)]],
+            "stroke": th["muted"], "strokeWidth": 3, "cap": "butt", "enter": {"name": "draw", "dur": 0.5}}
+
+
+def _bar_chart(p, th):
+    """Bars that grow from a baseline in turn, each with its value counting up above it and its label below."""
+    labels, values = _series(p, "barChart")
+    pid, n = p["id"], len(values)
+    w, h = p.get("w", 1200), p.get("h", 600)
+    top = p.get("max") or max(values) or 1.0
+    slot = w / n
+    bw = slot * (1 - min(0.9, max(0.0, p.get("gap", 0.3))))
+    grow, stagger = p.get("grow", 1.0), p.get("stagger", 0.12)
+    size, base = p.get("size", 30), h / 2
+    colors, hi = p.get("colors"), p.get("highlight")
+    picked = hi if isinstance(hi, list) else [] if hi is None else [hi]
+    fmt = p.get("format", "{:,.0f}")
+    _shown(p, values[0], fmt)
+    kids = [_axis(pid, w, base, th)]
+    for i, (lab, v) in enumerate(zip(labels, values)):
+        x, bh, at = round(-w / 2 + slot * (i + 0.5), 3), round(h * min(1.0, v / top), 3), round(i * stagger, 4)
+        fill = colors[i % len(colors)] if isinstance(colors, list) and colors else \
+            p.get("accent", th["accent"]) if i + 1 in picked or (lab and lab in picked) else p.get("color", th["paper"])
+        kids.append({"id": f"{pid}-bar{i + 1}", "type": "rect", "x": x, "y": base, "anchor": "bottom",
+                     "w": round(bw, 3), "h": {"from": 0, "to": bh, "dur": grow, "ease": "outQuad"},
+                     "radius": round(min(6, bw / 4), 3), "fill": fill, "at": at})
+        if p.get("values", True):  # 40 px above the bar on the same tween, so it rides on top
+            kids.append({"id": f"{pid}-value{i + 1}", "type": "counter", "x": x,
+                         "y": {"from": base - 40, "to": base - bh - 40, "dur": grow, "ease": "outQuad"},
+                         "value": {"from": 0, "to": v, "dur": grow, "ease": "outQuad"}, "format": fmt,
+                         "size": p.get("valueSize", round(size * 4 / 3)), "weight": 700, "fill": th["paper"],
+                         "at": at})
+        if lab:
+            kids.append({"id": f"{pid}-label{i + 1}", "type": "text", "text": lab, "x": x, "y": base + 20,
+                         "anchor": "top", "size": size, "fill": th["muted"], "at": at, "enter": "fade"})
+    return {"type": "group", "x": p.get("x", "50%"), "y": p.get("y", "50%"), "anchor": "center", "w": w, "h": h,
+            "children": kids}
+
+
+def _line_chart(p, th):
+    """A line that draws on through its points, with a dot and the value popping on at each as the line gets there."""
+    labels, values = _series(p, "lineChart", negative=True)
+    pid, n = p["id"], len(values)
+    if n < 2:
+        raise ValueError(f"layer '{pid}': lineChart data has 1 value; a line needs 2 or more")
+    w, h = p.get("w", 1200), p.get("h", 600)
+    lo = p.get("min", min(0.0, *values))
+    hi = p.get("max", max(values))
+    hi = hi if hi > lo else lo + 1
+    grow, size, color = p.get("grow", 1.5), p.get("size", 30), p.get("color", th["accent"])
+    pts = [(-w / 2 + w * i / (n - 1), h / 2 - h * (v - lo) / (hi - lo)) for i, v in enumerate(values)]
+    run = [0.0]  # length of the line up to each point
+    for (ax, ay), (bx, by) in zip(pts, pts[1:]):
+        run.append(run[-1] + math.hypot(bx - ax, by - ay))
+    kids = [_axis(pid, w, h / 2 - h * (min(max(0.0, lo), hi) - lo) / (hi - lo), th),
+            {"id": f"{pid}-line", "type": "line", "points": [[round(x, 3), round(y, 3)] for x, y in pts],
+             "stroke": color, "strokeWidth": p.get("strokeWidth", 6), "cap": "round", "join": "round", "at": 0.2,
+             "enter": {"name": "draw", "dur": grow, "ease": "inOutSine"}}]
+    for i, ((x, y), lab, v) in enumerate(zip(pts, labels, values)):
+        at = round(0.2 + grow * _sine_at(run[i] / (run[-1] or 1)), 4)  # when the line reaches it
+        if p.get("dots", True):
+            kids.append({"id": f"{pid}-dot{i + 1}", "type": "circle", "x": round(x, 3), "y": round(y, 3),
+                         "r": p.get("r", 9), "fill": color, "at": at, "enter": {"name": "pop", "dur": 0.3}})
+        if p.get("values", True):
+            kids.append({"id": f"{pid}-value{i + 1}", "type": "text", "text": _shown(p, v, "{:,.0f}"),
+                         "x": round(x, 3), "y": round(y - 22, 3), "anchor": "bottom", "size": size, "weight": 700,
+                         "fill": th["paper"], "at": at, "enter": {"name": "rise", "dur": 0.4, "dist": 16}})
+        if lab:
+            kids.append({"id": f"{pid}-label{i + 1}", "type": "text", "text": lab, "x": round(x, 3), "y": h / 2 + 20,
+                         "anchor": "top", "size": size, "fill": th["muted"], "enter": "fade"})
+    return {"type": "group", "x": p.get("x", "50%"), "y": p.get("y", "50%"), "anchor": "center", "w": w, "h": h,
+            "children": kids}
+
+
+def _arc(r: float, a0: float, a1: float) -> str:
+    """SVG path data for an arc of radius r about (0, 0), clockwise from a0 to a1 degrees (0 is three o'clock)."""
+    if a1 - a0 > 359.99:  # a whole ring, as two halves
+        rest = _arc(r, a0 + 180, a1)
+        return _arc(r, a0, a0 + 180) + " " + rest[rest.index("A"):]
+    x0, y0 = r * math.cos(math.radians(a0)), r * math.sin(math.radians(a0))
+    x1, y1 = r * math.cos(math.radians(a1)), r * math.sin(math.radians(a1))
+    return f"M{x0:.3f} {y0:.3f} A{r:.3f} {r:.3f} 0 {int(a1 - a0 > 180)} 1 {x1:.3f} {y1:.3f}"
+
+
+def _pie_chart(p, th):
+    """Slices that sweep round from twelve o'clock in turn, each labelled outside with its share. inner above 0 leaves
+    a hole in the middle (a doughnut)."""
+    labels, values = _series(p, "pieChart")
+    pid, total = p["id"], sum(values)
+    if total <= 0:
+        raise ValueError(f"layer '{pid}': pieChart data adds up to 0; a pie needs a value above 0")
+    r, inner = p.get("r", 240), min(0.95, max(0.0, p.get("inner", 0)))
+    grow, size = p.get("grow", 1.2), p.get("size", 30)
+    colors = p.get("colors") if isinstance(p.get("colors"), list) and p.get("colors") else CHART_COLORS
+    mid, width = r * (1 + inner) / 2, r * (1 - inner)  # each slice is a thick arc that draws on along its length
+    kids, done = [], 0.0
+    for i, (lab, v) in enumerate(zip(labels, values)):
+        if v <= 0:
+            continue
+        f0, f1 = done / total, (done + v) / total
+        done += v
+        a0, a1 = -90 + 360 * f0, -90 + 360 * f1
+        t0, t1 = grow * _sine_at(f0), grow * _sine_at(f1)
+        end = a1 if f1 > 1 - 1e-9 else a1 + 0.6  # tucked under the next slice, so no gap shows between them
+        kids.append({"id": f"{pid}-slice{i + 1}", "type": "path", "d": _arc(mid, a0, end),
+                     "stroke": colors[i % len(colors)], "strokeWidth": round(width, 3), "cap": "butt",
+                     "at": round(t0, 4), "enter": {"name": "draw", "dur": round(max(t1 - t0, 0.01), 4),
+                                                   "ease": "linear"}})
+        m = math.radians((a0 + a1) / 2)
+        cx, cy = math.cos(m), math.sin(m)
+        share = _shown(p, 100 * v / total, "{:.0f}%")
+        kids.append({"id": f"{pid}-label{i + 1}", "type": "text", "text": f"{lab}  {share}" if lab else share,
+                     "x": round((r + 28) * cx, 3), "y": round((r + 28) * cy, 3),
+                     "anchor": "left" if cx > 0.25 else "right" if cx < -0.25 else "top" if cy > 0 else "bottom",
+                     "size": size, "fill": th["paper"], "at": round(t1, 4), "enter": "fade"})
+    return {"type": "group", "x": p.get("x", "50%"), "y": p.get("y", "50%"), "anchor": "center", "w": 2 * r,
+            "h": 2 * r, "children": kids}
+
+
 # Parameters a builder reads only in some branches (so a single call may not touch them).
 PARAMS = {"lowerThird": ("title", "subtitle", "x", "y", "accent", "size", "plate", "color", "subColor"),
           "titleCard": ("title", "subtitle", "kicker", "size", "accent", "color", "x", "y"),
           "callout": ("x", "y", "r", "label", "side", "accent", "size", "boxColor"),
           "focus": ("x", "y", "w", "h", "dim", "accent", "radius"),
           "progress": ("color", "h", "y"),
-          "kinetic": ("words", "every", "size", "motion", "color", "x", "y")}
+          "kinetic": ("words", "every", "size", "motion", "color", "x", "y"),
+          "barChart": ("data", "labels", "x", "y", "w", "h", "max", "gap", "grow", "stagger", "size", "valueSize",
+                       "color", "colors", "highlight", "accent", "values", "format"),
+          "lineChart": ("data", "labels", "x", "y", "w", "h", "min", "max", "grow", "size", "color", "strokeWidth",
+                        "r", "dots", "values", "format"),
+          "pieChart": ("data", "labels", "x", "y", "r", "inner", "grow", "size", "colors", "format")}
 
 # Parameters a builder computes with, so text there would fail inside it.
-NUMBER_PARAMS = {"callout": ("r",), "lowerThird": ("size",)}
+NUMBER_PARAMS = {"callout": ("r",), "lowerThird": ("size",),
+                 "barChart": ("w", "h", "max", "gap", "grow", "stagger", "size", "valueSize"),
+                 "lineChart": ("w", "h", "min", "max", "grow", "size", "strokeWidth", "r"),
+                 "pieChart": ("r", "inner", "grow", "size")}
 
 BUILTIN = {"lowerThird": _lower_third, "titleCard": _title_card, "callout": _callout, "focus": _focus,
-           "progress": _progress, "kinetic": _kinetic}
+           "progress": _progress, "kinetic": _kinetic, "barChart": _bar_chart, "lineChart": _line_chart,
+           "pieChart": _pie_chart}
 COMPONENT_DOCS = {
     "lowerThird": "title, subtitle, x [\"6%\"], y [\"78%\"] (top-left of its accent bar), accent, size [54], "
                   "color, subColor, plate (box colour, or false for none)",
@@ -143,6 +318,15 @@ COMPONENT_DOCS = {
     "focus": "x, y, w, h (top-left and size of the region to highlight), dim [0.55], accent, radius",
     "progress": "color, h [8], y [\"100%\"] (a bar along the bottom edge that fills over the whole scene)",
     "kinetic": "words [list], every [0.6] (seconds per word), size [180], motion [pop], color, x, y [\"50%\"] (centre)",
+    "barChart": "data ([12, 30] or [[\"Q1\", 12], ...] or [{\"label\": \"Q1\", \"value\": 12}, ...]), labels, x, y "
+                "[\"50%\"] (centre), w [1200], h [600], max, gap [0.3], grow [1] (seconds a bar grows), "
+                "stagger [0.12], color, colors (one a bar, in turn), highlight (bar number from 1, label, or a list), "
+                "accent, values [true], format [\"{:,.0f}\"], size [30], valueSize [40]",
+    "lineChart": "data (as barChart's; below 0 is fine), labels, x, y [\"50%\"] (centre), w [1200], h [600], min, "
+                 "max, grow [1.5] (seconds the line draws on), color, strokeWidth [6], r [9] (dots), dots [true], "
+                 "values [true], format [\"{:,.0f}\"], size [30]",
+    "pieChart": "data (as barChart's), labels, x, y [\"50%\"] (centre), r [240], inner [0] (0..0.95: a hole for a "
+                "doughnut), grow [1.2] (seconds to sweep round), colors, format [\"{:.0f}%\"], size [30]",
 }
 _PASS = ("id", "at", "dur", "until", "enter", "exit", "emphasis", "opacity", "scale", "rotate", "hidden", "z",
          "rotateX", "rotateY", "fixed", "sound")
