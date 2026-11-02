@@ -114,3 +114,57 @@ def test_scene_that_no_longer_loads_reports_an_error(srv):
     scene.write_text("{ not json", encoding="utf-8")
     status, body, _ = req(port, "GET", "/frame?t=0")
     assert status == 500 and "error" in json.loads(body)
+
+
+def test_scene_lists_layers_with_timing_and_controls(srv):
+    port, _ = srv
+    layers = {l["id"]: l for l in json.loads(req(port, "GET", "/scene")[1])["layers"]}
+    assert layers["title"]["type"] == "text" and layers["title"]["in"] == 0
+    keys = [c["key"] for c in layers["title"]["controls"]]
+    assert {"text", "x", "size"} <= set(keys) and "r" not in keys
+    assert next(c for c in layers["title"]["controls"] if c["key"] == "size")["editable"]
+
+
+def test_hit_returns_boxes_for_visible_layers(srv):
+    port, _ = srv
+    boxes = json.loads(req(port, "GET", "/hit?x=0&y=0&t=1")[1])["boxes"]
+    assert set(boxes) == {"back", "title"} and len(boxes["title"]) == 4
+
+
+def test_prop_edit_rewrites_the_scene_and_logs_a_note(srv):
+    port, scene = srv
+    h = json.loads(req(port, "GET", "/scene")[1])["hash"]
+    status, body, _ = req(port, "POST", "/prop", {"layer": "title", "key": "size", "value": 80, "hash": h, "t": 1})
+    assert status == 200 and json.loads(body)["hash"] != h
+    assert json.loads(scene.read_text(encoding="utf-8"))["layers"][1]["size"] == 80
+    note = feedback.listing(scene)[0]
+    assert note["kind"] == "prop" and note["change"] == {"key": "size", "from": 40, "to": 80} and note["layer"] == "title"
+
+
+@pytest.mark.parametrize("body, why", [
+    ({"layer": "title", "key": "size", "value": "huge"}, "breaks the scene"),
+    ({"layer": "title", "key": "id", "value": "x"}, "cannot be edited"),
+    ({"layer": "nope", "key": "size", "value": 5}, "no layer"),
+    ({"layer": "title", "key": "size", "value": True}, "number or text"),
+])
+def test_bad_prop_edit_is_refused_and_leaves_the_file_alone(srv, body, why):
+    port, scene = srv
+    before = scene.read_bytes()
+    body["hash"] = json.loads(req(port, "GET", "/scene")[1])["hash"]
+    status, out, _ = req(port, "POST", "/prop", body)
+    assert status == 400 and why in json.loads(out)["error"]
+    assert scene.read_bytes() == before and feedback.listing(scene) == []
+
+
+def test_prop_edit_refuses_a_stale_page(srv):
+    port, scene = srv
+    status, out, _ = req(port, "POST", "/prop", {"layer": "title", "key": "size", "value": 80, "hash": "old"})
+    assert status == 400 and "reload" in json.loads(out)["error"]
+
+
+def test_prop_edit_will_not_rewrite_a_scene_with_comments(srv):
+    port, scene = srv
+    scene.write_text('// keep me\n' + json.dumps(SCENE), encoding="utf-8")
+    status, out, _ = req(port, "POST", "/prop", {"layer": "title", "key": "size", "value": 80,
+                                                   "hash": feedback.scene_hash(scene)})
+    assert status == 400 and "comments" in json.loads(out)["error"] and scene.read_text(encoding="utf-8").startswith("// keep me")

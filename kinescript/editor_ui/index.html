@@ -5,87 +5,91 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kinescript editor</title>
 <style>
-  :root { --bg:#0e1117; --block:#171b24; --line:#2a303c; --fg:#e8eaf0; --dim:#9299a8; --accent:#ffd400; --ok:#6ee7a8; }
+  :root { --bg:#0e1117; --block:#171b24; --line:#2a303c; --fg:#e8eaf0; --dim:#9299a8; --accent:#ffd400; --live:#6ee7a8; --err:#ff8a80; }
   * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.4 system-ui, sans-serif; min-height:100vh; }
-  header { padding:12px 16px 0; color:var(--dim); font-weight:600; }
-  #grid { display:grid; gap:12px; padding:12px 16px 16px;
-          grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
-          grid-template-areas: "player notes" "timeline notes" "layers notes"; align-items:start; }
-  @media (max-width: 800px) { #grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "player" "timeline" "layers" "notes"; } }
-  .block { background:var(--block); border:1px solid var(--line); border-radius:8px; padding:12px; min-width:0; }
-  .block > h2 { margin:0 0 10px; font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--dim); font-weight:600;
-                display:flex; justify-content:space-between; align-items:center; }
-  #b-player { grid-area:player; } #b-timeline { grid-area:timeline; } #b-layers { grid-area:layers; } #b-notes { grid-area:notes; }
-  #stage { position:relative; background:#000; cursor:crosshair; width:100%; margin:0 auto; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.4 system-ui, sans-serif; }
+  header { padding:12px 16px; color:var(--dim); font-weight:600; display:flex; gap:16px; align-items:baseline; }
+  header .hint { font-weight:400; font-size:12px; }
+  #app { display:grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 40%); gap:16px; padding:0 16px 24px; align-items:start; }
+  @media (max-width: 800px) { #app { grid-template-columns: minmax(0, 1fr); } #side { position:static !important; order:-1; } }
+  #side { position:sticky; top:12px; display:flex; flex-direction:column; gap:10px; }
+  .card { background:var(--block); border:1px solid var(--line); border-radius:8px; padding:12px; min-width:0; }
+  #stage { position:relative; background:#000; cursor:crosshair; width:100%; }
   #stage img, #stage video { display:block; width:100%; height:100%; }
   #stage video { position:absolute; inset:0; display:none; }
-  #pins { position:absolute; inset:0; pointer-events:none; }
+  #overlay { position:absolute; inset:0; pointer-events:none; }
   .pin { position:absolute; width:18px; height:18px; margin:-9px 0 0 -9px; border:2px solid var(--accent); border-radius:50%; background:rgba(0,0,0,.45); }
   .pin.stale { border-style:dashed; border-color:var(--dim); }
+  .sel { position:absolute; border:2px solid var(--accent); background:rgba(255,212,0,.08); }
   #tools { display:flex; gap:8px; align-items:center; }
   #tools input[type=range] { flex:1; min-width:0; }
+  #time { font-variant-numeric: tabular-nums; min-width:70px; text-align:right; color:var(--dim); }
   button { background:var(--line); color:var(--fg); border:0; padding:6px 12px; border-radius:6px; cursor:pointer; font:inherit; }
   button:hover { background:#3a4252; }
   button.primary { background:var(--accent); color:#111; font-weight:600; }
-  button:focus-visible, input:focus-visible, textarea:focus-visible, .chip:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
-  #time { font-variant-numeric: tabular-nums; min-width:76px; text-align:right; color:var(--dim); }
-  #chips { display:flex; flex-wrap:wrap; gap:6px; min-height:28px; }
-  .chip { border:1px solid var(--line); background:var(--bg); color:var(--fg); padding:3px 10px; border-radius:999px; cursor:pointer; font-size:13px; }
-  .chip[aria-pressed=true] { border-color:var(--accent); color:var(--accent); }
-  .empty { color:var(--dim); font-size:13px; }
-  #compose { display:none; margin-bottom:10px; padding:10px; border:1px solid var(--accent); border-radius:6px; }
-  #compose textarea { width:100%; height:64px; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:6px; resize:vertical; font:inherit; }
-  #compose .row { display:flex; gap:8px; margin-top:8px; align-items:center; }
-  #compose .where { color:var(--dim); font-size:12px; flex:1; }
-  .note { padding:10px; margin-bottom:8px; background:var(--bg); border:1px solid var(--line); border-radius:6px; }
-  .note .meta { color:var(--dim); font-size:12px; display:flex; gap:10px; flex-wrap:wrap; margin-bottom:4px; }
-  .note .meta a { color:var(--accent); cursor:pointer; text-decoration:underline; }
-  .note.resolved { opacity:.65; } .note.resolved .txt { text-decoration:line-through; }
+  button.link { background:none; padding:0; color:var(--accent); text-decoration:underline; font-size:12px; }
+  button:focus-visible, input:focus-visible, textarea:focus-visible, .head:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+  #msg { color:var(--err); min-height:1.2em; font-size:12px; }
+  #stack { display:flex; flex-direction:column; gap:10px; }
+  .layer { background:var(--block); border:1px solid var(--line); border-left:4px solid var(--line); border-radius:8px; }
+  .layer.live { border-left-color:var(--live); }
+  .layer.selected { border-color:var(--accent); border-left-color:var(--accent); }
+  .layer.off .body { opacity:.55; }
+  .head { display:flex; gap:10px; align-items:center; padding:10px 12px; cursor:pointer; }
+  .head .id { font-weight:600; } .head .type { color:var(--dim); font-size:12px; }
+  .head .badge { margin-left:auto; font-size:11px; padding:1px 8px; border-radius:999px; border:1px solid var(--line); color:var(--dim); }
+  .layer.live .badge { color:var(--live); border-color:var(--live); }
+  .count { background:var(--accent); color:#111; border-radius:999px; font-size:11px; padding:0 7px; font-weight:600; }
+  .body { padding:0 12px 12px; display:none; }
+  .layer.open .body { display:block; }
+  .span { position:relative; height:10px; background:var(--bg); border-radius:5px; margin:2px 0 10px; cursor:pointer; }
+  .span .fill { position:absolute; top:0; bottom:0; background:#3a4252; border-radius:5px; }
+  .layer.live .span .fill { background:var(--live); opacity:.6; }
+  .span .at { position:absolute; top:-3px; bottom:-3px; width:2px; background:var(--accent); }
+  .controls { display:grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap:8px; }
+  .ctl label { display:block; font-size:11px; color:var(--dim); margin-bottom:2px; text-transform:uppercase; letter-spacing:.05em; }
+  .ctl input[type=text], .ctl input[type=number] { width:100%; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:5px 6px; font:inherit; }
+  .ctl input[type=color] { width:100%; height:30px; padding:0; border:1px solid var(--line); border-radius:4px; background:var(--bg); }
+  .ctl.ro .val { font-size:12px; color:var(--dim); padding:5px 0; }
+  .note { padding:8px 10px; margin-top:8px; background:var(--bg); border:1px solid var(--line); border-radius:6px; }
+  .note .meta { color:var(--dim); font-size:12px; display:flex; gap:10px; flex-wrap:wrap; margin-bottom:2px; }
+  .note.resolved { opacity:.6; } .note.resolved .txt { text-decoration:line-through; }
+  .note.prop .txt { font-family:ui-monospace, monospace; font-size:12px; }
   .reply { margin:4px 0 0 10px; color:var(--dim); font-size:12px; }
-  #msg { color:#ff8a80; min-height:1.2em; font-size:12px; }
-  label { color:var(--dim); font-size:12px; font-weight:400; text-transform:none; letter-spacing:0; }
+  .compose textarea { width:100%; height:56px; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:6px; resize:vertical; font:inherit; margin-top:8px; }
+  .compose .row { display:flex; gap:8px; align-items:center; margin-top:6px; }
+  .compose .where { color:var(--dim); font-size:12px; flex:1; }
+  .err { color:var(--err); font-size:12px; margin-top:6px; }
+  .empty { color:var(--dim); font-size:13px; }
+  label.chk { color:var(--dim); font-size:12px; }
 </style>
 </head>
 <body>
-<header id="title">Loading…</header>
-<div id="grid">
-  <section class="block" id="b-player" aria-label="Player">
-    <h2>Player <span class="empty">click the frame to pin a note</span></h2>
-    <div id="stage"><img id="frame" alt="Frame at the playhead"><video id="vid" muted playsinline></video><div id="pins"></div></div>
-  </section>
-  <section class="block" id="b-timeline" aria-label="Timeline">
-    <h2>Timeline</h2>
-    <div id="tools">
-      <button id="prev" title="Previous frame (←)">◀</button>
-      <button id="play" title="Play the rendered video (space)">Play</button>
-      <button id="next" title="Next frame (→)">▶</button>
-      <input id="scrub" type="range" min="0" max="1" step="0.001" value="0" aria-label="Time">
-      <span id="time">0.00 s</span>
+<header><span id="title">Loading…</span><span class="hint">Click a layer block, or click the frame, to add notes and change values.</span>
+  <label class="chk" style="margin-left:auto"><input type="checkbox" id="showAll"> show resolved</label></header>
+<div id="app">
+  <div id="stack" aria-label="Layers"></div>
+  <aside id="side" aria-label="Preview">
+    <div class="card">
+      <div id="stage"><img id="frame" alt="Frame at the playhead"><video id="vid" muted playsinline></video><div id="overlay"></div></div>
+      <div id="tools" style="margin-top:10px">
+        <button id="prev" title="Previous frame (←)">◀</button>
+        <button id="play" title="Play the rendered video (space)">Play</button>
+        <button id="next" title="Next frame (→)">▶</button>
+        <input id="scrub" type="range" min="0" max="1" step="0.001" value="0" aria-label="Time">
+        <span id="time">0.00 s</span>
+      </div>
+      <div id="msg" role="status"></div>
     </div>
-  </section>
-  <section class="block" id="b-layers" aria-label="Layers">
-    <h2>On screen now <span class="empty">pick one to note it without a point</span></h2>
-    <div id="chips"></div>
-  </section>
-  <section class="block" id="b-notes" aria-label="Notes">
-    <h2>Notes <label><input type="checkbox" id="showAll"> show resolved</label></h2>
-    <form id="compose">
-      <textarea id="text" placeholder="What should change here?" aria-label="Note"></textarea>
-      <div class="row"><span class="where" id="where"></span>
-        <button type="button" id="cancel">Cancel</button><button type="submit" class="primary">Add note</button></div>
-    </form>
-    <div id="msg" role="status"></div>
-    <div id="list"></div>
-  </section>
+  </aside>
 </div>
 <script>
 const $ = id => document.getElementById(id);
-let info = null, t = 0, draft = null, notes = [], seq = 0, layers = [], picked = null;
+let info = null, t = 0, notes = [], boxes = {}, live = new Set(), selected = null, open = new Set(), draft = null, seq = 0, errs = {};
 
 const fmt = s => s.toFixed(2) + " s";
 const say = m => { $("msg").textContent = m || ""; };
-const post = body => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+const post = (path, body) => api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 async function api(path, opts) {
   const r = await fetch(path, opts);
   const body = (r.headers.get("content-type") || "").includes("json") ? await r.json() : r;
@@ -101,60 +105,144 @@ function show(time) {
   img.onload = () => { if (mine === seq) { $("frame").src = img.src; say(""); } };
   img.onerror = () => { if (mine === seq) say("Could not draw this frame; the scene may be mid-edit."); };
   img.src = "/frame?t=" + t.toFixed(3) + "&scale=" + (info.w > 960 ? 0.5 : 1) + "&_=" + Date.now();
-  drawPins(); loadLayers(mine);
+  api("/hit?x=0&y=0&t=" + t).then(h => { if (mine === seq) { boxes = h.boxes; live = new Set(h.layers); refreshLive(); drawOverlay(); } }).catch(() => {});
+  drawOverlay(); refreshLive();
 }
 
-async function loadLayers(mine) {
-  try {
-    const h = await api("/hit?x=0&y=0&t=" + t);
-    if (mine !== seq) return;
-    layers = h.layers;
-    if (picked && !layers.includes(picked)) picked = null;
-    drawChips();
-  } catch (e) { /* the frame request reports scene errors */ }
-}
-function drawChips() {
-  $("chips").replaceChildren(...(layers.length ? layers.map(id => {
-    const b = document.createElement("button"); b.className = "chip"; b.textContent = id; b.setAttribute("aria-pressed", id === picked);
-    b.onclick = () => { picked = id === picked ? null : id; drawChips(); if (picked) startDraft({ t, layer: picked }, "layer " + picked); };
-    return b;
-  }) : [Object.assign(document.createElement("span"), { className: "empty", textContent: "Nothing visible at this time." })]));
-}
-
-function startDraft(d, where) {
-  draft = d;
-  $("where").textContent = `${fmt(d.t)} · ${where}`;
-  $("compose").style.display = "block"; $("text").focus(); drawPins();
-}
-
-function drawPins() {
+function drawOverlay() {
+  const kids = [];
   const near = n => Math.abs(n.t - t) < 0.5 / info.fps + 1e-6;
-  const mk = (n, cls) => { const d = document.createElement("div"); d.className = "pin " + cls;
+  if (selected && boxes[selected]) {
+    const [l, tp, w, h] = boxes[selected];
+    const d = document.createElement("div"); d.className = "sel";
+    Object.assign(d.style, { left: l * 100 + "%", top: tp * 100 + "%", width: w * 100 + "%", height: h * 100 + "%" });
+    kids.push(d);
+  }
+  const pin = (n, cls) => { const d = document.createElement("div"); d.className = "pin " + cls;
     d.style.left = n.x * 100 + "%"; d.style.top = n.y * 100 + "%"; d.title = n.text || ""; return d; };
-  const els = notes.filter(n => n.x !== undefined && near(n)).map(n => mk(n, n.stale ? "stale" : ""));
-  if (draft && draft.x !== undefined && near(draft)) els.push(mk(draft, ""));
-  $("pins").replaceChildren(...els);
+  for (const n of notes) if (n.x !== undefined && near(n)) kids.push(pin(n, n.stale ? "stale" : ""));
+  if (draft && draft.x !== undefined && near(draft)) kids.push(pin(draft, ""));
+  $("overlay").replaceChildren(...kids);
+}
+
+function refreshLive() {
+  for (const L of info.layers) {
+    const card = document.getElementById("L-" + L.id); if (!card) continue;
+    const on = t >= L.in && t < L.out;
+    card.classList.toggle("live", on); card.classList.toggle("off", !on);
+    card.querySelector(".badge").textContent = on ? "on screen" : (t < L.in ? "starts " + fmt(L.in) : "ended");
+    card.querySelector(".at").style.left = Math.min(100, t / info.duration * 100) + "%";
+  }
+}
+
+function select(id, scroll) {
+  selected = id; open.add(id);
+  render(); drawOverlay();
+  if (scroll) document.getElementById("L-" + id)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+function ctlInput(L, c) {
+  const wrap = document.createElement("div"); wrap.className = "ctl" + (c.editable ? "" : " ro");
+  const lab = document.createElement("label"); lab.textContent = c.key; wrap.append(lab);
+  if (!c.editable) { const v = document.createElement("div"); v.className = "val"; v.title = "animated or computed: leave a note"; v.textContent = "animated"; wrap.append(v); return wrap; }
+  const isNum = typeof c.value === "number" || (c.value == null && ["x", "y", "w", "h", "r", "size", "at", "dur"].includes(c.key));
+  const isCol = (c.key === "fill" || c.key === "stroke") && typeof c.value === "string" && /^#[0-9a-f]{6}$/i.test(c.value);
+  const inp = document.createElement("input");
+  inp.type = isCol ? "color" : isNum ? "number" : "text";
+  if (isNum) inp.step = "any";
+  inp.value = c.value == null ? "" : c.value;
+  inp.setAttribute("aria-label", L.id + " " + c.key);
+  inp.onchange = async () => {
+    const raw = inp.value;
+    if (raw === "" || (isNum && !Number.isFinite(parseFloat(raw)))) return;
+    try {
+      info = await post("/prop", { layer: L.id, key: c.key, value: isNum ? parseFloat(raw) : raw, hash: info.hash, t });
+      errs[L.id] = ""; await loadNotes(); render(); show(t);
+    } catch (e) { errs[L.id] = e.message; render(); }
+  };
+  inp.addEventListener("keydown", e => e.stopPropagation());
+  wrap.append(inp); return wrap;
+}
+
+function noteView(n) {
+  const d = document.createElement("div"); d.className = "note " + n.status + (n.kind === "prop" ? " prop" : "");
+  const meta = document.createElement("div"); meta.className = "meta";
+  const go = document.createElement("button"); go.className = "link"; go.textContent = fmt(n.t); go.onclick = () => show(n.t);
+  meta.append(go);
+  if (n.kind === "prop") meta.append("edited");
+  if (n.stale && n.kind !== "prop") meta.append("scene changed since");
+  const act = document.createElement("button"); act.className = "link"; act.textContent = n.status === "open" ? "resolve" : "reopen";
+  act.onclick = async () => { try { await post("/notes", { action: n.status === "open" ? "resolve" : "reopen", id: n.id }); loadNotes(); } catch (e) { say(e.message); } };
+  meta.append(act);
+  const txt = document.createElement("div"); txt.className = "txt"; txt.textContent = n.text;
+  d.append(meta, txt);
+  for (const r of n.replies) { const x = document.createElement("div"); x.className = "reply"; x.textContent = r.by + ": " + r.text; d.append(x); }
+  return d;
+}
+
+function composer(layerId) {
+  const f = document.createElement("form"); f.className = "compose";
+  if (!draft || draft.layer !== layerId) {
+    const b = document.createElement("button"); b.type = "button"; b.textContent = "+ note";
+    b.onclick = () => { draft = { t, layer: layerId }; render(); };
+    f.append(b); return f;
+  }
+  const ta = document.createElement("textarea"); ta.placeholder = "What should change here?"; ta.setAttribute("aria-label", "Note for " + layerId);
+  ta.addEventListener("keydown", e => e.stopPropagation());
+  const where = document.createElement("span"); where.className = "where";
+  where.textContent = fmt(draft.t) + (draft.x !== undefined ? ` · ${Math.round(draft.x * 100)}%, ${Math.round(draft.y * 100)}%` : "");
+  const cancel = document.createElement("button"); cancel.type = "button"; cancel.textContent = "Cancel"; cancel.onclick = () => { draft = null; render(); drawOverlay(); };
+  const add = document.createElement("button"); add.type = "submit"; add.className = "primary"; add.textContent = "Add note";
+  const row = document.createElement("div"); row.className = "row"; row.append(where, cancel, add);
+  f.append(ta, row);
+  f.onsubmit = async e => {
+    e.preventDefault();
+    try { await post("/notes", { action: "add", ...draft, text: ta.value }); draft = null; await loadNotes(); render(); drawOverlay(); }
+    catch (err) { errs[layerId] = err.message; render(); }
+  };
+  setTimeout(() => ta.focus(), 0);
+  return f;
+}
+
+function layerCard(L) {
+  const mine = notes.filter(n => n.layer === L.id);
+  const card = document.createElement("section");
+  card.className = "layer" + (open.has(L.id) ? " open" : "") + (selected === L.id ? " selected" : "");
+  card.id = "L-" + L.id;
+  const head = document.createElement("div"); head.className = "head"; head.tabIndex = 0; head.setAttribute("role", "button");
+  head.setAttribute("aria-expanded", open.has(L.id));
+  const id = document.createElement("span"); id.className = "id"; id.textContent = L.id;
+  const ty = document.createElement("span"); ty.className = "type"; ty.textContent = L.type + (L.parent ? " in " + L.parent : "");
+  head.append(id, ty);
+  const openN = mine.filter(n => n.status === "open").length;
+  if (openN) { const c = document.createElement("span"); c.className = "count"; c.textContent = openN; c.title = openN + " open notes"; head.append(c); }
+  const badge = document.createElement("span"); badge.className = "badge"; head.append(badge);
+  const toggle = () => { if (open.has(L.id) && selected === L.id) { open.delete(L.id); selected = null; } else { open.add(L.id); selected = L.id; } render(); drawOverlay(); };
+  head.onclick = toggle;
+  head.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } };
+  const body = document.createElement("div"); body.className = "body";
+  const span = document.createElement("div"); span.className = "span"; span.title = fmt(L.in) + " to " + fmt(L.out);
+  const fill = document.createElement("div"); fill.className = "fill";
+  fill.style.left = L.in / info.duration * 100 + "%"; fill.style.width = Math.max(0.5, (L.out - L.in) / info.duration * 100) + "%";
+  const at = document.createElement("div"); at.className = "at"; span.append(fill, at);
+  span.onclick = e => { const r = span.getBoundingClientRect(); show((e.clientX - r.left) / r.width * info.duration); };
+  const ctl = document.createElement("div"); ctl.className = "controls"; ctl.append(...L.controls.map(c => ctlInput(L, c)));
+  body.append(span, ctl);
+  if (errs[L.id]) { const e = document.createElement("div"); e.className = "err"; e.textContent = errs[L.id]; body.append(e); }
+  body.append(...mine.map(noteView), composer(L.id));
+  card.append(head, body);
+  return card;
+}
+
+function render() {
+  const keep = document.activeElement?.getAttribute?.("aria-label");
+  $("stack").replaceChildren(...info.layers.map(layerCard));
+  if (keep) document.querySelector(`[aria-label="${CSS.escape(keep)}"]`)?.focus();
+  refreshLive();
 }
 
 async function loadNotes() {
   notes = (await api("/notes?status=" + ($("showAll").checked ? "all" : "open"))).notes;
-  const els = notes.map(n => {
-    const el = document.createElement("div"); el.className = "note " + n.status;
-    const meta = document.createElement("div"); meta.className = "meta";
-    const go = document.createElement("a"); go.textContent = fmt(n.t); go.onclick = () => show(n.t);
-    meta.append(go);
-    if (n.layer) meta.append(n.layer);
-    if (n.stale) meta.append("scene changed since");
-    const act = document.createElement("a"); act.textContent = n.status === "open" ? "resolve" : "reopen";
-    act.onclick = async () => { try { await api("/notes", post({ action: n.status === "open" ? "resolve" : "reopen", id: n.id })); loadNotes(); } catch (e) { say(e.message); } };
-    meta.append(act);
-    const txt = document.createElement("div"); txt.className = "txt"; txt.textContent = n.text;
-    el.append(meta, txt);
-    for (const r of n.replies) { const d = document.createElement("div"); d.className = "reply"; d.textContent = r.by + ": " + r.text; el.append(d); }
-    return el;
-  });
-  $("list").replaceChildren(...(els.length ? els : [Object.assign(document.createElement("div"), { className: "empty", textContent: "No notes yet." })]));
-  drawPins();
 }
 
 $("stage").addEventListener("click", async e => {
@@ -163,18 +251,10 @@ $("stage").addEventListener("click", async e => {
   const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
   let layer = null;
   try { layer = (await api(`/hit?x=${x}&y=${y}&t=${t}`)).layer; } catch (err) { say(err.message); }
-  startDraft({ t, x, y, layer }, `${layer || "no layer"} · ${Math.round(x * 100)}%, ${Math.round(y * 100)}%`);
+  if (!layer) { say("No layer under that point."); return; }
+  draft = { t, x, y, layer }; select(layer, true);
 });
-$("cancel").onclick = () => { draft = null; $("compose").style.display = "none"; drawPins(); };
-$("compose").addEventListener("submit", async e => {
-  e.preventDefault();
-  if (!draft) return;
-  try {
-    await api("/notes", post({ action: "add", ...draft, text: $("text").value }));
-    $("text").value = ""; $("cancel").click(); loadNotes();
-  } catch (err) { say(err.message); }
-});
-$("showAll").onchange = loadNotes;
+$("showAll").onchange = async () => { await loadNotes(); render(); drawOverlay(); };
 $("scrub").oninput = e => { $("vid").pause(); show(parseFloat(e.target.value)); };
 $("prev").onclick = () => show(t - 1 / info.fps);
 $("next").onclick = () => show(t + 1 / info.fps);
@@ -187,7 +267,7 @@ $("play").onclick = () => {
 $("vid").addEventListener("timeupdate", () => { $("scrub").value = $("vid").currentTime; $("time").textContent = fmt($("vid").currentTime); });
 $("vid").addEventListener("pause", () => { const v = $("vid"); v.style.display = "none"; $("play").textContent = "Play"; show(v.currentTime); });
 document.addEventListener("keydown", e => {
-  if (["TEXTAREA", "INPUT", "BUTTON"].includes(e.target.tagName)) return;
+  if (["TEXTAREA", "INPUT", "BUTTON"].includes(e.target.tagName) || e.target.classList.contains("head")) return;
   if (e.key === "ArrowLeft") $("prev").click();
   else if (e.key === "ArrowRight") $("next").click();
   else if (e.key === " ") { e.preventDefault(); $("play").click(); }
@@ -199,9 +279,10 @@ document.addEventListener("keydown", e => {
     $("title").textContent = `${info.name} · ${info.w}×${info.h} · ${info.duration} s`;
     $("scrub").max = info.duration;
     $("stage").style.aspectRatio = info.w + " / " + info.h;
-    $("stage").style.maxWidth = `calc((100vh - 300px) * ${info.w / info.h})`;
-    const start = parseFloat(new URLSearchParams(location.search).get("t"));
-    await loadNotes(); show(Number.isFinite(start) ? start : 0);
+    const q = new URLSearchParams(location.search);
+    const start = parseFloat(q.get("t"));
+    if (q.get("layer")) { selected = q.get("layer"); open.add(selected); }
+    await loadNotes(); render(); show(Number.isFinite(start) ? start : 0);
   } catch (e) { $("title").textContent = "Could not load the scene: " + e.message; }
 })();
 </script>

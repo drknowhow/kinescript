@@ -50,14 +50,82 @@ def _host_name(header: str) -> str:
     return header.rsplit(":", 1)[0] if ":" in header else header
 
 
+COMMON = ("at", "dur")
+CONTROLS = {"text": ("text", "x", "y", "size", "fill") + COMMON, "counter": ("x", "y", "size", "fill") + COMMON,
+            "circle": ("x", "y", "r", "fill") + COMMON, "rect": ("x", "y", "w", "h", "fill") + COMMON,
+            "image": ("x", "y", "w", "h") + COMMON, "video": ("x", "y", "w", "h") + COMMON,
+            "path": ("stroke",) + COMMON, "line": ("stroke",) + COMMON, "arrow": ("stroke",) + COMMON}
+EDITABLE = {k for keys in CONTROLS.values() for k in keys}
+
+
+def _walk(layers):
+    for raw in layers if isinstance(layers, list) else []:
+        if isinstance(raw, dict):
+            yield raw
+            yield from _walk(raw.get("children") or raw.get("layers"))
+
+
+def _raw_layers(doc) -> dict:
+    return {r["id"]: r for r in _walk(doc.get("layers")) if isinstance(r.get("id"), str)}
+
+
 def scene_info(path: Path) -> dict:
+    from .schema import loads
     from .verify import probe
     with _draw_lock:
         info = probe(str(path))
     c = info["canvas"]
+    raws = _raw_layers(loads(path.read_text(encoding="utf-8"))[0])
+    layers = []
+    for row in info["layers"]:
+        raw = raws.get(row["id"], {})
+        keys = CONTROLS.get(row["type"], ("x", "y") + COMMON)
+        layers.append({"id": row["id"], "type": row["type"], "in": row["in"], "out": row["out"], "parent": row["parent"],
+                       "controls": [{"key": k, "value": raw.get(k), "editable": isinstance(raw.get(k), (int, float, str))
+                                     and not isinstance(raw.get(k), bool) or k not in raw} for k in keys]})
     video = path.with_suffix(".mp4")
     return {"name": path.name, "w": c["w"], "h": c["h"], "fps": c["fps"], "duration": c["duration"],
-            "hash": feedback.scene_hash(path), "video": video.name if video.is_file() else None}
+            "hash": feedback.scene_hash(path), "video": video.name if video.is_file() else None, "layers": layers}
+
+
+def set_prop(path: Path, layer: str, key: str, value, base_hash: str, t: float = 0) -> dict:
+    """Write one property of one layer into the scene file, and log it as a note for the agent.
+
+    Refuses when the file changed since the page loaded it, holds comments or other non-strict JSON
+    (rewriting would drop them), or the result would not load as a scene."""
+    from .scene import Scene, SceneError
+    if key not in EDITABLE:
+        raise BadRequest(f"{key} cannot be edited here")
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise BadRequest("value must be a number or text")
+    if feedback.scene_hash(path) != base_hash:
+        raise BadRequest("the scene changed since this page loaded it; reload")
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        raise BadRequest("this scene has comments or loose JSON, so the editor will not rewrite it; leave a note instead") from None
+    raw = _raw_layers(doc).get(layer)
+    if raw is None:
+        raise BadRequest(f"no layer {layer}")
+    if key in raw and not isinstance(raw[key], (int, float, str)):
+        raise BadRequest(f"{layer}.{key} is animated or computed; leave a note instead")
+    before = raw.get(key)
+    raw[key] = value
+    try:
+        Scene(doc, str(path.parent)).close()
+    except (SceneError, ValueError) as e:
+        raise BadRequest(f"that value breaks the scene: {e}") from None
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(doc, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+    feedback.add(path, t, f"{layer}.{key}: {before!r} -> {value!r}", layer=layer, kind="prop",
+                 extra={"change": {"key": key, "from": before, "to": value}})
+    return scene_info(path)
 
 
 def frame_png(path: Path, t: float, scale: float) -> bytes:
@@ -84,7 +152,9 @@ def hit(path: Path, x: float, y: float, t: float) -> dict:
         left, top, right, bottom = b["rect"]
         if left <= px <= right and top <= py <= bottom:
             found = lid
-    return {"layer": found, "layers": list(info["visible"])}
+    boxes = {lid: [b["rect"][0] / c["w"], b["rect"][1] / c["h"], b["rect"][2] / c["w"], b["rect"][3] / c["h"]]
+             for lid, b in info["visible"].items()}
+    return {"layer": found, "layers": list(info["visible"]), "boxes": boxes}
 
 
 def make_handler(path: Path):
@@ -172,7 +242,7 @@ def make_handler(path: Path):
             self._send(206 if m else 200, body, "video/mp4", extra)
 
         def _post(self):
-            if urlparse(self.path).path != "/notes":
+            if urlparse(self.path).path not in ("/notes", "/prop"):
                 return self._json({"error": "not found"}, 404)
             if "application/json" not in (self.headers.get("Content-Type") or ""):
                 raise BadRequest("send application/json")
@@ -185,7 +255,10 @@ def make_handler(path: Path):
                 raise BadRequest("body is not valid JSON") from None
             if not isinstance(body, dict):
                 raise BadRequest("body must be an object")
-            action = body.get("action", "add")
+            action = "prop" if urlparse(self.path).path == "/prop" else body.get("action", "add")
+            if action == "prop":
+                return self._json(set_prop(path, body.get("layer"), body.get("key"), body.get("value"), body.get("hash"),
+                                              body.get("t") or 0))
             if action == "add":
                 note = feedback.add(path, body.get("t"), body.get("text"), body.get("x"), body.get("y"),
                                     body.get("layer"), body.get("kind", "pin"))

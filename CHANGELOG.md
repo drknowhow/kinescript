@@ -2,9 +2,11 @@
 
 ## Unreleased
 
-- `kine edit scene.json` opens a browser editor laid out in blocks: the frame (click it to pin a note on the layer under
-  the pointer), a timeline, the layers on screen at the playhead, and the notes. It serves on 127.0.0.1 only and
-  draws frames on the CPU.
+- `kine edit scene.json` opens a browser editor: a stack of layer blocks beside a sticky preview. Each block shows
+  the layer's in/out span, whether it is on screen at the playhead, controls for its values (text, x, y, size, w, h,
+  r, fill, stroke, at, dur) and its notes. A changed value is written to the scene file and logged as a note for the
+  agent. Clicking the frame selects the layer under the pointer and pins a note there. Scenes with comments are not
+  rewritten. It serves on 127.0.0.1 only and draws frames on the CPU.
 - `kine_feedback` (MCP): review notes kept in `<scene>.feedback.json` beside the scene. Each has a time, an optional
   point and layer id, and a status; `list`, `get`, `reply` and `resolve` work on them, and `still` returns the frame at
   the note's time with its point ringed. A note is `stale` once the scene file has changed.
