@@ -10,8 +10,8 @@
   body { margin:0; background:var(--bg); color:var(--fg); font:13px/1.35 system-ui, sans-serif; height:100vh; display:flex; flex-direction:column; }
   header { padding:8px 14px; color:var(--dim); display:flex; gap:14px; align-items:baseline; border-bottom:1px solid var(--line); }
   header b { color:var(--fg); } header .hint { font-size:12px; } header label { margin-left:auto; }
-  #app { flex:1; min-height:0; display:grid; grid-template-columns: 230px minmax(0, 1fr); }
-  @media (max-width: 800px) { #app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; } #rail { max-height:34vh; order:2; border-right:0 !important; border-top:1px solid var(--line); } }
+  #app { flex:1; min-height:0; display:grid; grid-template-columns: 230px minmax(0, 1fr) 310px; }
+  @media (max-width: 800px) { #app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto; overflow:auto; } main { order:1; } #side { order:2; border-left:0 !important; border-top:1px solid var(--line); } #rail { max-height:34vh; order:3; border-right:0 !important; border-top:1px solid var(--line); } }
   #rail { border-right:1px solid var(--line); overflow:auto; padding:8px 0; }
   #rail h2 { margin:10px 14px 4px; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--dim); font-weight:600; display:flex; align-items:center; }
   #rail h2 button { margin-left:auto; padding:0 6px; font-size:11px; }
@@ -43,7 +43,9 @@
   body.ctrl #strip [data-hl] { cursor:crosshair; }
   .pin { position:absolute; width:16px; height:16px; margin:-8px 0 0 -8px; border:2px solid var(--accent); border-radius:50%; background:rgba(0,0,0,.45); }
   .pin.stale { border-style:dashed; border-color:var(--dim); }
-  #pop { position:absolute; z-index:5; width:300px; background:var(--card); border:1px solid var(--accent); border-radius:8px; padding:8px; box-shadow:0 8px 24px rgba(0,0,0,.5); display:none; }
+  #side { border-left:1px solid var(--line); overflow:auto; padding:10px; min-width:0; }
+  #pop { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px; } #pop:has(.top) { border-color:var(--accent); }
+  .box.scope { left:0; top:0; width:100%; height:100%; border:2px dashed var(--accent); background:rgba(255,212,0,.05); }
   #pop .top { display:flex; align-items:center; gap:6px; margin-bottom:6px; } #pop .top b { flex:1; } #pop .top span { color:var(--dim); font-size:11px; }
   #pop .quote { background:var(--bg); border-radius:4px; padding:4px 6px; margin-bottom:6px; color:var(--dim); max-height:60px; overflow:auto; } #pop .quote b { color:var(--fg); }
   .x { background:none; border:0; color:var(--dim); cursor:pointer; font-size:16px; line-height:1; padding:0 2px; } .x:hover { color:var(--fg); }
@@ -104,7 +106,6 @@
   <main>
     <div id="wrap">
       <div id="stage"><img id="frame" alt="Frame at the playhead"><video id="vid" muted playsinline></video><div id="overlay"><svg id="ink" viewBox="0 0 1 1" preserveAspectRatio="none"></svg></div></div>
-      <div id="pop" role="dialog" aria-label="Comment"></div>
     </div>
     <div id="tools">
       <button id="prev" title="Previous frame (←)">◀</button><button id="play" title="Play the rendered video (space)">Play</button><button id="next" title="Next frame (→)">▶</button>
@@ -116,6 +117,7 @@
     <div id="strip"></div>
     <div id="msg" role="status"></div>
   </main>
+  <aside id="side" aria-label="Selected"><div id="pop"></div></aside>
 </div>
 <script>
 const $ = id => document.getElementById(id);
@@ -176,8 +178,16 @@ function show(time) {
 
 function topAt(x, y) { let f = null; for (const [id, [l, tp, r, b]] of Object.entries(boxes)) if (x >= l && x <= r && y >= tp && y <= b) f = id; return f; }
 function pt(e) { const r = $("stage").getBoundingClientRect(); return { x: Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)), y: Math.max(0, Math.min(1, (e.clientY - r.top) / r.height)), r }; }
+/* captions have no box of their own: outline the band they are drawn in */
+function capBand(id) {
+  const L = layerOf(id); if (!L || L.type !== "captions" || t < L.in || t >= L.out) return null;
+  const c = L.controls.find(k => k.key === "y"); let y = 0.86;
+  if (c && typeof c.value === "number") y = c.value / info.h; else if (c && /^[\d.]+%$/.test(c.value || "")) y = parseFloat(c.value) / 100;
+  y = Math.max(0.08, Math.min(0.94, y)); return [0.1, y - 0.07, 0.9, y + 0.06];
+}
+const rectOf = id => boxes[id] || capBand(id);
 function boxEl(id, cls, dx = 0, dy = 0) {
-  const [l, tp, r, b] = boxes[id], d = mk("div", "box " + cls);
+  const [l, tp, r, b] = rectOf(id), d = mk("div", "box " + cls);
   Object.assign(d.style, { left: (l + dx) * 100 + "%", top: (tp + dy) * 100 + "%", width: (r - l) * 100 + "%", height: (b - tp) * 100 + "%" });
   return d;
 }
@@ -187,9 +197,15 @@ function line(points, cls) { const p = document.createElementNS(NS, "polyline");
 function drawOverlay() {
   const kids = [];
   if (hover && hover !== selected && boxes[hover] && !drag && !drawMode) kids.push(boxEl(hover, "hover"));
-  if (selected && boxes[selected]) kids.push(drag?.moved ? boxEl(selected, "drag", drag.dx, drag.dy) : boxEl(selected, "sel"));
+  if (selected && rectOf(selected)) { const d = drag?.moved ? boxEl(selected, "drag", drag.dx, drag.dy) : boxEl(selected, "sel"); d.append(mk("span", "hltag", selected)); kids.push(d); }
+  if (tgt) {
+    const ap = tgt.kind === "sound" ? captionLayerFor(tgt.id) : tgt.kind === "word" ? captionLayerFor(tgt.sound) : tgt.kind === "cue" ? tgt.layer : null;
+    const label = tgt.kind === "word" ? "word: " + clean(tgt.word) : tgt.kind === "cue" ? "caption: " + tgt.text : tgt.kind === "sound" ? tgt.id : "whole scene";
+    if (tgt.kind === "scene") { const d = mk("div", "box scope"); d.append(mk("span", "hltag", label)); kids.push(d); }
+    else if (ap && rectOf(ap)) { const d = boxEl(ap, "sel"); d.append(mk("span", "hltag", label)); kids.push(d); }
+  }
   const lit = hl || playHl;
-  if (lit && boxes[lit]) { const d = boxEl(lit, "hl"); d.append(mk("span", "hltag", lit)); kids.push(d); }
+  if (lit && rectOf(lit)) { const d = boxEl(lit, "hl"); d.append(mk("span", "hltag", lit)); kids.push(d); }
   const dot = (n, cls) => { const d = mk("div", "pin " + cls); d.style.left = n.x * 100 + "%"; d.style.top = n.y * 100 + "%"; d.title = n.text || ""; return d; };
   for (const n of notes) if (n.x !== undefined && near(n) && n.kind !== "prop") kids.push(dot(n, n.stale ? "stale" : ""));
   if (pin && selected) kids.push(dot(pin, ""));
@@ -365,22 +381,15 @@ function renderPop() {
       kids = [top, q, noteForm(() => ({ layer: tgt.layer, word: tgt.text }), "Comment on this caption…", () => {})];
     }
   } else if (L) {
-    dock = !boxes[L.id];
+    dock = !rectOf(L.id);
     const top = mk("div", "top"); top.append(mk("b", "", L.id), mk("span", "", L.type), closeBtn(() => select(null)));
     kids = [top, controlsBlock(L), noteForm(() => ({ layer: L.id, ...(pin ? { x: pin.x, y: pin.y } : {}) }), pin ? "Note at this point…" : "Add a note…", () => { pin = null; })];
     if (dock) kids.splice(1, 0, mk("div", "hintline", "Not drawn as a box on the frame."));
   }
-  if (!kids) { pop.style.display = "none"; return; }
+  if (!kids) { pop.replaceChildren(mk("div", "hintline", "Click a layer on the frame, or a lane, word or caption in the strip, to edit it and leave a note. What it applies to is outlined on the video.")); return; }
   pop.replaceChildren(...kids); if (perr) pop.append(mk("div", "perr", perr));
-  pop.dataset.dock = dock ? "1" : ""; pop.style.display = "block"; place();
 }
-function place() {
-  const pop = $("pop"); if (pop.style.display === "none") return;
-  const s = $("stage"), W = s.clientWidth, H = s.clientHeight, ph = pop.offsetHeight, pw = pop.offsetWidth;
-  if (pop.dataset.dock || !selected || !boxes[selected]) { pop.style.left = Math.max(4, (W - pw) / 2) + "px"; pop.style.top = Math.max(4, H - ph - 8) + "px"; return; }
-  const [l, tp, , b] = boxes[selected]; let y = b * H + 8; if (y + ph > H) y = Math.max(4, tp * H - ph - 8); if (y + ph > H) y = Math.max(4, H - ph - 4);
-  pop.style.left = Math.max(4, Math.min(l * W, W - pw - 4)) + "px"; pop.style.top = y + "px";
-}
+function place() { /* the panel lives in the right sidebar now, so there is nothing to position */ }
 
 function select(id) { if (id !== selected) { perr = ""; pin = null; } selected = id; tgt = null; renderAll(); }
 function selectTarget(x) { selected = null; pin = null; perr = ""; tgt = x; renderAll(); }
@@ -414,7 +423,7 @@ function setHl() {
   const id = ctrl && lastEl ? lastEl.closest?.("[data-hl]")?.dataset.hl || null : null;
   if (id === hl) return;
   hl = id; drawOverlay();
-  if (id && !boxes[id]) say(id + " is not drawn at " + fmt(t) + " (move the playhead to where it is on screen)."); else if (!id) say("");
+  if (id && !rectOf(id)) say(id + " is not drawn at " + fmt(t) + " (move the playhead to where it is on screen)."); else if (!id) say("");
 }
 $("strip").addEventListener("mouseover", e => { lastEl = e.target; ctrl = e.ctrlKey; setHl(); });
 $("strip").addEventListener("mousemove", e => { lastEl = e.target; if (e.ctrlKey !== ctrl) { ctrl = e.ctrlKey; document.body.classList.toggle("ctrl", ctrl); } setHl(); });
@@ -448,7 +457,7 @@ stage.addEventListener("pointermove", e => {
     if (L.parent || !cx?.editable || !cy?.editable) { say(L.parent ? "Layers inside a group are moved from their notes." : "This layer's position is animated or fixed: leave a note instead."); drag = null; return; }
     drag.moved = true; pin = null;
   }
-  drag.dx = dx / drag.r.width; drag.dy = dy / drag.r.height; drawOverlay(); $("pop").style.display = "none";
+  drag.dx = dx / drag.r.width; drag.dy = dy / drag.r.height; drawOverlay();
 });
 stage.addEventListener("pointerup", async () => {
   if (cur) { cur = null; if (ink.length > MAXS) ink.shift(); renderAll(); return; }
