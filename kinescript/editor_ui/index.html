@@ -17,7 +17,7 @@
   .block > h2 { margin:0 0 10px; font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--dim); font-weight:600;
                 display:flex; justify-content:space-between; align-items:center; }
   #b-player { grid-area:player; } #b-timeline { grid-area:timeline; } #b-layers { grid-area:layers; } #b-notes { grid-area:notes; }
-  #stage { position:relative; background:#000; cursor:crosshair; width:100%; }
+  #stage { position:relative; background:#000; cursor:crosshair; width:100%; margin:0 auto; }
   #stage img, #stage video { display:block; width:100%; height:100%; }
   #stage video { position:absolute; inset:0; display:none; }
   #pins { position:absolute; inset:0; pointer-events:none; }
@@ -199,7 +199,9 @@ document.addEventListener("keydown", e => {
     $("title").textContent = `${info.name} · ${info.w}×${info.h} · ${info.duration} s`;
     $("scrub").max = info.duration;
     $("stage").style.aspectRatio = info.w + " / " + info.h;
-    await loadNotes(); show(0);
+    $("stage").style.maxWidth = `calc((100vh - 300px) * ${info.w / info.h})`;
+    const start = parseFloat(new URLSearchParams(location.search).get("t"));
+    await loadNotes(); show(Number.isFinite(start) ? start : 0);
   } catch (e) { $("title").textContent = "Could not load the scene: " + e.message; }
 })();
 </script>
