@@ -61,7 +61,11 @@
   .perr { color:var(--err); font-size:11px; margin-top:4px; }
   #tools { display:flex; gap:8px; align-items:center; width:100%; }
   #tl { display:grid; grid-template-columns: 112px minmax(0, 1fr) 60px; align-items:center; column-gap:6px; row-gap:3px; width:100%; }
-  #strip { width:100%; display:grid; grid-template-columns: 112px minmax(0, 1fr) 60px; align-items:center; column-gap:6px; row-gap:3px; max-height:var(--strip-h, 30vh); overflow-y:auto; overflow-x:hidden; }
+  #strip { width:100%; display:grid; grid-template-columns: 112px var(--tw, minmax(0, 1fr)) 60px; align-items:center; column-gap:6px; row-gap:3px; max-height:var(--strip-h, 30vh); overflow-y:auto; overflow-x:auto; }
+  #strip { scrollbar-color:#3a4252 var(--bg); scrollbar-width:thin; }
+  #strip .lab { position:sticky; left:0; z-index:3; background:var(--bg); }
+  .tick { position:absolute; top:0; bottom:0; border-left:1px solid var(--line); font-size:9px; color:var(--dim); padding-left:2px; line-height:12px; pointer-events:none; white-space:nowrap; }
+  .zoom { margin-left:auto; display:flex; gap:4px; align-items:center; color:var(--dim); font-size:11px; } .zoom button { padding:2px 8px; }
   #tl input[type=range] { grid-column:2; width:100%; margin:0; } #time { font-variant-numeric:tabular-nums; text-align:right; color:var(--dim); }
   .lab { color:var(--dim); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:flex; align-items:center; gap:4px; justify-content:flex-end; min-width:0; }
   .lab.layer { justify-content:flex-start; cursor:pointer; color:var(--fg); } .lab.layer:hover { color:var(--accent); } .lab.layer.sel { color:var(--accent); font-weight:600; }
@@ -105,6 +109,7 @@
     <div id="tools">
       <button id="prev" title="Previous frame (←)">◀</button><button id="play" title="Play the rendered video (space)">Play</button><button id="next" title="Next frame (→)">▶</button>
       <button id="drawBtn" title="Draw on the frame (D)">✎ Draw</button>
+      <span class="zoom" title="Ctrl+wheel zooms the strip, Shift+wheel or a sideways swipe moves it">timeline <button id="zout" title="Zoom out (-)">−</button><span id="zlvl">1×</span><button id="zin" title="Zoom in (+)">+</button><button id="zfit" title="Fit the whole scene (0)">Fit</button></span>
     </div>
     <div id="tl"><span></span><input id="scrub" type="range" min="0" max="1" step="0.001" value="0" aria-label="Time"><span id="time">0.00 s</span></div>
     <div id="filters" role="group" aria-label="Show or hide groups"></div>
@@ -166,7 +171,7 @@ function show(time) {
   img.onerror = () => { if (mine === seq) say("Could not draw this frame; the scene may be mid-edit."); };
   img.src = "/frame?t=" + t.toFixed(3) + "&scale=" + (info.w > 960 ? 0.5 : 1) + hideQ() + "&_=" + Date.now();
   api("/hit?x=0&y=0&t=" + t + hideQ()).then(h => { if (mine === seq) { boxes = h.boxes; pos = h.pos; renderAll(); } }).catch(() => {});
-  renderAll();
+  renderAll(); followHead();
 }
 
 function topAt(x, y) { let f = null; for (const [id, [l, tp, r, b]] of Object.entries(boxes)) if (x >= l && x <= r && y >= tp && y <= b) f = id; return f; }
@@ -255,6 +260,8 @@ function chip(tr, a, b, text, color, sel, has, onclick, title) {
 function renderStrip() {
   const rows = [], ruler = lane("notes", tr => {
     tr.classList.add("ruler");
+    const pps = trackW() / info.duration, step = [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60].find(x => x * pps >= 64) || 60;
+    for (let i = 0; i * step <= info.duration + 1e-9; i++) { const k = mk("div", "tick", +(i * step).toFixed(2) + "s"); k.style.left = pct(i * step) + "%"; tr.append(k); }
     for (const n of notes) { if (off.has(noteGroup(n))) continue; const m = mk("div", "nmark" + (n.kind === "prop" ? " prop" : "")); m.style.left = pct(n.t) + "%"; m.title = targetLabel(n) + ": " + n.text; m.onclick = e => { e.stopPropagation(); show(n.t); }; tr.append(m); }
   });
   if (hid.size) { const b = mk("button", "labbtn", "show all (" + hid.size + ")"); b.onclick = () => { hid.clear(); saveHid(); show(t); }; ruler[0].replaceChildren(b); }
@@ -290,7 +297,7 @@ function renderStrip() {
     L.cues.forEach(([a, b, text], i) => chip(tr, a, b, text, "var(--cap)", tgt?.kind === "cue" && tgt.layer === L.id && tgt.idx === i,
       openCount(x => x.layer === L.id && x.word === text), () => { show(a); selectTarget({ kind: "cue", layer: L.id, idx: i, text, a, b }); }, fmt(a) + " " + text));
   }, L.id));
-  $("strip").replaceChildren(...rows.flat());
+  const sl = $("strip").scrollLeft; $("strip").replaceChildren(...rows.flat()); $("strip").scrollLeft = sl;
   $("strip").querySelectorAll(".track").forEach(tr => { const h = mk("div", "head"); h.style.left = pct(t) + "%"; tr.append(h); });
 }
 
@@ -378,6 +385,30 @@ function place() {
 function select(id) { if (id !== selected) { perr = ""; pin = null; } selected = id; tgt = null; renderAll(); }
 function selectTarget(x) { selected = null; pin = null; perr = ""; tgt = x; renderAll(); }
 function renderAll() { drawOverlay(); renderFilters(); renderRail(); renderStrip(); renderPop(); }
+/* zoom and pan the time strip: Ctrl+wheel zooms, Shift+wheel or a sideways swipe pans, +/- keys, Fit */
+let zoom = 1;
+const LABW = 118;
+const trackW = () => Math.max(120, $("strip").clientWidth - 112 - 60 - 12) * zoom;
+function applyZoom(z, ta, ox) {
+  const s = $("strip"), keepT = ta ?? t, keepX = ox ?? (s.clientWidth + LABW) / 2;
+  zoom = Math.max(1, Math.min(40, z));
+  document.documentElement.style.setProperty("--tw", zoom === 1 ? "minmax(0, 1fr)" : trackW() + "px");
+  s.scrollLeft = zoom === 1 ? 0 : LABW + keepT / info.duration * trackW() - keepX;
+  $("zlvl").textContent = +zoom.toFixed(1) + "×"; renderStrip();
+}
+function followHead() {
+  if (zoom === 1) return;
+  const s = $("strip"), x = LABW + t / info.duration * trackW();
+  if (x < s.scrollLeft + LABW + 8 || x > s.scrollLeft + s.clientWidth - 70) s.scrollLeft = x - s.clientWidth / 2;
+}
+$("strip").addEventListener("wheel", e => {
+  const s = $("strip");
+  if (e.ctrlKey) {
+    e.preventDefault(); const ox = e.clientX - s.getBoundingClientRect().left;
+    applyZoom(zoom * (e.deltaY < 0 ? 1.25 : 0.8), Math.max(0, Math.min(info.duration, (s.scrollLeft + ox - LABW) / trackW() * info.duration)), ox);
+  } else if (!e.deltaX && zoom > 1 && (e.shiftKey || s.scrollHeight <= s.clientHeight + 1)) { e.preventDefault(); s.scrollLeft += e.deltaY; }
+}, { passive: false });
+$("zin").onclick = () => applyZoom(zoom * 1.5); $("zout").onclick = () => applyZoom(zoom / 1.5); $("zfit").onclick = () => applyZoom(1);
 /* hold Ctrl and hover a lane, word or caption to outline what it is on the frame */
 function setHl() {
   const id = ctrl && lastEl ? lastEl.closest?.("[data-hl]")?.dataset.hl || null : null;
@@ -458,6 +489,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "ArrowLeft") $("prev").click(); else if (e.key === "ArrowRight") $("next").click();
   else if (e.key === " ") { e.preventDefault(); $("play").click(); }
   else if (e.key === "d" || e.key === "D") $("drawBtn").click();
+  else if (e.key === "+" || e.key === "=") $("zin").click(); else if (e.key === "-") $("zout").click(); else if (e.key === "0") $("zfit").click();
   else if (e.key === "Escape") { stopSound(); ink = []; cur = null; drawMode = false; selected = null; tgt = null; syncDraw(); }
 });
 
@@ -466,6 +498,7 @@ function fit() {
   const strip = Math.min(lanes * 25 + 4, window.innerHeight * 0.3); document.documentElement.style.setProperty("--strip-h", Math.round(strip) + "px");
   const availH = main.clientHeight - strip - 140, availW = main.clientWidth - 32, ar = info.w / info.h;
   $("wrap").style.width = Math.max(200, Math.min(availW, availH * ar)) + "px"; place();
+  if (zoom > 1) document.documentElement.style.setProperty("--tw", trackW() + "px");
 }
 window.addEventListener("resize", () => info && fit());
 
