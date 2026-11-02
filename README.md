@@ -45,7 +45,7 @@ rendered from.
 - **Finishing.** Per-layer blur, shadow, blend modes and colour adjustments; a scene grade with vignette and film
   grain; optional motion blur.
 - **Components.** `lowerThird`, `titleCard`, `callout`, `focus` (dim everything but a region), `progress`,
-  `kinetic`, plus your own with `{{param}}` placeholders.
+  `kinetic`, the charts `barChart`, `lineChart` and `pieChart`, plus your own with `{{param}}` placeholders.
 - **Outputs.** H.264 `.mp4`, ProRes 4444 `.mov` and VP9 `.webm` with alpha for compositing, `.gif`, PNG sequences.
 
 ## 2D
@@ -359,6 +359,9 @@ More scenes in [`examples/`](https://github.com/drknowhow/kinescript/tree/main/e
 - [`transitions.json`](https://github.com/drknowhow/kinescript/blob/main/examples/transitions.json): six two-clip
   sequences cutting at once, by iris, push, whip, glitch and two luma wipes, one through a radial map and one
   through a map dark at both ends, 5 s.
+- [`charts.json`](https://github.com/drknowhow/kinescript/blob/main/examples/charts.json): a bar chart whose bars
+  grow in turn under their counting values, a line that draws on through five points, and a doughnut whose slices
+  sweep round, 5 s.
 
 `edit.json`, `import.json`, `textures.json`, `screens.json`, `edges.json`, `product.json`, `voiceover.json`,
 `narrated.json`, `flipbook.json`, `vector.json` and `svg.json` read sample media: run `python examples/make_media.py` first to
