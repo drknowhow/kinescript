@@ -176,7 +176,11 @@ function show(time) {
   renderAll(); followHead();
 }
 
-function topAt(x, y) { let f = null; for (const [id, [l, tp, r, b]] of Object.entries(boxes)) if (x >= l && x <= r && y >= tp && y <= b) f = id; return f; }
+function topAt(x, y) {
+  let f = null; for (const [id, [l, tp, r, b]] of Object.entries(boxes)) if (x >= l && x <= r && y >= tp && y <= b) f = id;
+  for (const L of info.layers) { const r = !boxes[L.id] && capBand(L.id); if (r && x >= r[0] && x <= r[2] && y >= r[1] && y <= r[3]) f = L.id; }  // captions sit on top and have no box
+  return f;
+}
 function pt(e) { const r = $("stage").getBoundingClientRect(); return { x: Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)), y: Math.max(0, Math.min(1, (e.clientY - r.top) / r.height)), r }; }
 /* captions have no box of their own: outline the band they are drawn in */
 function capBand(id) {
@@ -196,7 +200,7 @@ function line(points, cls) { const p = document.createElementNS(NS, "polyline");
 
 function drawOverlay() {
   const kids = [];
-  if (hover && hover !== selected && boxes[hover] && !drag && !drawMode) kids.push(boxEl(hover, "hover"));
+  if (hover && hover !== selected && rectOf(hover) && !drag && !drawMode) kids.push(boxEl(hover, "hover"));
   if (selected && rectOf(selected)) { const d = drag?.moved ? boxEl(selected, "drag", drag.dx, drag.dy) : boxEl(selected, "sel"); d.append(mk("span", "hltag", selected)); kids.push(d); }
   if (tgt) {
     const ap = tgt.kind === "sound" ? captionLayerFor(tgt.id) : tgt.kind === "word" ? captionLayerFor(tgt.sound) : tgt.kind === "cue" ? tgt.layer : null;
@@ -441,6 +445,7 @@ stage.addEventListener("pointerdown", e => {
   if (drawMode) { cur = [[+p.x.toFixed(4), +p.y.toFixed(4)]]; ink.push(cur); selected = null; tgt = null; pin = null; stage.setPointerCapture(e.pointerId); renderAll(); return; }
   const id = topAt(p.x, p.y);
   if (!id) { select(null); return; }
+  if (layerOf(id).type === "captions") { select(id); return; }  // captions have no x to drag; pick the word from the strip
   if (id !== selected) { tgt = null; selected = id; perr = ""; }
   pin = { x: p.x, y: p.y };
   drag = { id, cx: e.clientX, cy: e.clientY, r: p.r, moved: false, dx: 0, dy: 0 };
