@@ -66,3 +66,41 @@ def test_mcp_lists_and_resolves_and_marks_the_frame(s):
 def test_mcp_rejects_unknown_note(s):
     with pytest.raises(ValueError, match="no note"):
         mcp.call("kine_feedback", {"scene": s, "action": "get", "id": "n5"})
+
+
+def test_note_can_target_a_sound_word_and_carry_strokes(s):
+    n = fb.add(s, 1, "mispronounced", sound="vo", word="scene")
+    d = fb.add(s, 1.2, "move this", strokes=[[[0.1, 0.1], [0.4, 0.3]]], layer="title")
+    assert (n["sound"], n["word"]) == ("vo", "scene") and d["kind"] == "draw" and d["strokes"][0][1] == [0.4, 0.3]
+
+
+@pytest.mark.parametrize("strokes", [[], [[]], [[[0.1, 2.0]]], [[[0.1]]], "x", [[[0.1, 0.1]]] * 21])
+def test_bad_strokes_are_refused(s, strokes):
+    with pytest.raises(fb.FeedbackError):
+        fb.add(s, 1, "x", strokes=strokes)
+
+
+def test_mcp_still_draws_the_strokes(s):
+    n = fb.add(s, 1, "circle it", strokes=[[[0.2, 0.2], [0.8, 0.2], [0.8, 0.8]]])
+    out = mcp.call("kine_feedback", {"scene": s, "action": "get", "id": n["id"], "still": True})
+    assert out[1]["type"] == "image"
+    import base64
+
+    import skia
+    img = skia.Image.MakeFromEncoded(skia.Data.MakeWithCopy(base64.b64decode(out[1]["data"])))
+    px = img.toarray()  # BGRA: the yellow stroke has blue near 0 and red near 255
+    h, w = px.shape[:2]
+    assert px[int(h * 0.2), int(w * 0.5), 2] > 240 and px[int(h * 0.2), int(w * 0.5), 0] < 20
+    assert px[int(h * 0.9), int(w * 0.1), 2] < 100
+
+
+def test_mcp_still_rings_the_point(s):
+    n = fb.add(s, 1, "here", 0.5, 0.5)
+    out = mcp.call("kine_feedback", {"scene": s, "action": "get", "id": n["id"], "still": True})
+    import base64
+
+    import skia
+    px = skia.Image.MakeFromEncoded(skia.Data.MakeWithCopy(base64.b64decode(out[1]["data"]))).toarray()
+    h, w = px.shape[:2]
+    ring = int(max(w, h) * 0.025)
+    assert px[h // 2, w // 2 + ring, 2] > 240 and px[h // 2, w // 2 + ring, 0] < 20

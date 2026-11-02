@@ -69,22 +69,50 @@ def marked_still(sc, note: dict, scale: float = 0.5) -> str:
     from .output import still
     out = str(Path(tempfile.gettempdir()) / f"kine_note_{os.getpid()}_{note['id']}.png")
     still(sc, note["t"], out, scale)
-    if "x" in note:
-        img = skia.Image.open(out)
+    if "x" in note or note.get("strokes"):
+        img = skia.Image.MakeFromEncoded(skia.Data.MakeWithCopy(Path(out).read_bytes()))
         surf = skia.Surface(img.width(), img.height())
         with surf as canvas:
             canvas.drawImage(img, 0, 0)
-            cx, cy = note["x"] * img.width(), note["y"] * img.height()
-            r = max(img.width(), img.height()) * 0.025
+            w, h = img.width(), img.height()
             for width, color in ((6, 0xFF000000), (3, 0xFFFFD400)):
-                paint = skia.Paint(AntiAlias=True, Style=skia.Paint.kStroke_Style, StrokeWidth=width, Color=color)
-                canvas.drawCircle(cx, cy, r, paint)
+                paint = skia.Paint(AntiAlias=True, Style=skia.Paint.kStroke_Style, StrokeWidth=width, Color=color,
+                                   StrokeCap=skia.Paint.kRound_Cap, StrokeJoin=skia.Paint.kRound_Join)
+                if "x" in note:
+                    canvas.drawCircle(note["x"] * w, note["y"] * h, max(w, h) * 0.025, paint)
+                for line in note.get("strokes", []):
+                    path = skia.Path()
+                    path.moveTo(line[0][0] * w, line[0][1] * h)
+                    for px, py in line[1:]:
+                        path.lineTo(px * w, py * h)
+                    if len(line) == 1:
+                        path.lineTo(line[0][0] * w + 0.1, line[0][1] * h)
+                    canvas.drawPath(path, paint)
         surf.makeImageSnapshot().save(out, skia.kPNG)
     return out
 
 
+MAX_STROKES, MAX_POINTS = 20, 500
+
+
+def _strokes(v) -> list:
+    if not isinstance(v, list) or not v or len(v) > MAX_STROKES:
+        raise FeedbackError(f"strokes must be 1 to {MAX_STROKES} lines")
+    out = []
+    for line in v:
+        if not isinstance(line, list) or not 1 <= len(line) <= MAX_POINTS:
+            raise FeedbackError(f"a stroke has 1 to {MAX_POINTS} points")
+        out.append([[_frac("stroke x", p[0]), _frac("stroke y", p[1])] if isinstance(p, list) and len(p) == 2
+                    else _frac("stroke", None) for p in line])
+    return out
+
+
 def add(scene_path, t: float, text: str, x: float | None = None, y: float | None = None,
-        layer: str | None = None, kind: str = "pin", extra: dict | None = None) -> dict:
+        layer: str | None = None, kind: str = "pin", extra: dict | None = None,
+        sound: str | None = None, word: str | None = None, strokes=None) -> dict:
+    """A note on a time, optionally at a point, a layer, a sound (and one of its words) or drawn strokes."""
+    if strokes is not None:
+        kind = "draw"
     if kind not in KINDS:
         raise FeedbackError(f"kind must be one of {', '.join(KINDS)}")
     if isinstance(t, bool) or not isinstance(t, (int, float)) or t < 0:
@@ -102,6 +130,12 @@ def add(scene_path, t: float, text: str, x: float | None = None, y: float | None
         note["x"], note["y"] = _frac("x", x), _frac("y", y)
     if layer:
         note["layer"] = layer
+    if sound:
+        note["sound"] = str(sound)
+    if word:
+        note["word"] = str(word)
+    if strokes is not None:
+        note["strokes"] = _strokes(strokes)
     if extra:
         note.update({k: v for k, v in extra.items() if k not in note})
     data["version"] = VERSION

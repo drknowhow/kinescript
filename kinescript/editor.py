@@ -54,8 +54,10 @@ COMMON = ("at", "dur")
 CONTROLS = {"text": ("text", "x", "y", "size", "fill") + COMMON, "counter": ("x", "y", "size", "fill") + COMMON,
             "circle": ("x", "y", "r", "fill") + COMMON, "rect": ("x", "y", "w", "h", "fill") + COMMON,
             "image": ("x", "y", "w", "h") + COMMON, "video": ("x", "y", "w", "h") + COMMON,
-            "path": ("stroke",) + COMMON, "line": ("stroke",) + COMMON, "arrow": ("stroke",) + COMMON}
+            "path": ("stroke",) + COMMON, "line": ("stroke",) + COMMON, "arrow": ("stroke",) + COMMON,
+            "captions": ("y", "size", "fill", "active") + COMMON}
 EDITABLE = {k for keys in CONTROLS.values() for k in keys}
+SOUND_CONTROLS = ("text", "speaker", "at", "volume")
 
 
 def _walk(layers):
@@ -69,26 +71,49 @@ def _raw_layers(doc) -> dict:
     return {r["id"]: r for r in _walk(doc.get("layers")) if isinstance(r.get("id"), str)}
 
 
+def _raw_sounds(doc) -> list:
+    audio = doc.get("audio")
+    return [r for r in audio if isinstance(r, dict)] if isinstance(audio, list) else []
+
+
+def _controls(raw: dict, keys) -> list:
+    return [{"key": k, "value": raw.get(k),
+             "editable": k not in raw or (isinstance(raw[k], (int, float, str)) and not isinstance(raw[k], bool))}
+            for k in keys]
+
+
 def scene_info(path: Path) -> dict:
     from .schema import loads
     from .verify import probe
     with _draw_lock:
         info = probe(str(path))
     c = info["canvas"]
-    raws = _raw_layers(loads(path.read_text(encoding="utf-8"))[0])
+    doc = loads(path.read_text(encoding="utf-8"))[0]
+    raws = _raw_layers(doc)
+    raw_sounds = _raw_sounds(doc)
     layers = []
     for row in info["layers"]:
         raw = raws.get(row["id"], {})
         keys = CONTROLS.get(row["type"], ("x", "y") + COMMON)
+        cues = [[c[0] + row["in"], c[1] + row["in"], str(c[2])] for c in raw.get("cues") or []
+                if isinstance(c, list) and len(c) == 3] if row["type"] == "captions" else []
         layers.append({"id": row["id"], "type": row["type"], "in": row["in"], "out": row["out"], "parent": row["parent"],
-                       "controls": [{"key": k, "value": raw.get(k), "editable": isinstance(raw.get(k), (int, float, str))
-                                     and not isinstance(raw.get(k), bool) or k not in raw} for k in keys]})
+                       "voice": raw.get("voice") if row["type"] == "captions" else None, "cues": cues,
+                       "controls": _controls(raw, keys)})
+    sounds = []
+    for i, row in enumerate(info["audio"]):
+        raw = raw_sounds[i] if i < len(raw_sounds) else {}
+        words = [[w[0], w[1], w[2]] for w in row.get("words") or []]
+        sounds.append({"id": row["id"], "role": row["role"], "in": row["in"], "out": row["out"], "src": row.get("src"),
+                       "words": words, "speaks": "text" in raw,
+                       "controls": _controls(raw, SOUND_CONTROLS if "text" in raw else ("at", "volume"))})
     video = path.with_suffix(".mp4")
     return {"name": path.name, "w": c["w"], "h": c["h"], "fps": c["fps"], "duration": c["duration"],
-            "hash": feedback.scene_hash(path), "video": video.name if video.is_file() else None, "layers": layers}
+            "hash": feedback.scene_hash(path), "video": video.name if video.is_file() else None, "layers": layers,
+            "sounds": sounds}
 
 
-def set_props(path: Path, layer: str, changes: dict, base_hash: str, t: float = 0) -> dict:
+def set_props(path: Path, layer: str | None, changes: dict, base_hash: str, t: float = 0, sound: str | None = None) -> dict:
     """Write properties of one layer into the scene file in one save, and log them as one note for the agent.
 
     Refuses when the file changed since the page loaded it, holds comments or other non-strict JSON
@@ -96,8 +121,9 @@ def set_props(path: Path, layer: str, changes: dict, base_hash: str, t: float = 
     from .scene import Scene, SceneError
     if not isinstance(changes, dict) or not changes:
         raise BadRequest("nothing to change")
+    allowed = set(SOUND_CONTROLS) if sound else EDITABLE
     for key, value in changes.items():
-        if key not in EDITABLE:
+        if key not in allowed:
             raise BadRequest(f"{key} cannot be edited here")
         if isinstance(value, bool) or not isinstance(value, (int, float, str)):
             raise BadRequest("value must be a number or text")
@@ -107,9 +133,16 @@ def set_props(path: Path, layer: str, changes: dict, base_hash: str, t: float = 
         doc = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         raise BadRequest("this scene has comments or loose JSON, so the editor will not rewrite it; leave a note instead") from None
-    raw = _raw_layers(doc).get(layer)
-    if raw is None:
-        raise BadRequest(f"no layer {layer}")
+    if sound:
+        rows = _raw_sounds(doc)
+        by_id = {r.get("id") or f"audio{i + 1}": r for i, r in enumerate(rows)}
+        raw, layer = by_id.get(sound), sound
+        if raw is None:
+            raise BadRequest(f"no sound {sound}")
+    else:
+        raw = _raw_layers(doc).get(layer)
+        if raw is None:
+            raise BadRequest(f"no layer {layer}")
     before = {}
     for key, value in changes.items():
         if key in raw and not isinstance(raw[key], (int, float, str)):
@@ -129,7 +162,9 @@ def set_props(path: Path, layer: str, changes: dict, base_hash: str, t: float = 
         Path(tmp).unlink(missing_ok=True)
         raise
     text = ", ".join(f"{layer}.{k}: {before[k]!r} -> {v!r}" for k, v in changes.items())
-    feedback.add(path, t, text, layer=layer, kind="prop",
+    if sound and "text" in changes:
+        text += " (run kine_voice to speak it again)"
+    feedback.add(path, t, text, layer=None if sound else layer, sound=sound, kind="prop",
                  extra={"change": {k: {"from": before[k], "to": v} for k, v in changes.items()}})
     return scene_info(path)
 
@@ -265,10 +300,12 @@ def make_handler(path: Path):
             action = "prop" if urlparse(self.path).path == "/prop" else body.get("action", "add")
             if action == "prop":
                 changes = body.get("changes") or {body.get("key"): body.get("value")}
-                return self._json(set_props(path, body.get("layer"), changes, body.get("hash"), body.get("t") or 0))
+                return self._json(set_props(path, body.get("layer"), changes, body.get("hash"), body.get("t") or 0,
+                                            body.get("sound")))
             if action == "add":
                 note = feedback.add(path, body.get("t"), body.get("text"), body.get("x"), body.get("y"),
-                                    body.get("layer"), body.get("kind", "pin"))
+                                    body.get("layer"), body.get("kind", "pin"), None, body.get("sound"),
+                                    body.get("word"), body.get("strokes"))
                 return self._json({"note": note}, 201)
             if action == "resolve":
                 return self._json({"note": feedback.resolve(path, body.get("id"), body.get("text"), by="user")})

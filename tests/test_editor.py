@@ -183,3 +183,61 @@ def test_hit_returns_layer_positions_in_pixels(srv):
     port, _ = srv
     pos = json.loads(req(port, "GET", "/hit?x=0&y=0&t=1")[1])["pos"]
     assert pos["title"] == [160.0, 90.0]
+
+
+@pytest.fixture
+def vsrv(tmp_path, monkeypatch):
+    import wave
+    monkeypatch.setenv("KINE_BACKEND", "cpu")
+    with wave.open(str(tmp_path / "vo.wav"), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(16000)
+        w.writeframes(b"\0\0" * 16000)
+    p = tmp_path / "v.json"
+    p.write_text(json.dumps({**SCENE, "audio": [{"id": "vo", "role": "voice", "text": "Hi there", "src": "vo.wav"}],
+                             "layers": SCENE["layers"] + [{"id": "cc", "type": "captions", "cues": [[0, 1, "Hello"]]}]}),
+                 encoding="utf-8")
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), editor.make_handler(p))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    yield httpd.server_port, p
+    httpd.shutdown()
+    httpd.server_close()
+
+
+def test_scene_lists_sounds_and_caption_cues(vsrv):
+    port, _ = vsrv
+    info = json.loads(req(port, "GET", "/scene")[1])
+    vo = info["sounds"][0]
+    assert (vo["id"], vo["role"], vo["speaks"]) == ("vo", "voice", True)
+    assert "text" in [c["key"] for c in vo["controls"]]
+    cc = next(l for l in info["layers"] if l["id"] == "cc")
+    assert cc["cues"] == [[0.0, 1.0, "Hello"]]
+
+
+def test_sound_text_edit_is_written_and_flagged_for_kine_voice(vsrv):
+    port, scene = vsrv
+    h = json.loads(req(port, "GET", "/scene")[1])["hash"]
+    status, _, _ = req(port, "POST", "/prop", {"sound": "vo", "changes": {"text": "Hello world"}, "hash": h, "t": 0.5})
+    assert status == 200
+    assert json.loads(scene.read_text(encoding="utf-8"))["audio"][0]["text"] == "Hello world"
+    note = feedback.listing(scene)[0]
+    assert note["sound"] == "vo" and "kine_voice" in note["text"] and "layer" not in note
+
+
+def test_sound_edit_refuses_layer_only_keys(vsrv):
+    port, scene = vsrv
+    h = json.loads(req(port, "GET", "/scene")[1])["hash"]
+    status, out, _ = req(port, "POST", "/prop", {"sound": "vo", "changes": {"size": 5}, "hash": h})
+    assert status == 400 and "cannot be edited" in json.loads(out)["error"]
+
+
+def test_notes_post_accepts_word_cue_and_strokes(vsrv):
+    port, scene = vsrv
+    req(port, "POST", "/notes", {"t": 0.5, "text": "too fast", "sound": "vo", "word": "there", "layer": "cc"})
+    req(port, "POST", "/notes", {"t": 0.5, "text": "typo", "layer": "cc", "word": "Hello"})
+    req(port, "POST", "/notes", {"t": 1, "text": "this bit", "strokes": [[[0.1, 0.1], [0.5, 0.5]]]})
+    status, _, _ = req(port, "POST", "/notes", {"t": 1, "text": "bad", "strokes": [[[3, 3]]]})
+    notes = {n["text"]: n for n in feedback.listing(scene)}
+    assert status == 400 and notes["too fast"]["word"] == "there" and notes["typo"]["layer"] == "cc"
+    assert notes["this bit"]["kind"] == "draw"

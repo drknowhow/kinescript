@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kinescript editor</title>
 <style>
-  :root { --bg:#0e1117; --card:#171b24; --line:#2a303c; --fg:#e8eaf0; --dim:#9299a8; --accent:#ffd400; --live:#6ee7a8; --err:#ff8a80; }
+  :root { --bg:#0e1117; --card:#171b24; --line:#2a303c; --fg:#e8eaf0; --dim:#9299a8; --accent:#ffd400; --live:#6ee7a8; --err:#ff8a80; --voice:#7aa2ff; --music:#c58cff; --sfx:#ff9f6e; --cap:#6ee7a8; }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--fg); font:13px/1.35 system-ui, sans-serif; height:100vh; display:flex; flex-direction:column; }
   header { padding:8px 14px; color:var(--dim); display:flex; gap:14px; align-items:baseline; border-bottom:1px solid var(--line); }
@@ -13,12 +13,12 @@
   #app { flex:1; min-height:0; display:grid; grid-template-columns: 220px minmax(0, 1fr); }
   @media (max-width: 800px) { #app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; } #rail { max-height:34vh; order:2; border-right:0 !important; border-top:1px solid var(--line); } }
   #rail { border-right:1px solid var(--line); overflow:auto; padding:8px 0; }
-  #rail h2 { margin:10px 14px 4px; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--dim); font-weight:600; }
+  #rail h2 { margin:10px 14px 4px; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--dim); font-weight:600; display:flex; align-items:center; }
+  #rail h2 button { margin-left:auto; padding:0 6px; font-size:11px; }
   .row { display:flex; align-items:center; gap:8px; padding:4px 14px; cursor:pointer; }
   .row:hover { background:var(--card); } .row.sel { background:var(--card); box-shadow: inset 3px 0 var(--accent); }
   .dot { width:8px; height:8px; border-radius:50%; background:var(--line); flex:none; } .row.live .dot { background:var(--live); }
-  .row .id { font-weight:600; } .row .type { color:var(--dim); font-size:11px; }
-  .row.off .id { color:var(--dim); font-weight:400; }
+  .row .id { font-weight:600; } .row .type { color:var(--dim); font-size:11px; } .row.off .id { color:var(--dim); font-weight:400; }
   .count { margin-left:auto; background:var(--accent); color:#111; border-radius:999px; font-size:11px; padding:0 6px; font-weight:600; }
   .nrow { padding:4px 14px; display:flex; gap:6px; align-items:baseline; cursor:pointer; }
   .nrow:hover { background:var(--card); } .nrow .tm { color:var(--accent); font-variant-numeric:tabular-nums; flex:none; }
@@ -26,66 +26,83 @@
   .nrow.resolved .tx { text-decoration:line-through; color:var(--dim); } .nrow.prop .tx { font-family:ui-monospace, monospace; font-size:11px; color:var(--dim); }
   .nrow button { background:none; border:0; color:var(--dim); cursor:pointer; padding:0 2px; } .nrow button:hover { color:var(--accent); }
   .empty { color:var(--dim); padding:4px 14px; }
-  main { display:flex; flex-direction:column; min-width:0; min-height:0; padding:12px 16px; gap:8px; align-items:center; }
+  main { display:flex; flex-direction:column; min-width:0; min-height:0; padding:10px 16px; gap:6px; align-items:center; }
   #wrap { position:relative; width:100%; flex:none; }
   #stage { position:relative; background:#000; width:100%; touch-action:none; user-select:none; margin:0 auto; }
+  #stage.draw { cursor:crosshair; }
   #stage img, #stage video { display:block; width:100%; height:100%; pointer-events:none; }
   #stage video { position:absolute; inset:0; display:none; }
   #overlay { position:absolute; inset:0; pointer-events:none; overflow:hidden; }
+  #ink { position:absolute; inset:0; width:100%; height:100%; }
+  #ink polyline { fill:none; stroke:var(--accent); stroke-width:3; stroke-linecap:round; stroke-linejoin:round; vector-effect:non-scaling-stroke; }
+  #ink polyline.old { stroke:#fff; opacity:.85; }
   .box { position:absolute; pointer-events:none; }
-  .box.hover { border:1px dashed rgba(255,212,0,.7); }
-  .box.sel { border:2px solid var(--accent); background:rgba(255,212,0,.07); }
-  .box.drag { border:2px dashed var(--accent); }
+  .box.hover { border:1px dashed rgba(255,212,0,.7); } .box.sel { border:2px solid var(--accent); background:rgba(255,212,0,.07); } .box.drag { border:2px dashed var(--accent); }
   .pin { position:absolute; width:16px; height:16px; margin:-8px 0 0 -8px; border:2px solid var(--accent); border-radius:50%; background:rgba(0,0,0,.45); }
   .pin.stale { border-style:dashed; border-color:var(--dim); }
-  #pop { position:absolute; z-index:5; width:290px; background:var(--card); border:1px solid var(--accent); border-radius:8px; padding:8px; box-shadow:0 8px 24px rgba(0,0,0,.5); display:none; }
-  #pop .top { display:flex; align-items:center; gap:6px; margin-bottom:6px; }
-  #pop .top b { flex:1; } #pop .top span { color:var(--dim); font-size:11px; }
+  #pop { position:absolute; z-index:5; width:300px; background:var(--card); border:1px solid var(--accent); border-radius:8px; padding:8px; box-shadow:0 8px 24px rgba(0,0,0,.5); display:none; }
+  #pop .top { display:flex; align-items:center; gap:6px; margin-bottom:6px; } #pop .top b { flex:1; } #pop .top span { color:var(--dim); font-size:11px; }
+  #pop .quote { background:var(--bg); border-radius:4px; padding:4px 6px; margin-bottom:6px; color:var(--dim); max-height:60px; overflow:auto; } #pop .quote b { color:var(--fg); }
   .x { background:none; border:0; color:var(--dim); cursor:pointer; font-size:16px; line-height:1; padding:0 2px; } .x:hover { color:var(--fg); }
   .ctls { display:grid; grid-template-columns: repeat(3, 1fr); gap:6px; }
-  .ctl label { display:block; font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:.05em; }
-  .ctl.wide { grid-column: 1 / -1; }
+  .ctl label { display:block; font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:.05em; } .ctl.wide { grid-column: 1 / -1; }
   .ctl input[type=text], .ctl input[type=number], .nf { width:100%; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:3px 5px; font:inherit; }
   .ctl input[type=color] { width:100%; height:24px; padding:0; border:1px solid var(--line); border-radius:4px; background:var(--bg); }
   .ctl.ro .v { color:var(--dim); font-size:11px; padding:3px 0; }
+  .hintline { color:var(--dim); font-size:11px; margin-top:4px; }
   details summary { cursor:pointer; color:var(--dim); font-size:11px; margin:6px 0 4px; } details .ctls { margin-bottom:4px; }
   .noterow { display:flex; gap:6px; margin-top:6px; } .noterow button { flex:none; }
   button { background:var(--line); color:var(--fg); border:0; padding:4px 10px; border-radius:5px; cursor:pointer; font:inherit; } button:hover { background:#3a4252; }
-  button.primary { background:var(--accent); color:#111; font-weight:600; }
-  button:focus-visible, input:focus-visible, summary:focus-visible, .row:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+  button.primary { background:var(--accent); color:#111; font-weight:600; } button.on { background:var(--accent); color:#111; }
+  button:focus-visible, input:focus-visible, summary:focus-visible, .row:focus-visible, .chip:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
   .perr { color:var(--err); font-size:11px; margin-top:4px; }
   #tools { display:flex; gap:8px; align-items:center; width:100%; }
-  #tools input[type=range] { flex:1; min-width:0; } #time { font-variant-numeric:tabular-nums; min-width:64px; text-align:right; color:var(--dim); }
+  #tl { display:grid; grid-template-columns: 56px minmax(0, 1fr) 60px; align-items:center; column-gap:6px; row-gap:3px; width:100%; }
+  #tl input[type=range] { grid-column:2; width:100%; margin:0; } #time { font-variant-numeric:tabular-nums; text-align:right; color:var(--dim); }
+  .lab { color:var(--dim); font-size:10px; text-transform:uppercase; letter-spacing:.05em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; }
+  .track { position:relative; height:22px; background:var(--card); border-radius:4px; cursor:pointer; overflow:hidden; }
+  .track.ruler { height:12px; background:none; }
+  .bar { position:absolute; top:3px; bottom:3px; border-radius:3px; opacity:.35; }
+  .chip { position:absolute; top:2px; bottom:2px; border-radius:3px; border:0; padding:0 3px; font-size:11px; line-height:18px; overflow:hidden; white-space:nowrap; text-overflow:clip; color:#0b0d12; cursor:pointer; min-width:6px; }
+  .chip:hover { filter:brightness(1.2); } .chip.sel { outline:2px solid var(--accent); } .chip.has::after { content:""; position:absolute; top:1px; right:1px; width:6px; height:6px; border-radius:50%; background:#fff; box-shadow:0 0 0 1px #0b0d12; }
+  .nmark { position:absolute; top:2px; width:8px; height:8px; margin-left:-4px; border-radius:50%; background:var(--accent); cursor:pointer; }
+  .nmark.prop { background:var(--dim); }
+  .head { position:absolute; top:0; bottom:0; width:2px; background:var(--accent); pointer-events:none; z-index:2; }
   #msg { color:var(--err); min-height:1.2em; font-size:12px; width:100%; }
 </style>
 </head>
 <body>
-<header><b id="title">Loading…</b><span class="hint">Click a layer on the clip to edit it; drag to move it.</span>
+<header><b id="title">Loading…</b><span class="hint">Click a layer to edit or drag it · click a word or sound below to comment · ✎ to draw on the frame</span>
   <label><input type="checkbox" id="showAll"> show resolved</label></header>
 <div id="app">
-  <nav id="rail" aria-label="Layers and notes"><h2>Layers</h2><div id="layers"></div><h2>Notes</h2><div id="notes"></div></nav>
+  <nav id="rail" aria-label="Layers, sounds and notes"><h2>Layers</h2><div id="layers"></div><h2>Sounds</h2><div id="sounds"></div><h2>Notes <button id="sceneNote" title="Note on the whole scene at the playhead">+ scene</button></h2><div id="notes"></div></nav>
   <main>
     <div id="wrap">
-      <div id="stage"><img id="frame" alt="Frame at the playhead"><video id="vid" muted playsinline></video><div id="overlay"></div></div>
-      <div id="pop" role="dialog" aria-label="Layer"></div>
+      <div id="stage"><img id="frame" alt="Frame at the playhead"><video id="vid" muted playsinline></video><div id="overlay"><svg id="ink" viewBox="0 0 1 1" preserveAspectRatio="none"></svg></div></div>
+      <div id="pop" role="dialog" aria-label="Comment"></div>
     </div>
     <div id="tools">
       <button id="prev" title="Previous frame (←)">◀</button><button id="play" title="Play the rendered video (space)">Play</button><button id="next" title="Next frame (→)">▶</button>
-      <input id="scrub" type="range" min="0" max="1" step="0.001" value="0" aria-label="Time"><span id="time">0.00 s</span>
+      <button id="drawBtn" title="Draw on the frame (D)">✎ Draw</button>
     </div>
+    <div id="tl"><span></span><input id="scrub" type="range" min="0" max="1" step="0.001" value="0" aria-label="Time"><span id="time">0.00 s</span><div id="strip" style="display:contents"></div></div>
     <div id="msg" role="status"></div>
   </main>
 </div>
 <script>
 const $ = id => document.getElementById(id);
 const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+const NS = "http://www.w3.org/2000/svg";
 // boxes: layer id -> [left, top, right, bottom] as fractions of the frame; pos: layer id -> [x, y] in canvas pixels.
-let info = null, t = 0, notes = [], boxes = {}, pos = {}, live = new Set(), selected = null, hover = null;
-let pin = null, drag = null, seq = 0, perr = "", moreOpen = false;
+let info = null, t = 0, notes = [], boxes = {}, pos = {}, selected = null, tgt = null, hover = null;
+let pin = null, drag = null, seq = 0, perr = "", moreOpen = false, drawMode = false, ink = [], cur = null;
+const ROLE = { voice: "var(--voice)", music: "var(--music)", sfx: "var(--sfx)" };
 
 const fmt = s => s.toFixed(2) + " s";
 const say = m => { $("msg").textContent = m || ""; };
 const layerOf = id => info.layers.find(l => l.id === id);
+const soundOf = id => info.sounds.find(s => s.id === id);
+const clean = w => w.replace(/_\d+$/, "");
 async function api(path, opts) {
   const r = await fetch(path, opts);
   const body = (r.headers.get("content-type") || "").includes("json") ? await r.json() : r;
@@ -97,138 +114,225 @@ const post = (path, body) => api(path, { method: "POST", headers: { "Content-Typ
 function show(time) {
   t = Math.max(0, Math.min(time, info.duration));
   $("scrub").value = t; $("time").textContent = fmt(t);
-  const mine = ++seq;
-  const img = new Image();
+  const mine = ++seq, img = new Image();
   img.onload = () => { if (mine === seq) { $("frame").src = img.src; say(""); } };
   img.onerror = () => { if (mine === seq) say("Could not draw this frame; the scene may be mid-edit."); };
   img.src = "/frame?t=" + t.toFixed(3) + "&scale=" + (info.w > 960 ? 0.5 : 1) + "&_=" + Date.now();
-  api("/hit?x=0&y=0&t=" + t).then(h => { if (mine === seq) { boxes = h.boxes; pos = h.pos; live = new Set(h.layers); renderAll(); } }).catch(() => {});
+  api("/hit?x=0&y=0&t=" + t).then(h => { if (mine === seq) { boxes = h.boxes; pos = h.pos; renderAll(); } }).catch(() => {});
   renderAll();
 }
 
-function topAt(x, y) {
-  let found = null;
-  for (const [id, [l, tp, r, b]] of Object.entries(boxes)) if (x >= l && x <= r && y >= tp && y <= b) found = id;
-  return found;
-}
-function pt(e) { const r = $("stage").getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height, r }; }
-
+function topAt(x, y) { let f = null; for (const [id, [l, tp, r, b]] of Object.entries(boxes)) if (x >= l && x <= r && y >= tp && y <= b) f = id; return f; }
+function pt(e) { const r = $("stage").getBoundingClientRect(); return { x: Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)), y: Math.max(0, Math.min(1, (e.clientY - r.top) / r.height)), r }; }
 function boxEl(id, cls, dx = 0, dy = 0) {
-  const [l, tp, r, b] = boxes[id]; const d = mk("div", "box " + cls);
+  const [l, tp, r, b] = boxes[id], d = mk("div", "box " + cls);
   Object.assign(d.style, { left: (l + dx) * 100 + "%", top: (tp + dy) * 100 + "%", width: (r - l) * 100 + "%", height: (b - tp) * 100 + "%" });
   return d;
 }
+const near = n => Math.abs(n.t - t) < 0.5 / info.fps + 1e-6;
+function line(points, cls) { const p = document.createElementNS(NS, "polyline"); p.setAttribute("class", cls || ""); p.setAttribute("points", points.map(q => q[0] + "," + q[1]).join(" ")); return p; }
+
 function drawOverlay() {
   const kids = [];
-  if (hover && hover !== selected && boxes[hover] && !drag) kids.push(boxEl(hover, "hover"));
+  if (hover && hover !== selected && boxes[hover] && !drag && !drawMode) kids.push(boxEl(hover, "hover"));
   if (selected && boxes[selected]) kids.push(drag?.moved ? boxEl(selected, "drag", drag.dx, drag.dy) : boxEl(selected, "sel"));
-  const near = n => Math.abs(n.t - t) < 0.5 / info.fps + 1e-6;
   const dot = (n, cls) => { const d = mk("div", "pin " + cls); d.style.left = n.x * 100 + "%"; d.style.top = n.y * 100 + "%"; d.title = n.text || ""; return d; };
   for (const n of notes) if (n.x !== undefined && near(n) && n.kind !== "prop") kids.push(dot(n, n.stale ? "stale" : ""));
   if (pin && selected) kids.push(dot(pin, ""));
-  $("overlay").replaceChildren(...kids);
+  const ov = $("overlay"); [...ov.children].forEach(c => { if (c.id !== "ink") c.remove(); }); ov.append(...kids);
+  const lines = [];
+  for (const n of notes) if (n.strokes && near(n)) for (const s of n.strokes) lines.push(line(s, "old"));
+  for (const s of ink) lines.push(line(s));
+  $("ink").replaceChildren(...lines);
 }
 
+/* rail */
+function targetLabel(n) {
+  if (n.sound) return n.sound + (n.word ? ": " + clean(n.word) : "");
+  if (n.layer) return n.layer + (n.word ? ": " + n.word : "");
+  return "scene";
+}
+function openCount(pred) { return notes.filter(n => n.status === "open" && n.kind !== "prop" && pred(n)).length; }
 function renderRail() {
   $("layers").replaceChildren(...info.layers.map(L => {
     const on = t >= L.in && t < L.out;
     const r = mk("div", "row" + (on ? " live" : " off") + (selected === L.id ? " sel" : "")); r.tabIndex = 0; r.setAttribute("role", "button");
     r.append(mk("span", "dot"), mk("span", "id", L.id), mk("span", "type", L.type));
-    const n = notes.filter(x => x.layer === L.id && x.status === "open").length;
-    if (n) r.append(mk("span", "count", n));
+    const n = openCount(x => x.layer === L.id); if (n) r.append(mk("span", "count", n));
     r.title = fmt(L.in) + " to " + fmt(L.out);
     const go = () => { if (!on) show(L.in); select(L.id); };
     r.onclick = go; r.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } };
     return r;
   }));
+  $("sounds").replaceChildren(...(info.sounds.length ? info.sounds.map(S => {
+    const on = t >= S.in && t < S.out, r = mk("div", "row" + (on ? " live" : " off") + (tgt?.kind === "sound" && tgt.id === S.id ? " sel" : "")); r.tabIndex = 0; r.setAttribute("role", "button");
+    r.append(mk("span", "dot"), mk("span", "id", S.id), mk("span", "type", S.role));
+    const n = openCount(x => x.sound === S.id); if (n) r.append(mk("span", "count", n));
+    const go = () => { show(S.in); selectTarget({ kind: "sound", id: S.id }); };
+    r.onclick = go; r.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } };
+    return r;
+  }) : [mk("div", "empty", "No sounds.")]));
   $("notes").replaceChildren(...(notes.length ? notes.map(n => {
     const r = mk("div", "nrow " + n.status + (n.kind === "prop" ? " prop" : ""));
-    r.append(mk("span", "tm", n.t.toFixed(1) + "s"), mk("span", "tx", (n.layer ? n.layer + ": " : "") + n.text));
+    r.append(mk("span", "tm", n.t.toFixed(1) + "s"), mk("span", "tx", (n.strokes ? "✎ " : "") + targetLabel(n) + ": " + n.text));
     r.title = n.text + (n.stale && n.kind !== "prop" ? " (scene changed since)" : "");
     const b = mk("button", "", n.status === "open" ? "✓" : "↺"); b.title = n.status === "open" ? "Resolve" : "Reopen";
     b.onclick = async e => { e.stopPropagation(); try { await post("/notes", { action: n.status === "open" ? "resolve" : "reopen", id: n.id }); await loadNotes(); renderAll(); } catch (x) { say(x.message); } };
     r.append(b);
-    r.onclick = () => { show(n.t); if (n.layer) select(n.layer); };
+    r.onclick = () => { show(n.t); if (n.sound) selectTarget({ kind: "sound", id: n.sound }); else if (n.layer) select(n.layer); };
     return r;
   }) : [mk("div", "empty", "No notes yet.")]));
 }
 
-function ctlInput(L, c) {
-  const wide = c.key === "text";
-  const w = mk("div", "ctl" + (c.editable ? "" : " ro") + (wide ? " wide" : "")); w.append(mk("label", "", c.key));
+/* time strip: ruler with note marks, one lane per sound, one per captions layer with cues */
+function pct(x) { return Math.max(0, Math.min(100, x / info.duration * 100)); }
+function lane(label, build) {
+  const l = mk("div", "lab", label), tr = mk("div", "track"); build(tr);
+  tr.onclick = e => { if (e.target === tr || e.target.classList.contains("bar")) { const r = tr.getBoundingClientRect(); show((e.clientX - r.left) / r.width * info.duration); } };
+  return [l, tr, mk("span")];
+}
+function chip(tr, a, b, text, color, sel, has, onclick, title) {
+  const c = mk("button", "chip" + (sel ? " sel" : "") + (has ? " has" : ""), text); c.style.left = pct(a) + "%"; c.style.width = Math.max(1.2, pct(b) - pct(a) - 0.2) + "%";
+  c.style.background = color; c.title = title || text; c.onclick = e => { e.stopPropagation(); onclick(); }; tr.append(c);
+}
+function renderStrip() {
+  const rows = [], ruler = lane("notes", tr => {
+    tr.classList.add("ruler");
+    for (const n of notes) { const m = mk("div", "nmark" + (n.kind === "prop" ? " prop" : "")); m.style.left = pct(n.t) + "%"; m.title = targetLabel(n) + ": " + n.text; m.onclick = e => { e.stopPropagation(); show(n.t); }; tr.append(m); }
+  });
+  rows.push(ruler);
+  for (const S of info.sounds) rows.push(lane(S.id, tr => {
+    const bar = mk("div", "bar"); bar.style.left = pct(S.in) + "%"; bar.style.width = Math.max(0.5, pct(S.out) - pct(S.in)) + "%"; bar.style.background = ROLE[S.role] || "var(--dim)"; tr.append(bar);
+    if (S.words.length) S.words.forEach(([w, a, b], i) => chip(tr, a, b, clean(w), ROLE[S.role] || "var(--voice)", tgt?.kind === "word" && tgt.sound === S.id && tgt.idx === i,
+      openCount(x => x.sound === S.id && x.word === w), () => { show(a); selectTarget({ kind: "word", sound: S.id, idx: i, word: w, a, b }); }, fmt(a) + " " + clean(w)));
+    else chip(tr, S.in, S.out, S.role, ROLE[S.role] || "var(--dim)", tgt?.kind === "sound" && tgt.id === S.id, openCount(x => x.sound === S.id && !x.word),
+      () => { show(S.in); selectTarget({ kind: "sound", id: S.id }); }, S.id + " (" + S.role + ")");
+  }));
+  for (const L of info.layers) if (L.cues.length) rows.push(lane(L.id, tr => {
+    L.cues.forEach(([a, b, text], i) => chip(tr, a, b, text, "var(--cap)", tgt?.kind === "cue" && tgt.layer === L.id && tgt.idx === i,
+      openCount(x => x.layer === L.id && x.word === text), () => { show(a); selectTarget({ kind: "cue", layer: L.id, idx: i, text, a, b }); }, fmt(a) + " " + text));
+  }));
+  $("strip").replaceChildren(...rows.flat());
+  $("strip").querySelectorAll(".track").forEach(tr => { const h = mk("div", "head"); h.style.left = pct(t) + "%"; tr.append(h); });
+}
+
+/* panel */
+function ctlInput(owner, c) {
+  const wide = c.key === "text", w = mk("div", "ctl" + (c.editable ? "" : " ro") + (wide ? " wide" : "")); w.append(mk("label", "", c.key));
   if (!c.editable) { const v = mk("div", "v", "animated"); v.title = "Animated or computed: leave a note instead"; w.append(v); return w; }
-  const isNum = typeof c.value === "number" || (c.value == null && ["x", "y", "w", "h", "r", "size", "at", "dur"].includes(c.key));
-  const isCol = (c.key === "fill" || c.key === "stroke") && typeof c.value === "string" && /^#[0-9a-f]{6}$/i.test(c.value);
+  const isNum = typeof c.value === "number" || (c.value == null && ["x", "y", "w", "h", "r", "size", "at", "dur", "volume"].includes(c.key));
+  const isCol = (c.key === "fill" || c.key === "stroke" || c.key === "active") && typeof c.value === "string" && /^#[0-9a-f]{6}$/i.test(c.value);
   const i = mk("input"); i.type = isCol ? "color" : isNum ? "number" : "text"; if (isNum) i.step = "any";
-  i.value = c.value == null ? "" : c.value; i.setAttribute("aria-label", L.id + " " + c.key);
-  i.onchange = () => { const raw = i.value; if (raw === "" || (isNum && !Number.isFinite(parseFloat(raw)))) return; apply(L.id, { [c.key]: isNum ? parseFloat(raw) : raw }); };
+  i.value = c.value == null ? "" : c.value; i.setAttribute("aria-label", owner.id + " " + c.key);
+  i.onchange = () => { const raw = i.value; if (raw === "" || (isNum && !Number.isFinite(parseFloat(raw)))) return; apply(owner, { [c.key]: isNum ? parseFloat(raw) : raw }); };
   i.onkeydown = e => e.stopPropagation(); w.append(i); return w;
 }
-
-async function apply(id, changes) {
-  try { info = await post("/prop", { layer: id, changes, hash: info.hash, t }); perr = ""; await loadNotes(); show(t); }
+async function apply(owner, changes) {
+  try { info = await post("/prop", { ...(owner.sound ? { sound: owner.id } : { layer: owner.id }), changes, hash: info.hash, t }); perr = ""; await loadNotes(); show(t); }
   catch (e) { perr = e.message; renderAll(); }
 }
-
-function renderPop() {
-  const pop = $("pop"), L = selected && layerOf(selected);
-  if (!L || !boxes[selected]) { pop.style.display = "none"; return; }
-  const main = L.controls.filter(c => !["x", "y", "at", "dur"].includes(c.key)), more = L.controls.filter(c => ["x", "y", "at", "dur"].includes(c.key));
-  const top = mk("div", "top"); top.append(mk("b", "", L.id), mk("span", "", L.type));
-  const close = mk("button", "x", "×"); close.title = "Close (Esc)"; close.setAttribute("aria-label", "Close"); close.onclick = () => select(null); top.append(close);
-  const ctls = mk("div", "ctls"); ctls.append(...main.map(c => ctlInput(L, c)));
-  const det = mk("details"); det.open = moreOpen; det.ontoggle = () => { moreOpen = det.open; place(); };
-  det.append(mk("summary", "", "position and timing")); const c2 = mk("div", "ctls"); c2.append(...more.map(c => ctlInput(L, c))); det.append(c2);
-  const nf = mk("input", "nf"); nf.placeholder = pin ? "Note at this point…" : "Add a note…"; nf.setAttribute("aria-label", "Note for " + L.id);
-  const add = mk("button", "primary", "Add");
+function noteForm(fields, placeholder, after) {
+  const nf = mk("input", "nf"); nf.placeholder = placeholder; nf.setAttribute("aria-label", "Note"); const add = mk("button", "primary", "Add");
   const send = async () => {
     if (!nf.value.trim()) return;
-    try { await post("/notes", { action: "add", t, layer: L.id, ...(pin ? { x: pin.x, y: pin.y } : {}), text: nf.value }); pin = null; perr = ""; await loadNotes(); renderAll(); }
+    try { await post("/notes", { action: "add", t, ...fields(), text: nf.value }); perr = ""; await loadNotes(); after(); renderAll(); }
     catch (e) { perr = e.message; renderAll(); }
   };
   add.onclick = send; nf.onkeydown = e => { e.stopPropagation(); if (e.key === "Enter") send(); };
-  const nr = mk("div", "noterow"); nr.append(nf, add);
-  pop.replaceChildren(top, ctls, det, nr);
-  if (perr) pop.append(mk("div", "perr", perr));
-  pop.style.display = "block"; place();
+  const row = mk("div", "noterow"); row.append(nf, add); return row;
+}
+function closeBtn(fn) { const b = mk("button", "x", "×"); b.title = "Close (Esc)"; b.setAttribute("aria-label", "Close"); b.onclick = fn; return b; }
+const split = L => [L.controls.filter(c => !["x", "y", "at", "dur", "volume"].includes(c.key)), L.controls.filter(c => ["x", "y", "at", "dur", "volume"].includes(c.key))];
+function controlsBlock(owner) {
+  const [main, more] = split(owner), frag = document.createDocumentFragment();
+  if (main.length) { const g = mk("div", "ctls"); g.append(...main.map(c => ctlInput(owner, c))); frag.append(g); }
+  if (more.length) { const det = mk("details"); det.open = moreOpen; det.ontoggle = () => { moreOpen = det.open; place(); }; det.append(mk("summary", "", "position and timing")); const g = mk("div", "ctls"); g.append(...more.map(c => ctlInput(owner, c))); det.append(g); frag.append(det); }
+  return frag;
+}
+function captionLayerFor(soundId) { return info.layers.find(l => l.type === "captions" && l.voice === soundId)?.id; }
+
+function renderPop() {
+  const pop = $("pop"); let kids = null, dock = false;
+  const L = selected && layerOf(selected);
+  if (ink.length && !cur) {
+    dock = true;
+    const top = mk("div", "top"); top.append(mk("b", "", "Annotation"), mk("span", "", ink.length + (ink.length === 1 ? " stroke" : " strokes") + " · " + fmt(t)));
+    const undo = mk("button", "", "Undo"); undo.onclick = () => { ink.pop(); renderAll(); };
+    top.append(undo, closeBtn(() => { ink = []; renderAll(); }));
+    kids = [top, noteForm(() => { const [x, y] = ink[0][0], layer = topAt(x, y); return { strokes: ink, ...(layer ? { layer } : {}) }; }, "What does this mark mean?", () => { ink = []; drawMode = false; syncDraw(); })];
+  } else if (tgt) {
+    dock = true;
+    const top = mk("div", "top");
+    if (tgt.kind === "scene") {
+      top.append(mk("b", "", "Scene note"), mk("span", "", fmt(t)), closeBtn(() => selectTarget(null)));
+      kids = [top, noteForm(() => ({}), "Note on the whole scene at " + fmt(t) + "…", () => {})];
+    } else if (tgt.kind === "sound") {
+      const S = soundOf(tgt.id); top.append(mk("b", "", S.id), mk("span", "", S.role + " · " + fmt(S.in) + "–" + fmt(S.out)), closeBtn(() => selectTarget(null)));
+      kids = [top, controlsBlock({ id: S.id, sound: true, controls: S.controls }), ...(S.speaks ? [mk("div", "hintline", "Changing the text needs kine_voice to speak it again.")] : []),
+        noteForm(() => ({ sound: S.id }), "Note on this sound…", () => {})];
+    } else if (tgt.kind === "word") {
+      top.append(mk("b", "", tgt.sound), mk("span", "", fmt(tgt.a) + "–" + fmt(tgt.b)), closeBtn(() => selectTarget(null)));
+      const q = mk("div", "quote"); q.append("Word: ", mk("b", "", clean(tgt.word)));
+      kids = [top, q, noteForm(() => ({ sound: tgt.sound, word: tgt.word, ...(captionLayerFor(tgt.sound) ? { layer: captionLayerFor(tgt.sound) } : {}) }), "Comment on this word (wording, pronunciation, timing)…", () => {})];
+    } else if (tgt.kind === "cue") {
+      top.append(mk("b", "", tgt.layer), mk("span", "", "caption · " + fmt(tgt.a) + "–" + fmt(tgt.b)), closeBtn(() => selectTarget(null)));
+      const q = mk("div", "quote"); q.append(mk("b", "", tgt.text));
+      kids = [top, q, noteForm(() => ({ layer: tgt.layer, word: tgt.text }), "Comment on this caption…", () => {})];
+    }
+  } else if (L) {
+    dock = !boxes[L.id];
+    const top = mk("div", "top"); top.append(mk("b", "", L.id), mk("span", "", L.type), closeBtn(() => select(null)));
+    kids = [top, controlsBlock(L), noteForm(() => ({ layer: L.id, ...(pin ? { x: pin.x, y: pin.y } : {}) }), pin ? "Note at this point…" : "Add a note…", () => { pin = null; })];
+    if (dock) kids.splice(1, 0, mk("div", "hintline", "Not drawn as a box on the frame."));
+  }
+  if (!kids) { pop.style.display = "none"; return; }
+  pop.replaceChildren(...kids); if (perr) pop.append(mk("div", "perr", perr));
+  pop.dataset.dock = dock ? "1" : ""; pop.style.display = "block"; place();
 }
 function place() {
-  const pop = $("pop"), L = selected; if (!L || !boxes[L]) return;
-  const s = $("stage"), W = s.clientWidth, H = s.clientHeight, [l, tp, r, b] = boxes[L], ph = pop.offsetHeight, pw = pop.offsetWidth;
-  let y = b * H + 8; if (y + ph > H) y = Math.max(4, tp * H - ph - 8); if (y + ph > H) y = Math.max(4, H - ph - 4);
+  const pop = $("pop"); if (pop.style.display === "none") return;
+  const s = $("stage"), W = s.clientWidth, H = s.clientHeight, ph = pop.offsetHeight, pw = pop.offsetWidth;
+  if (pop.dataset.dock || !selected || !boxes[selected]) { pop.style.left = Math.max(4, (W - pw) / 2) + "px"; pop.style.top = Math.max(4, H - ph - 8) + "px"; return; }
+  const [l, tp, , b] = boxes[selected]; let y = b * H + 8; if (y + ph > H) y = Math.max(4, tp * H - ph - 8); if (y + ph > H) y = Math.max(4, H - ph - 4);
   pop.style.left = Math.max(4, Math.min(l * W, W - pw - 4)) + "px"; pop.style.top = y + "px";
 }
 
-function select(id) { if (id !== selected) { perr = ""; pin = null; } selected = id; renderAll(); }
-function renderAll() { drawOverlay(); renderRail(); renderPop(); }
+function select(id) { if (id !== selected) { perr = ""; pin = null; } selected = id; tgt = null; renderAll(); }
+function selectTarget(x) { selected = null; pin = null; perr = ""; tgt = x; renderAll(); }
+function renderAll() { drawOverlay(); renderRail(); renderStrip(); renderPop(); }
+function syncDraw() { $("drawBtn").classList.toggle("on", drawMode); $("stage").classList.toggle("draw", drawMode); renderAll(); }
 
+/* pointer: draw, or select and drag */
 const stage = $("stage");
 stage.addEventListener("pointerdown", e => {
   if (!$("vid").paused) return;
-  const p = pt(e), id = topAt(p.x, p.y);
+  const p = pt(e);
+  if (drawMode) { cur = [[+p.x.toFixed(4), +p.y.toFixed(4)]]; ink.push(cur); selected = null; tgt = null; pin = null; stage.setPointerCapture(e.pointerId); renderAll(); return; }
+  const id = topAt(p.x, p.y);
   if (!id) { select(null); return; }
-  if (id !== selected) { selected = id; perr = ""; }
+  if (id !== selected) { tgt = null; selected = id; perr = ""; }
   pin = { x: p.x, y: p.y };
   drag = { id, cx: e.clientX, cy: e.clientY, r: p.r, moved: false, dx: 0, dy: 0 };
   stage.setPointerCapture(e.pointerId); renderAll();
 });
 stage.addEventListener("pointermove", e => {
   const p = pt(e);
-  if (!drag) { const h = $("vid").paused ? topAt(p.x, p.y) : null; if (h !== hover) { hover = h; drawOverlay(); } return; }
+  if (cur) { const last = cur[cur.length - 1]; if (Math.hypot(p.x - last[0], p.y - last[1]) > 0.003 && cur.length < 500) { cur.push([+p.x.toFixed(4), +p.y.toFixed(4)]); drawOverlay(); } return; }
+  if (!drag) { const h = $("vid").paused && !drawMode ? topAt(p.x, p.y) : null; if (h !== hover) { hover = h; drawOverlay(); } return; }
   const dx = e.clientX - drag.cx, dy = e.clientY - drag.cy;
   if (!drag.moved && Math.hypot(dx, dy) < 5) return;
   if (!drag.moved) {
     const L = layerOf(drag.id), cx = L.controls.find(c => c.key === "x"), cy = L.controls.find(c => c.key === "y");
-    if (L.parent || !cx?.editable || !cy?.editable) { say(L.parent ? "Layers inside a group are moved from their notes." : "This layer's position is animated: leave a note instead."); drag = null; return; }
+    if (L.parent || !cx?.editable || !cy?.editable) { say(L.parent ? "Layers inside a group are moved from their notes." : "This layer's position is animated or fixed: leave a note instead."); drag = null; return; }
     drag.moved = true; pin = null;
   }
   drag.dx = dx / drag.r.width; drag.dy = dy / drag.r.height; drawOverlay(); $("pop").style.display = "none";
 });
 stage.addEventListener("pointerup", async () => {
+  if (cur) { cur = null; if (ink.length > MAXS) ink.shift(); renderAll(); return; }
   const d = drag; drag = null; if (!d) return;
   if (!d.moved) { renderAll(); return; }
-  const L = layerOf(d.id);
-  const shift = (c, px, base, size) => {
+  const L = layerOf(d.id), shift = (c, px, base, size) => {
     if (typeof c.value === "number") return Math.round((c.value + px) * 10) / 10;
     if (typeof c.value === "string" && /^-?[\d.]+%$/.test(c.value)) return Math.round((parseFloat(c.value) + px / size * 100) * 10) / 10 + "%";
     if (c.value == null) return Math.round((base + px) * 10) / 10;
@@ -237,16 +341,19 @@ stage.addEventListener("pointerup", async () => {
   const cx = L.controls.find(c => c.key === "x"), cy = L.controls.find(c => c.key === "y");
   const nx = shift(cx, d.dx * info.w, pos[d.id]?.[0] ?? 0, info.w), ny = shift(cy, d.dy * info.h, pos[d.id]?.[1] ?? 0, info.h);
   if (nx == null || ny == null) { say("This layer's position is an expression: leave a note instead."); renderAll(); return; }
-  await apply(d.id, { x: nx, y: ny });
+  await apply({ id: d.id }, { x: nx, y: ny });
 });
+const MAXS = 20;
 stage.addEventListener("pointerleave", () => { if (hover) { hover = null; drawOverlay(); } });
-stage.addEventListener("pointercancel", () => { drag = null; renderAll(); });
+stage.addEventListener("pointercancel", () => { drag = null; cur = null; renderAll(); });
 
 async function loadNotes() { notes = (await api("/notes?status=" + ($("showAll").checked ? "all" : "open"))).notes; }
 $("showAll").onchange = async () => { await loadNotes(); renderAll(); };
 $("scrub").oninput = e => { $("vid").pause(); show(parseFloat(e.target.value)); };
 $("prev").onclick = () => show(t - 1 / info.fps);
 $("next").onclick = () => show(t + 1 / info.fps);
+$("drawBtn").onclick = () => { drawMode = !drawMode; if (!drawMode) { ink = []; } syncDraw(); };
+$("sceneNote").onclick = () => selectTarget({ kind: "scene" });
 $("play").onclick = () => {
   const v = $("vid");
   if (!info.video) { say("No rendered video next to the scene yet (kine render)."); return; }
@@ -258,11 +365,14 @@ $("vid").addEventListener("pause", () => { const v = $("vid"); v.style.display =
 document.addEventListener("keydown", e => {
   if (["TEXTAREA", "INPUT", "BUTTON", "SUMMARY"].includes(e.target.tagName) || e.target.getAttribute("role") === "button") return;
   if (e.key === "ArrowLeft") $("prev").click(); else if (e.key === "ArrowRight") $("next").click();
-  else if (e.key === " ") { e.preventDefault(); $("play").click(); } else if (e.key === "Escape") select(null);
+  else if (e.key === " ") { e.preventDefault(); $("play").click(); }
+  else if (e.key === "d" || e.key === "D") $("drawBtn").click();
+  else if (e.key === "Escape") { ink = []; cur = null; drawMode = false; selected = null; tgt = null; syncDraw(); }
 });
 
 function fit() {
-  const main = document.querySelector("main"), availH = main.clientHeight - 80, availW = main.clientWidth - 32, ar = info.w / info.h;
+  const main = document.querySelector("main"), extra = 80 + 26 * (1 + info.sounds.length + info.layers.filter(l => l.cues.length).length);
+  const availH = main.clientHeight - extra, availW = main.clientWidth - 32, ar = info.w / info.h;
   $("wrap").style.width = Math.max(200, Math.min(availW, availH * ar)) + "px"; place();
 }
 window.addEventListener("resize", () => info && fit());
