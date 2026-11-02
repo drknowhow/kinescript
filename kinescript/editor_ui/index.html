@@ -5,97 +5,94 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kinescript editor</title>
 <style>
-  :root { --bg:#0e1117; --block:#171b24; --line:#2a303c; --fg:#e8eaf0; --dim:#9299a8; --accent:#ffd400; --live:#6ee7a8; --err:#ff8a80; }
+  :root { --bg:#0e1117; --card:#171b24; --line:#2a303c; --fg:#e8eaf0; --dim:#9299a8; --accent:#ffd400; --live:#6ee7a8; --err:#ff8a80; }
   * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.4 system-ui, sans-serif; }
-  header { padding:12px 16px; color:var(--dim); font-weight:600; display:flex; gap:16px; align-items:baseline; }
-  header .hint { font-weight:400; font-size:12px; }
-  #app { display:grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 40%); gap:16px; padding:0 16px 24px; align-items:start; }
-  @media (max-width: 800px) { #app { grid-template-columns: minmax(0, 1fr); } #side { position:static !important; order:-1; } }
-  #side { position:sticky; top:12px; display:flex; flex-direction:column; gap:10px; }
-  .card { background:var(--block); border:1px solid var(--line); border-radius:8px; padding:12px; min-width:0; }
-  #stage { position:relative; background:#000; cursor:crosshair; width:100%; }
-  #stage img, #stage video { display:block; width:100%; height:100%; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:13px/1.35 system-ui, sans-serif; height:100vh; display:flex; flex-direction:column; }
+  header { padding:8px 14px; color:var(--dim); display:flex; gap:14px; align-items:baseline; border-bottom:1px solid var(--line); }
+  header b { color:var(--fg); } header .hint { font-size:12px; } header label { margin-left:auto; }
+  #app { flex:1; min-height:0; display:grid; grid-template-columns: 220px minmax(0, 1fr); }
+  @media (max-width: 800px) { #app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; } #rail { max-height:34vh; order:2; border-right:0 !important; border-top:1px solid var(--line); } }
+  #rail { border-right:1px solid var(--line); overflow:auto; padding:8px 0; }
+  #rail h2 { margin:10px 14px 4px; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--dim); font-weight:600; }
+  .row { display:flex; align-items:center; gap:8px; padding:4px 14px; cursor:pointer; }
+  .row:hover { background:var(--card); } .row.sel { background:var(--card); box-shadow: inset 3px 0 var(--accent); }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--line); flex:none; } .row.live .dot { background:var(--live); }
+  .row .id { font-weight:600; } .row .type { color:var(--dim); font-size:11px; }
+  .row.off .id { color:var(--dim); font-weight:400; }
+  .count { margin-left:auto; background:var(--accent); color:#111; border-radius:999px; font-size:11px; padding:0 6px; font-weight:600; }
+  .nrow { padding:4px 14px; display:flex; gap:6px; align-items:baseline; cursor:pointer; }
+  .nrow:hover { background:var(--card); } .nrow .tm { color:var(--accent); font-variant-numeric:tabular-nums; flex:none; }
+  .nrow .tx { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0; }
+  .nrow.resolved .tx { text-decoration:line-through; color:var(--dim); } .nrow.prop .tx { font-family:ui-monospace, monospace; font-size:11px; color:var(--dim); }
+  .nrow button { background:none; border:0; color:var(--dim); cursor:pointer; padding:0 2px; } .nrow button:hover { color:var(--accent); }
+  .empty { color:var(--dim); padding:4px 14px; }
+  main { display:flex; flex-direction:column; min-width:0; min-height:0; padding:12px 16px; gap:8px; align-items:center; }
+  #wrap { position:relative; width:100%; flex:none; }
+  #stage { position:relative; background:#000; width:100%; touch-action:none; user-select:none; margin:0 auto; }
+  #stage img, #stage video { display:block; width:100%; height:100%; pointer-events:none; }
   #stage video { position:absolute; inset:0; display:none; }
-  #overlay { position:absolute; inset:0; pointer-events:none; }
-  .pin { position:absolute; width:18px; height:18px; margin:-9px 0 0 -9px; border:2px solid var(--accent); border-radius:50%; background:rgba(0,0,0,.45); }
+  #overlay { position:absolute; inset:0; pointer-events:none; overflow:hidden; }
+  .box { position:absolute; pointer-events:none; }
+  .box.hover { border:1px dashed rgba(255,212,0,.7); }
+  .box.sel { border:2px solid var(--accent); background:rgba(255,212,0,.07); }
+  .box.drag { border:2px dashed var(--accent); }
+  .pin { position:absolute; width:16px; height:16px; margin:-8px 0 0 -8px; border:2px solid var(--accent); border-radius:50%; background:rgba(0,0,0,.45); }
   .pin.stale { border-style:dashed; border-color:var(--dim); }
-  .sel { position:absolute; border:2px solid var(--accent); background:rgba(255,212,0,.08); }
-  #tools { display:flex; gap:8px; align-items:center; }
-  #tools input[type=range] { flex:1; min-width:0; }
-  #time { font-variant-numeric: tabular-nums; min-width:70px; text-align:right; color:var(--dim); }
-  button { background:var(--line); color:var(--fg); border:0; padding:6px 12px; border-radius:6px; cursor:pointer; font:inherit; }
-  button:hover { background:#3a4252; }
+  #pop { position:absolute; z-index:5; width:290px; background:var(--card); border:1px solid var(--accent); border-radius:8px; padding:8px; box-shadow:0 8px 24px rgba(0,0,0,.5); display:none; }
+  #pop .top { display:flex; align-items:center; gap:6px; margin-bottom:6px; }
+  #pop .top b { flex:1; } #pop .top span { color:var(--dim); font-size:11px; }
+  .x { background:none; border:0; color:var(--dim); cursor:pointer; font-size:16px; line-height:1; padding:0 2px; } .x:hover { color:var(--fg); }
+  .ctls { display:grid; grid-template-columns: repeat(3, 1fr); gap:6px; }
+  .ctl label { display:block; font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:.05em; }
+  .ctl.wide { grid-column: 1 / -1; }
+  .ctl input[type=text], .ctl input[type=number], .nf { width:100%; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:3px 5px; font:inherit; }
+  .ctl input[type=color] { width:100%; height:24px; padding:0; border:1px solid var(--line); border-radius:4px; background:var(--bg); }
+  .ctl.ro .v { color:var(--dim); font-size:11px; padding:3px 0; }
+  details summary { cursor:pointer; color:var(--dim); font-size:11px; margin:6px 0 4px; } details .ctls { margin-bottom:4px; }
+  .noterow { display:flex; gap:6px; margin-top:6px; } .noterow button { flex:none; }
+  button { background:var(--line); color:var(--fg); border:0; padding:4px 10px; border-radius:5px; cursor:pointer; font:inherit; } button:hover { background:#3a4252; }
   button.primary { background:var(--accent); color:#111; font-weight:600; }
-  button.link { background:none; padding:0; color:var(--accent); text-decoration:underline; font-size:12px; }
-  button:focus-visible, input:focus-visible, textarea:focus-visible, .head:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
-  #msg { color:var(--err); min-height:1.2em; font-size:12px; }
-  #stack { display:flex; flex-direction:column; gap:10px; }
-  .layer { background:var(--block); border:1px solid var(--line); border-left:4px solid var(--line); border-radius:8px; }
-  .layer.live { border-left-color:var(--live); }
-  .layer.selected { border-color:var(--accent); border-left-color:var(--accent); }
-  .layer.off .body { opacity:.55; }
-  .head { display:flex; gap:10px; align-items:center; padding:10px 12px; cursor:pointer; }
-  .head .id { font-weight:600; } .head .type { color:var(--dim); font-size:12px; }
-  .head .badge { margin-left:auto; font-size:11px; padding:1px 8px; border-radius:999px; border:1px solid var(--line); color:var(--dim); }
-  .layer.live .badge { color:var(--live); border-color:var(--live); }
-  .count { background:var(--accent); color:#111; border-radius:999px; font-size:11px; padding:0 7px; font-weight:600; }
-  .body { padding:0 12px 12px; display:none; }
-  .layer.open .body { display:block; }
-  .span { position:relative; height:10px; background:var(--bg); border-radius:5px; margin:2px 0 10px; cursor:pointer; }
-  .span .fill { position:absolute; top:0; bottom:0; background:#3a4252; border-radius:5px; }
-  .layer.live .span .fill { background:var(--live); opacity:.6; }
-  .span .at { position:absolute; top:-3px; bottom:-3px; width:2px; background:var(--accent); }
-  .controls { display:grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap:8px; }
-  .ctl label { display:block; font-size:11px; color:var(--dim); margin-bottom:2px; text-transform:uppercase; letter-spacing:.05em; }
-  .ctl input[type=text], .ctl input[type=number] { width:100%; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:5px 6px; font:inherit; }
-  .ctl input[type=color] { width:100%; height:30px; padding:0; border:1px solid var(--line); border-radius:4px; background:var(--bg); }
-  .ctl.ro .val { font-size:12px; color:var(--dim); padding:5px 0; }
-  .note { padding:8px 10px; margin-top:8px; background:var(--bg); border:1px solid var(--line); border-radius:6px; }
-  .note .meta { color:var(--dim); font-size:12px; display:flex; gap:10px; flex-wrap:wrap; margin-bottom:2px; }
-  .note.resolved { opacity:.6; } .note.resolved .txt { text-decoration:line-through; }
-  .note.prop .txt { font-family:ui-monospace, monospace; font-size:12px; }
-  .reply { margin:4px 0 0 10px; color:var(--dim); font-size:12px; }
-  .compose textarea { width:100%; height:56px; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:6px; resize:vertical; font:inherit; margin-top:8px; }
-  .compose .row { display:flex; gap:8px; align-items:center; margin-top:6px; }
-  .compose .where { color:var(--dim); font-size:12px; flex:1; }
-  .err { color:var(--err); font-size:12px; margin-top:6px; }
-  .empty { color:var(--dim); font-size:13px; }
-  label.chk { color:var(--dim); font-size:12px; }
+  button:focus-visible, input:focus-visible, summary:focus-visible, .row:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+  .perr { color:var(--err); font-size:11px; margin-top:4px; }
+  #tools { display:flex; gap:8px; align-items:center; width:100%; }
+  #tools input[type=range] { flex:1; min-width:0; } #time { font-variant-numeric:tabular-nums; min-width:64px; text-align:right; color:var(--dim); }
+  #msg { color:var(--err); min-height:1.2em; font-size:12px; width:100%; }
 </style>
 </head>
 <body>
-<header><span id="title">Loading…</span><span class="hint">Click a layer block, or click the frame, to add notes and change values.</span>
-  <label class="chk" style="margin-left:auto"><input type="checkbox" id="showAll"> show resolved</label></header>
+<header><b id="title">Loading…</b><span class="hint">Click a layer on the clip to edit it; drag to move it.</span>
+  <label><input type="checkbox" id="showAll"> show resolved</label></header>
 <div id="app">
-  <div id="stack" aria-label="Layers"></div>
-  <aside id="side" aria-label="Preview">
-    <div class="card">
+  <nav id="rail" aria-label="Layers and notes"><h2>Layers</h2><div id="layers"></div><h2>Notes</h2><div id="notes"></div></nav>
+  <main>
+    <div id="wrap">
       <div id="stage"><img id="frame" alt="Frame at the playhead"><video id="vid" muted playsinline></video><div id="overlay"></div></div>
-      <div id="tools" style="margin-top:10px">
-        <button id="prev" title="Previous frame (←)">◀</button>
-        <button id="play" title="Play the rendered video (space)">Play</button>
-        <button id="next" title="Next frame (→)">▶</button>
-        <input id="scrub" type="range" min="0" max="1" step="0.001" value="0" aria-label="Time">
-        <span id="time">0.00 s</span>
-      </div>
-      <div id="msg" role="status"></div>
+      <div id="pop" role="dialog" aria-label="Layer"></div>
     </div>
-  </aside>
+    <div id="tools">
+      <button id="prev" title="Previous frame (←)">◀</button><button id="play" title="Play the rendered video (space)">Play</button><button id="next" title="Next frame (→)">▶</button>
+      <input id="scrub" type="range" min="0" max="1" step="0.001" value="0" aria-label="Time"><span id="time">0.00 s</span>
+    </div>
+    <div id="msg" role="status"></div>
+  </main>
 </div>
 <script>
 const $ = id => document.getElementById(id);
-let info = null, t = 0, notes = [], boxes = {}, live = new Set(), selected = null, open = new Set(), draft = null, seq = 0, errs = {};
+const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+// boxes: layer id -> [left, top, right, bottom] as fractions of the frame; pos: layer id -> [x, y] in canvas pixels.
+let info = null, t = 0, notes = [], boxes = {}, pos = {}, live = new Set(), selected = null, hover = null;
+let pin = null, drag = null, seq = 0, perr = "", moreOpen = false;
 
 const fmt = s => s.toFixed(2) + " s";
 const say = m => { $("msg").textContent = m || ""; };
-const post = (path, body) => api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+const layerOf = id => info.layers.find(l => l.id === id);
 async function api(path, opts) {
   const r = await fetch(path, opts);
   const body = (r.headers.get("content-type") || "").includes("json") ? await r.json() : r;
   if (!r.ok) throw new Error(body.error || r.statusText);
   return body;
 }
+const post = (path, body) => api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
 function show(time) {
   t = Math.max(0, Math.min(time, info.duration));
@@ -105,156 +102,148 @@ function show(time) {
   img.onload = () => { if (mine === seq) { $("frame").src = img.src; say(""); } };
   img.onerror = () => { if (mine === seq) say("Could not draw this frame; the scene may be mid-edit."); };
   img.src = "/frame?t=" + t.toFixed(3) + "&scale=" + (info.w > 960 ? 0.5 : 1) + "&_=" + Date.now();
-  api("/hit?x=0&y=0&t=" + t).then(h => { if (mine === seq) { boxes = h.boxes; live = new Set(h.layers); refreshLive(); drawOverlay(); } }).catch(() => {});
-  drawOverlay(); refreshLive();
+  api("/hit?x=0&y=0&t=" + t).then(h => { if (mine === seq) { boxes = h.boxes; pos = h.pos; live = new Set(h.layers); renderAll(); } }).catch(() => {});
+  renderAll();
 }
 
+function topAt(x, y) {
+  let found = null;
+  for (const [id, [l, tp, r, b]] of Object.entries(boxes)) if (x >= l && x <= r && y >= tp && y <= b) found = id;
+  return found;
+}
+function pt(e) { const r = $("stage").getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height, r }; }
+
+function boxEl(id, cls, dx = 0, dy = 0) {
+  const [l, tp, r, b] = boxes[id]; const d = mk("div", "box " + cls);
+  Object.assign(d.style, { left: (l + dx) * 100 + "%", top: (tp + dy) * 100 + "%", width: (r - l) * 100 + "%", height: (b - tp) * 100 + "%" });
+  return d;
+}
 function drawOverlay() {
   const kids = [];
+  if (hover && hover !== selected && boxes[hover] && !drag) kids.push(boxEl(hover, "hover"));
+  if (selected && boxes[selected]) kids.push(drag?.moved ? boxEl(selected, "drag", drag.dx, drag.dy) : boxEl(selected, "sel"));
   const near = n => Math.abs(n.t - t) < 0.5 / info.fps + 1e-6;
-  if (selected && boxes[selected]) {
-    const [l, tp, w, h] = boxes[selected];
-    const d = document.createElement("div"); d.className = "sel";
-    Object.assign(d.style, { left: l * 100 + "%", top: tp * 100 + "%", width: w * 100 + "%", height: h * 100 + "%" });
-    kids.push(d);
-  }
-  const pin = (n, cls) => { const d = document.createElement("div"); d.className = "pin " + cls;
-    d.style.left = n.x * 100 + "%"; d.style.top = n.y * 100 + "%"; d.title = n.text || ""; return d; };
-  for (const n of notes) if (n.x !== undefined && near(n)) kids.push(pin(n, n.stale ? "stale" : ""));
-  if (draft && draft.x !== undefined && near(draft)) kids.push(pin(draft, ""));
+  const dot = (n, cls) => { const d = mk("div", "pin " + cls); d.style.left = n.x * 100 + "%"; d.style.top = n.y * 100 + "%"; d.title = n.text || ""; return d; };
+  for (const n of notes) if (n.x !== undefined && near(n) && n.kind !== "prop") kids.push(dot(n, n.stale ? "stale" : ""));
+  if (pin && selected) kids.push(dot(pin, ""));
   $("overlay").replaceChildren(...kids);
 }
 
-function refreshLive() {
-  for (const L of info.layers) {
-    const card = document.getElementById("L-" + L.id); if (!card) continue;
+function renderRail() {
+  $("layers").replaceChildren(...info.layers.map(L => {
     const on = t >= L.in && t < L.out;
-    card.classList.toggle("live", on); card.classList.toggle("off", !on);
-    card.querySelector(".badge").textContent = on ? "on screen" : (t < L.in ? "starts " + fmt(L.in) : "ended");
-    card.querySelector(".at").style.left = Math.min(100, t / info.duration * 100) + "%";
-  }
-}
-
-function select(id, scroll) {
-  selected = id; open.add(id);
-  render(); drawOverlay();
-  if (scroll) document.getElementById("L-" + id)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    const r = mk("div", "row" + (on ? " live" : " off") + (selected === L.id ? " sel" : "")); r.tabIndex = 0; r.setAttribute("role", "button");
+    r.append(mk("span", "dot"), mk("span", "id", L.id), mk("span", "type", L.type));
+    const n = notes.filter(x => x.layer === L.id && x.status === "open").length;
+    if (n) r.append(mk("span", "count", n));
+    r.title = fmt(L.in) + " to " + fmt(L.out);
+    const go = () => { if (!on) show(L.in); select(L.id); };
+    r.onclick = go; r.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } };
+    return r;
+  }));
+  $("notes").replaceChildren(...(notes.length ? notes.map(n => {
+    const r = mk("div", "nrow " + n.status + (n.kind === "prop" ? " prop" : ""));
+    r.append(mk("span", "tm", n.t.toFixed(1) + "s"), mk("span", "tx", (n.layer ? n.layer + ": " : "") + n.text));
+    r.title = n.text + (n.stale && n.kind !== "prop" ? " (scene changed since)" : "");
+    const b = mk("button", "", n.status === "open" ? "✓" : "↺"); b.title = n.status === "open" ? "Resolve" : "Reopen";
+    b.onclick = async e => { e.stopPropagation(); try { await post("/notes", { action: n.status === "open" ? "resolve" : "reopen", id: n.id }); await loadNotes(); renderAll(); } catch (x) { say(x.message); } };
+    r.append(b);
+    r.onclick = () => { show(n.t); if (n.layer) select(n.layer); };
+    return r;
+  }) : [mk("div", "empty", "No notes yet.")]));
 }
 
 function ctlInput(L, c) {
-  const wrap = document.createElement("div"); wrap.className = "ctl" + (c.editable ? "" : " ro");
-  const lab = document.createElement("label"); lab.textContent = c.key; wrap.append(lab);
-  if (!c.editable) { const v = document.createElement("div"); v.className = "val"; v.title = "animated or computed: leave a note"; v.textContent = "animated"; wrap.append(v); return wrap; }
+  const wide = c.key === "text";
+  const w = mk("div", "ctl" + (c.editable ? "" : " ro") + (wide ? " wide" : "")); w.append(mk("label", "", c.key));
+  if (!c.editable) { const v = mk("div", "v", "animated"); v.title = "Animated or computed: leave a note instead"; w.append(v); return w; }
   const isNum = typeof c.value === "number" || (c.value == null && ["x", "y", "w", "h", "r", "size", "at", "dur"].includes(c.key));
   const isCol = (c.key === "fill" || c.key === "stroke") && typeof c.value === "string" && /^#[0-9a-f]{6}$/i.test(c.value);
-  const inp = document.createElement("input");
-  inp.type = isCol ? "color" : isNum ? "number" : "text";
-  if (isNum) inp.step = "any";
-  inp.value = c.value == null ? "" : c.value;
-  inp.setAttribute("aria-label", L.id + " " + c.key);
-  inp.onchange = async () => {
-    const raw = inp.value;
-    if (raw === "" || (isNum && !Number.isFinite(parseFloat(raw)))) return;
-    try {
-      info = await post("/prop", { layer: L.id, key: c.key, value: isNum ? parseFloat(raw) : raw, hash: info.hash, t });
-      errs[L.id] = ""; await loadNotes(); render(); show(t);
-    } catch (e) { errs[L.id] = e.message; render(); }
+  const i = mk("input"); i.type = isCol ? "color" : isNum ? "number" : "text"; if (isNum) i.step = "any";
+  i.value = c.value == null ? "" : c.value; i.setAttribute("aria-label", L.id + " " + c.key);
+  i.onchange = () => { const raw = i.value; if (raw === "" || (isNum && !Number.isFinite(parseFloat(raw)))) return; apply(L.id, { [c.key]: isNum ? parseFloat(raw) : raw }); };
+  i.onkeydown = e => e.stopPropagation(); w.append(i); return w;
+}
+
+async function apply(id, changes) {
+  try { info = await post("/prop", { layer: id, changes, hash: info.hash, t }); perr = ""; await loadNotes(); show(t); }
+  catch (e) { perr = e.message; renderAll(); }
+}
+
+function renderPop() {
+  const pop = $("pop"), L = selected && layerOf(selected);
+  if (!L || !boxes[selected]) { pop.style.display = "none"; return; }
+  const main = L.controls.filter(c => !["x", "y", "at", "dur"].includes(c.key)), more = L.controls.filter(c => ["x", "y", "at", "dur"].includes(c.key));
+  const top = mk("div", "top"); top.append(mk("b", "", L.id), mk("span", "", L.type));
+  const close = mk("button", "x", "×"); close.title = "Close (Esc)"; close.setAttribute("aria-label", "Close"); close.onclick = () => select(null); top.append(close);
+  const ctls = mk("div", "ctls"); ctls.append(...main.map(c => ctlInput(L, c)));
+  const det = mk("details"); det.open = moreOpen; det.ontoggle = () => { moreOpen = det.open; place(); };
+  det.append(mk("summary", "", "position and timing")); const c2 = mk("div", "ctls"); c2.append(...more.map(c => ctlInput(L, c))); det.append(c2);
+  const nf = mk("input", "nf"); nf.placeholder = pin ? "Note at this point…" : "Add a note…"; nf.setAttribute("aria-label", "Note for " + L.id);
+  const add = mk("button", "primary", "Add");
+  const send = async () => {
+    if (!nf.value.trim()) return;
+    try { await post("/notes", { action: "add", t, layer: L.id, ...(pin ? { x: pin.x, y: pin.y } : {}), text: nf.value }); pin = null; perr = ""; await loadNotes(); renderAll(); }
+    catch (e) { perr = e.message; renderAll(); }
   };
-  inp.addEventListener("keydown", e => e.stopPropagation());
-  wrap.append(inp); return wrap;
+  add.onclick = send; nf.onkeydown = e => { e.stopPropagation(); if (e.key === "Enter") send(); };
+  const nr = mk("div", "noterow"); nr.append(nf, add);
+  pop.replaceChildren(top, ctls, det, nr);
+  if (perr) pop.append(mk("div", "perr", perr));
+  pop.style.display = "block"; place();
+}
+function place() {
+  const pop = $("pop"), L = selected; if (!L || !boxes[L]) return;
+  const s = $("stage"), W = s.clientWidth, H = s.clientHeight, [l, tp, r, b] = boxes[L], ph = pop.offsetHeight, pw = pop.offsetWidth;
+  let y = b * H + 8; if (y + ph > H) y = Math.max(4, tp * H - ph - 8); if (y + ph > H) y = Math.max(4, H - ph - 4);
+  pop.style.left = Math.max(4, Math.min(l * W, W - pw - 4)) + "px"; pop.style.top = y + "px";
 }
 
-function noteView(n) {
-  const d = document.createElement("div"); d.className = "note " + n.status + (n.kind === "prop" ? " prop" : "");
-  const meta = document.createElement("div"); meta.className = "meta";
-  const go = document.createElement("button"); go.className = "link"; go.textContent = fmt(n.t); go.onclick = () => show(n.t);
-  meta.append(go);
-  if (n.kind === "prop") meta.append("edited");
-  if (n.stale && n.kind !== "prop") meta.append("scene changed since");
-  const act = document.createElement("button"); act.className = "link"; act.textContent = n.status === "open" ? "resolve" : "reopen";
-  act.onclick = async () => { try { await post("/notes", { action: n.status === "open" ? "resolve" : "reopen", id: n.id }); loadNotes(); } catch (e) { say(e.message); } };
-  meta.append(act);
-  const txt = document.createElement("div"); txt.className = "txt"; txt.textContent = n.text;
-  d.append(meta, txt);
-  for (const r of n.replies) { const x = document.createElement("div"); x.className = "reply"; x.textContent = r.by + ": " + r.text; d.append(x); }
-  return d;
-}
+function select(id) { if (id !== selected) { perr = ""; pin = null; } selected = id; renderAll(); }
+function renderAll() { drawOverlay(); renderRail(); renderPop(); }
 
-function composer(layerId) {
-  const f = document.createElement("form"); f.className = "compose";
-  if (!draft || draft.layer !== layerId) {
-    const b = document.createElement("button"); b.type = "button"; b.textContent = "+ note";
-    b.onclick = () => { draft = { t, layer: layerId }; render(); };
-    f.append(b); return f;
-  }
-  const ta = document.createElement("textarea"); ta.placeholder = "What should change here?"; ta.setAttribute("aria-label", "Note for " + layerId);
-  ta.addEventListener("keydown", e => e.stopPropagation());
-  const where = document.createElement("span"); where.className = "where";
-  where.textContent = fmt(draft.t) + (draft.x !== undefined ? ` · ${Math.round(draft.x * 100)}%, ${Math.round(draft.y * 100)}%` : "");
-  const cancel = document.createElement("button"); cancel.type = "button"; cancel.textContent = "Cancel"; cancel.onclick = () => { draft = null; render(); drawOverlay(); };
-  const add = document.createElement("button"); add.type = "submit"; add.className = "primary"; add.textContent = "Add note";
-  const row = document.createElement("div"); row.className = "row"; row.append(where, cancel, add);
-  f.append(ta, row);
-  f.onsubmit = async e => {
-    e.preventDefault();
-    try { await post("/notes", { action: "add", ...draft, text: ta.value }); draft = null; await loadNotes(); render(); drawOverlay(); }
-    catch (err) { errs[layerId] = err.message; render(); }
-  };
-  setTimeout(() => ta.focus(), 0);
-  return f;
-}
-
-function layerCard(L) {
-  const mine = notes.filter(n => n.layer === L.id);
-  const card = document.createElement("section");
-  card.className = "layer" + (open.has(L.id) ? " open" : "") + (selected === L.id ? " selected" : "");
-  card.id = "L-" + L.id;
-  const head = document.createElement("div"); head.className = "head"; head.tabIndex = 0; head.setAttribute("role", "button");
-  head.setAttribute("aria-expanded", open.has(L.id));
-  const id = document.createElement("span"); id.className = "id"; id.textContent = L.id;
-  const ty = document.createElement("span"); ty.className = "type"; ty.textContent = L.type + (L.parent ? " in " + L.parent : "");
-  head.append(id, ty);
-  const openN = mine.filter(n => n.status === "open").length;
-  if (openN) { const c = document.createElement("span"); c.className = "count"; c.textContent = openN; c.title = openN + " open notes"; head.append(c); }
-  const badge = document.createElement("span"); badge.className = "badge"; head.append(badge);
-  const toggle = () => { if (open.has(L.id) && selected === L.id) { open.delete(L.id); selected = null; } else { open.add(L.id); selected = L.id; } render(); drawOverlay(); };
-  head.onclick = toggle;
-  head.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } };
-  const body = document.createElement("div"); body.className = "body";
-  const span = document.createElement("div"); span.className = "span"; span.title = fmt(L.in) + " to " + fmt(L.out);
-  const fill = document.createElement("div"); fill.className = "fill";
-  fill.style.left = L.in / info.duration * 100 + "%"; fill.style.width = Math.max(0.5, (L.out - L.in) / info.duration * 100) + "%";
-  const at = document.createElement("div"); at.className = "at"; span.append(fill, at);
-  span.onclick = e => { const r = span.getBoundingClientRect(); show((e.clientX - r.left) / r.width * info.duration); };
-  const ctl = document.createElement("div"); ctl.className = "controls"; ctl.append(...L.controls.map(c => ctlInput(L, c)));
-  body.append(span, ctl);
-  if (errs[L.id]) { const e = document.createElement("div"); e.className = "err"; e.textContent = errs[L.id]; body.append(e); }
-  body.append(...mine.map(noteView), composer(L.id));
-  card.append(head, body);
-  return card;
-}
-
-function render() {
-  const keep = document.activeElement?.getAttribute?.("aria-label");
-  $("stack").replaceChildren(...info.layers.map(layerCard));
-  if (keep) document.querySelector(`[aria-label="${CSS.escape(keep)}"]`)?.focus();
-  refreshLive();
-}
-
-async function loadNotes() {
-  notes = (await api("/notes?status=" + ($("showAll").checked ? "all" : "open"))).notes;
-}
-
-$("stage").addEventListener("click", async e => {
+const stage = $("stage");
+stage.addEventListener("pointerdown", e => {
   if (!$("vid").paused) return;
-  const r = $("stage").getBoundingClientRect();
-  const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
-  let layer = null;
-  try { layer = (await api(`/hit?x=${x}&y=${y}&t=${t}`)).layer; } catch (err) { say(err.message); }
-  if (!layer) { say("No layer under that point."); return; }
-  draft = { t, x, y, layer }; select(layer, true);
+  const p = pt(e), id = topAt(p.x, p.y);
+  if (!id) { select(null); return; }
+  if (id !== selected) { selected = id; perr = ""; }
+  pin = { x: p.x, y: p.y };
+  drag = { id, cx: e.clientX, cy: e.clientY, r: p.r, moved: false, dx: 0, dy: 0 };
+  stage.setPointerCapture(e.pointerId); renderAll();
 });
-$("showAll").onchange = async () => { await loadNotes(); render(); drawOverlay(); };
+stage.addEventListener("pointermove", e => {
+  const p = pt(e);
+  if (!drag) { const h = $("vid").paused ? topAt(p.x, p.y) : null; if (h !== hover) { hover = h; drawOverlay(); } return; }
+  const dx = e.clientX - drag.cx, dy = e.clientY - drag.cy;
+  if (!drag.moved && Math.hypot(dx, dy) < 5) return;
+  if (!drag.moved) {
+    const L = layerOf(drag.id), cx = L.controls.find(c => c.key === "x"), cy = L.controls.find(c => c.key === "y");
+    if (L.parent || !cx?.editable || !cy?.editable) { say(L.parent ? "Layers inside a group are moved from their notes." : "This layer's position is animated: leave a note instead."); drag = null; return; }
+    drag.moved = true; pin = null;
+  }
+  drag.dx = dx / drag.r.width; drag.dy = dy / drag.r.height; drawOverlay(); $("pop").style.display = "none";
+});
+stage.addEventListener("pointerup", async () => {
+  const d = drag; drag = null; if (!d) return;
+  if (!d.moved) { renderAll(); return; }
+  const L = layerOf(d.id);
+  const shift = (c, px, base, size) => {
+    if (typeof c.value === "number") return Math.round((c.value + px) * 10) / 10;
+    if (typeof c.value === "string" && /^-?[\d.]+%$/.test(c.value)) return Math.round((parseFloat(c.value) + px / size * 100) * 10) / 10 + "%";
+    if (c.value == null) return Math.round((base + px) * 10) / 10;
+    return null;
+  };
+  const cx = L.controls.find(c => c.key === "x"), cy = L.controls.find(c => c.key === "y");
+  const nx = shift(cx, d.dx * info.w, pos[d.id]?.[0] ?? 0, info.w), ny = shift(cy, d.dy * info.h, pos[d.id]?.[1] ?? 0, info.h);
+  if (nx == null || ny == null) { say("This layer's position is an expression: leave a note instead."); renderAll(); return; }
+  await apply(d.id, { x: nx, y: ny });
+});
+stage.addEventListener("pointerleave", () => { if (hover) { hover = null; drawOverlay(); } });
+stage.addEventListener("pointercancel", () => { drag = null; renderAll(); });
+
+async function loadNotes() { notes = (await api("/notes?status=" + ($("showAll").checked ? "all" : "open"))).notes; }
+$("showAll").onchange = async () => { await loadNotes(); renderAll(); };
 $("scrub").oninput = e => { $("vid").pause(); show(parseFloat(e.target.value)); };
 $("prev").onclick = () => show(t - 1 / info.fps);
 $("next").onclick = () => show(t + 1 / info.fps);
@@ -267,22 +256,25 @@ $("play").onclick = () => {
 $("vid").addEventListener("timeupdate", () => { $("scrub").value = $("vid").currentTime; $("time").textContent = fmt($("vid").currentTime); });
 $("vid").addEventListener("pause", () => { const v = $("vid"); v.style.display = "none"; $("play").textContent = "Play"; show(v.currentTime); });
 document.addEventListener("keydown", e => {
-  if (["TEXTAREA", "INPUT", "BUTTON"].includes(e.target.tagName) || e.target.classList.contains("head")) return;
-  if (e.key === "ArrowLeft") $("prev").click();
-  else if (e.key === "ArrowRight") $("next").click();
-  else if (e.key === " ") { e.preventDefault(); $("play").click(); }
+  if (["TEXTAREA", "INPUT", "BUTTON", "SUMMARY"].includes(e.target.tagName) || e.target.getAttribute("role") === "button") return;
+  if (e.key === "ArrowLeft") $("prev").click(); else if (e.key === "ArrowRight") $("next").click();
+  else if (e.key === " ") { e.preventDefault(); $("play").click(); } else if (e.key === "Escape") select(null);
 });
+
+function fit() {
+  const main = document.querySelector("main"), availH = main.clientHeight - 80, availW = main.clientWidth - 32, ar = info.w / info.h;
+  $("wrap").style.width = Math.max(200, Math.min(availW, availH * ar)) + "px"; place();
+}
+window.addEventListener("resize", () => info && fit());
 
 (async () => {
   try {
     info = await api("/scene");
     $("title").textContent = `${info.name} · ${info.w}×${info.h} · ${info.duration} s`;
-    $("scrub").max = info.duration;
-    $("stage").style.aspectRatio = info.w + " / " + info.h;
-    const q = new URLSearchParams(location.search);
-    const start = parseFloat(q.get("t"));
-    if (q.get("layer")) { selected = q.get("layer"); open.add(selected); }
-    await loadNotes(); render(); show(Number.isFinite(start) ? start : 0);
+    $("scrub").max = info.duration; $("stage").style.aspectRatio = info.w + " / " + info.h; fit();
+    const q = new URLSearchParams(location.search), start = parseFloat(q.get("t"));
+    await loadNotes(); show(Number.isFinite(start) ? start : 0);
+    if (q.get("layer")) setTimeout(() => select(q.get("layer")), 300);
   } catch (e) { $("title").textContent = "Could not load the scene: " + e.message; }
 })();
 </script>

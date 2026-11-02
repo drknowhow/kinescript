@@ -88,16 +88,19 @@ def scene_info(path: Path) -> dict:
             "hash": feedback.scene_hash(path), "video": video.name if video.is_file() else None, "layers": layers}
 
 
-def set_prop(path: Path, layer: str, key: str, value, base_hash: str, t: float = 0) -> dict:
-    """Write one property of one layer into the scene file, and log it as a note for the agent.
+def set_props(path: Path, layer: str, changes: dict, base_hash: str, t: float = 0) -> dict:
+    """Write properties of one layer into the scene file in one save, and log them as one note for the agent.
 
     Refuses when the file changed since the page loaded it, holds comments or other non-strict JSON
     (rewriting would drop them), or the result would not load as a scene."""
     from .scene import Scene, SceneError
-    if key not in EDITABLE:
-        raise BadRequest(f"{key} cannot be edited here")
-    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
-        raise BadRequest("value must be a number or text")
+    if not isinstance(changes, dict) or not changes:
+        raise BadRequest("nothing to change")
+    for key, value in changes.items():
+        if key not in EDITABLE:
+            raise BadRequest(f"{key} cannot be edited here")
+        if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+            raise BadRequest("value must be a number or text")
     if feedback.scene_hash(path) != base_hash:
         raise BadRequest("the scene changed since this page loaded it; reload")
     try:
@@ -107,10 +110,12 @@ def set_prop(path: Path, layer: str, key: str, value, base_hash: str, t: float =
     raw = _raw_layers(doc).get(layer)
     if raw is None:
         raise BadRequest(f"no layer {layer}")
-    if key in raw and not isinstance(raw[key], (int, float, str)):
-        raise BadRequest(f"{layer}.{key} is animated or computed; leave a note instead")
-    before = raw.get(key)
-    raw[key] = value
+    before = {}
+    for key, value in changes.items():
+        if key in raw and not isinstance(raw[key], (int, float, str)):
+            raise BadRequest(f"{layer}.{key} is animated or computed; leave a note instead")
+        before[key] = raw.get(key)
+        raw[key] = value
     try:
         Scene(doc, str(path.parent)).close()
     except (SceneError, ValueError) as e:
@@ -123,8 +128,9 @@ def set_prop(path: Path, layer: str, key: str, value, base_hash: str, t: float =
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
-    feedback.add(path, t, f"{layer}.{key}: {before!r} -> {value!r}", layer=layer, kind="prop",
-                 extra={"change": {"key": key, "from": before, "to": value}})
+    text = ", ".join(f"{layer}.{k}: {before[k]!r} -> {v!r}" for k, v in changes.items())
+    feedback.add(path, t, text, layer=layer, kind="prop",
+                 extra={"change": {k: {"from": before[k], "to": v} for k, v in changes.items()}})
     return scene_info(path)
 
 
@@ -154,7 +160,8 @@ def hit(path: Path, x: float, y: float, t: float) -> dict:
             found = lid
     boxes = {lid: [b["rect"][0] / c["w"], b["rect"][1] / c["h"], b["rect"][2] / c["w"], b["rect"][3] / c["h"]]
              for lid, b in info["visible"].items()}
-    return {"layer": found, "layers": list(info["visible"]), "boxes": boxes}
+    pos = {lid: b["pos"] for lid, b in info["visible"].items()}
+    return {"layer": found, "layers": list(info["visible"]), "boxes": boxes, "pos": pos}
 
 
 def make_handler(path: Path):
@@ -257,8 +264,8 @@ def make_handler(path: Path):
                 raise BadRequest("body must be an object")
             action = "prop" if urlparse(self.path).path == "/prop" else body.get("action", "add")
             if action == "prop":
-                return self._json(set_prop(path, body.get("layer"), body.get("key"), body.get("value"), body.get("hash"),
-                                              body.get("t") or 0))
+                changes = body.get("changes") or {body.get("key"): body.get("value")}
+                return self._json(set_props(path, body.get("layer"), changes, body.get("hash"), body.get("t") or 0))
             if action == "add":
                 note = feedback.add(path, body.get("t"), body.get("text"), body.get("x"), body.get("y"),
                                     body.get("layer"), body.get("kind", "pin"))

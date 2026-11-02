@@ -138,7 +138,7 @@ def test_prop_edit_rewrites_the_scene_and_logs_a_note(srv):
     assert status == 200 and json.loads(body)["hash"] != h
     assert json.loads(scene.read_text(encoding="utf-8"))["layers"][1]["size"] == 80
     note = feedback.listing(scene)[0]
-    assert note["kind"] == "prop" and note["change"] == {"key": "size", "from": 40, "to": 80} and note["layer"] == "title"
+    assert note["kind"] == "prop" and note["change"] == {"size": {"from": 40, "to": 80}} and note["layer"] == "title"
 
 
 @pytest.mark.parametrize("body, why", [
@@ -168,3 +168,18 @@ def test_prop_edit_will_not_rewrite_a_scene_with_comments(srv):
     status, out, _ = req(port, "POST", "/prop", {"layer": "title", "key": "size", "value": 80,
                                                    "hash": feedback.scene_hash(scene)})
     assert status == 400 and "comments" in json.loads(out)["error"] and scene.read_text(encoding="utf-8").startswith("// keep me")
+
+
+def test_prop_edit_can_move_a_layer_in_one_save(srv):
+    port, scene = srv
+    h = json.loads(req(port, "GET", "/scene")[1])["hash"]
+    status, _, _ = req(port, "POST", "/prop", {"layer": "title", "changes": {"x": 100, "y": 50}, "hash": h, "t": 0})
+    assert status == 200
+    title = json.loads(scene.read_text(encoding="utf-8"))["layers"][1]
+    assert (title["x"], title["y"]) == (100, 50) and len(feedback.listing(scene)) == 1
+
+
+def test_hit_returns_layer_positions_in_pixels(srv):
+    port, _ = srv
+    pos = json.loads(req(port, "GET", "/hit?x=0&y=0&t=1")[1])["pos"]
+    assert pos["title"] == [160.0, 90.0]
