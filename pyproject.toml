@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kinescript"
-version = "1.7.0"
-description = "Render motion graphics, video edits and voice-over from JSON scenes on the GPU, with checks an agent can read."
+version = "1.7.1"
+description = "Render motion graphics, video edits and voice-over from JSON scenes, with checks for agents and a browser editor."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE", "kinescript/fonts/*-OFL.txt"]
@@ -15,7 +15,7 @@ dependencies = ["skia-python>=144.1", "numpy>=1.24", "glfw>=2.5"]
 keywords = [
     "video", "video rendering", "video editing", "programmatic video", "motion graphics", "animation",
     "json", "skia", "gpu", "ffmpeg", "3d", "captions", "voice-over", "text to speech", "audio mixing",
-    "loudness", "mcp", "ai agents",
+    "loudness", "mcp", "ai agents", "video editor", "annotation",
 ]
 classifiers = [
     "Development Status :: 5 - Production/Stable",

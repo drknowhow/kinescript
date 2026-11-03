@@ -46,6 +46,7 @@ rendered from.
   grain; optional motion blur.
 - **Components.** `lowerThird`, `titleCard`, `callout`, `focus` (dim everything but a region), `progress`,
   `kinetic`, the charts `barChart`, `lineChart` and `pieChart`, plus your own with `{{param}}` placeholders.
+- **Review on the frame.** `kine edit scene.json` opens the scene in the browser: click a layer to change its values or drag it, comment on a layer, a word of the voice or the whole scene, draw on the frame, and the agent reads the notes back ([Editor](https://github.com/drknowhow/kinescript#editor)).
 - **Outputs.** H.264 `.mp4`, ProRes 4444 `.mov` and VP9 `.webm` with alpha for compositing, `.gif`, PNG sequences.
 
 ## 2D
@@ -250,6 +251,43 @@ and `kine_still` return images inline. `kine_feedback` lists, answers and resolv
   }
 }
 ```
+
+## Editor
+
+<p align="center"><img src="https://raw.githubusercontent.com/drknowhow/kinescript/main/docs/editor.jpg" width="900" alt="The kine edit page: the narrated example with the word Check selected on the frame, its values and a note field in a sidebar on the right, and a time strip under the clip with a lane for every layer and sound"></p>
+
+`kine edit scene.json` serves a page on `127.0.0.1` (it opens your browser; `--port` and `--no-open` change that). It is
+for the moment after an agent has made a scene and a person has to say what is wrong with it, or fix a number.
+
+- **Select on the frame.** Hover outlines the layer under the pointer and a click selects it. Text, shapes, captions,
+  groups and layers drawn onto a screen or card face can all be picked. A sidebar on the right shows its values and a
+  note field, and the frame outlines what the sidebar applies to, with a tag. Dragging a layer writes its `x` and `y`
+  to the scene file in one save.
+- **Edit the values that are plain numbers and text.** A layer's values, such as `text`, `size`, `fill`, `x`, `y` and timing, or a
+  voice's `text`, `speaker`, `at` and `volume`. Animated values and expressions are shown as such and left to the
+  agent. The page refuses to write when the file changed under it, when the scene has comments (rewriting would drop
+  them), or when the result would not load.
+- **A strip under the clip.** One lane for every layer, lit while it is on screen, with an eye that hides it in the
+  preview only (the scene file is not touched). Sounds get their own lanes: a voice shows its words, a captions
+  layer its cues. Layers, sounds and notes are colour-coded by kind, with filter chips to hide a kind. Ctrl+wheel
+  zooms the strip and Shift+wheel or a sideways swipe moves it. Hold Ctrl over a lane to outline its component on
+  the frame. Each sound has a play button that plays it alone, or one word of a voice.
+- **Notes.** Comment on a layer, a point on it, a sound, one word, a caption or the whole scene (`+ scene`), or draw
+  on the frame (`Draw`, or `D`). Notes are saved in `scene.feedback.json` beside the scene, with a hash of the scene
+  so a note made before an edit is marked `stale`.
+
+The agent reads them with the `kine_feedback` MCP tool:
+
+| Action | What it does |
+|---|---|
+| `list` | open notes in time order, each with its time, layer, sound, word, point or strokes, and `stale` |
+| `get` | one note, with its replies |
+| `reply` | answers a note without closing it |
+| `resolve` | closes a note, with an optional reply |
+
+With `still=true`, `list` and `get` return the frame at the note's time with its point ringed and its strokes drawn in
+yellow, so the agent sees what the person pointed at. The editor draws frames on the CPU, whatever `KINE_BACKEND` says,
+because its server answers on several threads.
 
 ## Install
 

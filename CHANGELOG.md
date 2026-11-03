@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.1 (2026-11-02)
+
+- The README and the PyPI page now describe the editor (`kine edit`) and `kine_feedback`, and the project site has an
+  Editor section with screenshots of it. `marketing/build_editor_shots.py` takes the screenshots in headless Chrome.
+  No code changes.
+
 ## 1.7.0 (2026-11-02)
 
 - Kinescript needs skia-python 144.1 or later, and `pyproject.toml` now says so (it said 87). Earlier releases,
