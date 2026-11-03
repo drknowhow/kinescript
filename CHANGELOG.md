@@ -1,28 +1,30 @@
 # Changelog
 
-## Unreleased
+## 1.7.0 (2026-11-02)
 
 - Kinescript needs skia-python 144.1 or later, and `pyproject.toml` now says so (it said 87). Earlier releases,
   87.9, 138.0 and 144.0.post1 among them, bind `skia.M44` without `Rows`, so any scene using depth (z, rotateX,
   rotateY or a camera) stopped with "a bug in Kinescript" at `space.py:79`. With an older skia-python installed,
   importing Kinescript now fails at once and names the version to install.
-- `kine edit scene.json` opens a browser editor built around the clip. Hover outlines the layer under the pointer,
-  a click selects it and opens a small panel beside it with its values and a note field (a click also pins the note
-  at that point), and dragging moves it: `x` and `y` are written to the scene file in one save. Under the clip, each
-  layer has a bar for its in and out time, lit while it is on screen, and an eye that hides it in the preview only
-  (the scene file is not changed; `/frame` and `/hit` take `hide=id,id`); click a bar to jump there and select the
-  layer. Every edit is logged as a note for the agent. Animated values and layers inside groups are not edited here, and scenes
-  with comments are not rewritten. It serves on 127.0.0.1 only and draws frames on the CPU.
-- `kine edit` also comments on sound and captions. A strip under the clip lines up each sound's lane with the scene's
-  time: a voice shows its words, a captions layer its cues, music and effects their span. Click a word, cue or sound
-  to comment on it (a comment on a voiced word also names the captions layer that shows it), or change a voice's
-  `text`, `speaker`, `at` or `volume` (the note reminds the agent to run `kine_voice`). `✎ Draw` (or `D`) draws on the
-  frame, `+ scene` leaves a note on the whole scene, and note marks sit on the strip. Captions layers can change `y`,
-  `size`, `fill` and `active`.
+- `kine edit scene.json` opens a browser editor for reviewing a scene. Click a layer on the frame to select it, or
+  drag it to move it (`x` and `y` are written to the scene file in one save). A right sidebar shows the selection's
+  values and a note field, and the frame outlines what it applies to with a tag; text, shapes, captions, groups and
+  layers drawn onto a screen or card face can all be picked. Under the clip, one lane per layer shows its in and out
+  time, lit while it is on screen, with an eye that hides it in the preview only (the scene file is not changed;
+  `/frame` and `/hit` take `hide=id,id`). Layers, sounds and notes are colour-coded by kind, with filter chips to
+  hide a kind. Ctrl+wheel zooms the strip, Shift+wheel or a sideways swipe moves it, and holding Ctrl over a lane
+  outlines its component on the frame. It serves on 127.0.0.1 only and draws frames on the CPU.
+- `kine edit` also comments on sound and captions. Each sound has its own lane, a voice shows its words and a
+  captions layer its cues; click a word, cue or sound to comment on it, play it alone (or one word of a voice), or
+  change a voice's `text`, `speaker`, `at` or `volume` (the note reminds the agent to run `kine_voice`). `Draw` (or
+  `D`) draws on the frame, `+ scene` leaves a note on the whole scene, and note marks sit on the strip. Animated
+  values are not edited here, and scenes with comments are not rewritten.
 - `kine_feedback` (MCP): review notes kept in `<scene>.feedback.json` beside the scene. Each has a time, an optional
   point, layer id, sound, word or drawn strokes, and a status; `list`, `get`, `reply` and `resolve` work on them, and
   `still` returns the frame at the note's time with its point ringed and its strokes drawn. A note is `stale` once the
   scene file has changed.
+- With `KINE_BACKEND=cpu` set, rendering no longer uses a GL context that already exists, because that context belongs
+  to the thread that made it.
 
 ## 1.6.1 (2026-11-01)
 
