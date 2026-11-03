@@ -1,16 +1,13 @@
 name: release-kokoro
 
 # Push a tag like kokoro-v0.1.0 to build plugins/kinescript-kokoro and publish it to PyPI as kinescript-kokoro.
-# Run the workflow by hand (Actions > release-kokoro > Run workflow) to publish the same build to TestPyPI instead.
-# Publishing uses trusted publishing (OIDC), as release.yml does. Each index needs a publisher for the project
-# kinescript-kokoro (a pending one before the first upload) that lists this repository, workflow file
-# "release-kokoro.yml" and the environment: "pypi" on pypi.org, "testpypi" on test.pypi.org.
+# Publishing uses trusted publishing (OIDC), as release.yml does. pypi.org needs a publisher for the project
+# kinescript-kokoro that lists this repository, workflow file "release-kokoro.yml" and the environment "pypi".
 # The tag must not start with "v": release.yml publishes kinescript itself on those.
 
 on:
   push:
     tags: ["kokoro-v*"]
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -94,22 +91,3 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
-
-  publish-testpypi:
-    needs: build
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    environment:
-      name: testpypi
-      url: https://test.pypi.org/project/kinescript-kokoro/
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-          skip-existing: true

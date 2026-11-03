@@ -324,7 +324,9 @@ def _vector(src: str, mtime: int, size: int) -> Vector:
     undrawn = tuple(k for k in SVG_FIX if k in found)
     w, h = svgdoc.size(root)
     # The reader follows xlink:href only; SVG 2 writes href (a <use>, a gradient taking another's stops).
-    dom = skia.SVGDOM.MakeFromStream(skia.MemoryStream(skia.Data.MakeWithCopy(_START_TAG.sub(_xlink, data))))
+    # Keep the Data in a name: MemoryStream does not own the bytes it reads, so a temporary is freed under the parser.
+    blob = skia.Data.MakeWithCopy(_START_TAG.sub(_xlink, data))
+    dom = skia.SVGDOM.MakeFromStream(skia.MemoryStream(blob))
     if dom is None:
         raise MediaError(f"cannot read svg {src}")
     dom.setContainerSize(skia.Size(w, h))
