@@ -54,18 +54,18 @@ same language: the first letter picks it.
 
 Kokoro reads English through [misaki](https://github.com/hexgrad/misaki), which takes a Markdown link in the
 text to change how one word is said. It looks up names it doesn't know in espeak, and some come out wrong:
-"Kinescript" alone is said KYNE-script.
+"Kokoro" alone is said ko-KOR-oh.
 
 ```json
-{"id": "vo1", "role": "voice", "text": "Meet [Kinescript](/kˈɪnəskɹˌɪpt/). [[go]]Render it."}
+{"id": "vo1", "role": "voice", "text": "Meet [Kokoro](/kˈOkəɹO/). [[go]]Render it."}
 ```
 
-- `[word](/phonemes/)` says the word with the IPA phonemes between the slashes, here KIN-uh-script. `ˈ` marks
+- `[word](/phonemes/)` says the word with the IPA phonemes between the slashes, here KO-kuh-roh. `ˈ` marks
   primary stress and `ˌ` secondary; misaki's phoneme list names the symbols it accepts.
 - `[word](-1)` lowers the word's stress one step, `[word](-2)` removes it, and `[word](+1)` or `[word](+2)`
-  raises it.
+  raises it. `+2` is the most: misaki marks one primary stress, so `+3` and higher say it as `+2` does.
 
-The words file, captions and word ids keep the word as written (`Kinescript.`, id `kinescript`), and `[[go]]`
+The words file, captions and word ids keep the word as written (`Kokoro.`, id `kokoro`), and `[[go]]`
 marks work around it. Keep each link to one word: misaki joins `[New York](...)` into a single timed word.
 
 ## Device
