@@ -206,8 +206,10 @@ def gpu_context():
     """One hidden OpenGL context per process, or None when there is no usable GPU.
     KINE_BACKEND=cpu forces the raster backend; KINE_BACKEND=gpu makes no GPU an error."""
     want = backend_setting()
+    if want == "cpu":
+        return None
     if "ctx" not in _GL:
-        _GL["ctx"] = None if want == "cpu" else _make_gl()
+        _GL["ctx"] = _make_gl()
     if want == "gpu" and _GL["ctx"] is None:
         raise RuntimeError("KINE_BACKEND=gpu, but no OpenGL context could be made on this machine; set it to auto "
                            "or cpu to draw on the CPU")

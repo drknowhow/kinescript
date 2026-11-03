@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+- `kine edit scene.json` opens a browser editor built around the clip. Hover outlines the layer under the pointer,
+  a click selects it and opens a small panel beside it with its values and a note field (a click also pins the note
+  at that point), and dragging moves it: `x` and `y` are written to the scene file in one save. Under the clip, each
+  layer has a bar for its in and out time, lit while it is on screen, and an eye that hides it in the preview only
+  (the scene file is not changed; `/frame` and `/hit` take `hide=id,id`); click a bar to jump there and select the
+  layer. Every edit is logged as a note for the agent. Animated values and layers inside groups are not edited here, and scenes
+  with comments are not rewritten. It serves on 127.0.0.1 only and draws frames on the CPU.
+- `kine edit` also comments on sound and captions. A strip under the clip lines up each sound's lane with the scene's
+  time: a voice shows its words, a captions layer its cues, music and effects their span. Click a word, cue or sound
+  to comment on it (a comment on a voiced word also names the captions layer that shows it), or change a voice's
+  `text`, `speaker`, `at` or `volume` (the note reminds the agent to run `kine_voice`). `✎ Draw` (or `D`) draws on the
+  frame, `+ scene` leaves a note on the whole scene, and note marks sit on the strip. Captions layers can change `y`,
+  `size`, `fill` and `active`.
+- `kine_feedback` (MCP): review notes kept in `<scene>.feedback.json` beside the scene. Each has a time, an optional
+  point, layer id, sound, word or drawn strokes, and a status; `list`, `get`, `reply` and `resolve` work on them, and
+  `still` returns the frame at the note's time with its point ringed and its strokes drawn. A note is `stale` once the
+  scene file has changed.
+
 ## 1.6.1 (2026-11-01)
 
 - Chart components `barChart`, `lineChart` and `pieChart`, each taking `data` as numbers, `[label, number]` pairs or

@@ -850,6 +850,7 @@ COMMANDS
                                   on stdin and prints a JSON list of results, one per request.
                                   Rendering never speaks.
   kine watch scene.json           re-makes the contact sheet on every save
+  kine edit scene.json            browser page: scrub, pin notes on frames; an agent reads them with kine_feedback
   kine doctor                     checks ffmpeg and ffprobe, the GPU and fonts; exits 1 when
                                   ffmpeg or ffprobe is missing, and says how to install it
   kine mcp                        the same tools for MCP clients
