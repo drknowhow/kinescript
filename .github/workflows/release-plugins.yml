@@ -1,23 +1,15 @@
 name: release-plugins
 
 # Push a tag like chatterbox-v0.1.0 or elevenlabs-v0.1.0 to build that plugin from plugins/kinescript-<name> and
-# publish it to PyPI as kinescript-<name>. Run the workflow by hand (Actions > release-plugins > Run workflow) and
-# pick a plugin to publish the same build to TestPyPI instead.
-# Publishing uses trusted publishing (OIDC), as release.yml does. Each project needs a publisher on each index (a
-# pending one before the first upload) that lists this repository, workflow file "release-plugins.yml" and the
-# environment: "pypi" on pypi.org, "testpypi" on test.pypi.org.
+# publish it to PyPI as kinescript-<name>.
+# Publishing uses trusted publishing (OIDC), as release.yml does. Each project needs a pypi.org publisher that lists
+# this repository, workflow file "release-plugins.yml" and the environment "pypi".
 # The smoke test installs kinescript from PyPI, so tag a plugin after the kinescript release it needs is published.
 # kinescript-kokoro keeps release-kokoro.yml, the workflow its PyPI publisher names.
 
 on:
   push:
     tags: ["chatterbox-v*", "elevenlabs-v*"]
-  workflow_dispatch:
-    inputs:
-      plugin:
-        description: Plugin to publish to TestPyPI
-        type: choice
-        options: [chatterbox, elevenlabs]
 
 permissions:
   contents: read
@@ -30,10 +22,8 @@ jobs:
     steps:
       - name: Which plugin
         id: which
-        env:
-          PICKED: ${{ inputs.plugin }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" = push ]; then p="${GITHUB_REF_NAME%%-v*}"; else p="$PICKED"; fi
+          p="${GITHUB_REF_NAME%%-v*}"
           case "$p" in chatterbox|elevenlabs) ;; *) echo "no plugin named '$p'"; exit 1 ;; esac
           echo "plugin=$p" >> "$GITHUB_OUTPUT"
           echo "PLUGIN=$p" >> "$GITHUB_ENV"
@@ -185,22 +175,3 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
-
-  publish-testpypi:
-    needs: build
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    environment:
-      name: testpypi
-      url: https://test.pypi.org/project/kinescript-${{ needs.build.outputs.plugin }}/
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-          skip-existing: true
