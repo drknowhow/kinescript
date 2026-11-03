@@ -296,9 +296,6 @@ SVG_FIX = {"text": "turn text into paths (Inkscape: Path > Object to Path; Illus
            "feDropShadow": "drop the filter and give the layer a shadow",
            "animation": "an svg's own animation does not play: animate the layer instead"}
 _START_TAG = re.compile(rb"<[A-Za-z][^>]*>")
-# The reader can look past the end of the bytes it is given on Linux, and fails the file on what it finds there; blanks
-# after the root element are ignored by an xml parser and give it something harmless to find.
-_PAD = b" " * 4096
 _HREF = re.compile(rb"(\s)href(\s*=)")
 
 
@@ -327,7 +324,9 @@ def _vector(src: str, mtime: int, size: int) -> Vector:
     undrawn = tuple(k for k in SVG_FIX if k in found)
     w, h = svgdoc.size(root)
     # The reader follows xlink:href only; SVG 2 writes href (a <use>, a gradient taking another's stops).
-    dom = skia.SVGDOM.MakeFromStream(skia.MemoryStream(skia.Data.MakeWithCopy(_START_TAG.sub(_xlink, data) + _PAD)))
+    # Keep the Data in a name: MemoryStream does not own the bytes it reads, so a temporary is freed under the parser.
+    blob = skia.Data.MakeWithCopy(_START_TAG.sub(_xlink, data))
+    dom = skia.SVGDOM.MakeFromStream(skia.MemoryStream(blob))
     if dom is None:
         raise MediaError(f"cannot read svg {src}")
     dom.setContainerSize(skia.Size(w, h))
