@@ -210,6 +210,8 @@ README has the details:
 [Kokoro](https://github.com/drknowhow/kinescript/tree/main/plugins/kinescript-kokoro),
 [Chatterbox](https://github.com/drknowhow/kinescript/tree/main/plugins/kinescript-chatterbox),
 [ElevenLabs](https://github.com/drknowhow/kinescript/tree/main/plugins/kinescript-elevenlabs).
+Kokoro, Chatterbox and ElevenLabs belong to their owners. Kinescript and its plugins are not affiliated with or
+endorsed by them; the names say which voice each plugin calls.
 
 ## Built for agents
 

@@ -1,7 +1,9 @@
 """Buffer views compressed with EXT_meshopt_compression (or KHR_meshopt_compression, the same format), as
 gltfpack -c writes them, decoded with numpy: vertex attributes (codec versions 0 and 1), triangle indices, index
 sequences, and the octahedral, quaternion, exponential and colour filters. It follows meshoptimizer's reference
-decoder (meshopt_decoder_reference.js); the byte groups are read in Python, the deltas added up in numpy."""
+decoder (meshopt_decoder_reference.js); the byte groups are read in Python, the deltas added up in numpy.
+
+meshoptimizer is Copyright (c) 2016-2026 Arseny Kapoulkine, under the MIT licence in meshoptimizer-LICENSE.txt."""
 from __future__ import annotations
 
 import numpy as np
