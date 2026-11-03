@@ -1,15 +1,12 @@
 name: release
 
 # Push a tag like v1.0.0 to build the package and publish it to PyPI.
-# Run the workflow by hand (Actions > release > Run workflow) to publish the same build to TestPyPI instead.
-# Publishing uses trusted publishing (OIDC). No API token is stored here. Each index needs a publisher
-# (a pending one before the first upload) that lists this repository, workflow file "release.yml" and the
-# environment: "pypi" on pypi.org, "testpypi" on test.pypi.org.
+# Publishing uses trusted publishing (OIDC). No API token is stored here. pypi.org needs a publisher that
+# lists this repository, workflow file "release.yml" and the environment "pypi".
 
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -75,22 +72,3 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
-
-  publish-testpypi:
-    needs: build
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    environment:
-      name: testpypi
-      url: https://test.pypi.org/project/kinescript/
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-          skip-existing: true
