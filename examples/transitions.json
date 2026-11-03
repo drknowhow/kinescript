@@ -1,0 +1,64 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 5, "bg": "#0a0c10"},
+  "layers": [
+    {"id": "title", "type": "text", "text": "SIX WAYS ACROSS", "x": "50%", "y": "10%", "size": 72, "weight": 700,
+     "letterSpacing": 8, "fill": "$sheet", "at": 0.1, "enter": {"name": "rise-mask", "dur": 0.7}},
+    {"id": "subtitle", "type": "text", "text": "one word in a sequence's \"transition\"", "font": "$mono", "size": 30,
+     "x": "50%", "y": "17%", "fill": "$annotation", "at": 0.3, "enter": "fade"},
+
+    {"id": "iris-tile", "type": "group", "x": 360, "y": "37%", "anchor": "center", "w": 544, "h": 306,
+     "radius": 18, "clip": true, "at": 0.2, "enter": "fade", "children": [
+      {"id": "iris", "type": "sequence", "w": 544, "h": 306, "anchor": "center", "fit": "cover",
+       "volume": 0,
+       "clips": [{"src": "media/fractal.mp4", "trim": [0, 2.6]}, {"src": "media/cells.mp4", "trim": [0.5, 3.7]}],
+       "transition": {"type": "iris", "dur": 1}}]},
+    {"id": "iris-label", "type": "text", "text": "iris", "font": "$mono", "size": 30, "x": 360, "y": "53.5%",
+     "fill": "$sheet", "at": 0.2, "enter": "fade"},
+
+    {"id": "push-tile", "type": "group", "x": 960, "y": "37%", "anchor": "center", "w": 544, "h": 306,
+     "radius": 18, "clip": true, "at": 0.3, "enter": "fade", "children": [
+      {"id": "push", "type": "sequence", "w": 544, "h": 306, "anchor": "center", "fit": "cover",
+       "volume": 0,
+       "clips": [{"src": "media/fractal.mp4", "trim": [0, 2.5]}, {"src": "media/cells.mp4", "trim": [0.5, 3.7]}],
+       "transition": {"type": "push", "dur": 1}}]},
+    {"id": "push-label", "type": "text", "text": "push", "font": "$mono", "size": 30, "x": 960, "y": "53.5%",
+     "fill": "$sheet", "at": 0.3, "enter": "fade"},
+
+    {"id": "whip-tile", "type": "group", "x": 1560, "y": "37%", "anchor": "center", "w": 544, "h": 306,
+     "radius": 18, "clip": true, "at": 0.4, "enter": "fade", "children": [
+      {"id": "whip", "type": "sequence", "w": 544, "h": 306, "anchor": "center", "fit": "cover",
+       "volume": 0,
+       "clips": [{"src": "media/fractal.mp4", "trim": [0, 2.4]}, {"src": "media/cells.mp4", "trim": [0.5, 3.3]}],
+       "transition": {"type": "whip", "dur": 0.6}}]},
+    {"id": "whip-label", "type": "text", "text": "whip", "font": "$mono", "size": 30, "x": 1560, "y": "53.5%",
+     "fill": "$sheet", "at": 0.4, "enter": "fade"},
+
+    {"id": "glitch-tile", "type": "group", "x": 360, "y": "72%", "anchor": "center", "w": 544, "h": 306,
+     "radius": 18, "clip": true, "at": 0.5, "enter": "fade", "children": [
+      {"id": "glitch", "type": "sequence", "w": 544, "h": 306, "anchor": "center", "fit": "cover",
+       "volume": 0,
+       "clips": [{"src": "media/fractal.mp4", "trim": [0, 2.3]}, {"src": "media/cells.mp4", "trim": [0.5, 3.5]}],
+       "transition": {"type": "glitch", "dur": 0.8}}]},
+    {"id": "glitch-label", "type": "text", "text": "glitch", "font": "$mono", "size": 30, "x": 360, "y": "88.5%",
+     "fill": "$sheet", "at": 0.5, "enter": "fade"},
+
+    {"id": "radial-tile", "type": "group", "x": 960, "y": "72%", "anchor": "center", "w": 544, "h": 306,
+     "radius": 18, "clip": true, "at": 0.6, "enter": "fade", "children": [
+      {"id": "radial", "type": "sequence", "w": 544, "h": 306, "anchor": "center", "fit": "cover",
+       "volume": 0,
+       "clips": [{"src": "media/fractal.mp4", "trim": [0, 2.2]}, {"src": "media/cells.mp4", "trim": [0.5, 3.9]}],
+       "transition": {"type": "luma", "dur": 1.2, "soft": 0.3, "map": {"radial": [0.5, 0.5, 0.75]}}}]},
+    {"id": "radial-label", "type": "text", "text": "luma, radial map", "font": "$mono", "size": 30, "x": 960,
+     "y": "88.5%", "fill": "$sheet", "at": 0.6, "enter": "fade"},
+
+    {"id": "doors-tile", "type": "group", "x": 1560, "y": "72%", "anchor": "center", "w": 544, "h": 306,
+     "radius": 18, "clip": true, "at": 0.7, "enter": "fade", "children": [
+      {"id": "doors", "type": "sequence", "w": 544, "h": 306, "anchor": "center", "fit": "cover",
+       "volume": 0,
+       "clips": [{"src": "media/fractal.mp4", "trim": [0, 2.1]}, {"src": "media/cells.mp4", "trim": [0.5, 3.9]}],
+       "transition": {"type": "luma", "dur": 1.2, "soft": 0.15,
+                      "map": {"angle": 90, "stops": ["#000", "#fff", "#000"]}}}]},
+    {"id": "doors-label", "type": "text", "text": "luma, dark at both ends", "font": "$mono", "size": 30,
+     "x": 1560, "y": "88.5%", "fill": "$sheet", "at": 0.7, "enter": "fade"}
+  ]
+}

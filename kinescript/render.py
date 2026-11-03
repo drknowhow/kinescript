@@ -10,6 +10,7 @@ import sys
 import time
 import unicodedata
 from collections import deque
+from itertools import repeat
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,9 +20,12 @@ import skia
 
 from . import color as C
 from . import media, render3d, space, stage, svgpath
+from . import morph as M
+from . import particles as PT
+from . import presets as P
 from .presets import IDENT, Mods
-from .props import length, noise
-from .scene import Layer, Scene, uses_depth
+from .props import COPY_PAINT, FIELD, UNIT, length, noise
+from .scene import Layer, Scene, SceneError, uses_depth
 
 ANCHORS = {"center": (0.5, 0.5), "topleft": (0, 0), "top": (0.5, 0), "topright": (1, 0), "left": (0, 0.5),
            "right": (1, 0.5), "bottomleft": (0, 1), "bottom": (0.5, 1), "bottomright": (1, 1)}
@@ -33,17 +37,24 @@ _GROTESK = {400: "SpaceGrotesk-Regular.ttf", 500: "SpaceGrotesk-Medium.ttf", 600
 _PLEX = {400: "IBMPlexMono-Regular.ttf", 500: "IBMPlexMono-Medium.ttf", 600: "IBMPlexMono-SemiBold.ttf",
          700: "IBMPlexMono-Bold.ttf"}
 BUNDLED = {"space grotesk": _GROTESK, "sans": _GROTESK, "ibm plex mono": _PLEX, "mono": _PLEX}
+COMBINE = {"union": skia.PathOp.kUnion_PathOp, "subtract": skia.PathOp.kDifference_PathOp,
+           "intersect": skia.PathOp.kIntersect_PathOp, "xor": skia.PathOp.kXOR_PathOp}
 BLENDS = {"normal": skia.BlendMode.kSrcOver, "multiply": skia.BlendMode.kMultiply, "screen": skia.BlendMode.kScreen,
           "overlay": skia.BlendMode.kOverlay, "add": skia.BlendMode.kPlus, "lighten": skia.BlendMode.kLighten,
           "darken": skia.BlendMode.kDarken, "softLight": skia.BlendMode.kSoftLight,
-          "difference": skia.BlendMode.kDifference, "color": skia.BlendMode.kColor}
+          "difference": skia.BlendMode.kDifference, "color": skia.BlendMode.kColor,
+          "hardLight": skia.BlendMode.kHardLight, "colorDodge": skia.BlendMode.kColorDodge,
+          "colorBurn": skia.BlendMode.kColorBurn, "exclusion": skia.BlendMode.kExclusion, "hue": skia.BlendMode.kHue,
+          "saturation": skia.BlendMode.kSaturation, "luminosity": skia.BlendMode.kLuminosity}
+STILL = ("rect", "circle", "ellipse", "path", "polygon", "group")  # what a group's picture may hold (Renderer._rest)
 SAMPLING = skia.SamplingOptions(skia.FilterMode.kLinear, skia.MipmapMode.kNone)
+NEAREST = skia.SamplingOptions(skia.FilterMode.kNearest, skia.MipmapMode.kNone)  # an image that is "pixelated"
 # Video frames arrive at source size and upscale here. Catmull-Rom interpolates (a 1:1 draw is
 # exact); Mitchell, used before, blurred every native-size frame (mean error 14.8 vs 4.7 on a sharp clip).
 CUBIC = skia.SamplingOptions(skia.CubicResampler.CatmullRom())
 # Seconds ahead that a render drawing forward opens the decoders of the clips coming on (Renderer._prime).
 AHEAD = 1.0
-_FMT = re.compile(r"\{:([^{}]*)\}")
+_FMT = FIELD
 _GL: dict = {}
 
 # A frame as I420 (BT.709, limited range), computed on the GPU so the readback and the pipe to the
@@ -89,6 +100,24 @@ half4 main(float2 p) {
 BLUR_GPU = 16
 
 
+def _rrect(box, r) -> skia.RRect:
+    """box rounded by r: one radius, or four as CSS orders them, [top-left, top-right, bottom-right, bottom-left];
+    four that do not fit are scaled down together, as CSS scales them."""
+    rect = skia.Rect.MakeXYWH(*box)
+    if isinstance(r, (list, tuple)):
+        rr = skia.RRect()
+        rr.setRectRadii(rect, [skia.Point(max(0.0, float(v)), max(0.0, float(v))) for v in r])
+        return rr
+    return skia.RRect.MakeRectXY(rect, r, r)
+
+
+def _outline(paint: skia.Paint, path: skia.Path) -> skia.Path:
+    """The area path covers when drawn with paint: a stroke's outline, dashes and all."""
+    out = skia.Path()
+    paint.getFillPath(path, out)
+    return out
+
+
 def _blur_sksl(n: int) -> str:
     adds = "".join(f"t += floor(float4(s{k}.eval(p)) * 255 + 0.5);" for k in range(n))
     return ("".join(f"uniform shader s{k};" for k in range(n))
@@ -96,6 +125,20 @@ def _blur_sksl(n: int) -> str:
 
 
 # Premultiplied to straight alpha with the integer rounding blurred frames have always had (_straighten).
+# A layer warped (Renderer._warped): each pixel taken from up to `amount` of the layer's own px away, in the direction
+# the noise's red and green give; m takes the layer's px to the frame's.
+WARP_SKSL = """
+uniform shader layer;
+uniform shader noise;
+uniform float4 m;
+uniform float amount;
+half4 main(float2 p) {
+    half4 n = noise.eval(p);
+    float2 v = n.a > 0 ? (float2(n.rg) / n.a - 0.5) * 2 * amount : float2(0);
+    return layer.eval(p + float2(m.x * v.x + m.z * v.y, m.y * v.x + m.w * v.y));
+}
+"""
+
 STRAIGHT_SKSL = """
 uniform shader src;
 float4 main(float2 p) {
@@ -143,6 +186,7 @@ def _read_back(job: list, rows: int, res) -> None:
 # Layer types drawn from their props, enter and exit alone, which Renderer._holds reads. Footage is one: a sub-frame
 # shows its frame's picture (_draw_video). Shaders, captions and models follow the clock in other ways.
 HOLDS = {"rect", "circle", "ellipse", "polygon", "path", "line", "arrow", "image", "video", "text", "counter", "group"}
+SHAPED = {"rect", "circle", "ellipse", "polygon", "path", "line"}  # drawn by _shape alone
 
 BACKENDS = ("auto", "gpu", "cpu")
 
@@ -162,8 +206,10 @@ def gpu_context():
     """One hidden OpenGL context per process, or None when there is no usable GPU.
     KINE_BACKEND=cpu forces the raster backend; KINE_BACKEND=gpu makes no GPU an error."""
     want = backend_setting()
+    if want == "cpu":
+        return None
     if "ctx" not in _GL:
-        _GL["ctx"] = None if want == "cpu" else _make_gl()
+        _GL["ctx"] = _make_gl()
     if want == "gpu" and _GL["ctx"] is None:
         raise RuntimeError("KINE_BACKEND=gpu, but no OpenGL context could be made on this machine; set it to auto "
                            "or cpu to draw on the CPU")
@@ -221,6 +267,15 @@ def _covers(tf: skia.Typeface, cp: int) -> bool:
     if hit is None:
         hit = _COVERS[key] = bool(tf.unicharToGlyph(cp))
     return hit
+
+
+def _face(tf: skia.Typeface, cluster: str) -> skia.Typeface:
+    """The typeface a cluster is drawn in: tf, or the system font that has what tf lacks."""
+    missing = next((ch for ch in cluster if not _ignorable(ch) and not _covers(tf, ord(ch))), None)
+    if missing is None:
+        return tf
+    style = tf.fontStyle()
+    return _fallback(style, ord(missing), _emoji(cluster)) or _fallback(style, ord(missing)) or tf
 
 
 def _ignorable(ch: str) -> bool:
@@ -387,6 +442,48 @@ class Layout:
     units: list | None = None  # _draw_text's units, worked out on first use
 
 
+def _on_contour(meas: skia.PathMeasure, n: float, s: float, lx: float, ly: float, clamp: bool = False):
+    """The point (lx, ly) of the frame that stands s along the path meas measures (n long), x along it and y across,
+    as (cos, sin, x, y) of that frame's turn and where the point lands. Past an open path's ends: None, or with clamp
+    its end; a closed path goes round again."""
+    if n <= 0:
+        return None
+    if meas.isClosed():
+        s %= n
+    elif clamp:
+        s = min(max(s, 0.0), n)
+    elif not 0.0 <= s <= n:
+        return None
+    pt = meas.getPosTan(s)
+    if not pt:
+        return None
+    pos, tan = pt
+    co, si = tan.x(), tan.y()
+    return co, si, pos.x() + co * lx - si * ly, pos.y() + si * lx + co * ly
+
+
+@dataclass
+class PathText:
+    """Where a text's letters stand on its textPath (Renderer._on_path)."""
+    lay: Layout
+    key: tuple
+    frames: dict  # id(run): (cos, sin, x, y), the run's left end on its baseline turned to the path, or None (off it)
+    bounds: tuple  # (left, top, right, bottom) of the letters drawn, in the layer's space
+    parts: list  # (left, top, right, bottom) of each run drawn, in the layer's space, for text-overlap
+    meas: skia.PathMeasure
+    n: float  # the path's length
+    start: float  # how far along the path the text's left edge is
+
+    def pivot(self, x: float, line: int) -> tuple[float, float, float]:
+        """Where a unit whose middle is x across the layout and on `line` turns and moves: the middle of its line
+        on the path, and the path's direction there in degrees."""
+        lay = self.lay
+        f = _on_contour(self.meas, self.n, self.start + x, 0.0, line * lay.lh - lay.baseline0 + lay.lh / 2, True)
+        if f is None:
+            return 0.0, 0.0, 0.0
+        return f[2], f[3], math.degrees(math.atan2(f[1], f[0]))
+
+
 def color_matrix(fx: dict) -> list[float] | None:
     """4x5 row-major colour matrix from brightness/contrast/saturate/hue/exposure/temperature/tint/invert/gray."""
     if not fx:
@@ -506,6 +603,12 @@ def glsl_to_sksl(src: str) -> str:
 # Largest frame side. 16384 is the biggest texture most GPUs take, and a 16384-pixel square is 1 GB of RGBA;
 # --scale 100 on 1080p asked for 192000x108000 and failed inside Skia.
 MAX_SIDE = 16384
+# What the CPU takes to blur one pixel of an offscreen layer with this Skia wheel: 0.44 s for a 1080p layer.
+# Renderer.filtered counts the pixels a frame's offscreen effects blur, or do as much work as blurring would.
+CPU_BLUR_S = 0.44 / (1920 * 1080)
+# What the CPU takes to draw a particle, and each pixel of the square its sprite covers: 5,000 particles of 1 px took
+# 1.6 ms a frame, of 12 px 53 ms and of 24 px 197 ms. Renderer.particle_s adds them up for the frame.
+CPU_PARTICLE_S, CPU_PARTICLE_PX_S = 0.3e-6, 70e-9
 
 
 def frame_size(w: int, h: int, scale) -> tuple[int, int]:
@@ -546,11 +649,29 @@ class Renderer:
         # False: video layers are placed (box, stroke) but no frame is decoded, for checks that read boxes, not pixels.
         self.footage = True
         self.boxes: dict[str, dict] = {}
+        self.letters: dict[str, list] = {}  # tracking, a text on a path: its letters' rects, as boxes has its own
         self._tf: dict = {}
         self._layouts: dict = {}
         self._fonts: dict = {}
         self._shaped: dict = {}  # (typeface, size, text, rtl) -> how _draw_pieces draws it (_pieces)
         self._paths: dict = {}
+        self._roughs: dict = {}  # layer id: (seed, the path it wobbled, the wobbled path), the last one made
+        # While a combining group draws its children: into its space, and the outlines they give instead of drawing
+        self._capture: tuple[skia.Matrix, list] | None = None
+        self._matte: Layer | None = None  # the mask being drawn (_masked): layers drawn while it is are not seen as such
+        self._cutting: Layer | None = None  # the masked layer being recorded, drawn as itself inside _masked
+        self._warping: Layer | None = None  # the displaced layer being recorded, drawn as itself inside _warped
+        self._looking: Layer | None = None  # the layer with effects being recorded (_looked), drawn without its layer
+        self._look: tuple | None = None  # the paint of that layer and the matrix it applies in, once it is drawn
+        self._warp_effect = None
+        self._combos: dict = {}  # a combining group's id: (the outlines it merged, the merged path), the last one
+        self._morphs: dict = {}  # (layer id, key): that key and the next matched point for point (morph.match)
+        self._morphed: dict = {}  # layer id: (how far through its keys, the path there), the last one drawn
+        self._routes: dict = {}  # an along's path by layer (data) or route id: (path, measure, length); a textPath's
+        # by ("textPath", layer id): (route path, its placing, measure, length)
+        self._pathtext: dict[str, PathText] = {}  # a text's letters on its textPath, the last placing worked out
+        self._group_T: dict[str, float] = {}  # a group with a clock: the scene time it is drawn at, for its kids
+        self._solid: dict[int, skia.Paint] = {}  # an antialiased fill paint for each colour (_fill_paint)
         self._shaders: dict = {}
         self.stop_at: str | None = None
         self.stop_after: str | None = None
@@ -563,6 +684,7 @@ class Renderer:
         self.swim: set[str] = set()  # textured models whose triangles stayed too large to map the image this frame
         self.unfocused = False  # the camera's focus plane was nearer or farther than every layer this frame
         self.slow_dof = False  # a stage blurred per pixel on the CPU this frame
+        self.filtered = 0.0  # px blurred by offscreen effects this frame, or their like in work (CPU_BLUR_S)
         self._dof = None  # (focus distance, aperture, z 0's distance) while the camera blurs (render3d.defocus)
         self._focused = None  # _dof while drawing a layer the camera moves, else None
         self._span = [math.inf, 0.0]  # the least and most w of what the camera moves, drawn this frame
@@ -583,9 +705,18 @@ class Renderer:
         self._straight = None  # (effect, surface) straightening blurred transparent frames on the GPU
         self._frame_t: float | None = None  # while drawing a motion-blur sub-frame, the time of its frame
         self._blended: dict[str, bool] = {}  # group id -> whether a layer inside it has a blend mode
+        self._rests: dict[str, list] = {}  # group id -> [from, to, its children's picture or None] or [] (_still)
+        self._recording = False  # drawing a group's children into its picture (_still)
         self._ink: skia.Rect | None = None  # track: device bounds of the strokes the layer being drawn made
         self._alpha = 1.0  # the opacity of the layer being drawn when its paint carries it (_one_draw), else 1
         self._cf: skia.ColorFilter | None = None  # likewise its fog
+        self._copy: tuple | None = None  # while a layer's copies draw (_copies): (the layer, the copy's own colours)
+        self._ops: list | None = None  # while a shape's copies are made ready: what _shape would draw
+        self._copying = 0  # how many layers' copies are drawing, one inside another: their boxes join (_note)
+        self._tinted: dict[tuple, tuple] = {}  # (layer id, fill or stroke) -> its copies' still colours (_tints)
+        self._sprite: dict[str, tuple] = {}  # particles layer id -> its sprite (_sprites)
+        self._emitter: dict[str, tuple | None] = {}  # particles layer id -> where its emitter is over time (_emitted)
+        self.particle_s = 0.0  # the CPU's time for the particles drawn this frame (CPU_PARTICLE_S)
         cm = color_matrix({k: v for k, v in scene.grade.items() if k not in ("vignette", "grain")})
         self.grade_filter = skia.ColorFilters.Matrix(cm) if cm else None
         self._videos = [L for L in scene.all_layers() if L.type == "video"]
@@ -709,7 +840,7 @@ class Renderer:
         lo, hi = min(times), max(times)
         k = 0
         for L in self.s.layers:
-            if not self._holds(L, lo, hi, F):
+            if L.id not in self.s.mattes and not self._holds(L, lo, hi, F):  # a mask holds where its layer does
                 break
             k += 1
         return k
@@ -719,13 +850,15 @@ class Renderer:
         props, its enter and exit, and its children's."""
         if not L.visible(F):
             return True
-        if L.type not in HOLDS:
+        if L.type not in HOLDS or L.clock is not None or (L.copies is not None and L.copies.moves()):
             return False
         end = math.nextafter(L.t_out, -math.inf)
         lo, hi = min(max(lo, L.t_in), end), min(max(hi, L.t_in), end)  # as _layer clamps a sub-frame
         a, b, d = lo - L.t_in, hi - L.t_in, L.dur
         if L.enter:
             done = L.enter.dur
+            if L.type == "group" and L.enter.stagger and L.children:
+                done += max(k.turn for k in L.children)
             if L.type in ("text", "counter") and L.raw.get("split"):
                 if L.type == "counter":  # its units come from a value that may change
                     return False
@@ -735,6 +868,13 @@ class Renderer:
                 return False
         if L.exit and d - b < L.exit.dur:
             return False
+        route = self.s.by_id[L.along[0][1:]] if L.along and L.along[0].startswith("#") else None
+        if route is not None and not all(p.static for p in route.props.values()):
+            return False  # it rides a path that moves
+        if L.mask is not None and not self._holds(L.mask[0], lo, hi, F):
+            return False
+        if L.warp is not None and float(L.warp.get("speed", 1)):
+            return False  # its waves slide
         return all(p.held(a, b, d) for p in L.props.values()) and all(self._holds(k, lo, hi, F) for k in L.children)
 
     @property
@@ -816,11 +956,13 @@ class Renderer:
         held: the background and the first `held` layers draw the same on every sub-frame (_held). Without `under`,
         only they draw, ungraded; `under` is an image of that, which the sub-frame starts from in their place."""
         s = self.s
-        self.boxes = {}
+        self.boxes, self.letters = {}, {}
         self.culled, self.unlit, self.fogged, self.inside, self.swim = set(), set(), set(), set(), set()
         self.unfocused = self.slow_dof = False
+        self.filtered = 0.0
         self._dof, self._span = None, [math.inf, 0.0]
         self.tris = 0
+        self.particle_s = 0.0
         self.wires, self.depths = [], []
         self.stop_at, self.stop_after, self._stopped = stop_at, stop_after, False
         self._frame_t = frame_t
@@ -1046,6 +1188,13 @@ class Renderer:
             return
         if L.id in self.s.surfaces:  # a model's texture: drawn there (_surface), not here
             return
+        if L.id in self.s.mattes and L is not self._matte:  # a mask: drawn where it cuts the layer it masks
+            return
+        if L.mask is not None and self._capture is None and L is not self._cutting:  # a combining group takes it uncut
+            self._masked(c, L, T, parent_alpha)
+            return
+        if self._capture is not None and L.type in ("image", "video", "shader", "model", "captions", "particles"):
+            return  # a combining group merges shapes and text only
         F = self._frame_t
         if not L.visible(T if F is None else F):
             return
@@ -1057,20 +1206,43 @@ class Renderer:
         t = T - L.t_in
         d = L.dur
         g = lambda name, default=None: L.get(name, t, T, 0, default)  # noqa: E731
+        if L.warp is not None and self._capture is None and L is not self._warping:
+            self._warped(c, L, T, t, g, parent_alpha)
+            return
+        if L.looks is not None and self._capture is None and L is not self._looking:
+            self._looked(c, L, T, parent_alpha)
+            return
         split = L.raw.get("split") if L.type in ("text", "counter") else None
         mods = IDENT
-        if L.enter and not split and t < L.enter.dur:
+        if L.enter and not split and t < L.enter.dur and not (L.type == "group" and L.enter.stagger):
             mods = L.enter.mods(t / L.enter.dur)
+        elif split and L.enter and t < L.enter.dur and "luma" in L.enter.names:  # wipes the whole text, by its time
+            m = L.enter.mods(t / L.enter.dur)
+            mods = Mods(reveal=m.reveal, wipe="luma", matte=m.matte, soft=m.soft)
+        if L.turn is not None:  # its group's enter, from its turn, on the group's own time
+            m = L.parent.enter
+            p = (self._group_T.get(L.parent.id, T) - L.parent.t_in - L.turn) / m.dur if m.dur else 1.0
+            if p < 1:
+                mods = mods.combine(m.mods(p))
         if L.exit and d - t < L.exit.dur:
             mods = mods.combine(L.exit.mods((d - t) / L.exit.dur))
+        for e in L.emphasis:
+            if not (split and e.stagger):  # a staggered one plays unit by unit (_draw_text)
+                mods = mods.combine(e.mods(t))
         alpha = max(0.0, min(1.0, float(g("opacity")) * mods.alpha))
         if alpha <= 0.002:
             return
         box = self._box(L, t, T, g)
-        x, y = float(g("x")) + mods.dx, float(g("y")) + mods.dy
-        rot = float(g("rotate")) + mods.rotate
-        sc = float(g("scale")) * mods.scale
-        sx, sy = sc * float(g("scaleX")), sc * float(g("scaleY"))
+        x, y, rot, sc, sx, sy, blur = L.placed(t, T)
+        x, y = float(x) + mods.dx, float(y) + mods.dy
+        rot = float(rot) + mods.rotate
+        if L.along is not None:
+            ax, ay, turn = self._along(L, t, T)
+            x, y = x + ax, y + ay
+            if L.along[1]:
+                rot += turn
+        sc = float(sc) * mods.scale
+        sx, sy = sc * float(sx), sc * float(sy)
         outer, tilt, facing = self._m3d, None, True
         defocus = 0.0  # the blur the camera's depth of field gives this layer, in its own px
         fg, fogf = None, 0.0  # the fog, and how much of it covers this layer
@@ -1081,6 +1253,10 @@ class Renderer:
                 tilt = space.tilt(z, rx, ry)
                 m = m @ tilt
             m = m @ space.rotate_z(rot) @ space.scale(sx, sy)
+            if mods.sx != 1 or mods.sy != 1 or mods.hinge:
+                px, py = self._pivot(box, mods)
+                m = m @ space.translate(px, py) @ space.rotate_z(mods.hinge) @ space.scale(mods.sx, mods.sy) @ (
+                    space.translate(-px, -py))
             if box is not None:
                 xy, w = space.project(m, box)
                 if w.min() < space.NEAR:
@@ -1122,13 +1298,24 @@ class Renderer:
             c.rotate(rot)
         if sx != 1 or sy != 1:
             c.scale(sx, sy)
-        blur = float(g("blur")) + mods.blur
+        if mods.sx != 1 or mods.sy != 1 or mods.hinge:  # a squash, stretch or swing, about its own pivot
+            px, py = self._pivot(box, mods)
+            c.translate(px, py)
+            if mods.hinge:
+                c.rotate(mods.hinge)
+            c.scale(mods.sx, mods.sy)
+            c.translate(-px, -py)
+        blur = float(blur) + mods.blur
         if defocus > 0.05:
             blur = math.hypot(blur, defocus)
         shadow = L.raw.get("shadow")
         fx = L.raw.get("fx")
-        blend = L.raw.get("blend")
-        effects = blur > 0.05 or shadow or fx or (blend and blend != "normal")
+        # A masked or displaced layer blends once it is cut (_masked) or warped (_warped).
+        blend = None if L is self._cutting or L is self._warping else L.raw.get("blend")
+        glitch = mods.glitch if mods.glitch > 0.01 and box is not None else 0.0
+        luma = mods.wipe == "luma" and mods.reveal < 1 and box is not None  # a matte drawn over it in its own layer
+        effects = (blur > 0.05 or shadow or fx or (blend and blend != "normal") or L.looks or mods.smear > 0.05
+                   or glitch or luma)
         cf = None
         if fogf > 0.002:
             if not effects and self._one_draw(L):
@@ -1150,14 +1337,28 @@ class Renderer:
             layered, paint_alpha = False, alpha
         elif layered:
             paint = skia.Paint(Alphaf=alpha)
-            filt = None
-            if blur > 0.05:
-                filt = skia.ImageFilters.Blur(blur, blur)
+            filt, work, reach = self._looks(L, g, t) if L.looks else (None, 0.0, 0.0)
+            if mods.solid and mods.smear > 0.05 and box is not None:
+                # A whip that stays opaque smears inside its box, from edges a pixel in from the drawn ones, as a
+                # shot's motion blur does: its edges stay solid where a decal blur would let the background through.
+                ex, ey, ew, eh = box
+                far = int(ew + eh) + 1
+                crop = skia.IRect.MakeLTRB(math.ceil(ex) + 1, math.floor(ey) - far, math.floor(ex + ew) - 1,
+                                           math.ceil(ey + eh) + far)
+                filt = skia.ImageFilters.Blur(blur + mods.smear, blur, skia.TileMode.kClamp, filt, crop)
+                work, reach = work + 1, max(reach, 3 * blur)
+            elif blur > 0.05 or mods.smear > 0.05:  # a whip smears it across
+                filt = skia.ImageFilters.Blur(blur + mods.smear, blur, skia.TileMode.kDecal, filt)
+                work, reach = work + 1, max(reach, 3 * (blur + mods.smear))
             if shadow:
                 sh = shadow if isinstance(shadow, dict) else {}
                 sig = float(sh.get("blur", 16)) / 2
-                filt = skia.ImageFilters.DropShadow(float(sh.get("x", 0)), float(sh.get("y", 6)), sig, sig,
-                                                    _argb(sh.get("color", "#00000099")), filt)
+                dx, dy = float(sh.get("x", 0)), float(sh.get("y", 6))
+                filt = skia.ImageFilters.DropShadow(dx, dy, sig, sig, _argb(sh.get("color", "#00000099")), filt)
+                work, reach = work + 1.2, max(reach, 3 * sig + max(abs(dx), abs(dy)))  # a blur, moved and merged
+            if glitch:
+                filt = self._glitch(f"{L.id}/{mods.seed}", box, mods, glitch, filt)
+                work += 3  # the slices, then two coloured copies of them and the slices again, merged
             if filt:
                 paint.setImageFilter(filt)
             if fx:
@@ -1169,45 +1370,30 @@ class Renderer:
                 paint.setColorFilter(skia.ColorFilters.Compose(mist, inner) if inner else mist)
             if blend:
                 paint.setBlendMode(BLENDS.get(blend, skia.BlendMode.kSrcOver))
-            c.saveLayer(None, paint)
+            if L is self._looking:  # _looked opens the layer, as large as what is drawn now
+                self._look, layered = (paint, c.getTotalMatrix(), work, reach), False
+            else:
+                if work:  # a layer the size of the clip, which is the frame unless a group clips it
+                    clip = c.getDeviceClipBounds()
+                    self.filtered += work * clip.width() * clip.height()
+                if self._recording:  # a picture folds a layer whose paint is only alpha into the one draw inside
+                    # it, which rounds differently; a layer paint's colour is not drawn, and with one it stays a layer
+                    paint.setColor4f(skia.Color4f(1.0, 1.0, 1.0, alpha))
+                c.saveLayer(None, paint)
         if box is not None:
             bx, by, bw, bh = box
             if mods.wipe and mods.reveal < 1:
-                r = max(0.0, mods.reveal)
-                clip = {"right": (bx, by, bx + bw * r, by + bh), "left": (bx + bw * (1 - r), by, bx + bw, by + bh),
-                        "down": (bx, by, bx + bw, by + bh * r), "up": (bx, by + bh * (1 - r), bx + bw, by + bh)}[mods.wipe]
-                c.clipRect(skia.Rect(*clip), doAntiAlias=True)
+                if L.copies is not None and L.type != "model":  # its copies wipe on as one
+                    bx, by, bw, bh = self._copies_box(L, t, T, box)
+                self._wipe(c, mods, bx, by, bw, bh)
         reveal = mods.reveal if not mods.wipe else 1.0
-        draw = getattr(self, "_draw_" + L.type)
-        self._ink, self._alpha, self._cf = None, paint_alpha, cf
-        drawn = draw(c, L, t, T, g, box, reveal, mods)  # a model returns its projected bounds
-        if self.track and (box is not None or drawn):
-            m = c.getTotalMatrix()
-            r = skia.Rect(*drawn) if drawn else m.mapRect(skia.Rect.MakeXYWH(*box))
-            if self._ink is not None:  # a stroke reaches half its width past the shape, an arrow's head further
-                r.join(self._ink)
-            sc = 1.0 if drawn else math.sqrt(abs(m.getScaleX() * m.getScaleY())) or abs(m.getSkewX())
-            info = {"rect": [round(r.left(), 1), round(r.top(), 1), round(r.right(), 1), round(r.bottom(), 1)],
-                    "alpha": round(alpha * parent_alpha, 3), "type": L.type, "scale": round(sc, 4)}
-            if L.type in ("text", "counter", "captions"):
-                # The colour _draw_text uses, so checks see default-coloured text too.
-                fill = g("fill") if "fill" in L.props else C.parse(self.s.theme.get("paper", "#f2f0e8"))
-                info.update(size=float(g("size", 64)), fill=list(fill) if isinstance(fill, tuple) else None,
-                            text=self._last_text if hasattr(self, "_last_text") else "")
-            if not facing:
-                info["mirrored"] = True
-            self.boxes[L.id] = info
-        if L.type == "group":
-            kids = L.children
-            if self._m3d is not None and L.raw.get("sort") == "depth":
-                kids = sorted(kids, key=lambda k: self._far(k, T))
-            if self._m3d is not None and L.raw.get("sort") == "pixel" and self._stage is None:
-                stage.stage(self).draw(self, c, kids, T, parent_alpha * alpha, L.raw.get("shadows"))
-            else:
-                for child in kids:
-                    if self._stopped:
-                        break
-                    self._layer(c, child, T, parent_alpha * alpha)
+        self._ink, self._alpha, self._cf, self._t = None, paint_alpha, cf, t
+        if L.copies is not None and L.type != "model":  # a model's copies are merged into its mesh (render3d)
+            self._copies(c, L, t, T, g, box, reveal, mods, alpha, parent_alpha, facing)
+        else:
+            self._body(c, L, t, T, g, box, reveal, mods, alpha, parent_alpha, facing)
+        if luma:
+            self._luma(c, mods, bx, by, bw, bh)
         if layered == 2:
             c.restore()
         if layered:
@@ -1217,6 +1403,673 @@ class Renderer:
         if self.stop_after == L.id:
             self._stopped = True
 
+    @staticmethod
+    def _pivot(box, mods) -> tuple[float, float]:
+        """Where a squash, stretch or swing acts, in the layer's own space: the middle of its box, or of the box's top
+        or bottom edge."""
+        if box is None:
+            return 0.0, 0.0
+        bx, by, bw, bh = box
+        return bx + bw / 2, by + (0.0 if mods.pivot == "top" else bh if mods.pivot == "bottom" else bh / 2)
+
+    @staticmethod
+    def _wipe(c, mods, bx, by, bw, bh):
+        """c clipped to what a wipe has shown of the box so far; a rise-mask also moves what is drawn up into it from
+        below its bottom edge."""
+        r, w = max(0.0, mods.reveal), mods.wipe
+        if w == "luma":  # a matte, drawn over what the layer draws (_luma)
+            return
+        if w in ("right", "left", "down", "up"):
+            clip = {"right": (bx, by, bx + bw * r, by + bh), "left": (bx + bw * (1 - r), by, bx + bw, by + bh),
+                    "down": (bx, by, bx + bw, by + bh * r), "up": (bx, by + bh * (1 - r), bx + bw, by + bh)}[w]
+            c.clipRect(skia.Rect(*clip), doAntiAlias=True)
+        elif w == "rise":
+            c.clipRect(skia.Rect.MakeXYWH(bx, by, bw, bh), doAntiAlias=True)
+            c.translate(0, bh * (1 - r))
+        else:
+            cx, cy, far = bx + bw / 2, by + bh / 2, math.hypot(bw, bh) / 2
+            path = skia.Path()
+            if w == "iris":  # a circle from the middle that reaches the corners
+                path.addCircle(cx, cy, far * r)
+            elif w == "clock":  # a hand sweeping round from twelve o'clock
+                path.moveTo(cx, cy)
+                path.arcTo(skia.Rect.MakeLTRB(cx - far - 1, cy - far - 1, cx + far + 1, cy + far + 1), -90, 360 * r,
+                           False)
+                path.close()
+            else:  # blinds: strips that each open downwards
+                n = max(1, mods.count)
+                for k in range(n):
+                    path.addRect(skia.Rect.MakeXYWH(bx, by + bh * k / n, bw, bh / n * r))
+            c.clipPath(path, doAntiAlias=True)
+
+    def _luma(self, c, mods, bx, by, bw, bh):
+        """Keeps what a luma wipe has shown of the layer drawn so far: where its map, stretched over the box, is darker
+        than the wipe has reached, fading out over soft above it. The map's alpha comes from its brightness through a
+        colour matrix and is drawn in over the layer's own (DstIn)."""
+        s = max(1e-3, mods.soft)
+        k = 1 / s
+        m = mods.matte
+        paint = skia.Paint(BlendMode=skia.BlendMode.kDstIn)
+        img = None
+        if isinstance(m, str):
+            try:
+                img = media.image(m)
+            except media.MediaError:  # check reports it (media-missing, bad-media); it wipes by the gradient instead
+                m = None
+        if img is not None:
+            fit = skia.Matrix.MakeRectToRect(skia.Rect.MakeWH(img.width(), img.height()),
+                                             skia.Rect.MakeXYWH(bx, by, bw, bh), skia.Matrix.kFill_ScaleToFit)
+            paint.setShader(img.makeShader(skia.TileMode.kClamp, skia.TileMode.kClamp,
+                                           skia.SamplingOptions(skia.FilterMode.kLinear), fit))
+        else:
+            paint.setShader(self._gradient(m if isinstance(m, dict) else {"angle": 90}, bx, by, bw, bh, 1.0))
+        paint.setColorFilter(skia.ColorFilters.Matrix([0] * 15 + [-0.2126 * k, -0.7152 * k, -0.0722 * k, 0,
+                                                                  mods.reveal * (1 + s) * k]))
+        c.drawPaint(paint)
+
+    @staticmethod
+    def _glitch(key: str, box, mods, amount, src):
+        """An image filter for a glitch: the box cut into bands, about half of them jumped sideways, with a red copy of
+        them pulled left and a cyan one right behind. How far by amount (0..1), which bands by key and mods.step."""
+        bx, by, bw, bh = box
+        far = int(bw + bh) + 1  # crop rects as wide as the layer could reach
+        bands = []
+        for top, bottom, shift in P.slices(key, mods.step):
+            crop = skia.IRect.MakeLTRB(int(math.floor(bx)) - far, int(round(by + bh * top)), int(math.ceil(bx + bw)) + far,
+                                       int(round(by + bh * bottom)))
+            if not crop.isEmpty():
+                bands.append(skia.ImageFilters.Offset(shift * amount * bw * 0.12, 0, src, crop))
+        cut = skia.ImageFilters.Merge(bands)
+        split = amount * max(4.0, min(bw, bh) * 0.06)
+        red = skia.ColorFilters.Matrix([0, 0, 0, 0, 1, 0, 0, 0, 0, 0.16, 0, 0, 0, 0, 0.26, 0, 0, 0, 1, 0])
+        cyan = skia.ColorFilters.Matrix([0, 0, 0, 0, 0.1, 0, 0, 0, 0, 0.9, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0])
+        return skia.ImageFilters.Merge([skia.ImageFilters.ColorFilter(red, skia.ImageFilters.Offset(-split, 0, cut)),
+                                        skia.ImageFilters.ColorFilter(cyan, skia.ImageFilters.Offset(split, 0, cut)),
+                                        cut])
+
+    def _body(self, c, L: Layer, t, T, g, box, reveal, mods, alpha, parent_alpha, facing):
+        """L drawn on c in the space _layer set up, its box noted (track), then its children if it is a group."""
+        drawn = getattr(self, "_draw_" + L.type)(c, L, t, T, g, box, reveal, mods)  # a model gives its bounds
+        if self.track and (box is not None or drawn):
+            self._note(c, L, g, box, drawn, alpha, parent_alpha, facing)
+        if L.type == "group":
+            kids = L.children
+            frame_t = self._frame_t
+            if L.clock is not None:  # the children run on the group's clock, a motion-blur sub-frame's frame too
+                self._group_T[L.id] = T
+                T = self._inner(L, t, T)
+                if frame_t is not None:
+                    self._frame_t = self._inner(L, frame_t - L.t_in, frame_t)
+            if self._m3d is not None and L.raw.get("sort") == "depth":
+                kids = sorted(kids, key=lambda k: self._far(k, T))
+            if self._m3d is not None and L.raw.get("sort") == "pixel" and self._stage is None:
+                stage.stage(self).draw(self, c, kids, T, parent_alpha * alpha, L.raw.get("shadows"))
+            else:
+                outer_capture = self._capture
+                if L.raw.get("combine"):
+                    inv = skia.Matrix()
+                    self._capture = (inv, []) if c.getTotalMatrix().invert(inv) else None
+                pic = self._still(L, T, parent_alpha * alpha)
+                if pic is not None:
+                    c.drawPicture(pic)
+                for child in kids if pic is None else ():
+                    if self._stopped:
+                        break
+                    self._layer(c, child, T, parent_alpha * alpha)
+                if L.raw.get("combine"):
+                    self._combine(c, L, t, g, box, reveal, outer_capture)
+            self._frame_t = frame_t
+
+    def _still(self, L: Layer, T: float, parent_alpha: float) -> skia.Picture | None:
+        """Group L's children as a picture recorded the first time it is drawn, on frames when every layer in it
+        draws as it did then (_rest) and nothing needs them one by one: boxes, a combining group, depth, a copy, a
+        stop. The picture holds the same draws, so the frame is the same bytes; svg-500's 500 pieces take 6.9 ms a
+        frame on the GPU drawn layer by layer and 1.5 ms played back."""
+        if (self.track or self._capture is not None or self._m3d is not None or self._ops is not None
+                or self._copy is not None or self.stop_at is not None or self.stop_after is not None
+                or self._recording):
+            return None
+        rest = self._rests.get(L.id)
+        if rest is None:
+            rest = self._rests[L.id] = self._rest(L)
+        F = self._frame_t
+        if not rest or not rest[0] <= T < rest[1] or F is not None and not rest[0] <= F < rest[1]:
+            return None
+        if rest[2] is None:
+            rec = skia.PictureRecorder()
+            rc = rec.beginRecording(skia.Rect.MakeLTRB(-1e7, -1e7, 1e7, 1e7))
+            self._recording = True
+            try:
+                for child in L.children:
+                    self._layer(rc, child, T, parent_alpha)
+            finally:
+                self._recording = False
+            rest[2] = rec.finishRecordingAsPicture()
+        return rest[2]
+
+    def _rest(self, L: Layer) -> list:
+        """[from, to, None]: the scene times in which every layer inside group L draws the same on each frame (none
+        when to is not after from), or [] when one never does. Each is a shape or a group with constant keys, after
+        its enter (its group's staggered one too) and before its exit, with nothing that draws it apart from the rest:
+        a mask, an effect, a blend, repeat, a route, rough, a morph or a clock. An emphasis holds it back until its
+        last cycle ends."""
+        if L.clock is not None or L.raw.get("combine") or not L.children:
+            return []
+        lo, hi, todo = -math.inf, math.inf, list(L.children)
+        while todo:
+            K = todo.pop()
+            raw = K.raw
+            if (K.type not in STILL or K.clock is not None or K.copies is not None or K.along is not None
+                    or K.mask is not None or K.looks is not None or K.warp is not None or K.rough is not None
+                    or K.morph is not None or not all(p.static for p in K.props.values())
+                    or float(K.get("blur", 0.0) or 0.0) or raw.get("shadow") or raw.get("fx")
+                    or raw.get("blend") not in (None, "normal") or raw.get("combine")):
+                return []
+            lo, hi = max(lo, K.t_in), min(hi, K.t_out)
+            # 1e-9 s inside each edge, so that time's rounding never puts a layer still moving in the window
+            if K.enter:
+                lo = max(lo, K.t_in + K.enter.dur + 1e-9)
+            if K.turn is not None:
+                lo = max(lo, K.parent.t_in + K.turn + K.parent.enter.dur + 1e-9)
+            if K.exit:
+                hi = min(hi, K.t_out - K.exit.dur - 1e-9)
+            if K.emphasis:  # still once its last emphasis has played
+                lo = max(lo, K.t_in + max(e.end for e in K.emphasis) + 1e-9)
+            todo.extend(K.children)
+        return [lo, hi, None]
+
+    def _note(self, c, L: Layer, g, box, drawn, alpha, parent_alpha, facing, rect: skia.Rect | None = None):
+        """For boxes (track): where L landed on the frame, its anchor, opacity and scale; rect, when given, is where
+        it landed. Copies of it (_copies) join their boxes into one."""
+        m = c.getTotalMatrix()
+        if rect is not None:
+            r = rect
+        else:
+            r = skia.Rect(*drawn) if drawn else m.mapRect(skia.Rect.MakeXYWH(*box))
+            if self._ink is not None:  # a stroke reaches half its width past the shape, an arrow's head further
+                r.join(self._ink)
+        if self._copying and L.id in self.boxes:  # another copy of it: one box holds them all
+            r.join(skia.Rect(*self.boxes[L.id]["rect"]))
+        sc = 1.0 if drawn else math.sqrt(abs(m.getScaleX() * m.getScaleY() - m.getSkewX() * m.getSkewY()))
+        o = m.mapXY(0, 0)  # its anchor, where x and y put it
+        info = {"rect": [round(r.left(), 1), round(r.top(), 1), round(r.right(), 1), round(r.bottom(), 1)],
+                "pos": [round(o.x(), 1), round(o.y(), 1)], "alpha": round(alpha * parent_alpha, 3),
+                "type": L.type, "scale": round(sc, 4)}
+        if L.type in ("text", "counter", "captions"):
+            # The colour _draw_text uses, so checks see default-coloured text too.
+            fill = (g("fill") if "fill" in L.props else None if isinstance(L.raw.get("fill"), dict)
+                    else C.parse(self.s.theme.get("paper", "#f2f0e8")))
+            info.update(size=float(g("size", 64)), fill=list(fill) if isinstance(fill, tuple) else None,
+                        text=self._last_text if hasattr(self, "_last_text") else "")
+        if not facing:
+            info["mirrored"] = True
+        if self._matte is not None:
+            info["mask"] = True
+        self.boxes[L.id] = info
+        on = self._pathtext.get(L.id) if L.onpath is not None else None
+        if on is not None:
+            self.letters[L.id] = [list(m.mapRect(skia.Rect.MakeLTRB(*p))) for p in on.parts]
+
+    def _copies(self, c, L: Layer, t, T, g, box, reveal, mods, alpha, parent_alpha, facing):
+        """L's "repeat": L drawn once for each copy, moved by the copy's x, y, rotate and scale in L's space and in
+        the copy's own fill, stroke and opacity. A shape's path and paints are made once and drawn for every copy in
+        one loop, recoloured. Anything else is recorded once and replayed for each copy while the copies keep L's
+        colours, and drawn once for each copy when they do not."""
+        cols = L.copy_columns(t, T)
+        n = L.copies.n
+        zero = [0.0] * n
+        xs, ys, rs, ss = cols.get("x", zero), cols.get("y", zero), cols.get("rotate"), cols.get("scale")
+        fades = cols.get("opacity")
+        own = {k: cols[k] for k in COPY_PAINT if k in cols}
+        if L.type in SHAPED and self._capture is None and not (L.type == "rect" and L.raw.get("dimOutside")):
+            self._copy_shapes(c, L, t, T, g, box, reveal, mods, xs, ys, rs, ss, fades, own)
+            seen = [i for i in range(n) if fades is None or fades[i] > 0.002]
+            if self.track and box is not None and seen:
+                base, inv = c.getTotalMatrix(), skia.Matrix()
+                if base.invert(inv):
+                    local = skia.Rect.MakeXYWH(*box)
+                    if self._ink is not None:  # its stroke, in L's space
+                        local.join(inv.mapRect(self._ink))
+                    r = self._spread(base, local, seen, xs, ys, rs, ss)
+                    if r is not None:
+                        self._note(c, L, g, box, None, alpha, parent_alpha, facing, r)
+            return
+        a0, cf = self._alpha, self._cf
+        if not own and self._m3d is None and self._capture is None and not self.track and self.stop_at is None \
+                and self.stop_after is None:
+            # Recorded once, where L lands, as far round as any copy reaches into the frame, and replayed moved by
+            # each copy's place: in the frame's space, L's matrix times the copy's times L's inverse.
+            base, inv = c.getTotalMatrix(), skia.Matrix()
+            clip = c.getDeviceClipBounds()
+            live = [i for i in range(n) if (fades is None or fades[i] > 0.002) and (ss is None or ss[i])]
+            if not live or clip.isEmpty() or not base.invert(inv):
+                return
+            reach = self._spread(base, inv.mapRect(skia.Rect.Make(clip)), live, xs, ys, rs, ss, inverse=True)
+            if reach is None:
+                return
+            reach.join(skia.Rect.Make(clip))
+            rec = skia.PictureRecorder()
+            rc = rec.beginRecording(reach, skia.RTreeFactory()())
+            rc.setMatrix(c.getLocalToDevice())
+            work = self.filtered
+            self._body(rc, L, t, T, g, box, reveal, mods, alpha, parent_alpha, facing)
+            self.filtered += (self.filtered - work) * (len(live) - 1)
+            pic = rec.finishRecordingAsPicture()
+            if pic.cullRect().isEmpty():
+                return
+            for i in live:
+                a = 1.0 if fades is None else min(1.0, fades[i])
+                m = skia.Matrix.Translate(xs[i], ys[i])
+                if rs is not None and rs[i]:
+                    m.preRotate(rs[i])
+                if ss is not None and ss[i] != 1:
+                    m.preScale(ss[i], ss[i])
+                c.save()
+                c.setMatrix(skia.Matrix.Concat(base, skia.Matrix.Concat(m, inv)))
+                c.drawPicture(pic, None, skia.Paint(Alphaf=a) if a < 0.999 else None)
+                c.restore()
+            return
+        one = self._one_draw(L, True)  # a copy's opacity goes in the paint of its one draw
+        was = self._copy
+        self._copying += 1
+        try:
+            for i in range(n):
+                if self._stopped:
+                    break
+                a = 1.0 if fades is None else min(1.0, max(0.0, fades[i]))
+                if a <= 0.002:
+                    continue
+                c.save()
+                c.translate(xs[i], ys[i])
+                if rs is not None and rs[i]:
+                    c.rotate(rs[i])
+                if ss is not None and ss[i] != 1:
+                    c.scale(ss[i], ss[i])
+                self._copy = (L, {k: v[i] for k, v in own.items()}) if own else None
+                self._ink, self._alpha, self._cf, self._t = None, a0 * a if one else a0, cf, t
+                if a < 0.999 and not one:  # it fades in a layer as large as it draws
+                    pic = self._record(c, lambda rc: self._body(rc, L, t, T, g, box, reveal, mods, alpha,
+                                                                parent_alpha, facing))
+                    if pic is not None:
+                        c.save()
+                        c.resetMatrix()  # the picture was recorded where it lands on this canvas
+                        c.drawPicture(pic, None, skia.Paint(Alphaf=a))
+                        c.restore()
+                else:
+                    self._body(c, L, t, T, g, box, reveal, mods, alpha, parent_alpha, facing)
+                c.restore()
+        finally:
+            self._copy = was
+            self._copying -= 1
+
+    def _copy_shapes(self, c, L: Layer, t, T, g, box, reveal, mods, xs, ys, rs, ss, fades, own: dict):
+        """A shape's copies: the paths and paints _shape draws, made once with the first copy's colours, then drawn
+        for each copy in one loop, each paint recoloured with the copy's own fill or stroke. A lone fill takes a
+        copy's opacity in its paint; a fill and a stroke fade together in a layer of the copy's own."""
+        was, self._copy = self._copy, (L, {k: v[0] for k, v in own.items()}) if own else None
+        self._ops = []
+        try:
+            getattr(self, "_draw_" + L.type)(c, L, t, T, g, box, reveal, mods)
+        finally:
+            ops, self._ops, self._copy = self._ops, None, was
+        base, inv = c.getTotalMatrix(), skia.Matrix()
+        if not ops or not base.invert(inv):
+            return
+        one = len(ops) == 1 and ops[0][2] == "fill"
+        kept = []  # (path, paint, each copy's colour as the paint takes it or None, the paint's alpha)
+        for path, paint, role, mul, m in ops:
+            if m != base:  # drawn moved within L's space (an anchored path)
+                path = skia.Path(path)
+                path.transform(skia.Matrix.Concat(inv, m))
+            p = skia.Paint(paint)  # a kept solid paint is shared; a copy's own colour made it solid
+            col = own.get(role)
+            kept.append((path, p, None if col is None else self._tints(L, role, col, mul, fades if one else None),
+                         p.getAlphaf()))
+        save, restore, translate, rotate, scale, draw = c.save, c.restore, c.translate, c.rotate, c.scale, c.drawPath
+        if fades is None and rs is None and ss is None and len(kept) == 1:  # copies that only move, in a loop of its own
+            path, p, ints, _ = kept[0]
+            tint = p.setColor
+            for x, y, v in zip(xs, ys, ints or repeat(None)):
+                save()
+                translate(x, y)
+                if v is not None:
+                    tint(v)
+                draw(path, p)
+                restore()
+            return
+        bounds = None
+        dev = math.sqrt(abs(base.getScaleX() * base.getScaleY() - base.getSkewX() * base.getSkewY()))
+        for i in range(len(xs)):
+            a = 1.0 if fades is None else min(1.0, max(0.0, fades[i]))
+            if a <= 0.002:
+                continue
+            save()
+            translate(xs[i], ys[i])
+            if rs is not None and rs[i]:
+                rotate(rs[i])
+            k = 1.0
+            if ss is not None and ss[i] != 1:
+                k = ss[i]
+                scale(k, k)
+            alone = a < 0.999 and not one
+            if alone:
+                if bounds is None:
+                    bounds = skia.Rect.MakeEmpty()
+                    for path, p, *_ in kept:
+                        bounds.join(p.computeFastBounds(path.getBounds()))
+                pad = 1.5 / max(dev * abs(k), 1e-3)  # a pixel and a half, past the edge's antialiasing
+                c.saveLayer(bounds.makeOutset(pad, pad), skia.Paint(Alphaf=a))
+            for path, p, ints, alpha in kept:
+                if ints is not None:
+                    p.setColor(ints[i])
+                elif one and fades is not None:
+                    p.setAlphaf(alpha * a)
+                draw(path, p)
+            if alone:
+                restore()
+            restore()
+
+    def _tints(self, L: Layer, role: str, col: list, mul: float, fades: list | None) -> list[int]:
+        """Each copy's own fill or stroke as a paint takes it, at mul of its alpha (and its opacity, from fades). A
+        still column is the same list from frame to frame (Copies), so its colours are kept while mul holds."""
+        argb = C.to_argb_int
+        if fades is not None:
+            return [argb(v, mul * min(1.0, max(0.0, a))) for v, a in zip(col, fades)]
+        hit = self._tinted.get((L.id, role))
+        if hit is None or hit[0] is not col or hit[1] != mul:
+            hit = self._tinted[(L.id, role)] = (col, mul, [argb(v, mul) for v in col])
+        return hit[2]
+
+    def _copies_box(self, L: Layer, t, T, box) -> tuple:
+        """The box round all of L's copies (_copies), in L's space."""
+        cols, n = L.copy_columns(t, T), L.copies.n
+        zero = [0.0] * n
+        r = self._spread(skia.Matrix(), skia.Rect.MakeXYWH(*box), range(n), cols.get("x", zero), cols.get("y", zero),
+                         cols.get("rotate"), cols.get("scale"))
+        return box if r is None else (r.left(), r.top(), r.width(), r.height())
+
+    @staticmethod
+    def _spread(base: skia.Matrix, rect: skia.Rect, which: list, xs, ys, rs, ss,
+                inverse: bool = False) -> skia.Rect | None:
+        """Where rect, in a layer's space, lands on the device (by base) moved as each copy in `which` moves it; with
+        inverse, moved back by each one's move: what of the layer each one brings to rect."""
+        q = np.array([[rect.left(), rect.top()], [rect.right(), rect.top()], [rect.right(), rect.bottom()],
+                      [rect.left(), rect.bottom()]])
+        w = np.asarray(which)
+        x, y = np.asarray(xs, float)[w, None], np.asarray(ys, float)[w, None]
+        ang = np.radians(np.asarray(rs, float)[w, None]) if rs is not None else np.zeros((len(w), 1))
+        s = np.asarray(ss, float)[w, None] if ss is not None else np.ones((len(w), 1))
+        cs, sn = np.cos(ang), np.sin(ang)
+        if inverse:
+            dx, dy = q[:, 0] - x, q[:, 1] - y
+            with np.errstate(divide="ignore", invalid="ignore"):
+                u, v = (dx * cs + dy * sn) / s, (dy * cs - dx * sn) / s
+        else:
+            px, py = q[:, 0] * s, q[:, 1] * s
+            u, v = px * cs - py * sn + x, px * sn + py * cs + y
+        m = base.get9()
+        W = m[6] * u + m[7] * v + m[8]
+        ok = np.isfinite(u) & np.isfinite(v) & (W > 1e-9)
+        if not ok.any():
+            return None
+        X, Y = ((m[0] * u + m[1] * v + m[2]) / W)[ok], ((m[3] * u + m[4] * v + m[5]) / W)[ok]
+        return skia.Rect(float(X.min()), float(Y.min()), float(X.max()), float(Y.max()))
+
+    def _looks(self, L: Layer, g, t: float) -> tuple[skia.ImageFilter | None, float, float]:
+        """L's innerShadow, outline and glow, in that order, as one image filter on its offscreen layer, so both
+        backends draw them: the layer shaded inside its edge, outlined, and over a blurred copy of itself (in the
+        glow's colour, if it has one). Their sizes are in the layer's own px. Also their work, in blurs of the layer
+        (CPU_BLUR_S), and how far past the layer they reach, in its px."""
+        F, CF, looks = skia.ImageFilters, skia.ColorFilters, L.looks
+        f = None  # the layer as drawn
+        work = reach = 0.0
+        s = looks.get("innerShadow")
+        sig = float(g("innerShadow blur", s.get("blur", 12))) / 2 if s else 0.0
+        if s:
+            r, gg, b, a = C.parse(s.get("color", "#00000080"))
+            # The shadow's colour where the layer is not, moved and blurred, kept where the layer is.
+            gap = F.ColorFilter(CF.Matrix([0, 0, 0, 0, r, 0, 0, 0, 0, gg, 0, 0, 0, 0, b, 0, 0, 0, -a, a]), f)
+            gap = F.Offset(float(g("innerShadow x", s.get("x", 0))), float(g("innerShadow y", s.get("y", 4))), gap)
+            if sig > 0.05:
+                gap = F.Blur(sig, sig, skia.TileMode.kDecal, gap)
+                work += 1
+            f = F.Merge([f, F.Xfermode(skia.BlendMode.kSrcIn, f, gap)])
+        o = looks.get("outline")
+        w = float(g("outline width", o.get("width", 4))) if o else 0.0
+        if w > 0.01:
+            # The layer copied round circles of radius w, w - 1.5, ... down to a pixel or so, the copies at most 1.5 px
+            # apart: a round outline with no gaps at thin strokes. Skia's dilate filter is square, and took 135 ms a
+            # pass on the CPU for a 220 px word; the 21 copies of a 3 px outline take 13 ms.
+            copies = []
+            for r in [r for r in (w - 1.5 * k for k in range(int(w / 1.5) + 1)) if r > 0.4] or [w]:
+                n = max(8, math.ceil(2 * math.pi * r / 1.5))
+                copies += [F.Offset(r * math.cos(2 * math.pi * j / n), r * math.sin(2 * math.pi * j / n), f)
+                           for j in range(n)]
+            ring = F.ColorFilter(CF.Blend(_argb(o.get("color", "#000000")), skia.BlendMode.kSrcIn), F.Merge(copies))
+            f = F.Merge([ring, f])
+            work, reach = work + len(copies) / 20, max(reach, w)  # 20 copies take about as long as a blur
+        gl = looks.get("glow")
+        size = float(g("glow size", gl.get("size", 24))) if gl else 0.0
+        strength = float(g("glow amount", gl.get("amount", 1))) if gl else 0.0
+        if size > 0.05 and strength > 0.002:
+            halo = F.Blur(size / 2, size / 2, skia.TileMode.kDecal, f)
+            if gl.get("color") is not None:
+                halo = F.ColorFilter(CF.Blend(_argb(gl["color"]), skia.BlendMode.kSrcIn), halo)
+            if strength != 1:
+                halo = F.ColorFilter(CF.Matrix([1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, strength, 0]), halo)
+            f = F.Merge([halo, f])
+            work, reach = work + 1, max(reach, 1.5 * size)
+        return f, work, reach
+
+    def _looked(self, c, L: Layer, T: float, parent_alpha: float):
+        """L with its glow, outline or inner shadow, in an offscreen layer only as large as what L draws. A layer the
+        size of the frame, as blur and shadow have, made the CPU dilate and blur all of it: 3.4 s a 1080p frame for an
+        outlined line of text. L is recorded first, without its layer; the layer then takes the same paint, in L's own
+        space, so the effects keep their sizes and order."""
+        was = self._looking, self._look
+        self._looking, self._look = L, None
+        try:
+            body = self._record(c, lambda rc: self._layer(rc, L, T, parent_alpha))
+            look = self._look
+        finally:
+            self._looking, self._look = was
+        if body is None or look is None:
+            return
+        paint, m, work, reach = look
+        cull = body.cullRect()
+        out = reach * math.sqrt(abs(m.getScaleX() * m.getScaleY() - m.getSkewX() * m.getSkewY()))  # on the frame
+        self.filtered += work * (cull.width() + 2 * out) * (cull.height() + 2 * out)
+        inv = skia.Matrix()
+        # What L drew, in its own space: the layer's filters spread it from there.
+        bounds = inv.mapRect(body.cullRect()) if not m.hasPerspective() and m.invert(inv) else None
+        c.save()
+        c.setMatrix(m)
+        c.saveLayer(bounds, paint)
+        c.resetMatrix()  # the picture was recorded where it lands on this canvas
+        c.drawPicture(body)
+        c.restore()
+        c.restore()
+
+    def _warped(self, c, L: Layer, T: float, t: float, g, parent_alpha: float):
+        """L displaced: drawn into an image of its own, at the frame's resolution, then drawn from it with each pixel
+        taken from up to `amount` px away, in a direction fractal noise picks. The waves are `scale` px across in the
+        layer's own px and slide `speed` of them a second; the image is sampled between its pixels, so bent edges stay
+        smooth (Skia's displacement filter takes the nearest pixel, which left them in steps)."""
+        d = L.warp
+        amount = max(0.0, float(g("displace amount", d.get("amount", 8))))
+        m = c.getTotalMatrix()
+        a, b, cc, dd = m.getScaleX(), m.getSkewX(), m.getSkewY(), m.getScaleY()
+        reach = math.ceil(amount * max(math.hypot(a, cc), math.hypot(b, dd)))  # how far a pixel moves, on the frame
+        was, self._warping = self._warping, L
+        try:  # what lies just outside the frame can be moved into it
+            body = self._record(c, lambda rc: self._layer(rc, L, T, parent_alpha), reach)
+        finally:
+            self._warping = was
+        if body is None:
+            return
+        blend = None if L is self._cutting else L.raw.get("blend")  # a masked layer blends once cut (_masked)
+        mode = BLENDS[blend] if blend not in (None, "normal") else skia.BlendMode.kSrcOver
+        c.save()
+        c.resetMatrix()  # the picture was recorded where it lands on this canvas
+        if reach < 1:
+            c.drawPicture(body, None, skia.Paint(BlendMode=mode))
+            c.restore()
+            return
+        src = body.cullRect().roundOut()
+        dst = skia.IRect.MakeLTRB(src.left() - reach, src.top() - reach, src.right() + reach, src.bottom() + reach)
+        if not dst.intersect(c.getDeviceClipBounds()):
+            c.restore()
+            return
+        self.filtered += dst.width() * dst.height()  # drawing it again through the shader is about one blur's work
+        surf = self.surface.makeSurface(self.info.makeWH(src.width(), src.height()))
+        sc = surf.getCanvas()
+        sc.clear(skia.ColorTRANSPARENT)
+        sc.translate(-src.left(), -src.top())
+        sc.drawPicture(body)
+        img = surf.makeImageSnapshot()
+        scale = float(d.get("scale", 60))
+        shift = float(d.get("speed", 1)) * t * scale  # the waves slide diagonally
+        noise = skia.PerlinNoiseShader.MakeFractalNoise(1 / scale, 1 / scale, 1, int(d.get("seed", 0)))
+        if self._warp_effect is None:
+            self._warp_effect = skia.RuntimeEffect.MakeForShader(WARP_SKSL)
+        fx = skia.RuntimeEffectBuilder(self._warp_effect)
+        fx.setChild("layer", img.makeShader(skia.TileMode.kDecal, skia.TileMode.kDecal, SAMPLING,
+                                            skia.Matrix.Translate(src.left(), src.top())))
+        fx.setChild("noise", noise.makeWithLocalMatrix(skia.Matrix.Concat(m, skia.Matrix.Translate(-shift, -0.6 * shift))))
+        fx.setUniform("m", [a, cc, b, dd])
+        fx.setUniform("amount", amount)
+        # Paint(Shader=...): skia-python's setShader copies a shader that holds an image, 1.6 ms for a line of text.
+        c.drawRect(skia.Rect.Make(dst), skia.Paint(Shader=fx.makeShader(), BlendMode=mode))
+        c.restore()
+
+    def _masked(self, c, L: Layer, T: float, parent_alpha: float):
+        """L cut by its mask: the mask layer, drawn beside it on its own clock, keeps L where the mask is opaque
+        (luma: bright), or takes it away there for an invert; a feather blurs the mask's edge by that many px. Both are
+        recorded first, so the layers that cut are only as large as what they draw."""
+        M, mode, feather = L.mask
+        was, self._cutting = self._cutting, L
+        try:
+            body = self._record(c, lambda rc: self._layer(rc, L, T, parent_alpha))
+        finally:
+            self._cutting = was
+        if body is None and not self.track:  # check sees where the mask is even when the layer draws nothing
+            return
+        m = c.getTotalMatrix()
+        sigma = feather / 2 * math.sqrt(abs(m.getScaleX() * m.getScaleY() - m.getSkewX() * m.getSkewY()))
+        was, self._matte = self._matte, M
+        try:
+            cut = self._record(c, lambda rc: self._layer(rc, M, T, parent_alpha))
+        finally:
+            self._matte = was
+        if body is None:
+            return
+        area = body.cullRect()
+        invert = mode.endswith("Invert")
+        blend = L.raw.get("blend")
+        mix = skia.Paint(BlendMode=BLENDS[blend]) if blend not in (None, "normal") else None
+        if cut is None:  # no mask drawn now: an invert keeps all of the layer, any other mode none of it
+            if invert:
+                c.save()
+                c.resetMatrix()
+                c.drawPicture(body, None, mix)
+                c.restore()
+            return
+        reach = cut.cullRect().makeOutset(3 * sigma, 3 * sigma)  # the mask, and its blur
+        if not invert and not (area.left() < reach.right() and reach.left() < area.right()
+                               and area.top() < reach.bottom() and reach.top() < area.bottom()):
+            return  # nothing is left outside the mask
+        # Both layers hold all of the layer and all of the mask, in whole pixels and one more each way: what a
+        # layer's bounds cut through is antialiased otherwise (by up to 56 levels for a circle on the CPU). They hold
+        # no more: 50 masks took 2.1 s a 1080p frame on the CPU in layers from the frame's corner, 0.15 s in these.
+        # The CPU antialiases a circle or rounded rect by where it is in its layer, so one in a layer that moves with
+        # its mask can shift by up to 14 levels at its edge.
+        area.join(reach)
+        area = skia.Rect.Make(area.makeOutset(1, 1).roundOut())
+        paint = skia.Paint(BlendMode=skia.BlendMode.kDstOut if invert else skia.BlendMode.kDstIn)
+        if mode.startswith("luma"):
+            paint.setColorFilter(skia.LumaColorFilter.Make())  # premultiplied: half-clear white keeps half
+        if sigma > 0:
+            paint.setImageFilter(skia.ImageFilters.Blur(sigma, sigma))
+        self.filtered += (0.4 + (sigma > 0)) * area.width() * area.height()  # two layers to clear and cut, a blur
+        c.save()
+        c.resetMatrix()  # the pictures were recorded where they land on this canvas
+        c.saveLayer(area, mix)
+        c.drawPicture(body)
+        c.saveLayer(area, paint)
+        c.drawPicture(cut)
+        c.restore()
+        c.restore()
+        c.restore()
+
+    @staticmethod
+    def _record(c, draw, pad: int = 0) -> skia.Picture | None:
+        """What draw(canvas) draws on c, recorded where it lands on c's device with its bounds, and pad px past c's
+        clip; None if nothing."""
+        clip = c.getDeviceClipBounds()
+        if clip.isEmpty():
+            return None
+        rec = skia.PictureRecorder()
+        rc = rec.beginRecording(skia.Rect.Make(clip).makeOutset(pad, pad), skia.RTreeFactory()())
+        rc.setMatrix(c.getLocalToDevice())
+        draw(rc)
+        pic = rec.finishRecordingAsPicture()
+        return None if pic.cullRect().isEmpty() else pic
+
+    def _combine(self, c, L: Layer, t: float, g, box, reveal, outer):
+        """Merge the outlines L's children gave (_take), first to last by L's combine, and draw the merged shape with
+        L's fill and stroke; inside another combining group, give it to that one. Each merge so far is kept: a frame
+        merges again from the first child whose outline changed, so children that hold still are merged once."""
+        taken, self._capture = self._capture, outer
+        if taken is None or self._stopped:
+            return
+        paths, op = taken[1], COMBINE[L.raw["combine"]]
+        old, folds = self._combos.get(L.id, ([], []))
+        k = 0
+        while k < min(len(old), len(paths)) and old[k] == paths[k]:
+            k += 1
+        folds = folds[:k]
+        for p in paths[k:]:
+            folds.append((skia.Op(folds[-1], p, op) or folds[-1]) if folds else skia.Path(p))
+        self._combos[L.id] = (paths, folds)
+        out = folds[-1] if folds else skia.Path()
+        if out.isEmpty():
+            return
+        if box is None:
+            b = out.computeTightBounds()
+            box = (b.left(), b.top(), b.width(), b.height())
+        self._ink, self._alpha, self._cf, self._t = None, 1.0, None, t
+        self._shape(c, L, g, out, box, reveal)
+
+    def _take(self, c, path: skia.Path):
+        """For a combining group: path, drawn in the canvas's current space, put in the group's space."""
+        inv, paths = self._capture
+        out = skia.Path()
+        path.transform(skia.Matrix.Concat(inv, c.getTotalMatrix()), out)
+        paths.append(out)
+
+    @staticmethod
+    def _letters(pcs: list[Piece] | None, s: str, x: float, y: float, font: skia.Font) -> skia.Path:
+        """The outlines of s's letters where _draw_pieces draws them; a shaped piece letter by letter, unjoined."""
+        out = skia.Path()
+        for text, f, width in [(s, font, 0.0)] if pcs is None else [(p.text, p.font, p.width) for p in pcs]:
+            glyphs = f.textToGlyphs(text)
+            for gid, gx in zip(glyphs, f.getXPos(glyphs)):
+                gp = f.getPath(gid)
+                if gp is not None:
+                    out.addPath(gp, x + gx, y)
+            x += width
+        return out
+
+    @staticmethod
+    def _inner(L: Layer, t: float, T: float) -> float:
+        """The scene time group L's children see at its time t: timeRemap's seconds, or t at its speed, from its start,
+        and round again every loop seconds."""
+        speed, loop = L.clock
+        u = float(L.get("timeRemap", t, T)) if "timeRemap" in L.props else t * speed
+        if loop > 0:
+            u %= loop
+        return L.t_in + u
+
     def _blends_inside(self, L: Layer) -> bool:
         hit = self._blended.get(L.id)
         if hit is None:
@@ -1225,19 +2078,21 @@ class Renderer:
         return hit
 
     @staticmethod
-    def _one_draw(L: Layer) -> bool:
+    def _one_draw(L: Layer, copy: bool = False) -> bool:
         """Whether the layer draws in a single call, so its opacity can go in that call's paint. Two draws that
         overlap, faded one by one, darken where they meet: a stroke over a fill, an arrow's head on its shaft, a
-        rect's dimOutside, a stroke around a picture, glyphs that touch. So does a stroke alone once it is thin enough
-        to draw as a hairline, at its joints. Strokes, groups, text, shaders (whose output an offscreen layer clamps
-        before it fades) and models keep the offscreen layer."""
+        rect's dimOutside, a stroke around a picture, glyphs that touch, copies (repeat). So does a stroke alone once
+        it is thin enough to draw as a hairline, at its joints. Strokes, groups, text, shaders (whose output an
+        offscreen layer clamps before it fades) and models keep the offscreen layer. With `copy`: whether one of its
+        copies draws in a single call, its own stroke counting as the layer's."""
         ty, raw = L.type, L.raw
-        if L.children:
+        if L.children or (L.copies is not None and not copy):
             return False
+        own = copy and "stroke" in L.copies.keys  # a copy's own stroke
         if ty in ("rect", "circle", "ellipse", "path", "polygon"):  # the fill (_shape)
-            return raw.get("stroke") is None and not (ty == "rect" and raw.get("dimOutside"))
+            return raw.get("stroke") is None and not own and not (ty == "rect" and raw.get("dimOutside"))
         if ty in ("image", "video"):  # the picture (_content)
-            return raw.get("stroke") is None
+            return raw.get("stroke") is None and not own
         return False
 
     @staticmethod
@@ -1269,10 +2124,16 @@ class Renderer:
             return (-ax * w, -ay * h, w, h)
         if ty in ("text", "counter"):
             lay = self._text_layout(L, t, T, g, self._text_of(L, t, T, g))
+            if L.onpath is not None:  # its letters where they stand on the path, in the layer's space, and box's pad
+                left, top, right, bottom = self._on_path(L, t, T, g, lay, self._font(L, g, float(g("size", 64)))).bounds
+                if right < left:
+                    return (0.0, 0.0, 0.0, 0.0)
+                py, px = self._pad(L)
+                return (left - px, top - py, right - left + px * 2, bottom - top + py * 2)
             pad = self._pad(L)
             w, h = lay.w + pad[1] * 2, lay.h + pad[0] * 2
-        elif ty in ("captions", "model"):
-            return None  # a model's bounds come from its projected mesh (render3d.draw)
+        elif ty in ("captions", "model", "particles"):
+            return None  # a model's bounds come from its projected mesh (render3d.draw), particles' from where they are
         elif ty in ("circle",):
             w = h = float(g("r", 50)) * 2
         elif ty in ("path", "line", "arrow", "polygon"):
@@ -1284,12 +2145,12 @@ class Renderer:
             ax, ay = ANCHORS.get(L.raw["anchor"], (0.5, 0.5))
             return (-ax * w, -ay * h, w, h)
         elif ty == "image":
-            img = media.image(L.src)
-            w, h = float(g("w", img.width())), float(g("h", img.height()))
+            iw, ih = self._natural(L)
+            w, h = float(g("w", iw)), float(g("h", ih))
             if L.raw.get("w") is not None and L.raw.get("h") is None:
-                h = w * img.height() / img.width()
+                h = w * ih / iw
             elif L.raw.get("h") is not None and L.raw.get("w") is None:
-                w = h * img.width() / img.height()
+                w = h * iw / ih
         elif ty in ("video", "shader"):
             w, h = float(g("w", self.s.w)), float(g("h", self.s.h))
         else:
@@ -1308,32 +2169,65 @@ class Renderer:
         if "radial" in spec:
             cx, cy, r = (spec["radial"] + [0.5, 0.5, 0.6])[:3] if isinstance(spec["radial"], list) else (0.5, 0.5, 0.6)
             return skia.GradientShader.MakeRadial(skia.Point(x + cx * w, y + cy * h), max(1.0, r * max(w, h)), colors, pos)
+        if "sweep" in spec:  # round its middle from the top, clockwise, turned by angle (CSS conic-gradient's start)
+            cx, cy = (spec["sweep"] + [0.5, 0.5])[:2] if isinstance(spec["sweep"], list) else (0.5, 0.5)
+            px, py = x + cx * w, y + cy * h
+            return skia.GradientShader.MakeSweep(px, py, colors, pos, localMatrix=skia.Matrix.RotateDeg(
+                float(spec.get("angle") or 0) - 90, skia.Point(px, py)))
+        if "linear" not in spec and spec.get("angle") is not None:  # CSS's: 0 runs up, 90 to the right, corner to corner
+            a = math.radians(float(spec["angle"]))
+            dx, dy = math.sin(a), -math.cos(a)
+            half = (abs(w * dx) + abs(h * dy)) / 2
+            cx, cy = x + w / 2, y + h / 2
+            return skia.GradientShader.MakeLinear([skia.Point(cx - dx * half, cy - dy * half),
+                                                   skia.Point(cx + dx * half, cy + dy * half)], colors, pos)
         a, b = spec.get("linear", [[0, 0], [1, 1]])
         return skia.GradientShader.MakeLinear([skia.Point(x + a[0] * w, y + a[1] * h), skia.Point(x + b[0] * w, y + b[1] * h)],
                                               colors, pos)
 
+    def _own(self, L: Layer, key: str):
+        """A copy's own fill or stroke, as (r, g, b, a), while L's copies draw (_copies); else None."""
+        cp = self._copy
+        return None if cp is None or cp[0] is not L else cp[1].get(key)
+
     def _fill_paint(self, L: Layer, g, box, alpha=1.0, key="fill", default=None):
-        raw = L.raw.get(key, default)
+        own = self._own(L, key)
+        raw = L.raw.get(key, default) if own is None else own
         if raw is None:
             return None
-        p = skia.Paint(AntiAlias=True)
         if isinstance(raw, dict) and key not in L.props:  # a gradient; a colour tween is compiled into props
+            p = skia.Paint(AntiAlias=True)
             bx, by, bw, bh = box
             p.setShader(self._gradient(raw, bx, by, bw, bh, alpha))
         else:
-            col = g(key) if key in L.props else C.parse(raw) if isinstance(raw, str) else raw
-            p.setColor(_argb(col, alpha))
+            col = (own if own is not None else g(key) if key in L.props else C.parse(raw) if isinstance(raw, str)
+                   else raw)
+            if isinstance(col, C.Gradient):  # one that animates
+                p = skia.Paint(AntiAlias=True)
+                p.setShader(self._gradient(col.spec(), *box, alpha))
+                return p
+            argb = _argb(col, alpha)
+            p = self._solid.get(argb)
+            if p is None:
+                if len(self._solid) >= 4096:  # colours that animate make a new paint on most frames
+                    self._solid.clear()
+                p = self._solid[argb] = skia.Paint(AntiAlias=True, Color=argb)
         return p
 
     def _stroke_paint(self, L: Layer, g, box, alpha=1.0):
-        raw = L.raw.get("stroke")
+        own = self._own(L, "stroke")
+        raw = L.raw.get("stroke") if own is None else own
         if raw is None:
             return None
         p = skia.Paint(AntiAlias=True, Style=skia.Paint.kStroke_Style, StrokeWidth=float(g("strokeWidth", 4)))
         if isinstance(raw, dict) and "stroke" not in L.props:  # a gradient
             p.setShader(self._gradient(raw, *box, alpha))
         else:
-            p.setColor(_argb(g("stroke") if "stroke" in L.props else C.parse(raw), alpha))
+            col = own if own is not None else g("stroke") if "stroke" in L.props else C.parse(raw)
+            if isinstance(col, C.Gradient):  # one that animates
+                p.setShader(self._gradient(col.spec(), *box, alpha))
+            else:
+                p.setColor(_argb(col, alpha))
         cap = L.raw.get("cap", "round" if L.type in ("line", "arrow", "path") else "butt")
         p.setStrokeCap({"round": skia.Paint.kRound_Cap, "square": skia.Paint.kSquare_Cap}.get(cap, skia.Paint.kButt_Cap))
         p.setStrokeJoin({"round": skia.Paint.kRound_Join, "bevel": skia.Paint.kBevel_Join}.get(L.raw.get("join", "round"), skia.Paint.kMiter_Join))
@@ -1352,6 +2246,24 @@ class Renderer:
                 break
         return out
 
+    @staticmethod
+    def _dash(L: Layer, g, paint: skia.Paint, path: skia.Path | None = None, start: float = 0.0):
+        """Mark out paint's stroke in L's dash, slid back along it by dashOffset as SVG slides one. A stroke that
+        starts `start` of the way along `path` keeps its dashes where they lie on the whole path."""
+        on = [float(d) for d in L.raw["dash"]]
+        if len(on) % 2:  # an odd list repeats, as in SVG
+            on += on
+        phase = float(g("dashOffset", 0.0))
+        if start > 0 and path is not None:
+            phase += start * skia.PathMeasure(path, False).getLength()
+        paint.setPathEffect(skia.DashPathEffect.Make(on, phase % sum(on)))
+
+    @staticmethod
+    def _radius(g):
+        """radius as one number, or as the list of four corners it may be."""
+        r = g("radius", 0)
+        return [float(v) for v in r] if isinstance(r, (list, tuple)) else float(r)
+
     def _note_ink(self, c, path: skia.Path, paint: skia.Paint):
         """For boxes (track): add the device bounds of `path` stroked with `paint` to the layer's box."""
         if not self.track:
@@ -1364,45 +2276,86 @@ class Renderer:
         else:
             self._ink.join(r)
 
+    def _rough(self, L: Layer, path: skia.Path) -> skia.Path:
+        """path wobbled as by hand: points `length` px apart moved up to `amount` px, the same for the same seed. boil
+        picks a new seed that many times a second of the layer's time, so the frame stays a function of its time."""
+        amount, length, seed, boil = L.rough
+        if boil:
+            seed += int(math.floor(self._t * boil + 1e-9))
+        hit = self._roughs.get(L.id)
+        if hit is not None and hit[0] == seed and hit[1] == path:  # the same path object, so the GPU's work is kept
+            return hit[2]
+        out = skia.Path()
+        # As a hairline: a fill paint makes Skia measure an open path as closed, adding a stroke back to its start
+        skia.Paint(Style=skia.Paint.kStroke_Style, StrokeWidth=0,
+                   PathEffect=skia.DiscretePathEffect.Make(length, amount, seed)).getFillPath(path, out)
+        self._roughs[L.id] = (seed, skia.Path(path), out)
+        return out
+
     def _shape(self, c, L, g, path: skia.Path, box, reveal):
         """Fill then stroke. 'draw' (0..1) trims the stroke and fades the fill with it."""
+        if L.rough is not None:
+            path = self._rough(L, path)
+        if L.raw.get("fillRule") == "evenodd":  # where its outlines overlap, holes
+            path = skia.Path(path)
+            path.setFillType(skia.PathFillType.kEvenOdd)
         amt = max(0.0, min(1.0, float(g("draw")) * reveal))
-        has_stroke = L.raw.get("stroke") is not None
+        has_stroke = L.raw.get("stroke") is not None or self._own(L, "stroke") is not None
         fp = self._fill_paint(L, g, box, alpha=amt * self._alpha,
                               default=None if has_stroke else self.s.theme.get("paper", "#f2f0e8"))
+        if self._capture is not None:  # a combining group takes its fill's outline, or its stroke's
+            if fp is not None:
+                if amt > 0:
+                    self._take(c, path)
+            elif (sp := self._stroke_paint(L, g, box)) is not None and amt > 0.0005:
+                start = float(g("drawStart", 0.0))
+                if "dash" in L.raw:
+                    self._dash(L, g, sp, path, start)
+                self._take(c, _outline(sp, self._trim(path, amt, start)))
+            return
         if fp is not None and self._cf is not None:
+            fp = skia.Paint(fp)  # a kept solid paint is shared
             fp.setColorFilter(self._cf)
         if fp is not None and amt > 0:
-            c.drawPath(path, fp)
+            if self._ops is not None:  # its copies draw it (_copy_shapes)
+                self._ops.append((path, fp, "fill", amt * self._alpha, c.getTotalMatrix()))
+            else:
+                c.drawPath(path, fp)
         sp = self._stroke_paint(L, g, box)
         if sp is not None:
             self._note_ink(c, path, sp)  # the whole stroke, as the box is the whole shape while it draws on
             if amt > 0.0005:
-                c.drawPath(self._trim(path, amt, float(g("drawStart", 0.0))), sp)
+                start = float(g("drawStart", 0.0))
+                if "dash" in L.raw:
+                    self._dash(L, g, sp, path, start)
+                if self._ops is not None:
+                    self._ops.append((self._trim(path, amt, start), sp, "stroke", 1.0, c.getTotalMatrix()))
+                else:
+                    c.drawPath(self._trim(path, amt, start), sp)
 
     # ---- layer types ----------------------------------------------------------------------
     def _draw_group(self, c, L, t, T, g, box, reveal, mods):
+        if L.raw.get("combine"):  # its fill and stroke draw what its children merge into (_combine)
+            return
         if box is not None and L.raw.get("clip"):
-            r = float(g("radius", 0))
-            rr = skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(*box), r, r)
-            c.clipRRect(rr, doAntiAlias=True)
+            c.clipRRect(_rrect(box, self._radius(g)), doAntiAlias=True)
         fp = self._fill_paint(L, g, box) if box is not None else None
         if fp is not None:
-            r = float(g("radius", 0))
-            c.drawRRect(skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(*box), r, r), fp)
+            c.drawRRect(_rrect(box, self._radius(g)), fp)
 
     def _draw_rect(self, c, L, t, T, g, box, reveal, mods):
         bx, by, bw, bh = box
-        r = min(float(g("radius", 0)), bw / 2, bh / 2)
+        r = self._radius(g)
+        r = r if isinstance(r, list) else min(r, bw / 2, bh / 2)
         dim = float(g("dimOutside", 0))
         if dim > 0:
             hole = skia.Path()
             hole.addRect(skia.Rect(-40000, -40000, 40000, 40000))
-            hole.addRRect(skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(*box), r, r))
+            hole.addRRect(_rrect(box, r))
             hole.setFillType(skia.PathFillType.kEvenOdd)
             c.drawPath(hole, skia.Paint(AntiAlias=True, Color=_argb("#000000", dim * reveal)))
         path = skia.Path()
-        path.addRRect(skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(*box), r, r))
+        path.addRRect(_rrect(box, r))
         self._shape(c, L, g, path, box, reveal)
 
     def _draw_circle(self, c, L, t, T, g, box, reveal, mods):
@@ -1413,12 +2366,77 @@ class Renderer:
     def _draw_ellipse(self, c, L, t, T, g, box, reveal, mods):
         self._draw_circle(c, L, t, T, g, box, reveal, mods)
 
+    def _along(self, L: Layer, t: float, T: float) -> tuple[float, float, float]:
+        """Where L's along puts its anchor at t, as an offset from its x and y, and the path's direction there in
+        degrees. The path's first contour is ridden: an open one stops at its ends, a closed one goes round again."""
+        d = L.along[0]
+        route = self.s.by_id[d[1:]] if d.startswith("#") else None
+        if route is None:
+            hit = self._routes.get(L.id)
+            if hit is None:
+                path = svgpath.parse(d)
+                meas = skia.PathMeasure(path, False)
+                hit = self._routes[L.id] = (path, meas, meas.getLength())
+        else:
+            rt = T - route.t_in
+            rg = lambda name, default=None: route.get(name, rt, T, 0, default)  # noqa: E731
+            path = self._path(route, rt, T, rg)
+            hit = self._routes.get(route.id)
+            if hit is None or hit[0] is not path:
+                meas = skia.PathMeasure(path, False)
+                hit = self._routes[route.id] = (path, meas, meas.getLength())
+        path, meas, n = hit
+        p = float(L.get("along", t, T))
+        p = p % 1.0 if meas.isClosed() else min(max(p, 0.0), 1.0)
+        pt = meas.getPosTan(p * n) if n > 0 else None
+        if not pt:
+            return 0.0, 0.0, 0.0
+        pos, tan = pt
+        px, py, tx, ty = pos.x(), pos.y(), tan.x(), tan.y()
+        if route is not None:  # where the route draws it: _draw_path's anchor shift, then the route's own placing
+            if "anchor" in route.raw:
+                box, b = self._box(route, rt, T, rg), path.computeTightBounds()
+                px, py = px + box[0] - b.left(), py + box[1] - b.top()
+            x, y, rot, sc, sx, sy, _ = route.placed(rt, T)
+            sx, sy = float(sc) * float(sx), float(sc) * float(sy)
+            px, py, tx, ty = px * sx, py * sy, tx * sx, ty * sy
+            if rot:
+                co, si = math.cos(math.radians(float(rot))), math.sin(math.radians(float(rot)))
+                px, py, tx, ty = px * co - py * si, px * si + py * co, tx * co - ty * si, tx * si + ty * co
+            px, py = px + float(x), py + float(y)
+        return px, py, math.degrees(math.atan2(ty, tx))
+
+    def _morph(self, L: Layer, g) -> skia.Path:
+        """A morphing path's d where its keys have got to: a key's own path on it, between two keys their matched
+        pair mixed (an ease that overshoots carries on past the key)."""
+        keys = L.morph
+        u = float(g("morph"))
+        i = min(max(int(math.floor(u)), 0), len(keys) - 2)
+        if len(keys) == 1 or u == i:
+            return keys[max(0, i)]
+        if u == i + 1:
+            return keys[i + 1]
+        last = self._morphed.get(L.id)
+        if last is not None and last[0] == u:
+            return last[1]
+        pair = self._morphs.get((L.id, i))
+        if pair is None:
+            pair = self._morphs[(L.id, i)] = M.match(keys[i], keys[i + 1])
+        out = skia.Path()
+        pair[0].interpolate(pair[1], 1.0 - (u - i), out)
+        self._morphed[L.id] = (u, out)
+        return out
+
     def _path(self, L: Layer, t, T, g) -> skia.Path:
         ty = L.type
+        if L.morph is not None:
+            p = self._morph(L, g)
+            return self._corner(p, g) if "corner" in L.props else p
         static = all(L.props[k].static for k in ("x1", "y1", "x2", "y2", "bend", "r", "sides", "inner") if k in L.props)
-        key = L.id
+        rounds = "corner" in L.props and not L.props["corner"].static  # a corner that changes: kept unrounded
+        key = (L.id, "unrounded") if rounds else L.id
         if static and key in self._paths:
-            return self._paths[key]
+            return self._corner(self._paths[key], g) if rounds else self._paths[key]
         p = skia.Path()
         if ty == "path" and L.raw.get("d"):
             p = svgpath.parse(L.raw["d"])
@@ -1458,9 +2476,24 @@ class Renderer:
             for q in pts[1:]:
                 p.lineTo(*q)
             p.close()
+        if static and rounds:
+            self._paths[key] = p
+            return self._corner(p, g)
+        if "corner" in L.props:
+            p = self._corner(p, g)
         if static:
             self._paths[key] = p
         return p
+
+    @staticmethod
+    def _corner(p: skia.Path, g) -> skia.Path:
+        """p with every corner rounded by corner px, so draw and a rider on it follow the rounded line."""
+        corner = float(g("corner", 0))
+        if corner <= 0:
+            return p
+        out = skia.Path()
+        skia.Paint(PathEffect=skia.CornerPathEffect.Make(corner)).getFillPath(p, out)
+        return out
 
     def _draw_path(self, c, L, t, T, g, box, reveal, mods):
         path = self._path(L, t, T, g)
@@ -1506,16 +2539,52 @@ class Renderer:
                 self._note_ink(c, full, sp)
         if amt <= 0.0005:
             return
-        c.drawPath(self._trim(path, amt), sp)
-        hp = head_at(amt)
+        hp = head_at(amt)  # on the smooth line, so a rough arrow still points where it goes
+        if L.rough is not None:
+            path = self._rough(L, path)
+            hp = None if hp is None else self._rough(L, hp)
+        shaft = sp
+        if "dash" in L.raw:  # the head stays whole
+            shaft = skia.Paint(sp)
+            self._dash(L, g, shaft)
+        if self._capture is not None:  # a combining group takes the outline of its stroke
+            out = _outline(shaft, self._trim(path, amt))
+            if hp is not None:
+                out.addPath(_outline(sp, hp))
+            self._take(c, out)
+            return
+        c.drawPath(self._trim(path, amt), shaft)
         if hp is not None:
             c.drawPath(hp, sp)
 
     def _draw_image(self, c, L, t, T, g, box, reveal, mods):
-        img = media.image(L.src)
-        self._content(c, L, g, box, img, img.width(), img.height())
+        img = media.still(L.src)
+        if L.seq is None:
+            self._content(c, L, g, box, img, img.width(), img.height())
+            return
+        if self._frame_t is not None:  # a motion-blur sub-frame shows its frame's drawing, as a video layer does
+            t = min(max(self._frame_t, L.t_in), math.nextafter(L.t_out, -math.inf)) - L.t_in
+        q = L.seq
+        k = q.at(t, float(L.raw.get("fps", media.SEQUENCE_FPS)), L.raw.get("loop", True))
+        if q.files is not None:
+            img = media.still(q.files[k])
+            self._content(c, L, g, box, img, img.width(), img.height())
+            return
+        w, h = img.width() / q.cols, img.height() / q.rows
+        self._content(c, L, g, box, img, w, h, skia.Rect.MakeXYWH(k % q.cols * w, k // q.cols * h, w, h))
 
-    def _content(self, c, L, g, box, img, iw, ih):
+    @staticmethod
+    def _natural(L: Layer) -> tuple[float, float]:
+        """Image layer L's own size: its image's (an svg's from its width, height and viewBox), its first frame's, or
+        a cell of its sheet."""
+        img = media.still(L.src)
+        if L.seq is not None and L.seq.files is None:
+            return img.width() / L.seq.cols, img.height() / L.seq.rows
+        return img.width(), img.height()
+
+    def _content(self, c, L, g, box, img, iw, ih, src: skia.Rect | None = None):
+        """img (iw x ih, or the part of it in src) drawn in box by L's fit, zoom and focus, with its stroke. An svg's
+        media.Vector is drawn as vectors, sharp at any size."""
         bx, by, bw, bh = box
         zoom = float(g("zoom"))
         fx, fy = (L.raw.get("focus") or [0.5, 0.5]) if not isinstance(L.raw.get("focus"), str) else (0.5, 0.5)
@@ -1524,10 +2593,10 @@ class Renderer:
         if "focusY" in L.props:
             fy = float(g("focusY"))
         fit = L.raw.get("fit", "cover")
-        r = float(g("radius", 0))
+        r = self._radius(g)
         c.save()
         if zoom != 1 or r or fit == "cover":
-            c.clipRRect(skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(*box), r, r), doAntiAlias=True)
+            c.clipRRect(_rrect(box, r), doAntiAlias=True)
         if fit == "stretch" or L.type == "video":
             cw, ch = bw, bh
         else:
@@ -1537,17 +2606,32 @@ class Renderer:
         cy0 = by + (bh - ch) / 2
         px, py = bx + fx * bw, by + fy * bh
         dst = skia.Rect.MakeXYWH(px + (cx0 - px) * zoom, py + (cy0 - py) * zoom, cw * zoom, ch * zoom)
-        if img is not None:
-            c.drawImageRect(img, dst, CUBIC if L.type == "video" else SAMPLING,
-                            skia.Paint(AntiAlias=True, Alphaf=self._alpha, ColorFilter=self._cf))
+        if isinstance(img, media.Vector):
+            sr = src or skia.Rect.MakeWH(iw, ih)
+            if src is not None:  # a sheet's cell, without its neighbours
+                c.clipRect(dst, doAntiAlias=True)
+            c.translate(dst.left(), dst.top())
+            c.scale(dst.width() / sr.width(), dst.height() / sr.height())
+            c.translate(-sr.left(), -sr.top())
+            fade = self._alpha < 1 or self._cf is not None  # drawn on a layer of its own, so overlaps do not show
+            c.drawPicture(img.picture, None, skia.Paint(Alphaf=self._alpha, ColorFilter=self._cf) if fade else None)
+        elif img is not None:
+            how = CUBIC if L.type == "video" else NEAREST if L.raw.get("pixelated") else SAMPLING
+            paint = skia.Paint(AntiAlias=True, Alphaf=self._alpha, ColorFilter=self._cf)
+            if src is None:
+                c.drawImageRect(img, dst, how, paint)
+            else:  # strictly inside src, so a cell's edge does not take in its neighbour's pixels
+                c.drawImageRect(img, src, dst, how, paint, skia.Canvas.kStrict_SrcRectConstraint)
         c.restore()
         sp = self._stroke_paint(L, g, box)
         if sp:
-            rr = skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(*box), r, r)
+            rr = _rrect(box, r)
             if self.track:
                 edge = skia.Path()
                 edge.addRRect(rr)
                 self._note_ink(c, edge, sp)
+            if "dash" in L.raw:
+                self._dash(L, g, sp)
             c.drawRRect(rr, sp)
 
     def _draw_video(self, c, L, t, T, g, box, reveal, mods):
@@ -1689,6 +2773,147 @@ class Renderer:
     def _draw_model(self, c, L, t, T, g, box, reveal, mods):
         return render3d.draw(self, c, L, g, reveal, t, T)
 
+    def _draw_particles(self, c, L, t, T, g, box, reveal, mods):
+        """The particles alive at t, each its sprite turned, sized and tinted, in one drawAtlas call; with track, the
+        frame rect they cover."""
+        try:
+            st = L.particles.state(t, L.dur, L.t_in)
+        except ValueError as e:
+            raise SceneError(f"layer '{L.id}': {e}", layer=L.id) from e
+        if st is None:
+            return None
+        x, y, size = st["x"], st["y"], st["size"]
+        moved = self._emitted(L, t, T, mods, st["birth"])
+        if moved is not None:
+            x, y = x + moved[0], y + moved[1]
+        img, cells, side, mid = self._sprites(L)
+        k = size / side
+        rot = st["rot"]
+        scos, ssin = k * np.cos(rot), k * np.sin(rot)
+        tx, ty = x - (scos - ssin) * mid, y - (ssin + scos) * mid
+        rs = skia.RSXform
+        xf = [rs(a, b, e, f) for a, b, e, f in zip(scos.tolist(), ssin.tolist(), tx.tolist(), ty.tolist())]
+        cell = st["cell"]
+        tex = [cells[0]] * len(xf) if cell is None else [cells[j] for j in cell.tolist()]
+        c.drawAtlas(img, xf, tex, st["argb"].tolist(), skia.BlendMode.kModulate, SAMPLING)
+        m = c.getTotalMatrix()
+        quad = float(np.dot(k, k)) * (2 * mid) ** 2 * abs(m.getScaleX() * m.getScaleY() - m.getSkewX() * m.getSkewY())
+        self.particle_s += len(xf) * CPU_PARTICLE_S + quad * CPU_PARTICLE_PX_S
+        if not self.track:
+            return None
+        half = size * (0.5 if L.particles.shape in ("circle", "soft", "ring") else 0.71)
+        r = m.mapRect(skia.Rect(float((x - half).min()), float((y - half).min()), float((x + half).max()),
+                                float((y + half).max())))
+        return (r.left(), r.top(), r.right(), r.bottom())
+
+    def _emitted(self, L: Layer, t: float, T: float, mods, births: np.ndarray):
+        """How far L's emitter has moved since each particle left it, in L's own space, so that particles stay where
+        they were born while x, y or along move the layer; None while it stays put."""
+        hit = self._emitter.get(L.id, False)
+        if hit is False:
+            hit = None
+            if any(k in L.props and not L.props[k].static for k in ("x", "y")) or L.along is not None:
+                off = T - t
+                grid = np.minimum(np.arange(int(math.ceil(L.dur * PT.GRID)) + 1) / PT.GRID, L.dur)
+                spots = np.array([self._spot_of(L, s, s + off) for s in grid.tolist()])
+                hit = (grid, spots[:, 0], spots[:, 1])
+            self._emitter[L.id] = hit
+        if hit is None:
+            return None
+        grid, xs, ys = hit
+        ex, ey = self._spot_of(L, t, T)
+        dx, dy = np.interp(births, grid, xs) - ex, np.interp(births, grid, ys) - ey
+        _, _, rot, sc, sx, sy, _ = L.placed(t, T)
+        sc = float(sc) * mods.scale
+        sx, sy = sc * float(sx), sc * float(sy)
+        if abs(sx) < 1e-9 or abs(sy) < 1e-9:
+            return None
+        a = -math.radians(float(rot) + mods.rotate)
+        cs, sn = math.cos(a), math.sin(a)
+        return (cs * dx - sn * dy) / sx, (sn * dx + cs * dy) / sy
+
+    def _spot_of(self, L: Layer, t: float, T: float) -> tuple[float, float]:
+        """Where x, y and along put L's anchor at t, in its parent's space."""
+        x, y = float(L.get("x", t, T)), float(L.get("y", t, T))
+        if L.along is not None:
+            ax, ay, _ = self._along(L, t, T)
+            x, y = x + ax, y + ay
+        return x, y
+
+    def _sprites(self, L: Layer) -> tuple:
+        """L's particle drawn white on clear, once: (the image, a cell rect for each width it flips through, the
+        particle's size in the image's px, the middle of a cell). The image holds the particle at its largest size
+        on the frame, so it is never drawn larger than it was made."""
+        hit = self._sprite.get(L.id)
+        if hit is not None:
+            return hit
+        em = L.particles
+        side = int(min(256, max(8, math.ceil(em.most() * self.scale))))
+        cell = side + 4
+        n = PT.FLIPS if em.flips else 1
+        surf = skia.Surface(cell * n, cell)
+        c = surf.getCanvas()
+        c.clear(skia.ColorTRANSPARENT)
+        draw = self._sprite_of(L, side)
+        for j in range(n):
+            c.save()
+            c.translate(cell * j + cell / 2, cell / 2)
+            if n > 1:
+                c.scale(max(0.08, j / (n - 1)), 1.0)
+            draw(c)
+            c.restore()
+        img = surf.makeImageSnapshot()
+        if self.gr is not None:
+            img = img.makeTextureImage(self.gr) or img
+        hit = self._sprite[L.id] = (img, [skia.Rect.MakeXYWH(cell * j, 0, cell, cell) for j in range(n)], side,
+                                    cell / 2)
+        return hit
+
+    def _sprite_of(self, L: Layer, s: float):
+        """A function drawing L's particle in white, `s` px across its longer side, centred on the origin."""
+        paint = skia.Paint(AntiAlias=True, Color=skia.ColorWHITE)
+        h = s / 2
+        if L.raw.get("src") is not None:
+            img = media.image(L.src)
+            k = s / max(img.width(), img.height())
+            w, ht = img.width() * k, img.height() * k
+            return lambda c: c.drawImageRect(img, skia.Rect.MakeXYWH(-w / 2, -ht / 2, w, ht), SAMPLING, paint)
+        if L.raw.get("text") is not None:
+            txt = str(L.raw["text"])
+            g = lambda k, d=None: L.raw.get(k, d)  # noqa: E731
+            font = self._font(L, g, s)
+            m = font.getMetrics()
+            font = self._font(L, g, s * s / max(self._measure(font, txt), m.fDescent - m.fAscent, 1e-6))
+            m, w = font.getMetrics(), self._measure(font, txt)
+            pcs = self._pieces(font, txt)
+            return lambda c: self._draw_pieces(c, pcs, txt, -w / 2, -(m.fAscent + m.fDescent) / 2, font, paint)
+        shape = L.particles.shape or "circle"
+        if shape == "circle":
+            return lambda c: c.drawCircle(0, 0, h, paint)
+        if shape == "square":
+            return lambda c: c.drawRect(skia.Rect(-h, -h, h, h), paint)
+        if shape == "rect":
+            return lambda c: c.drawRect(skia.Rect(-h, -h / 2, h, h / 2), paint)
+        if shape == "ring":
+            ring = skia.Paint(AntiAlias=True, Color=skia.ColorWHITE, Style=skia.Paint.kStroke_Style, StrokeWidth=s / 8)
+            return lambda c: c.drawCircle(0, 0, h - s / 16, ring)
+        if shape == "soft":
+            soft = skia.Paint(AntiAlias=True, Shader=skia.GradientShader.MakeRadial(
+                skia.Point(0, 0), h, [0xFFFFFFFF, 0x99FFFFFF, 0x33FFFFFF, 0x00FFFFFF], [0.0, 0.35, 0.7, 1.0]))
+            return lambda c: c.drawCircle(0, 0, h, soft)
+        if shape == "streak":  # fading from the tail to its head, which leads (+x) when it turns with its path
+            streak = skia.Paint(AntiAlias=True, Shader=skia.GradientShader.MakeLinear(
+                [skia.Point(-h, 0), skia.Point(h, 0)], [0x00FFFFFF, 0xFFFFFFFF]))
+            return lambda c: c.drawRRect(skia.RRect.MakeRectXY(skia.Rect(-h, -s / 10, h, s / 10), s / 10, s / 10),
+                                         streak)
+        path = skia.Path()
+        points = ([(h * math.cos(a), h * math.sin(a)) for a in (-math.pi / 2, math.pi / 6, 5 * math.pi / 6)]
+                  if shape == "triangle" else
+                  [((h if j % 2 == 0 else h * 0.45) * math.cos(-math.pi / 2 + j * math.pi / 5),
+                    (h if j % 2 == 0 else h * 0.45) * math.sin(-math.pi / 2 + j * math.pi / 5)) for j in range(10)])
+        path.addPoly([skia.Point(px, py) for px, py in points], True)
+        return lambda c: c.drawPath(path, paint)
+
     def _model_surface(self):
         """The offscreen models are drawn in at their place in the frame, and its supersampling factor: 2x, which
         `check` and `--boxes` skip (they take 4x MSAA on the GPU instead, else none).
@@ -1817,13 +3042,9 @@ class Renderer:
         rtl: the text around reads right to left; before, after: the direction of the text on either side, 'R' or
         'L' (default: rtl's), which punctuation at the ends of s takes when both agree."""
         tf, size = font.getTypeface(), font.getSize()
-        style = tf.fontStyle()
         units: list[list] = []  # [text, typeface, shaped, direction (R, L or N)]
         for cl in clusters(s):
-            use = tf
-            missing = next((ch for ch in cl if not _ignorable(ch) and not _covers(tf, ord(ch))), None)
-            if missing is not None:
-                use = _fallback(style, ord(missing), _emoji(cl)) or _fallback(style, ord(missing)) or tf
+            use = _face(tf, cl)
             d = _strong(cl) or "N"
             joins = joining(cl)
             if joins and units and units[-1][1] is use and units[-1][2] == "join":
@@ -1898,9 +3119,11 @@ class Renderer:
                 c.drawTextBlob(p.blob, x, y + p.drop, paint)
             x += p.width
 
-    def undrawable(self, L: Layer) -> tuple[list[str], list[str]]:
+    def undrawable(self, L: Layer) -> tuple[list[str], list[str], list[str]]:
         """Characters of a text, counter, captions or 3D text layer that no installed font has (they draw as empty
-        boxes), and those its font draws but cannot shape (3D text only: marks and right-to-left letters)."""
+        boxes), and those 3D text cannot draw as written: colour emoji (the first character of each), whose font has
+        no outline for them, and with letterSpacing (each character on its own) marks, right-to-left letters and
+        emoji parts."""
         fam = L.raw.get("font") or self.s.theme.get("font")
         tf = self._typeface(fam, int(L.get("weight", 0.0, 0.0, 0, 600) or 600), bool(L.raw.get("italic")))
         if L.type == "captions":
@@ -1909,15 +3132,24 @@ class Renderer:
             text = _FMT.sub("0123456789,.-", str(L.raw.get("format", "{:,.0f}")))
         else:
             text = str(L.raw.get("text", ""))
+        text = text.replace("**", "")
         missing, flat = [], []
-        for ch in dict.fromkeys(text.replace("**", "")):
+        spaced = L.raw.get("letterSpacing") not in (None, 0)
+        for ch in dict.fromkeys(text):
             if ch in "\n" or _ignorable(ch):
                 continue
             if not _covers(tf, ord(ch)) and _fallback(tf.fontStyle(), ord(ch)) is None:
                 missing.append(ch)
-            elif L.type == "model" and _shapes(ch):
+            elif L.type == "model" and spaced and _shapes(ch):
                 flat.append(ch)
-        return missing, flat
+        emoji: list[str] = []
+        for cl in dict.fromkeys(clusters(text) if L.type == "model" else []):
+            ch = next((c for c in cl if not _ignorable(c)), " ")
+            if not ch.isspace() and ch not in missing and ch not in emoji:
+                face = _face(tf, cl)
+                if skia.Font(face, 12).getPath(face.unicharToGlyph(ord(ch))) is None:
+                    emoji.append(ch)
+        return missing, emoji, [ch for ch in flat if ch not in emoji]
 
     def _text_layout(self, L: Layer, t, T, g, txt: str, size: float | None = None, max_w=None) -> Layout:
         size = float(size if size is not None else g("size", 64))
@@ -1932,7 +3164,7 @@ class Renderer:
         font = self._font(L, g, size)
         meas = lambda s, rtl=False: self._measure(font, s, rtl) + ls * len(s)  # noqa: E731
         split = L.raw.get("split")
-        apart = split == "chars" or ls  # each letter drawn on its own
+        apart = split == "chars" or ls or L.onpath is not None  # each letter drawn on its own
 
         def wmeas(w: str) -> float:
             """A word's width as drawn: letter by letter when they are drawn apart and the word needs more than
@@ -2061,13 +3293,21 @@ class Renderer:
         bx, by, bw, bh = box
         pad = self._pad(L)
         boxspec = L.raw.get("box")
-        if boxspec:
+        if boxspec and self._capture is None:
             bs = boxspec if isinstance(boxspec, dict) else {}
             r = float(bs.get("radius", 10))
             c.drawRRect(skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(*box), r, r),
                         skia.Paint(AntiAlias=True, Color=_argb(bs.get("fill", "#000000b0"))))
         ox, oy = bx + pad[1], by + pad[0]
-        fill = g("fill") if "fill" in L.props else C.parse(self.s.theme.get("paper", "#f2f0e8"))
+        fill = self._own(L, "fill") or (g("fill") if "fill" in L.props else L.raw["fill"]
+                                        if isinstance(L.raw.get("fill"), dict)
+                                        else C.parse(self.s.theme.get("paper", "#f2f0e8")))
+        gpaint = None  # a gradient fill, across the text as a shape's goes across its box; emphasis stays a colour
+        if isinstance(fill, (dict, C.Gradient)):
+            gx, gy, gw, gh = (ox, oy, lay.w, lay.h) if L.onpath is None else (ox, oy, bw - pad[1] * 2, bh - pad[0] * 2)
+            gpaint = skia.Paint(AntiAlias=True, Shader=self._gradient(fill if isinstance(fill, dict) else fill.spec(),
+                                                                      gx, gy, gw, gh, 1.0))
+            fill = (1.0, 1.0, 1.0, 1.0)  # only its alpha counts under the shader
         emph = g("emph") if "emph" in L.props else C.parse(self.s.theme.get("accent", "#ff633f"))
         act = g("active") if "active" in L.props else emph
         fpaint = skia.Paint(AntiAlias=True)
@@ -2075,49 +3315,111 @@ class Renderer:
         split = L.raw.get("split")
         enter = L.enter if split else None
         stagger = (enter.stagger if enter and enter.stagger else 0.04) if split else 0
+        units = self._units(lay, font, split)
+        turn = None  # each unit's turn in the stagger, when it is not its place in the text
+        if enter is not None and enter.order != "start":
+            turn = P.turns(len(units), enter.order, enter.seed)
+        waves = [(e, None if e.order == "start" else P.turns(len(units), e.order, e.seed))
+                 for e in L.emphasis if e.stagger] if split else []  # emphases that run across the units
         typing = enter is None and L.enter and "type" in L.enter.names and t < L.enter.dur
         visible_chars = lay.nchars * reveal if (reveal < 1 or typing) else None
         track = mods.track
         c00 = lay.runs[0].char0 if lay.runs else 0
-        unit_keys = {k for k in ("unitX", "unitY", "unitRotate", "unitScale", "unitOpacity") if k in L.props}
+        fu = {k: L.unit_fn(k, t, T, len(units)) for k in UNIT if k in L.props}  # each a function of the unit
+        fx, fy, fo, fr, fs, fb, ff = (fu.get(k) for k in ("unitX", "unitY", "unitOpacity", "unitRotate", "unitScale",
+                                                           "unitBlur", "unitFill"))
         cols, pop = (fill, emph, act), active is not None and L.raw.get("mode") == "pop"  # captions only
         painted = None  # (which colour, alpha) fpaint holds
-        for ui, (runs, x0, x1) in enumerate(self._units(lay, font, split)):
+        onpath = self._on_path(L, t, T, g, lay, font, track) if L.onpath is not None else None
+        own = None  # the text's own letters, which a scramble shows for those outside A to Z
+        for ui, (runs, x0, x1) in enumerate(units):
             um = IDENT
             if enter is not None:
-                p = (t - ui * stagger) / enter.dur if enter.dur else 1.0
+                p = (t - (ui if turn is None else turn[ui]) * stagger) / enter.dur if enter.dur else 1.0
                 if p < 1:
                     um = enter.mods(p)
+            for e, order in waves:
+                um = um.combine(e.mods(t - (ui if order is None else order[ui]) * e.stagger))
             if um.alpha <= 0.002:
                 continue
-            ux = um.dx + (float(L.get("unitX", t, T, ui)) if "unitX" in unit_keys else 0)
-            uy = um.dy + (float(L.get("unitY", t, T, ui)) if "unitY" in unit_keys else 0)
-            ua = um.alpha * (float(L.get("unitOpacity", t, T, ui)) if "unitOpacity" in unit_keys else 1)
-            urot = um.rotate + (float(L.get("unitRotate", t, T, ui)) if "unitRotate" in unit_keys else 0)
-            usc = um.scale * (float(L.get("unitScale", t, T, ui)) if "unitScale" in unit_keys else 1)
-            moved = ux or uy or urot or usc != 1 or um.rx or um.ry or um.dz
-            blurred = um.blur > 0.1
-            if moved:  # a unit drawn where it lies needs no save and restore: most of them, once they are in
+            ux = um.dx + (float(fx(ui)) if fx else 0)
+            uy = um.dy + (float(fy(ui)) if fy else 0)
+            ua = um.alpha * (float(fo(ui)) if fo else 1)
+            urot = um.rotate + (float(fr(ui)) if fr else 0)
+            usc = um.scale * (float(fs(ui)) if fs else 1)
+            ublur = um.blur + (max(0.0, float(fb(ui))) if fb else 0)
+            uf = ff(ui) if ff else None  # its plain letters' colour
+            ucols = cols if uf is None else (uf, emph, act)
+            moved = ux or uy or urot or usc != 1 or um.rx or um.ry or um.dz or um.sx != 1 or um.sy != 1 or um.hinge
+            wiped = um.wipe and um.reveal < 1 and onpath is None
+            uglitch = um.glitch if um.glitch > 0.01 and onpath is None else 0.0
+            ublur, ublur_y = ublur + um.smear, ublur  # across and down: a whip smears each unit across
+            blurred = ublur > 0.1
+            if moved or wiped:  # a unit drawn where it lies needs no save and restore: most of them, once they are in
                 c.save()
-                ucx, ucy = ox + (x0 + x1) / 2, oy + runs[0][0].line * lay.lh + lay.lh / 2
-                c.translate(ucx + ux, ucy + uy)
+            if moved:
+                if onpath is None:
+                    ucx, ucy = ox + (x0 + x1) / 2, oy + runs[0][0].line * lay.lh + lay.lh / 2
+                    c.translate(ucx + ux, ucy + uy)
+                else:  # along and across the path where the unit's middle is
+                    ucx, ucy, ang = onpath.pivot((x0 + x1) / 2, runs[0][0].line)
+                    c.translate(ucx, ucy)
+                    c.rotate(ang)
+                    c.translate(ux, uy)
                 if um.rx or um.ry or um.dz:
                     c.concat(space.to_skia(space.tilt(um.dz, um.rx, um.ry)))
                 if urot:
                     c.rotate(urot)
                 if usc != 1:
                     c.scale(usc, usc)
+                if um.sx != 1 or um.sy != 1 or um.hinge:  # about the middle of the unit's line, or its top or bottom
+                    lift = {"top": -lay.lh / 2, "bottom": lay.lh / 2}.get(um.pivot, 0.0)
+                    c.translate(0, lift)
+                    c.rotate(um.hinge)
+                    c.scale(um.sx, um.sy)
+                    c.translate(0, -lift)
+                if onpath is not None:
+                    c.rotate(-ang)
                 c.translate(-ucx, -ucy)
-            if blurred:
-                c.saveLayer(self._blur_bounds(c, um.blur, ox + x1 + max(0.0, track * (runs[-1][0].char0 - c00)),
-                                              oy + (runs[-1][0].line + 1) * lay.lh, size, spaint),
-                            skia.Paint(ImageFilter=skia.ImageFilters.Blur(um.blur, um.blur)))
+            if wiped or uglitch:  # over the unit's own line, a little wider than its letters
+                edge = size * 0.12
+                left = ox + x0 + track * (runs[0][0].char0 - c00) - edge
+                right = ox + x1 + track * (runs[-1][0].char0 + len(runs[-1][0].text) - 1 - c00) + edge
+                ubox = (left, oy + runs[0][0].line * lay.lh, right - left, lay.lh)
+            if wiped:
+                self._wipe(c, um, *ubox)
+            if uglitch:
+                area = c.getDeviceClipBounds()
+                self.filtered += 3 * area.width() * area.height()
+                c.saveLayer(None, skia.Paint(ImageFilter=self._glitch(f"{L.id}/{ui}/{um.seed}", ubox, um, uglitch,
+                                                                      None)))
+            if blurred and onpath is not None:  # bounded by the letters on the CPU, as _blur_bounds does
+                out = 3 * ublur + (spaint.getStrokeWidth() if spaint is not None else 0.0)
+                left, top, right, bottom = onpath.bounds
+                bounds = skia.Rect.MakeLTRB(left - out, top - out, right + out, bottom + out) if (
+                    self.backend == "cpu" and right >= left) else None
+            elif blurred:
+                bounds = self._blur_bounds(c, ublur, ox + x1 + max(0.0, track * (runs[-1][0].char0 - c00)),
+                                           oy + (runs[-1][0].line + 1) * lay.lh, size, spaint)
+                area = skia.Rect.Make(c.getDeviceClipBounds())  # the layer: the clip, as far as the bounds reach
+                if bounds is None or area.intersect(c.getTotalMatrix().mapRect(bounds)):
+                    self.filtered += area.width() * area.height()
+                c.saveLayer(bounds, skia.Paint(ImageFilter=skia.ImageFilters.Blur(ublur, ublur_y)))
+            batch: dict = {}  # on a path: (colour, alpha): the letters drawn as they are, and their RSXforms
+            mess = um.scramble or mods.scramble  # a unit's own scramble settles its letters, the layer's all of them
+            if mess > 0:
+                base, n = (runs[0][0].char0, sum(len(r.text) for r, _ in runs)) if um.scramble else (c00, lay.nchars)
+                if own is None:
+                    own = "".join(sorted({ch for r in lay.runs for ch in r.text if ch.isalnum()}))
+                key, step = f"{L.id}/{um.seed if um.scramble else mods.seed}", um.step if um.scramble else mods.step
             for r, pcs in runs:
                 text = r.text
                 if visible_chars is not None:
                     if r.char0 >= visible_chars:
                         continue
                     text = text[: max(0, int(visible_chars - r.char0))]
+                if mess > 0:
+                    text = P.scrambled(text, r.char0, mess, base, n, key, step, own)
                 k = 0
                 if active is not None:
                     if r.word <= active:
@@ -2126,23 +3428,47 @@ class Renderer:
                         continue
                 elif r.emph:
                     k = 1
-                if painted != (k, ua):
-                    fpaint.setColor(_argb(cols[k], ua))
-                    painted = (k, ua)
+                if painted != (k, ua, uf):
+                    fpaint.setColor(_argb(ucols[k], ua))
+                    if gpaint is not None:
+                        gpaint.setAlphaf(ua)
+                    painted = (k, ua, uf)
+                ink = gpaint if gpaint is not None and k == 0 and uf is None else fpaint
+                if onpath is not None:
+                    self._path_run(c, onpath, r, pcs, text, font, (k, ua), ink, spaint, batch)
+                    continue
                 y = oy + r.line * lay.lh + lay.baseline0
                 x = ox + r.x + track * (r.char0 - c00) if track else ox + r.x
                 if text != r.text:  # typed so far: a right-to-left word grows from its right edge
                     if r.rtl:
                         x += self._measure(font, r.text, True, r.ctx) - self._measure(font, text, True, r.ctx)
                     pcs = self._pieces(font, text, r.rtl, r.ctx)
+                if self._capture is not None:  # a combining group takes the letters' outlines
+                    self._take(c, self._letters(pcs, text, x, y, font))
+                    continue
                 if spaint is not None:
                     self._draw_pieces(c, pcs, text, x, y, font, spaint)
-                self._draw_pieces(c, pcs, text, x, y, font, fpaint)
+                self._draw_pieces(c, pcs, text, x, y, font, ink)
+            for (k, ua), (letters, xforms) in batch.items():  # one blob a colour
+                blob = skia.TextBlob.MakeFromRSXform("".join(letters), xforms, font)
+                if blob is None:
+                    continue
+                if spaint is not None:
+                    c.drawTextBlob(blob, 0, 0, spaint)
+                if gpaint is not None and k == 0 and uf is None:
+                    gpaint.setAlphaf(ua)
+                    c.drawTextBlob(blob, 0, 0, gpaint)
+                else:
+                    c.drawTextBlob(blob, 0, 0, skia.Paint(AntiAlias=True, Color=_argb(ucols[k], ua)))
+                painted = None
             if blurred:
                 c.restore()
-            if moved:
+            if uglitch:
                 c.restore()
-        if visible_chars is not None and L.raw.get("caret") and (int(T * 2) % 2 == 0 or reveal < 1):
+            if moved or wiped:
+                c.restore()
+        if visible_chars is not None and L.raw.get("caret") and (int(T * 2) % 2 == 0 or reveal < 1) and (
+                self._capture is None):
             last = None
             for r in lay.runs:
                 if r.char0 < visible_chars:
@@ -2150,14 +3476,121 @@ class Renderer:
             if last is not None:
                 vis = last.text[: max(0, int(visible_chars - last.char0))]
                 cw = max(3, size * 0.06)
-                if last.rtl:  # left of what is typed so far
-                    cx = (ox + last.x + self._measure(font, last.text, True, last.ctx)
-                          - self._measure(font, vis, True, last.ctx) - 4 - cw)
-                else:
-                    cx = ox + last.x + self._measure(font, vis) + 4
-                cy = oy + last.line * lay.lh
-                c.drawRect(skia.Rect.MakeXYWH(cx, cy + lay.lh * 0.15, cw, lay.lh * 0.7),
-                           skia.Paint(Color=_argb(emph)))
+                f = onpath.frames.get(id(last)) if onpath is not None else None
+                if onpath is not None and f is not None:  # after the letter, turned with it
+                    c.save()
+                    c.concat(skia.Matrix.MakeAll(f[0], -f[1], f[2], f[1], f[0], f[3], 0, 0, 1))
+                    c.drawRect(skia.Rect.MakeXYWH(self._measure(font, vis) + 4, lay.lh * 0.15 - lay.baseline0, cw,
+                                                  lay.lh * 0.7), skia.Paint(Color=_argb(emph)))
+                    c.restore()
+                elif onpath is None:
+                    if last.rtl:  # left of what is typed so far
+                        cx = (ox + last.x + self._measure(font, last.text, True, last.ctx)
+                              - self._measure(font, vis, True, last.ctx) - 4 - cw)
+                    else:
+                        cx = ox + last.x + self._measure(font, vis) + 4
+                    cy = oy + last.line * lay.lh
+                    c.drawRect(skia.Rect.MakeXYWH(cx, cy + lay.lh * 0.15, cw, lay.lh * 0.7),
+                               skia.Paint(Color=_argb(emph)))
+
+    def _text_route(self, L: Layer, T: float) -> tuple[skia.PathMeasure, float]:
+        """The measure of text layer L's textPath and its length: its d, or the path layer it names as that layer
+        draws it (its x, y, rotate, scale and anchor), in the space they share. Its first contour carries the text."""
+        d, key = L.onpath, ("textPath", L.id)
+        hit = self._routes.get(key)
+        if not d.startswith("#"):
+            if hit is None:
+                meas = skia.PathMeasure(svgpath.parse(d), False)
+                hit = self._routes[key] = (None, None, meas, meas.getLength())
+            return hit[2], hit[3]
+        route = self.s.by_id[d[1:]]
+        rt = T - route.t_in
+        rg = lambda name, default=None: route.get(name, rt, T, 0, default)  # noqa: E731
+        path = self._path(route, rt, T, rg)
+        placing = tuple(float(v) for v in route.placed(rt, T)[:6])
+        if hit is None or hit[0] is not path or hit[1] != placing:
+            x, y, rot, sc, sx, sy = placing
+            m = skia.Matrix.Translate(x, y)
+            m.preRotate(rot)
+            m.preScale(sc * sx, sc * sy)
+            if "anchor" in route.raw:  # _draw_path's shift
+                box, b = self._box(route, rt, T, rg), path.computeTightBounds()
+                m.preTranslate(box[0] - b.left(), box[1] - b.top())
+            out = skia.Path()
+            path.transform(m, out)
+            meas = skia.PathMeasure(out, False)
+            hit = self._routes[key] = (path, placing, meas, meas.getLength())
+        return hit[2], hit[3]
+
+    def _on_path(self, L: Layer, t, T, g, lay: Layout, font: skia.Font, track: float = 0.0) -> PathText:
+        """Where each letter of text layer L stands on its textPath at t: on its line's baseline, turned to the path
+        where the letter's middle is. Line 0 sits on the path and the lines after it below. An open path leaves out
+        the letters past its ends; a closed one takes them round again."""
+        meas, n = self._text_route(L, T)
+        off = float(g("textPath offset", 0.0))
+        key = (off, track, meas)
+        hit = self._pathtext.get(L.id)
+        if hit is not None and hit.lay is lay and hit.key == key:
+            return hit
+        k = {"start": 0.0, "center": 0.5, "end": 1.0}.get(L.raw["textPath"].get("align", "start"), 0.0)
+        start = off * n - k * lay.w
+        m = font.getMetrics()
+        c00 = lay.runs[0].char0 if lay.runs else 0
+        frames: dict = {}
+        parts = []
+        for r in lay.runs:
+            w = self._measure(font, r.text, r.rtl, r.ctx)
+            x = r.x + track * (r.char0 - c00)
+            f = frames[id(r)] = _on_contour(meas, n, start + x + w / 2, -w / 2, r.line * lay.lh)
+            if f is None:
+                continue
+            co, si, tx, ty = f
+            corners = [(tx + co * gx - si * gy, ty + si * gx + co * gy)
+                       for gx, gy in ((0.0, m.fAscent), (w, m.fAscent), (0.0, m.fDescent), (w, m.fDescent))]
+            parts.append((min(p[0] for p in corners), min(p[1] for p in corners), max(p[0] for p in corners),
+                          max(p[1] for p in corners)))
+        bounds = ((min(p[0] for p in parts), min(p[1] for p in parts), max(p[2] for p in parts),
+                   max(p[3] for p in parts)) if parts else (0.0, 0.0, -1.0, -1.0))
+        hit = self._pathtext[L.id] = PathText(lay, key, frames, bounds, parts, meas, n, start)
+        return hit
+
+    def _path_run(self, c, onpath: PathText, r: Run, pcs, text: str, font: skia.Font, paint: tuple, ink, spaint,
+                  batch: dict):
+        """Run r of a text on a path (its text so far): drawn as it is, its glyphs go in the batch for the unit's
+        blob; shaped or from another font, or taken by a combining group, it is drawn in its own turned frame."""
+        f = onpath.frames.get(id(r))
+        if f is None or not text:
+            return
+        co, si, tx, ty = f
+        if text != r.text:
+            pcs = self._pieces(font, text, r.rtl, r.ctx)
+        if pcs is None and self._capture is None:
+            letters, xforms = batch.setdefault(paint, ([], []))
+            letters.append(text)
+            xforms.extend(skia.RSXform(co, si, tx + co * gx, ty + si * gx)
+                          for gx in font.getXPos(font.textToGlyphs(text)))
+            return
+        m = skia.Matrix.MakeAll(co, -si, tx, si, co, ty, 0, 0, 1)
+        if self._capture is not None:  # a combining group takes the letters' outlines
+            out = skia.Path()
+            self._letters(pcs, text, 0.0, 0.0, font).transform(m, out)
+            self._take(c, out)
+            return
+        c.save()
+        c.concat(m)
+        if spaint is not None:
+            self._draw_pieces(c, pcs, text, 0.0, 0.0, font, spaint)
+        self._draw_pieces(c, pcs, text, 0.0, 0.0, font, ink)
+        c.restore()
+
+    def off_path(self, L: Layer) -> tuple[float, float] | None:
+        """(the text's length, the path's) when text layer L's textPath is open and too short for it at its start,
+        else None."""
+        t, T = 0.0, L.t_in
+        g = lambda name, default=None: L.get(name, t, T, 0, default)  # noqa: E731
+        lay = self._text_layout(L, t, T, g, self._text_of(L, t, T, g))
+        meas, n = self._text_route(L, T)
+        return (lay.w, n) if not meas.isClosed() and lay.w > n + 0.5 else None
 
     def _draw_captions(self, c, L, t, T, g, box, reveal, mods):
         cues = L.raw.get("cues") or []
@@ -2204,7 +3637,8 @@ class Renderer:
             r = m.mapRect(skia.Rect.MakeXYWH(*cbox))
             self.boxes[L.id] = {"rect": [round(r.left(), 1), round(r.top(), 1), round(r.right(), 1), round(r.bottom(), 1)],
                                 "alpha": round(a, 3), "type": "captions", "size": float(g("size", 64)),
-                                "fill": list(g("fill")) if "fill" in L.props else None, "text": text, "scale": 1.0}
+                                "fill": list(f) if isinstance(f := g("fill") if "fill" in L.props else None, tuple)
+                                else None, "text": text, "scale": 1.0}
         if a < 1:
             c.restore()
         c.restore()

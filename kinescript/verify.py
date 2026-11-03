@@ -14,13 +14,16 @@ import numpy as np
 import skia
 
 from . import color as C
-from . import listen, media, models, stage
-from .render import FONT_DIR, Renderer, _argb, joining, loop_end
-from .scene import Scene, SceneError, load
+from . import listen, media, models, schema, stage
+from .props import HOLD
+from .render import CPU_BLUR_S, FONT_DIR, Renderer, _argb, joining, loop_end
+from .scene import DEFAULTS, PLACED, Scene, SceneError, load
 
 # Model triangles one frame may draw before check warns. 100,000 took 71 ms a frame at 1080p on
 # the GPU in the 3D spike (2026-10-29), against about 15 ms at 20,000.
 TRIANGLE_BUDGET = 60_000
+SLOW_EFFECTS = 0.25  # s a frame on the CPU for offscreen effects, past which check warns slow-effects
+SLOW_PARTICLES = 0.25  # s a frame on the CPU for particles (Renderer.particle_s), past which it warns particle-cost
 # Layers check warns about when more than half of one stays off the canvas for MEDIA_OFF_FOR seconds; a slide or
 # a transition passes through faster.
 MEDIA = ("video", "image", "shader")
@@ -28,6 +31,69 @@ MEDIA_OFF_FOR = 1.0
 # Seconds a text of one or two words needs on screen; shorter, and it is a flash nobody reads. Quick kinetic type
 # (the kinetic component's default is 0.6 s a word) stays above it.
 FLASH = 0.4
+
+
+MOVES = ("x", "y", "z", "rotate", "rotateX", "rotateY", "scale", "scaleX", "scaleY")  # keys whose stops stop-and-go finds
+
+
+def _at_rest(ease, end: bool) -> bool:
+    """Whether the ease's speed is near zero at its start (or end): next to 1% of a linear ease's."""
+    return (1.0 - ease(0.999) if end else ease(0.001)) < 1e-5
+
+
+def stops(layer) -> list[tuple[str, float]]:
+    """(key, time) of each inner keyframe where a moving key of the layer comes to rest between two moves the same
+    way, because the ease into the key slows to it and the ease out of it starts from rest."""
+    out = []
+    for k in MOVES:
+        p = layer.props.get(k)
+        if p is None or p.keys is None or isinstance(layer.raw.get(k), dict) and layer.raw[k].get("smooth"):
+            continue
+        pts = p.keys(layer.dur)
+        for (t0, v0, _), (t1, v1, e1), (t2, v2, e2) in zip(pts, pts[1:], pts[2:]):
+            if not (isinstance(v1, (int, float)) and t0 < t1 < t2 and (v1 - v0) * (v2 - v1) > 0) or HOLD in (e1, e2):
+                continue
+            if _at_rest(e1, True) and _at_rest(e2, False):
+                out.append((k, t1))
+                break
+    return out
+
+
+STROBE = 40 / 1080  # px a frame, as a share of the canvas's short side, past which a move shows as copies
+STROBE_RUN = 5  # frames running that make it a move: not a cut, nor the first frames of a quick ease out
+
+
+def strobes(scene: Scene, r: Renderer) -> list[tuple[str, float, float]]:
+    """(layer id, time, px a frame) where a layer's anchor, moved by its x, y and along, goes further than STROBE each
+    frame for STROBE_RUN frames running. Motion blur smears such a move, so a scene with it has none."""
+    if int((scene.motion_blur or {}).get("samples", 0)) >= 2:
+        return []
+    fps, limit, out = scene.fps, STROBE * min(scene.w, scene.h), []
+    for L in scene.all_layers():
+        if L.along is None and all(L.props[k].static for k in ("x", "y") if k in L.props):
+            continue
+        prev, run, fast = None, 0, 0.0
+        try:
+            for f in range(math.ceil(L.t_in * fps), min(scene.frames, math.ceil(L.t_out * fps))):
+                T = f / fps
+                t = T - L.t_in
+                x, y = L.placed(t, T)[:2]
+                x, y = float(x), float(y)
+                if L.along is not None:
+                    ax, ay, _ = r._along(L, t, T)
+                    x, y = x + ax, y + ay
+                step = 0.0 if prev is None else math.hypot(x - prev[0], y - prev[1])
+                prev = (x, y)
+                if step <= limit:
+                    run, fast = 0, 0.0
+                    continue
+                run, fast = run + 1, max(fast, step)
+                if run == STROBE_RUN:
+                    out.append((L.id, (f - STROBE_RUN) / fps, fast))
+                    break
+        except (SceneError, ArithmeticError, ValueError, TypeError):
+            continue  # an expression that fails is reported where the frame is drawn
+    return out
 
 
 def _times(scene: Scene, count: int, times=None) -> list[float]:
@@ -40,13 +106,74 @@ def _times(scene: Scene, count: int, times=None) -> list[float]:
     return [min(scene.duration - 1 / scene.fps, step * (k + 0.5)) for k in range(count)]
 
 
+TRAIL_FRAMES = 600  # the most frames --trails draws a dot for; a longer scene gets a dot every few frames
+TRAIL_LAYERS = 24  # the most layers it draws a path for, those that travel furthest
+TRAIL_COLOURS = ("#ff633f", "#4a7dff", "#b9f45d", "#ffd166", "#3ddbd9", "#ef476f", "#c39bff", "#f2f0e8")
+
+
+def _trails(scene: Scene, scale: float) -> tuple[dict[str, list], int]:
+    """Where each moving layer's anchor is on the frame, in thumbnail px, at every `step`th frame:
+    {id: [(frame, x, y), or None where it is not drawn]} for the TRAIL_LAYERS that travel furthest, and the step."""
+    frames = max(1, int(round(scene.duration * scene.fps)))
+    step = max(1, math.ceil(frames / TRAIL_FRAMES))
+    ns = list(range(0, frames, step))
+    # Anchors come from the layers' matrices, so a quarter of the thumbnail's scale finds them as well, and the CPU
+    # draws a stress scene's frame in 4 to 8 ms instead of 24 to 38.
+    r = Renderer(scene, track=True, scale=scale / 4)
+    r.footage = False  # anchors, not pixels
+    seen: dict[str, list] = {}
+    for j, n in enumerate(ns):
+        r.draw(n / scene.fps)
+        for lid, b in r.boxes.items():
+            if b["alpha"] >= 0.05 and not b.get("mask"):
+                seen.setdefault(lid, [None] * len(ns))[j] = (n, 4 * b["pos"][0], 4 * b["pos"][1])
+
+    def travel(pts):
+        on = [p for p in pts if p]
+        return sum(math.dist(a[1:], b[1:]) for a, b in zip(on, on[1:]))
+    far = sorted((lid for lid, pts in seen.items() if travel(pts) > 2), key=lambda lid: -travel(seen[lid]))
+    return {lid: seen[lid] for lid in far[:TRAIL_LAYERS]}, step
+
+
+def _draw_trails(c, trails: dict, n: int, step: int, ox: float, oy: float, tw: float, th: float):
+    """Each moving layer's path, a dot at each frame, so the dots' spacing shows its speed and where it eases or
+    stops; the dot at this tile's frame n is ringed."""
+    c.save()
+    c.clipRect(skia.Rect.MakeXYWH(ox, oy, tw, th))
+    ring = skia.Paint(AntiAlias=True, Style=skia.Paint.kStroke_Style, StrokeWidth=1.5, Color=_argb("#f2f0e8"))
+    for k, pts in enumerate(trails.values()):
+        hue = TRAIL_COLOURS[k % len(TRAIL_COLOURS)]
+        dot = skia.Paint(AntiAlias=True, Color=_argb(hue))
+        line = skia.Paint(AntiAlias=True, Style=skia.Paint.kStroke_Style, StrokeWidth=1, Color=_argb(hue, 0.45))
+        path, gap = skia.Path(), True
+        for p in pts:
+            if p is None:
+                gap = True
+            elif gap:
+                path.moveTo(ox + p[1], oy + p[2])
+                gap = False
+            else:
+                path.lineTo(ox + p[1], oy + p[2])
+        c.drawPath(path, line)
+        for p in pts:
+            if p is not None:
+                c.drawCircle(ox + p[1], oy + p[2], 1.6, dot)
+        here = pts[n // step] if n // step < len(pts) else None
+        if here is not None:
+            c.drawCircle(ox + here[1], oy + here[2], 3.5, dot)
+            c.drawCircle(ox + here[1], oy + here[2], 4.5, ring)
+    c.restore()
+
+
 def contact_sheet(src, out: str, count: int = 12, cols: int | None = None, width: int = 480,
                   times=None, boxes: bool = False, audio: bool = False, wire: bool = False,
-                  depth: bool = False) -> dict:
+                  depth: bool = False, trails: bool = False, onion: int = 0) -> dict:
     """One PNG of `count` evenly spaced frames, each labelled with its time and frame number.
     boxes=True outlines every visible layer with its id. audio=True adds the sound under the frames, one lane per
     role and one for the mix, and returns its measurements. wire=True draws every model's drawn triangles over
-    it; depth=True dims the frame and shows each stage's depth image on it, nearer brighter."""
+    it; depth=True dims the frame and shows each stage's depth image on it, nearer brighter. trails=True draws each
+    moving layer's path, a dot a frame; onion=N draws the N frames before each one over it, fainter the older they
+    are, so only what moves shows twice."""
     from .output import IMAGE, at_note, out_path, save_image
     scene = load(src)
     try:
@@ -56,6 +183,8 @@ def contact_sheet(src, out: str, count: int = 12, cols: int | None = None, width
             raise ValueError(f"cols must be a whole number, 1 or more, got {cols!r}")
         if isinstance(width, bool) or not isinstance(width, int) or not 16 <= width <= 4096:
             raise ValueError(f"width must be a whole number of pixels from 16 to 4096, got {width!r}")
+        if isinstance(onion, bool) or not isinstance(onion, int) or not 0 <= onion <= 12:
+            raise ValueError(f"onion must be a whole number of frames from 0 to 12, got {onion!r}")
         cols = min(cols or 4, len(ts))
         out = str(out_path(scene, out, IMAGE))
     except ValueError:
@@ -76,13 +205,20 @@ def contact_sheet(src, out: str, count: int = 12, cols: int | None = None, width
     mono = skia.Typeface.MakeFromFile(str(FONT_DIR / "IBMPlexMono-Medium.ttf"))
     font = skia.Font(mono, 15)
     small = skia.Font(mono, 11)
+    paths, step = _trails(scene, scale) if trails else ({}, 1)
     for k, T in enumerate(ts):
         n = int(round(T * scene.fps))
+        ghosts = [(j, skia.Image.fromarray(r.frame(n - j).copy(), colorType=skia.kRGBA_8888_ColorType))
+                  for j in range(onion, 0, -1) if n - j >= 0]  # drawn before n, so the boxes are n's
         arr = r.frame(n)
         img = skia.Image.fromarray(np.ascontiguousarray(arr), colorType=skia.kRGBA_8888_ColorType)
         x = gap + (k % cols) * (tw + gap)
         y = gap + (k // cols) * (th + label_h + gap)
         c.drawImage(img, x, y + label_h)
+        for j, ghost in ghosts:  # where a ghost is the same as the frame, it changes it by a level at most
+            c.drawImage(ghost, x, y + label_h, skia.SamplingOptions(), skia.Paint(Alphaf=0.35 * (onion - j + 1) / onion))
+        if trails:
+            _draw_trails(c, paths, n, step, x, y + label_h, tw, th)
         if depth:
             staged += bool(r.depths)
             _draw_depth(c, r.depths, x, y + label_h, tw, th)
@@ -100,6 +236,12 @@ def contact_sheet(src, out: str, count: int = 12, cols: int | None = None, width
         info["audio"] = listen.summary(rep)
     if depth and not staged:
         notes.append('no stage drew in these frames: --depth shows the depth of groups with "sort": "pixel"')
+    if trails:
+        info["trails"] = list(paths)
+        if not paths:
+            notes.append("nothing moved: --trails draws the path of layers whose anchor moves on the frame")
+        if step > 1:
+            notes.append(f"--trails drew a dot every {step} frames: the scene has more than {TRAIL_FRAMES}")
     if notes:
         info["notes"] = notes
     return info
@@ -135,6 +277,12 @@ def _draw_depth(c, depths: list, ox: float, oy: float, tw: float, th: float):
     c.drawImage(skia.Image.fromarray(px, skia.kRGBA_8888_ColorType), ox, oy)
 
 
+def _area(a: list, b: list | None = None) -> float:
+    """The area of rect a (left, top, right, bottom), or of where it meets rect b."""
+    b = b or a
+    return max(0.0, min(a[2], b[2]) - max(a[0], b[0])) * max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+
+
 def _behind(boxes: dict, lid: str, a: list, w: int, h: int) -> str | None:
     """The shape or media layer drawn before `lid` that covers most of its box, if any.
     `boxes` is in draw order, so every entry before `lid` is underneath it. Layers that fill the
@@ -160,6 +308,14 @@ def _pixels(r: Renderer) -> np.ndarray:
     return buf
 
 
+def _combined(layer) -> bool:
+    """Whether a combining group merges the layer into its shape, so it is not drawn as itself."""
+    p = layer.parent
+    while p is not None and not p.raw.get("combine"):
+        p = p.parent
+    return p is not None
+
+
 def _over(boxes: dict, lid: str, a: list) -> str | None:
     """The layer drawn after `lid` whose box covers most of `lid`'s box, if any covers it at all."""
     best, area, after = None, 0.0, False
@@ -167,7 +323,7 @@ def _over(boxes: dict, lid: str, a: list) -> str | None:
         if other == lid:
             after = True
             continue
-        if not after or b["alpha"] < 0.5:
+        if not after or b["alpha"] < 0.5 or b.get("mask"):
             continue
         r = b["rect"]
         ix, iy = min(a[2], r[2]) - max(a[0], r[0]), min(a[3], r[3]) - max(a[1], r[1])
@@ -251,6 +407,104 @@ def probe(src, at: float | None = None) -> dict:
     return out
 
 
+def _drawn_at(L, T: float) -> float | None:
+    """The scene time layer L is drawn at when the scene is at T, through the clocks of the groups it is in, as the
+    renderer finds it; None where it or a group it is in is not shown then."""
+    groups = []
+    G = L.parent
+    while G is not None:
+        groups.append(G)
+        G = G.parent
+    for G in reversed(groups):
+        if not G.visible(T):
+            return None
+        if G.clock is not None:
+            T = Renderer._inner(G, T - G.t_in, T)
+    return T if L.visible(T) else None
+
+
+def _hex(c) -> str:
+    r, g, b, a = (round(min(max(float(x), 0.0), 1.0) * 255) for x in c)
+    return f"#{r:02x}{g:02x}{b:02x}" + (f"{a:02x}" if a < 255 else "")
+
+
+def curve(src, spec: str) -> dict:
+    """Layer id.key's value at every frame, as the renderer reads it through eases, expressions and group clocks, and
+    how fast it changes: per second from the frame before, signed for a number, and as a distance for a position (x
+    and y as a point) or a colour (in 0-255 channels). Also the spans where it holds still for 2 frames or more, and
+    its fastest frame. A layer's enter, exit, along and groups move it on top of its own keys."""
+    scene = load(src)
+    try:
+        lid, dot, key = str(spec).rpartition(".")
+        if not dot or not lid or not key:
+            raise ValueError(f"curve takes a layer's id and one of its keys, such as title.x, got {spec!r}")
+        L = scene.by_id.get(lid)
+        if L is None:
+            ids = [x.id for x in scene.all_layers()]
+            raise ValueError(f"curve {spec!r}: there is no layer '{lid}'; the layers are " + ", ".join(ids[:12])
+                             + (f" and {len(ids) - 12} more" if len(ids) > 12 else ""))
+        key = schema.ALIAS.get(key) or key  # rotation is rotate, alpha opacity, color fill
+        names = ("x", "y") if key == "position" else (key,)
+        if not all(k in L.props or k in DEFAULTS for k in names):
+            raise ValueError(f"curve {spec!r}: layer '{lid}' has no {key}; it has " + ", ".join(sorted(L.props))
+                             + ", and position samples x and y as a point")
+        fps, raw = scene.fps, []
+        for n in range(scene.frames):
+            T = _drawn_at(L, n / fps)
+            raw.append(None if T is None else [L.get(k, T - L.t_in, T) for k in names])
+
+        def vec(v: list) -> tuple:
+            v = v[0] if len(v) == 1 and isinstance(v[0], tuple) else v  # a colour
+            if all(isinstance(a, (int, float)) and not isinstance(a, bool) for a in v):
+                return tuple(float(a) for a in v)
+            raise ValueError(f"curve {spec!r}: {key} is {v[0]!r}; curve samples numbers, positions and colours")
+        vs = [None if v is None else vec(v) for v in raw]
+        kind = "position" if key == "position" else "colour" if any(v is not None and len(v) == 4 for v in vs) \
+            else "number"
+
+        def shown(v):
+            if v is None:
+                return None
+            return _hex(v) if kind == "colour" else round(v[0], 4) if kind == "number" else [round(a, 2) for a in v]
+        speed: list[float | None] = [None] * len(vs)
+        for n in range(1, len(vs)):
+            a, b = vs[n - 1], vs[n]
+            if a is not None and b is not None:
+                speed[n] = (b[0] - a[0]) * fps if kind == "number" else \
+                    math.dist(a, b) * (255 if kind == "colour" else 1) * fps
+        stops, start = [], None
+        for n in range(1, len(vs) + 1):
+            still = n < len(vs) and speed[n] is not None and abs(speed[n]) <= 1e-9
+            if still and start is None:
+                start = n - 1
+            elif not still and start is not None:
+                stops.append({"from": round(start / fps, 3), "to": round((n - 1) / fps, 3), "frames": [start, n - 1],
+                              "value": shown(vs[start])})
+                start = None
+        moving = [n for n, s in enumerate(speed) if s is not None and abs(s) > 1e-9]
+        top = max(moving, key=lambda n: (abs(speed[n]), -n)) if moving else None
+        out = {"ok": True, "curve": f"{lid}.{key}", "kind": kind, "fps": fps, "frames": scene.frames,
+               "value": [shown(v) for v in vs], "speed": [None if s is None else round(s, 3) for s in speed],
+               "stops": stops, "fastest": None if top is None else {
+                   "frame": top, "t": round(top / fps, 3), "speed": round(speed[top], 3), "value": shown(vs[top])}}
+        on = [v[0] for v in vs if v is not None]
+        if kind == "number" and on:
+            out["range"] = [round(min(on), 4), round(max(on), 4)]
+        notes = []
+        if not on:
+            notes.append(f"'{lid}' is not shown at any frame")
+        elif top is None:
+            notes.append(f"{key} holds still at every frame '{lid}' is shown")
+        if (L.enter or L.exit or L.emphasis or L.along is not None) and set(names) & {*PLACED, "opacity"}:
+            notes.append(f"its enter, exit, emphasis or along changes how it is drawn as well: this is {key} as its "
+                         "keys set it; kine look --trails shows where it is drawn")
+        if notes:
+            out["notes"] = notes
+        return out
+    finally:
+        scene.close()
+
+
 def _chars(chars: list[str], most: int = 8) -> str:
     """'😀' (U+1F600), 'ש' (U+05E9) and 3 more."""
     named = [f"'{ch}' (U+{ord(ch):04X})" for ch in chars[:most]]
@@ -259,12 +513,29 @@ def _chars(chars: list[str], most: int = 8) -> str:
 def probe_media(src: str) -> dict:
     """What `kine probe` says about a file that is not a scene: {"ok", "src", "kind": video|audio|image|model,
     ...}. A media file gives its duration, displayed w and h, fps, audio, alpha and rotation; a model its triangles,
-    vertices, materials and size. Raises MediaError or ValueError, naming the file, for one it cannot read."""
+    vertices, materials, size, animations (each with its duration in seconds), skins (with their joint counts),
+    morph targets, textures and texture coordinate sets; an svg the size it is drawn at, and the kinds of element in
+    it that are left out (undrawn). Raises MediaError or ValueError, naming the file, for one it cannot read."""
     if Path(src).suffix.lower() in models.EXTENSIONS:
         imp = models.load(src)
-        return {"ok": True, "src": src, "kind": "model", "triangles": int(len(imp.mesh.T)),
-                "vertices": int(len(imp.mesh.P)), "materials": len(imp.materials),
-                "size": [round(float(v), 3) for v in imp.size]}
+        about = imp.about or {}
+        out = {"ok": True, "src": src, "kind": "model", "triangles": int(len(imp.mesh.T)),
+               "vertices": int(len(imp.mesh.P)), "materials": len(imp.materials),
+               "size": [round(float(v), 3) for v in imp.size], "animations": about.get("animations", []),
+               "skins": about.get("skins", []), "morphTargets": about.get("morphTargets", 0),
+               "textures": about.get("textures", 0), "uvSets": about.get("uvSets", [])}
+        if about.get("crowded"):
+            out["note"] = (f"{about['crowded']} vertices are moved by more than four joints; each follows the four "
+                           "in JOINTS_0")
+        return out
+    if Path(src).suffix.lower() == ".svg":  # read by skia, not ffmpeg
+        v = media.vector(src)
+        out = {"ok": True, "src": src, "kind": "image", "duration": 0.0, "w": round(v.w, 3), "h": round(v.h, 3),
+               "fps": 0.0, "audio": False, "video": False, "image": True, "codec": "svg", "alpha": True, "rotation": 0,
+               "start": 0.0, "pix_fmt": "", "color_space": "", "undrawn": list(v.undrawn)}
+        if v.undrawn:
+            out["note"] = "left out when it is drawn: " + "; ".join(media.SVG_FIX[k] for k in v.undrawn)
+        return out
     info = media.probe(src)
     kind = "image" if info["image"] else "video" if info["video"] else "audio" if info["audio"] else "other"
     out = {"ok": True, "src": src, "kind": kind, **info}
@@ -408,8 +679,11 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
     r.footage = False
     found: dict[tuple, dict] = {}
     off: dict[str, list] = {}  # media layer (or its sequence) id -> (time, box, share off, layer) when mostly off
+    cuts: dict[str, list] = {}  # masked layer id -> [times it is drawn at, times its mask overlaps it at]
     shown: dict[str, int] = {}  # other layer id -> samples it is visible at
     gone: dict[str, list] = {}  # other layer id -> times it is visible but entirely off the canvas
+    slow: list[tuple[float, float]] = []  # (time, s its offscreen effects take on the CPU) past SLOW_EFFECTS
+    heavy: list[tuple[float, float]] = []  # (time, s its particles take on the CPU) past SLOW_PARTICLES
 
     def add(level, code, lid, T, msg, fix="", until=None):
         key = (code, lid)
@@ -470,16 +744,28 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
                 "the CPU takes about five times as long as the stage (0.8 s a 960x540 frame of examples/focus.json, "
                 "against 0.17)",
                 "render on a GPU, or leave aperture off while drafting")
+        if r.backend == "cpu" and r.filtered * CPU_BLUR_S > SLOW_EFFECTS:
+            slow.append((T, r.filtered * CPU_BLUR_S))
+        if r.backend == "cpu" and r.particle_s > SLOW_PARTICLES:
+            heavy.append((T, r.particle_s))
         if r.tris > TRIANGLE_BUDGET:
             add("warning", "triangle-budget", None, T, f"{r.tris:,} model triangles in one frame; renders slow "
                 f"down past {TRIANGLE_BUDGET:,} (about 70 ms a frame at 100,000 on a GPU)",
                 "use \"detail\": \"low\" or \"medium\", or fewer parts")
         texts = []
         for lid, b in r.boxes.items():
-            if b["alpha"] < 0.3:
+            layer = scene.by_id.get(lid)
+            if layer is not None and layer.mask is not None and not layer.mask[1].endswith("Invert"):
+                seen = cuts.setdefault(lid, [[], []])
+                seen[0].append(T)
+                mb, a = r.boxes.get(layer.mask[0].id), b["rect"]
+                if mb is not None and min(a[2], mb["rect"][2]) > max(a[0], mb["rect"][0]) and \
+                        min(a[3], mb["rect"][3]) > max(a[1], mb["rect"][1]):
+                    seen[1].append(T)
+            if b["alpha"] < 0.3 or b.get("mask"):
                 continue
             l, t, rr, bb = b["rect"]
-            layer = up = scene.by_id.get(lid)
+            up = layer
             allow = False
             while up is not None and not allow:  # set on a group or sequence, it covers what is inside
                 allow, up = bool(up.raw.get("allowOffscreen")), up.parent
@@ -515,9 +801,20 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
                 iy = min(a[3], b2[3]) - max(a[1], b2[1])
                 if ix > 4 and iy > 4:
                     area = min((a[2] - a[0]) * (a[3] - a[1]), (b2[2] - b2[0]) * (b2[3] - b2[1])) or 1
+                    pa, pb = r.letters.get(texts[i][0]), r.letters.get(texts[j][0])
+                    if pa or pb:  # a text on a path: its letters, not the box round the curve they stand on
+                        pa, pb = pa or [a], pb or [b2]
+                        area = min(sum(_area(p) for p in pa), sum(_area(p) for p in pb)) or 1
+                        ix, iy = sum(_area(p, q) for p in pa for q in pb), 1.0
                     if ix * iy / area > 0.15:
                         add("warning", "text-overlap", f"{texts[i][0]}+{texts[j][0]}", T,
                             "two text layers overlap", "offset one of them or separate them in time")
+    for lid, (drawn, met) in cuts.items():
+        if not met:
+            m = scene.by_id[lid].mask[0].id
+            add("warning", "mask-misses", lid, drawn[0], f"its mask '{m}' never overlaps it, so it is never seen",
+                f"move '{m}' over '{lid}' (it stands in the same group, by its own x and y), or check the mask's "
+                "times", until=drawn[-1])
     for lid, ts in gone.items():
         # A shape that sweeps across the canvas starts or ends off it: note one that is off whenever it is on, or
         # for MEDIA_OFF_FOR seconds.
@@ -538,7 +835,7 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
     # luminance under its box. These read pixels, footage included.
     r.footage = True
     for layer in scene.all_layers():
-        if layer.type not in ("text", "counter"):
+        if layer.type not in ("text", "counter") or layer.id in scene.mattes:
             continue
         T = min(layer.t_out - 1e-3, layer.t_in + min(layer.dur * 0.6, 1.5))
         try:
@@ -547,7 +844,7 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
             return broke(e, T)
         boxes = r.boxes  # draw() makes a new dict each time
         b = boxes.get(layer.id)
-        if not b or b["alpha"] < 0.5:
+        if not b or b["alpha"] < 0.5 or _combined(layer):
             continue
         l, t, rr, bb = (int(max(0, v)) for v in b["rect"])
         rr, bb = min(r.w, rr), min(r.h, bb)
@@ -564,6 +861,14 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
             continue
         if not b.get("fill") or layer.raw.get("box"):
             continue
+        if layer.mask is not None and layer.mask[1] in ("alpha", "luma"):  # it shows only inside its mask's box
+            m = boxes.get(layer.mask[0].id)
+            if m is None:
+                continue
+            l, t = max(l, int(m["rect"][0])), max(t, int(m["rect"][1]))
+            rr, bb = min(rr, math.ceil(m["rect"][2])), min(bb, math.ceil(m["rect"][3]))
+            if rr - l < 2 or bb - t < 2:
+                continue
         patch = buf[t:bb, l:rr, :3].reshape(-1, 3).astype(np.float32) / 255
         lin = np.where(patch <= 0.04045, patch / 12.92, ((patch + 0.055) / 1.055) ** 2.4)
         lum = lin @ np.array([0.2126, 0.7152, 0.0722], np.float32)
@@ -575,7 +880,26 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
                 + (f"; it overlaps '{under}'" if under else ""),
                 f"move it clear of '{under}', or add a box or a shadow" if under
                 else "add a box, a shadow, or change the colour")
+    if slow:
+        add("warning", "slow-effects", None, slow[0][0], "the blurs, shadows, glows, outlines, inner shadows, mask "
+            f"feathers and displace drawn offscreen take about {max(s for _, s in slow):.1f} s a frame on the CPU. "
+            "Skia's CPU blur takes 0.44 s for a 1080p layer, and a layer's blur or shadow blurs one the size of the frame",
+            "render on a GPU; draft with --scale 0.5 (a quarter of the pixels); or blur fewer layers",
+            until=slow[-1][0])
+    if heavy:
+        add("warning", "particle-cost", None, heavy[0][0], f"the particles take about {max(s for _, s in heavy):.1f} s "
+            "a frame on the CPU, which draws every pixel of each particle's square: 5,000 particles 12 px across take "
+            "53 ms, 24 px across 197 ms", "render on a GPU; draft with --scale 0.5 (a quarter of the pixels); or use "
+            "fewer or smaller particles", until=heavy[-1][0])
+    for lid, T, px in strobes(scene, r):
+        add("warning", "strobe", lid, T, f"moves {px:.0f} px a frame, fast enough to show as separate copies of "
+            "itself instead of one moving thing", "add \"motionBlur\": {\"samples\": 8} to the scene, or slow the move")
     for layer in scene.all_layers():
+        for k, t in stops(layer):
+            add("warning", "stop-and-go", layer.id, layer.t_in + t,
+                f"{k} comes to a stop at its keyframe at {t:g}s between two moves the same way: the ease into the key "
+                "slows to it and the ease out of it starts from rest",
+                f"pass through the key: \"{k}\": {{\"keys\": [...], \"smooth\": true}}; or a linear ease on the key")
         n = len(layer.children)
         if layer.type == "group" and layer.raw.get("sort") == "pixel" and n > stage.CHILDREN:
             add("warning", "stage-cost", layer.id, layer.t_in,
@@ -586,19 +910,28 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
     for layer in scene.all_layers():
         if not (layer.type in ("text", "counter", "captions") or layer.type == "model" and layer.raw.get("shape") == "text"):
             continue
-        missing, flat = r.undrawable(layer)
+        over = r.off_path(layer) if layer.onpath is not None else None
+        if over:
+            add("warning", "text-off-path", layer.id, layer.t_in, f"the text is {over[0]:.0f} px long and its path "
+                f"{over[1]:.0f} px, so the letters past the path's end are not drawn",
+                "make the text or its size smaller, the path longer, or close the path to take the text round",
+                until=layer.t_out)
+        missing, emoji, flat = r.undrawable(layer)
         if missing:
             them = "it" if len(missing) == 1 else "them"
             add("warning", "missing-glyph", layer.id, layer.t_in,
                 f"no installed font has {_chars(missing)}, so "
                 + ("it draws as an empty box" if len(missing) == 1 else "they draw as empty boxes"),
                 f"install a font that has {them} and name it in \"font\", or take {them} out", until=layer.t_out)
+        if emoji:
+            add("warning", "unshaped-3d-text", layer.id, layer.t_in,
+                f"colour emoji have no outline to push out in depth, so 3D text leaves out {_chars(emoji)}",
+                "put emoji in a text or image layer beside the model", until=layer.t_out)
         if flat:
             add("warning", "unshaped-3d-text", layer.id, layer.t_in,
-                f"3D text draws each character on its own, so {_chars(flat)} "
+                f"letterSpacing draws each character of 3D text on its own, so {_chars(flat)} "
                 f"{'comes' if len(flat) == 1 else 'come'} out unjoined, in the wrong order or with misplaced marks",
-                "use a text layer for right-to-left text, accents typed as separate marks and emoji sequences",
-                until=layer.t_out)
+                "take letterSpacing out: without it 3D text is shaped as a text layer is", until=layer.t_out)
         text = str(layer.raw.get("text", ""))
         spaced = layer.raw.get("letterSpacing") not in (None, 0)
         if layer.type == "text" and (layer.raw.get("split") == "chars" or spaced) and joining(text):

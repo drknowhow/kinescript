@@ -6,9 +6,11 @@ the code, so they cannot drift; tests/test_docs.py renders every JSON example in
 """
 from __future__ import annotations
 
+import textwrap
+
 from .components import COMPONENT_DOCS
 from .ease import EASES
-from .presets import PRESETS
+from .presets import EMPHASES, PRESETS
 from .shaders import PRESETS as SHADERS
 
 REFERENCE = """\
@@ -66,7 +68,8 @@ SCENE (top level)
   motionBlur  {"samples": 6, "shutter": 0.5}   (slower: renders 6 sub-frames per frame). A layer
               blurs only inside its own time, so its first and last frames are whole; grain is
               added once, to the blended frame. Still layers below every moving one are drawn once
-              a frame, not once a sub-frame, so list still layers first.
+              a frame, not once a sub-frame, so list still layers first. Without it, check warns
+              "strobe" where a layer moves more than 40 px a frame at 1080p for 5 frames running.
   camera      moves and turns the view in depth (see DEPTH AND CAMERA).
   fog         far layers fade into a colour (see DEPTH AND CAMERA).
   light       how model layers are lit (see 3D MODELS).
@@ -94,8 +97,15 @@ KEYS EVERY LAYER HAS
   id, type, at, dur, until
   x, y          position of the anchor. A number (px), "50%" (of the canvas, or of the group's
                 w and h), "50%-120", "10vw", "5vh", or an expression. "position": [x, y],
-                [x, y, z] or {"x": ..., "y": ...} is read as x and y (and z).
-  anchor        center (default) | topleft | top | topright | left | right | bottomleft | bottom |
+                [x, y, z] or {"x": ..., "y": ...} is read as x and y (and z); so are keyframes of
+                points, [[0, [200, 540]], [2, [960, 300]]], and smooth keys or a tween of points.
+  along         a path the layer rides: {"d": "M0 0 C300 -200 600 200 900 0", "p": [[0, 0], [2, 1]],
+                "orient": true}. d is SVG path data, moved by x and y as a path layer's is, or the
+                "#id" of a path, line, arrow or polygon in the same group, ridden where it is drawn
+                (x and y then move the layer off it). p is the share of the path's length, a key
+                like any other [from 0 at the layer's start to 1 at its end]; past 1 a closed path
+                goes round again. orient turns the layer with the path, adding to rotate.
+  anchor       center (default) | topleft | top | topright | left | right | bottomleft | bottom |
                 bottomright. Video and shader default to topleft, even with x and y set; an image
                 defaults to topleft without x and to center with it.
   opacity       0..1 (default 1). A group fades as one picture; layers in it with a blend still
@@ -105,13 +115,45 @@ KEYS EVERY LAYER HAS
   z, rotateX, rotateY, backface, fixed   depth: see DEPTH AND CAMERA
   blur          px
   blend         normal | multiply | screen | overlay | add | lighten | darken | softLight |
-                difference | color
+                hardLight | colorDodge | colorBurn | difference | exclusion | hue | saturation |
+                color | luminosity (the last four take that of the layer and the rest from below)
+  mask          the id of a layer beside it, in the same group, that it shows through: "mask": "lens",
+                or {"layer": "lens", "mode": "alpha", "feather": 12}. mode alpha (default: shown where
+                the mask is opaque), luma (where it is bright), alphaInvert or lumaInvert (where it is
+                not). feather blurs the mask's edge, in px. The mask layer draws only as a mask, on its
+                own clock, placed by its own x and y in the group, so it can move over a layer that
+                holds still. Video inside a word is a video layer masked by a text layer.
+  repeat        copies of the layer, up to 10,000: {"count": 60, "rotate": "=i * 6", "x": "=cos(i *
+                0.1047) * 300", "y": "=sin(i * 0.1047) * 300", "fill": "=hsl(i * 6)", "opacity": 0.8}.
+                A copy is the layer moved by its x, y, rotate and scale in the layer's own space, so
+                copies turn and scale round the layer's x and y. fill and stroke recolour the layer's
+                (on the layers that take them; a stroke a copy brings is strokeWidth [4] wide), and
+                opacity fades each copy. A key is a number (fill, stroke: a colour), a list taken in
+                turn (copy i takes item i, round again) or an expression of i (the copy, from 0), n
+                (the count) and the layer's t, d, p and T; keys that read no time are worked out
+                once. The layer's own keys, enter, exit, effects and mask act on all its copies as
+                one picture. A shape's copies draw in one loop: 10,000 circles, each moved by two
+                expressions, render at 1080p at about 40 fps on an RTX 5060 Ti. Captions do not
+                repeat; a model's repeat is under 3D MODELS.
   shadow        {"x": 0, "y": 6, "blur": 16, "color": "#00000099"}   (those are the defaults)
   fx            {"brightness": 0, "contrast": 1, "saturate": 1, "hue": 0, "exposure": 0,
                  "temperature": 0, "tint": 0, "gray": 0, "invert": 0}. brightness adds to every
                 channel (-1..1), so below 0 dark footage turns black; exposure is in stops and
                 multiplies (-1 halves the light), which is the way to darken footage.
+  glow          a blurred copy behind the layer: {"color": "#ff633f", "size": 24, "amount": 1}.
+                No color: the layer's own colours. amount above 1 brightens it. "glow": 24 is the size.
+  outline       a line round the layer's edge, outside it: {"width": 4, "color": "#000000"}
+  innerShadow   a shadow inside the layer's edge: {"x": 0, "y": 4, "blur": 12, "color": "#00000080"}
+  displace      waves that warp the layer: {"amount": 8, "scale": 60, "speed": 1, "seed": 0}. amount is
+                how far in px, scale the size of the waves, speed how many waves a second they slide.
+                The sizes of all four (glow size and amount, outline width, innerShadow x, y and
+                blur, displace amount) animate like any key; each draws the layer offscreen, as blur does.
+                On a model, glow and outline keep their 3D meanings (its material's glow, its edges):
+                put the model in a group to glow or outline it. On the CPU, effects drawn offscreen are
+                slow: blur and shadow blur a layer the size of the frame (0.44 s at 1080p), the rest one as
+                large as the layer, and check warns slow-effects past 0.25 s a frame.
   enter, exit   a motion (see ENTER AND EXIT)
+  emphasis      motions in the middle of the layer's life (see EMPHASIS)
   hidden        true skips the layer (and its sound)
   sound         a file played when the layer starts, timed by the layer (see SOUND)
   allowOffscreen  true stops check warning when the layer leaves the canvas; on a group or
@@ -127,7 +169,22 @@ LAYER TYPES (defaults in brackets)
   line      points [[x, y], [x, y], ...] (measured from the layer's x, y) stroke strokeWidth
             smooth closed
   path      d (SVG path data, e.g. "M0 0 L100 0") or points; fill stroke strokeWidth
+            fillRule [nonzero] (evenodd leaves holes where outlines overlap, as SVG's fill-rule)
+            d also takes keyframes of paths and morphs through them, any path into any other:
+            "d": [[0, "M0 0 L100 0 L50 90 Z"], [1, "M50 0 A50 50 0 1 1 49.9 0 Z"]]. Each piece
+            pairs with the one its size in the other key and starts where its points move least;
+            a piece with no partner grows from, or shrinks into, the middle of the nearest one.
   arrow     x1 y1 x2 y2 bend [0] head [22] stroke strokeWidth
+  strokes   on shapes, images and videos: dash [on, off, ...] px marks the stroke out as SVG's
+            stroke-dasharray does; dashOffset slides it back along the stroke (animate it for
+            marching dashes), and a dashed stroke still draws on, its dashes where they lie on
+            the whole path. corner (px) on a path, line or polygon rounds every corner. radius on
+            a rect, group, image or video takes four values, [top-left, top-right, bottom-right,
+            bottom-left], as CSS's border-radius does; [24, 24, 0, 0] rounds the top corners.
+  rough     on shapes: true, an amount in px [3], or {"amount": 3, "length": 12, "seed": 0, "boil": 0}.
+            It wobbles the outline as if drawn by hand: points length px apart stray up to amount px,
+            the same way for the same seed. boil draws it anew that many times a second (8 gives a
+            hand-drawn flicker). Fill, stroke and draw follow the wobbled line.
   text      text (centred on x, y: the anchor is center), size [64], weight [600] (100..900), font ["Space Grotesk"; also "IBM Plex Mono",
             any installed family, or a .ttf path], italic, fill [#f2f0e8], emph (colour of
             text written **like this**, also inside a word: g**P**u colours the P),
@@ -137,18 +194,60 @@ LAYER TYPES (defaults in brackets)
             text; pad is [vertical, horizontal]), case (upper|lower),
             split (chars|words|lines: animate each unit, see ENTER AND EXIT),
             caret (true shows a cursor while typing),
-            unitX unitY unitRotate unitScale unitOpacity (expressions per unit; i is its index).
+            unitX unitY unitRotate unitScale unitOpacity unitBlur unitFill (expressions per unit:
+            i is its number from 0 and n how many there are; unitFill colours its plain letters,
+            emph keeps its own). sweep(i, n, p, soft) is 1 for the units a sweep has passed, so
+            "unitFill": "=mix('#f2f0e8', '#ff633f', sweep(i, n, p, 3))" runs a highlight across.
+            textPath lays the letters along a path, each turned to it where its middle is: SVG
+            path data in the layer's space (x and y move it), "#id" of a path, line, arrow or
+            polygon in the same group (where that layer draws it), or {"d": ..., "offset": [0]
+            (how far along, a share of the path's length; animate it to run the text along),
+            "align": [start] (start|center|end: the part of the text that stands at offset)}.
+            The first line stands on the path and the others below it. An open path leaves out
+            the letters past its ends (check: text-off-path); a closed one takes them round
+            again. anchor does nothing there, and unit keys move along and across the path.
             A character the font lacks (emoji, CJK, Hebrew, Arabic...) is drawn with an installed
             font that has it; check names any that no font has (missing-glyph). Arabic letters
             join and accents sit on their letter. Right-to-left words read right to left, and a
             line's words are put in order by the Unicode bidi rules applied word by word.
-            split chars and letterSpacing draw each letter alone, so Arabic does not join there.
+            split chars, letterSpacing and textPath draw each letter alone, so Arabic does not join
+            there.
   counter   value (animate it, e.g. {"from": 0, "to": 1250, "dur": 2}), format ["{:,.0f}"; also
             "${:,.2f}M" or "{:.0f}%"], and every text key
   image     src (every src, for image, video, captions and audio, is relative to the scene
             file), w, h (give one and the other keeps the
             aspect), fit [cover] (cover|contain|stretch), zoom [1] (zooms inside the frame),
-            focus [[0.5, 0.5]] (the point zoom moves toward), radius, stroke, strokeWidth
+            focus [[0.5, 0.5]] (the point zoom moves toward), radius, stroke, strokeWidth,
+            pixelated (true scales it with hard pixel edges, for pixel art).
+            An .svg src draws as vectors, sharp at any size; its own size is its width and height,
+            or its viewBox's. Text, <style> sheets, <symbol>, <image>, markers and an svg's own
+            animation are left out (check warns svg-unsupported): turn text into paths when saving.
+            To animate its pieces one by one, use an svg layer.
+            Frame by frame: frames in place of src, a pattern with the frame number in it
+            ("run/run_%03d.png" or "run/run_####.png"), a glob ("run/*.png"), a folder of images
+            or a list of files; or sheet {"src": "walk.png", "cols": 8, "rows": 2, "count": 14},
+            its cells played row by row from the top left. fps [12] is frames a second; loop
+            [true] starts again after the last frame, false holds it, "pingpong" plays back to
+            the first. A number missing from the files shows the frame before it (check warns
+            missing-frames). The box is a frame's size, or a cell's. A file is decoded when it
+            first shows and the last 64 stay decoded: a new 1080p PNG every frame took 34 ms a
+            frame on an RTX 5060 Ti, one already decoded 4 ms.
+  svg       src (an .svg file) as a group of path layers, one for each path, rect, circle, ellipse,
+            line, polyline and polygon in it, with the file's transforms, fill, fill-rule, stroke
+            (width, caps, joins, dashes), opacity and linear and radial gradients. w, h (give one
+            and the other keeps the file's shape; neither: its own size) are numbers, since the
+            pieces are laid out once: animate scale to change its size. Without an x it stands
+            from its top left, as an image does; with one, at its middle. Each piece is named
+            <id>-<its id in the file> (<id>-1, <id>-2, ... for one without), and a <g> with an id
+            or an opacity becomes a group of its pieces. parts gives keys to the piece or group
+            with that id in the file, "*" to every shape: "parts": {"star": {"enter": "pop"},
+            "ring": {"draw": [[0, 0], [1, 1]]}, "*": {"stroke": "#f2f0e8"}}; check names an id the
+            file lacks (unknown-part). An enter with stagger brings the pieces on one by one.
+            Text, <style> sheets, <image>, clip paths, masks, filters, patterns, markers and an
+            svg's own animation are left out (check warns svg-unsupported); an image layer with
+            the same src draws most of them. A group whose layers all stand still is drawn once
+            and played back: an svg layer of 500 pieces draws in 1.5 ms a frame on an RTX 5060 Ti,
+            6.9 ms piece by piece.
   video     src, trim [start, end] (seconds in the source file), speed [1] (any number above 0),
             volume [1] (a number; 0 mutes), loop, w, h [canvas size], fit, zoom, focus, radius.
             Its sound is mixed in at the clip's speed and stops at the trim end unless loop is true.
@@ -172,15 +271,56 @@ LAYER TYPES (defaults in brackets)
             Fills the canvas unless you give w and h.
   model     a lit 3D solid, 3D text, an extruded SVG path or a model file: shape, src or parts
             (see 3D MODELS).
+  particles an emitter: rate (particles a second; keyframes taper it) and burst (how many leave at
+            once at the layer's start, or [[time, count], ...]), or a preset (confetti|sparks|snow|
+            dust|bubbles) whose keys the layer's own replace: {"type": "particles", "preset":
+            "confetti", "y": "70%"}. Each particle draws its own value from a number or [min, max] of
+            life [2] (seconds), speed [100] (px a second), angle [[0, 360]] (degrees: 0 is right, 90
+            down, so [-120, -60] sprays upward), size [8] (px across), spin [0] (degrees a second),
+            drag [0] (2 loses most of the speed in a second) and flip [0] (turns over that many times
+            a second, as confetti does). gravity [0] pulls in px a second each second, down, or
+            [x, y]. turbulence (px, or {"amount": 30, "speed": 0.5}) sways each one. align turns
+            each along its path. sizeOverLife and opacityOverLife are keyframes over 0..1 of a
+            particle's life, [[0, 1], [1, 0]] shrinking or fading it out; fillOverLife takes colours.
+            fill [#ffffff] is a colour or a list taken in turn. shape [circle] (circle|square|rect|
+            triangle|star|ring|soft|streak), or text (a character such as "★") or src (an image),
+            tinted by fill: white leaves them as they are. emitter [point] (point|line|rect|circle|
+            ring) spreads births over w [canvas width] and h [canvas height], or r [100], round x
+            and y [50%]. prewarm (true, or seconds) starts it as if it had been running; seed [from
+            the id] gives another draw. Particles stay where they were born while x, y or along move
+            the layer; rotate and scale turn and scale them all. A particle's path comes from its
+            number and the seed, so any frame renders alone. 5,000 alive render at 1080p at 131 to
+            159 fps on an RTX 5060 Ti and take about 0.1 s a frame on the CPU, where check warns
+            particle-cost past 0.25 s.
   group     children [layers], w, h, clip (true cuts children off at w x h), radius, fill.
             Children are placed from the group's x, y and start at the group's "at".
+            Its children's time: speed (2 runs them twice as fast), loop (seconds after which they
+            start again, so a looping icon is one group with "loop": 1.2) and timeRemap (keyframes
+            or an expression giving their time in seconds at the group's time t; a number freezes
+            them there). Sounds keep the scene's time.
+            combine (union|subtract|intersect|xor) merges its shapes and text into one shape, drawn
+            with the group's fill, stroke, strokeWidth, draw, dash and rough instead of the
+            children's own: "subtract" cuts every later child out of the first, so a word cut out of
+            a badge is a group of a rect and a text. A filled child gives its fill's outline, a line
+            or arrow its stroke's; images, videos, shaders, models and captions are left out. Text
+            gives its letters' outlines, a shaped script's letter by letter. Children that hold
+            still are merged once; moving ones each frame.
   sequence  clips [{"src": "a.mp4", "trim": [0, 4]}, ...] (an image clip needs dur) and transition
-            {"type": "fade", "dur": 0.4} (fade|wipe|slide|zoom|blur|cut; dur defaults to 0.5, cut
-            takes none, and no transition is a cut). Becomes a group of back-to-back layers named
-            <id>-1, <id>-2, ... that ends with its last clip, so "<id>.out" is a cue. Each
-            transition overlaps the clips it joins, so 3 s + 3 s with a 0.5 s fade lasts 5.5 s, and
-            must be shorter than both. Their sound crossfades over it: the clip before fades out
-            as the next fades in.
+            {"type": "fade", "dur": 0.4} (fade|wipe|slide|zoom|blur|iris|push|whip|luma|glitch|cut;
+            dur defaults to 0.5, cut takes none, and no transition is a cut). Becomes a group of
+            back-to-back layers named <id>-1, <id>-2, ... that ends with its last clip, so
+            "<id>.out" is a cue. Each transition overlaps the clips it joins, so 3 s + 3 s with a
+            0.5 s fade lasts 5.5 s, and must be shorter than both. Their sound crossfades over it:
+            the clip before fades out as the next fades in. fade, wipe (wipe-right), slide (left),
+            zoom, blur, iris and luma bring the next clip in with the enter of that name; iris
+            opens it in a circle from the middle. push moves both clips left a frame width, side
+            by side (the sequence's w, else the canvas's; the push enter moves in depth instead);
+            whip does too, faster, blurred across inside each clip. glitch breaks the clip before
+            up, then the next comes in broken up and settles. luma shows the
+            next clip where map is dark first and where it is light last: map is a gradient as a
+            fill takes ({"radial": [0.5, 0.5, 0.7]}, {"angle": 90, "stops": ["#000", "#fff",
+            "#000"]}) or an image file, stretched over the clip [a left-to-right gradient], and soft
+            [0.2] (0 to 1) is how far the edge spreads.
             fit, volume, w, h, x, y and anchor go to every clip; opacity, blur, fx, enter and the
             other layer keys apply to the whole cut.
 
@@ -270,15 +410,25 @@ DEPTH AND CAMERA (3D)
 3D MODELS
   A model layer is a lit solid in the space of DEPTH AND CAMERA, so z, rotateX, rotateY, rotate,
   scale and the camera apply to it. x and y place its centre.
-  shape     cube (w [200], h and depth [= w]) | sphere (r [100]) | cylinder (r [80], h [200]) |
-            cone (r [90], h [200], tip up) | torus (r [110], tube [r x 0.35], facing you) |
-            plane (w, h; both sides show) | text | path. Sizes are px and animate.
+  shape     cube (w [200], h and depth [= w], r [0] rounds its edges and corners) | sphere (r [100]) |
+            cylinder (r [80], h [200]) | cone (r [90], h [200], tip up) | capsule (r [60], h [240] end
+            to end: a cylinder with round ends) | torus (r [110], tube [r x 0.35], facing you) |
+            plane (w, h; both sides show) | lathe | tube | text | path. Sizes are px and animate.
+  lathe     shape "lathe" turns profile round the vertical axis: [[r, y], ...] points (r out from the
+            axis, y down; closed when the last point is the first) or path data, its x the distance
+            from the axis. Centred on y. A profile that ends off the axis (a cup with no lid) shows
+            both sides; bends sharper than 40 degrees stay sharp. profile does not animate:
+            "profile": [[0, -120], [70, -120], [40, 0], [90, 120], [0, 120]].
+  tube      shape "tube" runs a round tube of radius r [12] along d (SVG path data, fitted to w and/or
+            h as a path shape's), round at its ends: 3D lines and routes. draw grows it along its
+            length (other shapes show bottom to top). Without d, "tube" is read as a cylinder.
   text      shape "text" pushes letters out in depth: text ("\n" breaks lines), size [120],
             weight [600], font, italic, letterSpacing, lineHeight, depth [size x 0.2], bevel [0]
             (px of 45-degree edge). Centred on x, y. Each new text, size, depth or bevel value
-            rebuilds the solid, so grow it with scale. Characters are not shaped: right-to-left
-            letters, accents typed as separate marks and emoji sequences come out wrong (check
-            warns: unshaped-3d-text), so use a text layer for those.
+            rebuilds the solid, so grow it with scale. Lines are shaped as a text layer's are:
+            Arabic letters join, marks sit on their letters, right-to-left runs read right to left.
+            letterSpacing draws each character on its own, unshaped, and colour emoji have no
+            outline, so they are left out (check warns: unshaped-3d-text).
   path      shape "path": d (SVG path data, filled nonzero), w and/or h (fits inside them, keeping
             its shape), depth [a fifth of its larger side], bevel [0], strokeWidth (in d's units:
             extrudes the stroke, with round ends, for line icons).
@@ -288,34 +438,59 @@ DEPTH AND CAMERA (3D)
             glow however it is lit: neon, screens, lamps)   transparency 0..1 [0] (see-through: the far
             side and what is behind show, faces drawn far to near; a model with a texture draws solid,
             check warns). These animate. opacity fades the drawn model as a whole, as on any layer.
-  texture   an image (png, jpg, webp, gif, bmp) or video file drawn on the surface, "#groupId", or
+  texture   an image (png, jpg, webp, gif, bmp, svg) or video file drawn on the surface, "#groupId", or
             an object: {"src": "wood.jpg", "repeat": 2 or [across, down], "offset": [across, down]
             (in images, toward the right and down)}. A video plays on the model's clock, with "loop", "trim" and
             "speed" as on a video layer. "#groupId" draws that group on the surface at each frame's
             time, its box (its w and h, else the canvas) filling the image: a UI on a phone's screen.
             The group is drawn only there, its layers as in a scene without a camera. Once on each
             cube face and on a plane, upright from in front (on top and underneath, its top is the
-            far edge); round a sphere, cylinder or cone with its middle facing you, and flat across
-            their ends; once round a torus and its tube; across the front and back of text and path
-            shapes. The fill shows through clear pixels. A part takes the layer's texture unless it
+            far edge); round a sphere, cylinder, cone, capsule or lathe with its middle facing you, and
+            flat across a cylinder's or cone's ends; once round a torus and its tube; along a tube and
+            round it; across the front and back of text and path shapes. The fill shows through clear pixels. A part takes the layer's texture unless it
             sets its own; false draws its fill. Triangles are cut where perspective would slide the
             image across them (check warns texture-swim where that is not enough, right in front of
             the camera). repeat and offset do not animate. A textured model takes about twice as
             long to draw.
   parts     [{"shape": "sphere", "r": 30, "x": 0, "y": -120, "z": 0, "rotateX": 0, "rotateY": 0,
             "rotate": 0, "scale": 1, "fill": "#b9f45d", "shine": 0.9}, ...] placed from the
-            model's centre, in plain numbers (parts do not animate; the model does). A part takes
+            model's centre. Part keys take keyframes and expressions like layer keys, with i the
+            part's number from 0: "rotate": "=t*90" spins one part. The parts merge into one mesh,
+            merged again on the frames where a part moves or changes size. Parts with the same
+            material keys share a material, its values read for the first of them. A part takes
             the model's material keys it does not set. A model may have shape (or src), parts, or both.
+  repeat    {"count": 100, "x": "=(i % 10 - 4.5) * 50", "z": "=(floor(i / 10) - 4.5) * 50",
+            "y": "=sin(t * 2 + i) * 20", "rotateX", "rotateY", "rotate", "scale", "fill": "=hsl(i * 3.6)"}
+            draws count copies of the model (shape, parts or src, posed), up to 10,000, merged into
+            one mesh that sorts as one model. Each key is a number (fill: a colour), a list taken in
+            turn (copy i takes item i, round again) or an expression of i (the copy, from 0), n (the
+            count) and the layer's t, d, p and T. A copy is placed from the model's centre, as a part
+            is, and its fill recolours what the layer's fill would. Keys that read no time are worked
+            out once. A model draws at most 64 colours: past that, each copy takes the nearest kept
+            one (check warns repeat-colours). Copies cost what that many triangles cost: use "detail":
+            "low" for many.
   src       a model file: .glb or .gltf (glTF 2.0), or .obj with its .mtl. Colours, shine and metal
             come from the file; a fill on the layer recolours all of it. It fits inside w and/or h
-            keeping its shape, else its longest side is 300 px. Node transforms apply; animation
-            and skins do not. A glTF base colour texture (with its TEXCOORD_n) or an .obj map_Kd is
-            drawn as a texture; "texture": false draws its mean colour, and a texture on the layer
-            replaces the file's (check warns no-uvs when the file has no texture coordinates).
+            keeping its shape, else its longest side is 300 px. Node transforms, skins (up to four
+            joints a vertex; check warns skin-influences past that) and morph target weights apply,
+            and animation plays the file's clips. A glTF base colour texture (with its TEXCOORD_n)
+            or an .obj map_Kd is drawn as a texture; "texture": false draws its mean colour, and a
+            texture on the layer replaces the file's (check warns no-uvs when the file has no
+            texture coordinates).
             The light a material gives off (glTF emissiveFactor and emissiveTexture, .mtl Ke and
             map_Ke) is added to its colour however it is lit. A glTF material with alphaMode BLEND is
             see-through by its base colour's alpha, an .mtl one by d or Tr. Long triangles are cut to
-            1/24 of its size for the depth sort. Draco- or meshopt-compressed files are not read.
+            1/24 of its size for the depth sort. Compressed files are read: meshopt
+            (EXT_meshopt_compression, gltfpack -c) and quantized ones as they are; Draco
+            (KHR_draco_mesh_compression) with pip install "kinescript[draco]" (check names the
+            extra when it is missing).
+  animation a clip of the glTF file to play on the layer's clock: its name (kine probe lists them),
+            its number from 0, true for the first, or {"name": "Walk", "speed": 1, "loop": true,
+            "start": 0}. speed 2 plays twice as fast, -1 backwards; start is the seconds into the
+            clip at the layer's start; loop false holds the last pose. Node translation, rotation
+            and scale, morph target weights and skins move (LINEAR, STEP and CUBICSPLINE keys). The
+            model keeps the size and centre of its rest pose, so a clip that walks it moves it. A
+            name the file lacks is an error (unknown-animation) that lists the ones it has.
   ground    true or {"opacity": 0.5, "blur": px, "y": px, "from": "above"}: a soft shadow on a level
             floor under the model, as if lit from above, fainter as the model rises. The floor sits at
             the model's lowest point before it turns, or at y in the layer's parent space (canvas px
@@ -390,31 +565,82 @@ ANIMATING A VALUE (any number or colour key)
                Each keyframe is [time, value] or [time, value, ease into it]. Time is seconds from
                the layer start ("500ms", "12f" also work); a negative time counts back from its
                end; "40%" is a share of its length; "end" is its end. Between keyframes the default
-               ease is inOutCubic.
+               ease is inOutCubic, which slows to a stop at every key.
                A flat list such as [0, 100] is NOT keyframes.
+  smooth keys  "x": {"keys": [[0, 200], [1, 700], [2, 960], [3, 1700]], "smooth": true}
+               Passes through each key without stopping: at rest only at the first and last key,
+               at a turn, and around a "hold" key. Other eases on the keys are ignored. Numbers only.
   expression   "y": "=540 + sin(t * 3) * 40"   (a string starting with "=")
                t = seconds since the layer started   d = the layer's length   p = t / d (0..1)
                T = seconds since the scene started   i = unit index (split text)   W, H, fps
+               n = how many units (in unit keys only)
                helpers: sin cos tan sqrt abs min max round floor ceil exp log atan2 hypot pi tau
                         clamp(v, lo, hi)  lerp(a, b, p)  noise(x, seed)  wiggle(freq, amp, t, seed)
-                        ease("outCubic", p)
+                        ease("outCubic", p)  hsl(hue, sat, light)  mix(colour, colour, p)
+                        sweep(i, n, p, soft)
+               hsl takes a hue in degrees and saturation and lightness from 0 to 1; hsl and mix give
+               a colour, so "fill": "=mix('#ff633f', '#7b5cff', p)" works. sweep is 1 for the units
+               a sweep across n of them has passed at p, 0 for those it has not reached, and eased
+               between over soft [1] units at its front; it starts before unit 0 and ends past n - 1.
   Colours animate too: "fill": {"from": "#ff633f", "to": "#b9f45d", "dur": 1}.
   Gradient fill: "fill": {"linear": [[0, 0], [1, 1]], "stops": ["#ff633f", "#7b5cff"]}
                  or {"radial": [0.5, 0.5, 0.6], "stops": [...]}; points are 0..1 of the layer box.
+                 {"angle": 90, "stops": [...]} runs corner to corner as CSS's does (0 up, 90 right);
+                 {"sweep": [0.5, 0.5], "stops": [...]} goes round its middle from the top, clockwise,
+                 turned by angle. Text and strokes take gradients too. A gradient animates into one
+                 of the same kind with as many stops, by keyframes or a tween:
+                 "fill": {"from": {"angle": 0, "stops": [...]}, "to": {"angle": 180, "stops": [...]}}
 
 ENTER AND EXIT
   "enter": "rise"   or   {"name": "rise", "dur": 0.5, "ease": "outCubic", "stagger": 0.03}
-  Defaults: dur 0.5, ease outCubic (pop and spin: outBack; type: linear; draw: inOutCubic;
-  snap: outQuart). An exit plays during the LAST dur seconds of the layer and ends with it.
-  Combine with +: "rise+blur". Options: dist (px moved by rise, drop, left, right; default 48),
-  from (start scale of pop [0.4] and zoom [1.25]), amount (blur px [24], track px [40]).
+  Defaults: dur 0.5 (land and squash 1, swing 1.2, elastic 0.9, scramble 0.8), ease outCubic
+  (pop, spin and stretch: outBack; elastic: outElastic; whip: outExpo; snap and rise-mask:
+  outQuart; draw: inOutCubic; type, land, squash, swing and scramble: linear, as their timing
+  is their own). An exit plays during the LAST dur seconds of the layer and ends with it.
+  Combine with +: "rise+blur". Options: dist (px moved by rise, drop, left, right [48], land
+  and squash [160], whip [400; below 0 it comes from the left]), from (start scale of pop
+  [0.4], zoom [1.25] and elastic [0]), amount (blur px [24], track px [40], whip's blur px
+  [48], how far squash flattens [0.35]), deg (swing's first swing [60]), bounces (land [3],
+  squash [2]), count (strips of blinds [6]), seed (scramble's and glitch's random picks),
+  map and soft (luma's, as for a sequence's luma transition), fade (false keeps the layer
+  opaque while it moves: {"name": "left", "dist": 1920, "fade": false} slides it in solid,
+  and a whip's blur stays inside its box).
   With "split" on text, each unit enters in turn: unit k starts k x stagger seconds after the
-  layer starts, so the whole reveal takes dur + (units - 1) x stagger.
+  layer starts, so the whole reveal takes dur + (units - 1) x stagger. On a group, an enter
+  with a stagger, such as {"name": "rise", "stagger": 0.08}, enters its children in turn the
+  same way, and the group itself does not move.
+  order sets who goes first: start (default, in the order listed), end, center (from the
+  middle out), edges (from both ends in) or random (seed, a whole number, picks the shuffle).
   motions: {motions}
   rise moves up into place, drop moves down, left moves left, right moves right. type is a
   typewriter. draw draws a stroke or path on, and builds a model (build is the same). wipe reveals left to right. snap is a hard cut in
   with a small settle. flip, flip-up, tumble and push move in depth (see DEPTH AND CAMERA).
-  none is no motion.
+  land drops in from above and bounces, each bounce a quarter as high as the one before;
+  squash does too, long as it falls and flat as it lands. elastic grows in with a springy
+  overshoot, swing hangs from its top edge and swings down to rest, stretch opens sideways from
+  its middle. iris opens a circle from the middle, clock sweeps round from twelve o'clock,
+  blinds opens in strips, rise-mask rises from behind its own bottom edge (with "split":
+  "lines", each line from behind its own: the usual title reveal). scramble settles text from
+  random letters and digits, left to right. glitch splits the colours and jumps slices of the
+  layer sideways. whip slides in fast from the right, blurred along the way. luma wipes it on
+  through a map's brightness, dark parts first; on a split text it wipes the whole text. With
+  split, each unit wipes, rises or glitches in its own box. none is no motion.
+
+EMPHASIS
+  "emphasis": "pulse"   or   [{"name": "pulse", "at": 1.2, "repeat": 2}, {"name": "float", "loop": true}]
+  Motions in the middle of a layer's life, each cycle starting and ending at rest. at is
+  seconds into the layer [0], dur one cycle's seconds, repeat how many cycles [1] (2.5 plays two
+  and a half), loop true plays them until the layer ends. They combine with each other (+, or
+  several in the list) and with enter and exit. With stagger on a split text, each unit plays
+  it that many seconds after the one before, as a wave (order and seed as for enter).
+  emphases: {emphases}
+  pulse swells and settles (amount, a scale step [0.12]; 0.5 s), heartbeat beats twice (amount
+  [0.15]; 0.9 s), shake shakes sideways (dist px [12]; 0.6 s), wiggle rocks (deg [8]; 0.6 s),
+  wobble wobbles like jelly (amount [0.15]; 0.8 s), float drifts up and down, turning a little
+  (dist [10], deg [2]; 3 s), bob hops (dist [14]; 0.6 s), flash blinks out twice (amount, how
+  far it dims [1]; 0.8 s), tada shrinks, then grows and rocks (amount [0.1], deg [4]; 1 s),
+  spin turns once (deg [360]; 1 s, ease inOutCubic, or linear when it loops). Others take
+  linear; ease shapes each cycle.
 
 EASES  {eases}, spring, spring(stiffness, damping), bezier(x1, y1, x2, y2), steps(n)
   in* starts slow, out* ends slow (the most natural for entrances), inOut* does both.
@@ -515,17 +741,11 @@ RECIPES (layers to paste into "layers")
   Pill label:
     {"id": "pill", "type": "text", "text": "NEW", "x": "50%", "y": "50%", "size": 40,
      "fill": "#0a0c10", "box": {"fill": "#b9f45d", "pad": [10, 24], "radius": 999}}
-  Bar of a bar chart growing up from a baseline at y 900, with its value riding on top and its
-  label under the baseline. The value's y uses the same tween as the bar's height (same dur,
-  same default ease), so it stays 40 px above the bar. The label is anchored at its top edge,
-  20 px below the baseline. Keep text off the bar: light text over the orange fails the
-  contrast check:
-    {"id": "bar1", "type": "rect", "x": 600, "y": 900, "anchor": "bottom", "w": 120,
-     "h": {"from": 0, "to": 400, "dur": 0.8}, "fill": "#ff633f", "at": 0.5}
-    {"id": "bar1-value", "type": "counter", "x": 600, "y": {"from": 860, "to": 460, "dur": 0.8},
-     "size": 48, "at": 0.5, "value": {"from": 0, "to": 80, "dur": 0.8}, "format": "{:.0f}"}
-    {"id": "bar1-label", "type": "text", "text": "Q1", "x": 600, "y": 920, "anchor": "top",
-     "size": 40, "at": 0.5}
+  Bar chart whose bars grow in turn, each value counting up above its bar and each label under
+  the baseline; lineChart and pieChart take the same data:
+    {"use": "barChart", "id": "sales", "data": [["Q1", 42], ["Q2", 58], ["Q3", 71], ["Q4", 64]],
+     "highlight": "Q3", "format": "{:,.0f}"}
+  Its layers have the chart's id in front: sales-bar1, sales-value1, sales-label1, sales-axis.
   Slow zoom on a photo (Ken Burns):
     {"id": "photo", "type": "image", "src": "photo.jpg", "w": 1920, "h": 1080, "anchor": "topleft",
      "zoom": [[0, 1], ["end", 1.15, "linear"]], "focus": [0.6, 0.4]}
@@ -549,9 +769,12 @@ COMMANDS
                                   0.3 s per word, or one or two words for under 0.4 s
                                   (read-time), a character no installed font has
                                   (missing-glyph), Arabic drawn letter by letter
-                                  (unjoined-letters), 3D text it cannot shape
-                                  (unshaped-3d-text), or a video, image or shader more than
-                                  half off the canvas for 1 s or more (media-offscreen).
+                                  (unjoined-letters), colour emoji or spaced-out letters
+                                  in 3D text (unshaped-3d-text), an svg in an image or svg
+                                  layer with parts that are not drawn, such as text
+                                  (svg-unsupported), or a video, image
+                                  or shader more than half off the canvas for 1 s or more
+                                  (media-offscreen).
                                   With sound (it is
                                   mixed and measured, see SOUND): a voice cut off (audio-cut), two
                                   voices at once (voice-overlap), music under 10 LU below a voice
@@ -571,18 +794,29 @@ COMMANDS
                                   the JSON's "notes" say so), --width 480 (16 to 4096), --cols 4,
                                   -o (.png or .jpg). --wire draws every model's triangles over the
                                   frames; --depth dims them and shows each stage's depth image,
-                                  nearer brighter.
+                                  nearer brighter. --trails draws each moving layer's path, a dot
+                                  a frame, so their spacing shows its speed, eases and stops;
+                                  --onion 3 draws the 3 frames before each one over it, fainter.
                                   --audio adds the sound under the frames on the same time axis:
                                   a lane per role and one for the mix, the duck, and issues in red;
                                   its JSON gives each sound's loudness and gain and the mix's.
   kine still scene.json --at 2.5  one frame as PNG (-o to name it, .png or .jpg); --at -1 is 1 s
                                   before the end; --at end is the last frame; a time past the end
                                   draws the last frame, with a note. --scale 0.5 halves the size.
-  kine probe scene.json --at 2    every layer's and sound's start and end, and screen boxes at 2 s
+  kine probe scene.json --at 2    every layer's and sound's start and end, and at 2 s each visible
+                                  layer's screen box and anchor (pos)
+  kine probe scene.json --curve title.x
+                                  title's x at every frame, through eases, expressions and group
+                                  clocks, and its speed a second (signed; a distance for position,
+                                  x and y as a point, or a colour), where it holds still and its
+                                  fastest frame. An enter, exit or along moves a layer as well.
   kine probe clip.mp4             a media file's kind (video, audio or image), duration, w and h as
                                   shown (after rotation), fps, audio, alpha and rotation; a note
                                   when it lists a video stream with no frames in it. A model file
-                                  (.glb, .gltf, .obj): its triangles, vertices, materials and size.
+                                  (.glb, .gltf, .obj): its triangles, vertices, materials, size,
+                                  animations with their durations, skins, morph targets, textures
+                                  and texture coordinate sets. An .svg: the w and h it is drawn
+                                  at and the kinds of element left out of it (undrawn).
   kine render scene.json -o out.mp4 -q draft|standard|high
                                   standard is the default, draft the fastest, high the best.
                                   Also .mov or .webm (with --transparent for no background),
@@ -616,6 +850,7 @@ COMMANDS
                                   on stdin and prints a JSON list of results, one per request.
                                   Rendering never speaks.
   kine watch scene.json           re-makes the contact sheet on every save
+  kine edit scene.json            browser page: scrub, pin notes on frames; an agent reads them with kine_feedback
   kine doctor                     checks ffmpeg and ffprobe, the GPU and fonts; exits 1 when
                                   ffmpeg or ffprobe is missing, and says how to install it
   kine mcp                        the same tools for MCP clients
@@ -640,7 +875,8 @@ WORKFLOW FOR AGENTS
 
 
 def reference() -> str:
-    comps = "\n".join(f"    {k:<11}{v}" for k, v in COMPONENT_DOCS.items())
+    comps = "\n".join(textwrap.fill(v, 108, initial_indent=f"    {k:<11}", subsequent_indent=" " * 15)
+                      for k, v in COMPONENT_DOCS.items())
     eases = " ".join(sorted(k for k in EASES if k not in ("in", "out", "inOut")))
-    return (REFERENCE.replace("{motions}", " ".join(sorted(PRESETS)))
+    return (REFERENCE.replace("{motions}", " ".join(sorted(PRESETS))).replace("{emphases}", " ".join(EMPHASES))
             .replace("{shaders}", "|".join(SHADERS)).replace("{components}", comps).replace("{eases}", eases))

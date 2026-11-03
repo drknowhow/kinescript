@@ -1,0 +1,29 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 6, "bg": "#0a0c10"},
+  "layers": [
+    {"id": "title", "type": "text", "text": "ONE FILE, EVERY PIECE", "x": "50%", "y": "12%", "size": 64,
+     "weight": 700, "letterSpacing": 8, "fill": "$sheet", "enter": {"name": "rise", "dur": 0.6}},
+    {"id": "emblem", "type": "svg", "src": "media/emblem.svg", "x": "34%", "y": "56%", "w": 640,
+     "rotate": [[2.4, 0], [6, 24, "inOutSine"]],
+     "parts": {
+       "badge": {"enter": {"name": "pop", "dur": 0.5}},
+       "ring": {"at": 0.6, "enter": {"name": "fade", "dur": 0.4}, "dashOffset": [[0.6, 0], [6, 120, "linear"]]},
+       "star": {"at": 0.9, "draw": [[0, 0], [1, 1, "inOutCubic"]], "rotate": [[0, -72], [1.2, 0, "outBack"]]},
+       "dots": {"at": 1.6, "enter": {"name": "pop", "dur": 0.4, "stagger": 0.06}}
+     }},
+    {"id": "badge-label", "type": "text", "text": "**badge** pops in", "emph": "$key", "font": "$mono", "size": 30,
+     "anchor": "left", "align": "left", "x": "62%", "y": "38%", "fill": "$annotation", "at": 0.2,
+     "enter": {"name": "fade", "dur": 0.4}},
+    {"id": "ring-label", "type": "text", "text": "**ring** fades in, its dashes march", "emph": "$key",
+     "font": "$mono", "size": 30, "anchor": "left", "align": "left", "x": "62%", "y": "48%", "fill": "$annotation",
+     "at": 0.6, "enter": {"name": "fade", "dur": 0.4}},
+    {"id": "star-label", "type": "text", "text": "**star** draws on and turns", "emph": "$key", "font": "$mono",
+     "size": 30, "anchor": "left", "align": "left", "x": "62%", "y": "58%", "fill": "$annotation", "at": 0.9,
+     "enter": {"name": "fade", "dur": 0.4}},
+    {"id": "dots-label", "type": "text", "text": "**dots** pop one by one", "emph": "$key", "font": "$mono",
+     "size": 30, "anchor": "left", "align": "left", "x": "62%", "y": "68%", "fill": "$annotation", "at": 1.6,
+     "enter": {"name": "fade", "dur": 0.4}},
+    {"id": "note", "type": "text", "text": "\"type\": \"svg\" and parts keyed by the file's ids", "font": "$mono",
+     "size": 26, "x": "50%", "y": "90%", "fill": "$annotation", "at": 2.4, "enter": {"name": "fade", "dur": 0.5}}
+  ]
+}

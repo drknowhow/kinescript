@@ -279,6 +279,171 @@ def test_a_gradient_stop_past_the_end_warns_that_it_is_pinned():
     assert w and "drawn at 1" in w[0]["message"], w
 
 
+TWO = ["#fff", "#000"]
+
+
+@pytest.mark.parametrize("fill, words", [
+    ({"sweep": [0.5], "stops": TWO}, "sweep is"),
+    ({"sweep": "middle", "stops": TWO}, "sweep is"),
+    ({"angle": "up", "stops": TWO}, "angle is"),
+    ({"linear": [[0, 0], [1, 0]], "sweep": True, "stops": TWO}, "has linear and sweep"),
+    ({"from": {"angle": 0, "stops": TWO}, "to": {"sweep": True, "stops": TWO}, "dur": 1}, "same kind"),
+    ({"from": {"angle": 0, "stops": TWO}, "to": {"angle": 90, "stops": TWO + ["#f00"]}, "dur": 1}, "as many stops"),
+    ([[0, "#fff"], [1, {"angle": 90, "stops": TWO}]], "same kind"),
+    ([[0, {"angle": 0, "stops": TWO}], [1, {"angle": 90, "stops": ["#fff", "nope"]}]], "keyframe 2 gradient stop 2"),
+])
+def test_sweep_angle_and_animated_gradients_are_checked(fill, words):
+    assert words in one_error(scene([rect(fill=fill)]), "r")["message"]
+
+
+def test_sweep_and_angle_gradients_load_and_an_angle_beside_points_is_ignored():
+    for fill in ({"sweep": True, "stops": TWO}, {"sweep": [0.3, 0.5], "angle": 45, "stops": TWO},
+                 {"angle": 90, "stops": TWO}, {"from": {"angle": 0, "stops": TWO}, "to": {"angle": 90, "stops": TWO}}):
+        errs, s = errors(scene([rect(fill=fill)]))
+        assert s is not None and not errs, (fill, errs)
+    w = warnings(scene([rect(fill={"linear": [[0, 0], [1, 0]], "angle": 90, "stops": TWO})]), "ignored-key")
+    assert w and "angle is ignored" in w[0]["message"], w
+
+
+LINE = {"id": "l", "type": "line", "points": [[0, 0], [100, 40], [200, 0]]}
+
+
+@pytest.mark.parametrize("layer, words", [
+    (dict(LINE, dash=[]), "dash is"),
+    (dict(LINE, dash=[0, 0]), "dash is"),
+    (dict(LINE, dash=[8, -2]), "dash is"),
+    (dict(LINE, dash="8 4"), "dash is"),
+    (dict(LINE, corner=-3), "corner is -3"),
+    (rect(radius=[4, 4, 4]), "radius is"),
+    (rect(radius=[4, 4, 4, -4]), "radius is"),
+    (rect(radius=[[0, [0, 0, 0, 0]], [1, [8, 8]]]), "radius at keyframe 2"),
+])
+def test_dash_corner_and_four_corner_radius_are_checked(layer, words):
+    assert words in one_error(scene([layer]))["message"]
+
+
+def test_d_keyframes_are_checked_and_differing_pieces_noted():
+    path = {"id": "p", "type": "path", "fill": "#fff"}
+    for d, words in (([[0, "M0 0 L10 0 Z"], [1, "M0 0 Q nope"]], "d at keyframe 2"),
+                     ([[0, "M0 0 L10 0 Z"], [1, 40]], "d at keyframe 2 is 40"),
+                     ([[0, "M0 0 L10 0 Z"], ["soon", "M0 0 L20 0 Z"]], "keyframe 2 has time"),
+                     ({"from": "M0 0 L10 0 Z", "to": "M0 0 L20 0 Z"}, "keyframes of paths")):
+        e = one_error(scene([dict(path, d=d)]), "p")
+        assert words in e["message"], (d, e)
+    issues, s = load(scene([dict(path, d=[[0, "M0 0 H10 V10 Z"], [1, "M0 0 H10 V10 Z M2 2 H4 V4 Z"]])]))
+    assert s is not None and [i["code"] for i in issues] == ["morph-contours"], issues
+    assert len(s.by_id["p"].morph) == 2 and "morph" in s.by_id["p"].props
+
+
+def test_combine_is_checked_and_warns_about_what_it_leaves_out():
+    disc = {"id": "d", "type": "circle", "r": 10}
+    e = one_error(scene([{"id": "g", "type": "group", "combine": "weld", "children": [disc]}]), "g")
+    assert "combine" in e["message"], e
+    for g, words in (({"combine": "subtract", "children": [disc]}, "needs at least two"),
+                     ({"stroke": "#fff", "strokeWidth": 3, "children": [disc]}, "draw only with combine"),
+                     ({"combine": "union", "children": [disc, dict(disc, id="e"), {"id": "s", "type": "shader",
+                                                                                    "preset": "grid"}]}, "s is left out")):
+        w = warnings(scene([dict({"id": "g", "type": "group"}, **g)]), "ignored-key")
+        assert w and words in w[0]["message"], (g, w)
+    issues, s = load(scene([{"id": "g", "type": "group", "combine": "minus", "children": [disc, dict(disc, id="e")]}]))
+    assert s is not None and s.by_id["g"].raw["combine"] == "subtract", issues
+
+
+@pytest.mark.parametrize("rough, words", [
+    ("lots", "rough is"), ({"amount": -1}, "rough amount is -1"), ({"length": 0}, "rough length is 0"),
+    ({"seed": 1.5}, "rough seed is 1.5"), ({"seed": True}, "rough seed is"), ({"boil": -2}, "rough boil is -2"),
+])
+def test_rough_is_checked(rough, words):
+    assert words in one_error(scene([rect(rough=rough, fill="#fff")]), "r")["message"]
+
+
+def test_blend_modes_take_css_names():
+    issues, s = load(scene([rect(blend="hard-light"), dict(RECT, id="q", blend="color-dodge"),
+                            dict(RECT, id="u", blend="Luminosity")]))
+    assert [s.by_id[i].raw["blend"] for i in "rqu"] == ["hardLight", "colorDodge", "luminosity"], issues
+
+
+def test_looks_take_true_a_number_a_colour_or_an_object():
+    issues, s = load(scene([rect(glow=12), dict(RECT, id="q", outline="#ff0000"), dict(RECT, id="u", innerShadow=True),
+                            dict(RECT, id="v", displace={"strength": 3, "size": 40}),
+                            dict(RECT, id="w", glow={"radius": 8, "colour": "#ffffff"}, displace=False)]))
+    assert s.by_id["r"].looks == {"glow": {"size": 12}} and s.by_id["q"].looks == {"outline": {"color": "#ff0000"}}
+    assert s.by_id["u"].looks == {"innerShadow": {}} and s.by_id["u"].warp is None
+    assert s.by_id["v"].warp == {"amount": 3, "scale": 40} and s.by_id["v"].looks is None
+    assert s.by_id["w"].looks == {"glow": {"size": 8, "color": "#ffffff"}} and "displace" not in s.by_id["w"].raw
+    assert {i["code"] for i in issues} == {"renamed-key"}, issues
+
+
+def test_a_models_glow_and_outline_keep_their_3d_meanings():
+    issues, s = load(scene([{"id": "m", "type": "model", "shape": "box", "glow": 0.5, "outline": True},
+                            {"id": "g", "type": "group", "glow": 20, "children": [{"id": "n", "type": "model", "shape": "sphere"}]}]))
+    assert s.by_id["m"].looks is None and s.by_id["m"].raw["glow"] == 0.5 and "edges" in s.by_id["m"].raw, issues
+    assert s.by_id["g"].looks == {"glow": {"size": 20}}, issues
+
+
+@pytest.mark.parametrize("looks, code, words", [
+    ({"innerShadow": "deep"}, "bad-value", "innerShadow is"), ({"outline": {"width": 4, "dash": 3}}, "unknown-key",
+                                                                "outline: unknown key 'dash'"),
+    ({"displace": {"scale": 0}}, "bad-value", "displace scale is 0"),
+    ({"displace": {"seed": 1.5}}, "bad-value", "displace seed is 1.5"),
+    ({"displace": {"speed": "fast"}}, "bad-value", "displace speed is"),
+    ({"glow": {"color": "glowing"}}, None, "glow color"),
+])
+def test_looks_are_checked(looks, code, words):
+    e = one_error(scene([rect(**looks)]), "r")
+    assert (code is None or e["code"] == code) and words in e["message"] + e["fix"], e
+
+
+LENS = {"id": "lens", "type": "circle", "r": 20}
+
+
+@pytest.mark.parametrize("mask, code, words", [
+    (5, "bad-value", "mask is 5"), ({"mode": "luma"}, "missing-key", "mask names no layer"),
+    ({"layer": 3}, "bad-value", "layer is 3"), ({"layer": "lens", "mode": "multiply"}, "bad-value", "mask mode"),
+    ({"layer": "lens", "feather": -1}, "bad-value", "mask feather is -1"),
+    ("lnes", "mask-unknown", "did you mean 'lens'"), ("r", "bad-mask", "the layer itself"),
+])
+def test_mask_is_checked(mask, code, words):
+    e = one_error(scene([LENS, rect(mask=mask)]), "r")
+    assert e["code"] == code and words in e["message"] + e["fix"], e
+
+
+def test_a_mask_stands_beside_its_layer_and_masks_take_no_ring():
+    e = one_error(scene([LENS, {"id": "g", "type": "group", "children": [rect(mask="lens")]}]), "r")
+    assert e["code"] == "bad-mask" and "another group" in e["message"], e
+    e = one_error(scene([{"id": "g", "type": "group", "mask": "inner", "children": [dict(LENS, id="inner")]}]), "g")
+    assert e["code"] == "bad-mask" and "inside the layer it masks" in e["message"], e
+    e = one_error(scene([dict(LENS, mask="r"), rect(mask="lens")]), "lens")
+    assert e["code"] == "bad-mask" and "masked in turn" in e["message"], e
+    issues, s = load(scene([LENS, rect(mask="#lens"), dict(RECT, id="q", mask={"source": "lens", "mode": "Luma",
+                                                                               "softness": 8})]))
+    assert s.by_id["r"].mask == (s.by_id["lens"], "alpha", 0.0) and s.mattes == {"lens"}, issues
+    assert s.by_id["q"].mask == (s.by_id["lens"], "luma", 8.0), issues
+    assert {i["code"] for i in issues} == {"renamed-key", "renamed-value"}, issues
+
+
+def test_rough_takes_true_or_an_amount_and_warns_when_it_does_nothing():
+    _, s = load(scene([rect(rough=True), dict(LINE, rough=2.5), dict(LINE, id="m", rough=False)]))
+    assert s.by_id["r"].rough == (3.0, 12.0, 0, 0.0) and s.by_id["l"].rough == (2.5, 12.0, 0, 0.0)
+    assert s.by_id["m"].rough is None and "rough" not in s.by_id["m"].raw
+    w = warnings(scene([rect(rough={"amount": 0, "seed": 3})]), "ignored-key")
+    assert w and "draws the shape smooth" in w[0]["message"], w
+    issues, s = load(scene([rect(rough={"jitter": 2, "rate": 6})]))
+    assert s.by_id["r"].rough == (2.0, 12.0, 0, 6.0) and {i["code"] for i in issues} == {"renamed-key"}, issues
+
+
+def test_dash_and_corner_warn_where_they_do_nothing_and_their_svg_names_are_read():
+    for layer, words in ((rect(dash=[8, 4]), "has none"), (dict(LINE, dashOffset=4), "no dash"),
+                         (dict(LINE, corner=12, smooth=True), "smooth leaves none")):
+        w = warnings(scene([layer]), "ignored-key")
+        assert w and words in w[0]["message"], (layer, w)
+    issues, s = load(scene([dict(LINE, strokeDasharray=[8, 4], strokeDashoffset=2), rect(corner=6)]))
+    assert s is not None and {i["code"] for i in issues} == {"renamed-key"}, issues
+    assert s.by_id["l"].raw["dash"] == [8, 4] and s.by_id["r"].raw["radius"] == 6
+    errs, s = errors(scene([rect(radius=[12, 12, 0, 0], stroke="#fff", dash=[6, 3], dashOffset="=t*20")]))
+    assert s is not None and not errs, errs
+
+
 def test_null_values_mean_their_defaults():
     _, s = load(dict(scene([rect(fill=None, x=None, fx={"brightness": None}),
                             {"id": "t", "type": "text", "text": "a **b**", "emph": None}]),

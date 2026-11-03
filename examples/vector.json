@@ -1,0 +1,17 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 6, "bg": "#0a0c10"},
+  "layers": [
+    {"id": "title", "type": "text", "text": "SHARP AT ANY SIZE", "x": "50%", "y": "12%", "size": 64, "weight": 700,
+     "letterSpacing": 8, "fill": "$sheet", "enter": {"name": "rise", "dur": 0.6}},
+    {"id": "emblem", "type": "image", "src": "media/emblem.svg", "x": "42%", "y": "56%",
+     "h": [[0.3, 120], [3.8, 600, "inOutCubic"]], "rotate": [[0.3, -20], [6, 30, "linear"]],
+     "enter": {"name": "scale", "dur": 0.5}},
+    {"id": "emblem-label", "type": "text", "text": "emblem.svg: 120 px of its own, drawn at 600",
+     "font": "$mono", "size": 26, "x": "42%", "y": "90%", "fill": "$annotation", "at": 0.6,
+     "enter": {"name": "fade", "dur": 0.5}},
+    {"id": "spinner", "type": "image", "sheet": {"src": "media/spinner.svg", "cols": 8}, "fps": 16, "x": "82%",
+     "y": "56%", "h": 192, "at": 0.8, "enter": {"name": "scale", "dur": 0.5}},
+    {"id": "spinner-label", "type": "text", "text": "sheet: spinner.svg, 8 cells", "font": "$mono", "size": 26,
+     "x": "82%", "y": "72%", "fill": "$annotation", "at": 1.0, "enter": {"name": "fade", "dur": 0.5}}
+  ]
+}

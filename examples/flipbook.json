@@ -1,0 +1,16 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 6, "bg": "#0a0c10"},
+  "layers": [
+    {"id": "title", "type": "text", "text": "FRAME BY FRAME", "x": "50%", "y": "16%", "size": 64, "weight": 700,
+     "letterSpacing": 8, "fill": "$sheet", "enter": {"name": "rise", "dur": 0.6}},
+    {"id": "ground", "type": "line", "points": [[0, 820], [1920, 820]], "stroke": "$track", "strokeWidth": 4},
+    {"id": "fire", "type": "image", "frames": "media/flame/flame_%02d.png", "fps": 12, "x": "88%", "y": 822,
+     "anchor": "bottom", "h": 300, "enter": {"name": "scale", "dur": 0.5}},
+    {"id": "fire-label", "type": "text", "text": "frames: flame_%02d.png", "font": "$mono", "size": 26,
+     "x": "84%", "y": 880, "fill": "$annotation", "at": 0.4, "enter": {"name": "fade", "dur": 0.5}},
+    {"id": "walker", "type": "image", "sheet": {"src": "media/walk.png", "cols": 8}, "fps": 12, "pixelated": true,
+     "h": 192, "anchor": "bottom", "y": 824, "x": [[0, "6%"], [6, "78%", "linear"]]},
+    {"id": "walk-label", "type": "text", "text": "sheet: walk.png, 8 cells, pixelated", "font": "$mono", "size": 26,
+     "x": "30%", "y": 880, "fill": "$annotation", "at": 0.8, "enter": {"name": "fade", "dur": 0.5}}
+  ]
+}

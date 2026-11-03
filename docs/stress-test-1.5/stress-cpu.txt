@@ -4,3 +4,6 @@ models-30        120    0/1    2.02    12.48     10    2     294    0.93    yes 
 stage-16         120    0/1    4.53    42.20      3    2     718    0.72    yes  ok
 textured-100k    120    0/0    3.95    41.86      3    2     600    0.41    yes  ok
 dof-stage        120    0/1   49.80   209.53      1    2    1883    0.54    yes  ok
+# v1.5.0-3-gbdfb261-dirty (skinned and repeat-1000 added, 2026-11-01) · Intel64 Family 6 Model 198 Stepping 2, GenuineIntel · 20 threads · Python 3.14.4 · scale 1.0
+skinned          120    0/1    2.39    12.10     10    2     298    0.95    yes  ok
+repeat-1000      120    0/0    5.23    27.34      4    2     557   14.10    yes  ok

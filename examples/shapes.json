@@ -1,0 +1,24 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 6, "bg": "#0a0c10"},
+  "camera": {"rotateX": 22, "rotateY": [[0, -14], ["end", 14]]},
+  "light": {"preset": "studio", "follow": "world", "azimuth": -40, "elevation": 45},
+  "layers": [
+    {"id": "stage", "type": "group", "x": "50%", "y": "50%", "sort": "pixel", "shadows": {"opacity": 0.4, "soft": 3},
+     "children": [
+       {"id": "floor", "type": "rect", "y": 200, "w": 2600, "h": 1400, "radius": 40, "rotateX": 90, "fill": "#242832"},
+       {"id": "route", "type": "model", "shape": "tube", "r": 12, "y": 188, "rotateX": 90, "fill": "#b9f45d",
+        "shine": 0.6, "d": "M -820 380 C -600 380 -480 120 -330 40 S -60 -60 60 0 S 300 -40 400 -80 S 640 -300 820 -320",
+        "draw": [[0.3, 0], [3.6, 1, "inOut"]]},
+       {"id": "vase", "type": "model", "shape": "lathe", "x": -500, "y": 50, "z": -120, "fill": "#e8e2d0",
+        "shine": 0.7, "profile": "M 0 -150 L 58 -150 C 40 -100 124 -40 112 40 C 102 112 70 138 80 150 L 0 150"},
+       {"id": "cup", "type": "model", "shape": "lathe", "x": -160, "y": 112, "z": 200, "fill": "#ff633f",
+        "profile": [[84, -88], [70, 88], [0, 88]]},
+       {"id": "box", "type": "model", "shape": "cube", "w": 220, "h": 180, "depth": 180, "r": 36, "x": 200,
+        "y": 110, "z": -260, "rotateY": [[0, 10], ["end", 40]], "fill": "#ff633f", "shine": 0.5},
+       {"id": "pill", "type": "model", "shape": "capsule", "r": 50, "h": 300, "x": 560, "y": 150, "z": 160,
+        "rotate": 90, "rotateY": -30, "fill": "#e8e2d0", "shine": 0.6}
+     ]},
+    {"id": "title", "type": "text", "text": "Rounded, turned and swept", "x": "50%", "y": "11%", "size": 56,
+     "weight": 700, "fill": "#e8e2d0", "fixed": true, "at": 0.4, "enter": {"name": "rise", "dur": 0.6}}
+  ]
+}

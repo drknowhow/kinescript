@@ -23,6 +23,7 @@ import re
 
 from . import color as C
 from . import ease as E
+from . import particles as PT
 from .props import _LEN, _NUM, KEY_TIMES, _is_time
 from .timing import KEYWORDS, LIMIT, finite as _finite_secs, parse_clock, show
 
@@ -46,12 +47,17 @@ SHADOW_ALIAS = {"colour": "color", "fill": "color", "offsetX": "x", "offsetY": "
 BOX = {"fill", "pad", "radius"}
 BOX_ALIAS = {"color": "fill", "colour": "fill", "background": "fill", "bg": "fill", "padding": "pad",
              "borderRadius": "radius", "cornerRadius": "radius"}
-MOTION = {"name", "dur", "ease", "stagger", "dist", "from", "amount", "deg"}
+MOTION = {"name", "dur", "ease", "stagger", "dist", "from", "amount", "deg", "order", "seed", "bounces", "count",
+          "fade", "map", "soft"}
 MOTION_ALIAS = {"type": "name", "preset": "name", "duration": "dur", "easing": "ease", "distance": "dist",
-                "delay": "stagger"}
-TWEEN = {"from", "to", "dur", "delay", "ease", "keys"}
+                "delay": "stagger", "softness": "soft", "feather": "soft", "matte": "map"}
+EMPHASIS = {"name", "at", "dur", "repeat", "loop", "ease", "stagger", "order", "seed", "dist", "amount", "deg"}
+EMPHASIS_ALIAS = {"type": "name", "preset": "name", "duration": "dur", "easing": "ease", "distance": "dist",
+                  "times": "repeat", "count": "repeat", "repeats": "repeat", "start": "at", "time": "at",
+                  "loops": "loop"}
+TWEEN = {"from", "to", "dur", "delay", "ease", "keys", "smooth"}
 TWEEN_ALIAS = {"duration": "dur", "easing": "ease", "start": "from", "end": "to", "begin": "from"}
-GRADIENT = {"linear", "radial", "stops"}
+GRADIENT = {"linear", "radial", "sweep", "angle", "stops"}
 AUDIO = {"src", "at", "trim", "gain", "volume", "fadeIn", "fadeOut", "id", "role", "dur", "until", "loop", "pan",
          "words", "text", "speaker", "rate", "backend", "options"}
 AUDIO_ALIAS = {"source": "src", "file": "src", "path": "src", "start": "at", "fade_in": "fadeIn",
@@ -95,9 +101,17 @@ TEXTURE = {"src", "repeat", "offset", "loop", "trim", "speed"}
 CLIP_KEYS = ("loop", "trim", "speed")  # a video texture's, as on a video layer
 TEXTURE_ALIAS = {"image": "src", "file": "src", "path": "src", "url": "src", "tile": "repeat", "tiles": "repeat",
                  "tiling": "repeat", "shift": "offset", "position": "offset"}
+ALONG = {"d", "p", "orient"}
+ALONG_ALIAS = {"path": "d", "route": "d", "progress": "p", "autoRotate": "orient", "autoOrient": "orient",
+               "rotate": "orient"}
+TEXT_PATH = {"d", "offset", "align"}
+TEXT_PATH_ALIAS = {"path": "d", "route": "d", "data": "d", "startOffset": "offset", "start": "offset",
+                   "anchor": "align", "textAnchor": "align"}
+TEXT_PATH_ALIGN = {"start": "start", "left": "start", "center": "center", "centre": "center", "middle": "center",
+                   "end": "end", "right": "end"}
 PART = MATERIAL | {"shape", "w", "h", "depth", "r", "tube", "x", "y", "z", "rotateX", "rotateY", "rotate", "scale",
                    "text", "size", "font", "weight", "italic", "letterSpacing", "lineHeight", "d", "strokeWidth",
-                   "bevel"}
+                   "bevel", "profile"}
 MODEL_ALIAS = {"radius": "r", "thickness": "tube", "geometry": "shape", "primitive": "shape", "extrude": "depth",
                "extrusion": "depth", "chamfer": "bevel",
                "mesh": "shape", "gloss": "shine", "glossiness": "shine", "shininess": "shine",
@@ -106,7 +120,22 @@ MODEL_ALIAS = {"radius": "r", "thickness": "tube", "geometry": "shape", "primiti
                "floor": "ground", "groundShadow": "ground", "contactShadow": "ground", "map": "texture",
                "image": "texture", "picture": "texture", "decal": "texture", "skin": "texture", "outline": "edges",
                "outlines": "edges", "lines": "edges", "creases": "edges", "transmission": "transparency",
-               "seeThrough": "transparency", "translucency": "transparency"}
+               "seeThrough": "transparency", "translucency": "transparency", "copies": "repeat",
+               "instances": "repeat", "array": "repeat", "clones": "repeat", "grid": "repeat"}
+ANIMATION = {"name", "speed", "loop", "start"}  # a model file's clip, played on the layer's clock
+ANIMATION_ALIAS = {"clip": "name", "track": "name", "rate": "speed", "timeScale": "speed", "repeat": "loop",
+                   "offset": "start", "from": "start", "time": "start"}
+MODEL_FILES = (".glb", ".gltf", ".obj")
+# A model's copies: how many, and each one's place and fill (a number or colour, a list in turn, an expression of i).
+REPEAT = {"count", "x", "y", "z", "rotateX", "rotateY", "rotate", "scale", "fill"}
+# A 2D layer's: placed in its own plane, with their own fill, stroke and opacity where the layer has them.
+REPEAT_2D = {"count", "x", "y", "rotate", "scale", "opacity", "fill", "stroke"}
+REPEAT_ALIAS = {"n": "count", "copies": "count", "number": "count", "times": "count", "amount": "count",
+                "color": "fill", "colour": "fill", "colors": "fill", "colours": "fill", "rotation": "rotate",
+                "alpha": "opacity", "strokeColor": "stroke", "strokeColors": "stroke", "strokes": "stroke",
+                "rotationX": "rotateX", "rotationY": "rotateY", "rotationZ": "rotate", "rotateZ": "rotate"}
+MAX_COPIES = 10_000
+COPY_SLOTS = 64  # the materials a model with copies draws: its own, and one per copy fill for those without a fill
 GROUND = {"y", "opacity", "blur", "from"}
 EDGES = {"width", "color", "angle"}
 EDGES_ALIAS = {"colour": "color", "thickness": "width", "size": "width", "strokeWidth": "width", "crease": "angle",
@@ -116,46 +145,81 @@ SHADOWS_ALIAS = {"alpha": "opacity", "strength": "opacity", "softness": "soft", 
 GROUND_ALIAS = {"alpha": "opacity", "strength": "opacity", "softness": "blur", "radius": "blur", "level": "y"}
 
 COMMON = {"id", "type", "at", "dur", "until", "x", "y", "anchor", "opacity", "scale", "scaleX", "scaleY", "rotate",
-          "blur", "blend", "shadow", "fx", "enter", "exit", "hidden", "allowOffscreen", "z", "rotateX", "rotateY",
-          "backface", "fixed", "sound"}
-SHAPE = {"fill", "stroke", "strokeWidth", "draw", "drawStart", "cap", "join"}
+          "blur", "blend", "shadow", "fx", "enter", "exit", "emphasis", "hidden", "allowOffscreen", "z", "rotateX",
+          "rotateY",
+          "backface", "fixed", "sound", "along", "mask", "glow", "outline", "innerShadow", "displace"}
+# Layer effects: their keys, the key a number (or a colour) stands for, the keys that animate and their aliases.
+LOOKS = {
+    "glow": ({"color", "size", "amount"}, "size", ("size", "amount"),
+             {"colour": "color", "radius": "size", "blur": "size", "spread": "size", "strength": "amount",
+              "intensity": "amount", "opacity": "amount"}),
+    "outline": ({"width", "color"}, "width", ("width",),
+                {"colour": "color", "size": "width", "thickness": "width", "strokeWidth": "width"}),
+    "innerShadow": (SHADOW, "blur", ("x", "y", "blur"), SHADOW_ALIAS),
+    "displace": ({"amount", "scale", "speed", "seed"}, "amount", ("amount",),
+                 {"strength": "amount", "intensity": "amount", "size": "scale", "rate": "speed"}),
+}
+LOOK_PROPS = {f"{look} {k}" for look, (_, _, keys, _) in LOOKS.items() for k in keys}
+MODEL_OWN = {"glow", "outline"}  # on a model, its material's glow and its edges (MODEL_ALIAS), as before
+MASK = {"layer", "mode", "feather"}
+MASK_ALIAS = {"id": "layer", "source": "layer", "src": "layer", "matte": "layer", "type": "mode",
+              "softness": "feather", "soft": "feather", "blur": "feather", "edge": "feather"}
+MASK_MODES = ("alpha", "luma", "alphaInvert", "lumaInvert")
+MASK_MODE_ALIAS = {"invert": "alphaInvert", "inverted": "alphaInvert", "inverse": "alphaInvert",
+                   "alphainverted": "alphaInvert", "luminance": "luma", "lumainverted": "lumaInvert",
+                   "luminanceinvert": "lumaInvert"}
+SHAPE = {"fill", "stroke", "strokeWidth", "draw", "drawStart", "cap", "join", "dash", "dashOffset", "rough",
+         "fillRule"}
+ROUGH = {"amount", "length", "seed", "boil"}
+ROUGH_ALIAS = {"roughness": "amount", "jitter": "amount", "wobble": "amount", "segment": "length",
+               "size": "length", "rate": "boil", "fps": "boil"}
 TEXT = {"text", "size", "weight", "font", "italic", "fill", "emph", "align", "maxWidth", "lineHeight",
         "letterSpacing", "stroke", "strokeWidth", "box", "case", "textCase", "caret", "split",
-        "unitX", "unitY", "unitRotate", "unitScale", "unitOpacity"}
-MEDIA = {"src", "w", "h", "fit", "zoom", "focus", "focusX", "focusY", "radius", "stroke", "strokeWidth", "cap", "join"}
+        "unitX", "unitY", "unitRotate", "unitScale", "unitOpacity", "unitFill", "unitBlur"}
+MEDIA = {"src", "w", "h", "fit", "zoom", "focus", "focusX", "focusY", "radius", "stroke", "strokeWidth", "cap", "join",
+         "dash", "dashOffset"}
 TYPES: dict[str, set[str]] = {
-    "rect": SHAPE | {"w", "h", "radius", "dimOutside"},
-    "circle": SHAPE | {"r"},
-    "ellipse": SHAPE | {"w", "h"},
-    "polygon": SHAPE | {"sides", "r", "inner"},
-    "path": SHAPE | {"d", "points", "smooth", "closed"},
-    "line": SHAPE | {"points", "smooth", "closed"},
-    "arrow": SHAPE | {"x1", "y1", "x2", "y2", "bend", "head"},
-    "text": TEXT,
-    "counter": TEXT | {"value", "format"},
-    "image": MEDIA,
-    "video": MEDIA | {"trim", "speed", "volume", "loop", "fadeIn", "fadeOut"},
+    "rect": SHAPE | {"w", "h", "radius", "dimOutside", "repeat"},
+    "circle": SHAPE | {"r", "repeat"},
+    "ellipse": SHAPE | {"w", "h", "repeat"},
+    "polygon": SHAPE | {"sides", "r", "inner", "corner", "repeat"},
+    "path": SHAPE | {"d", "points", "smooth", "closed", "corner", "repeat"},
+    "line": SHAPE | {"points", "smooth", "closed", "corner", "repeat"},
+    "arrow": SHAPE | {"x1", "y1", "x2", "y2", "bend", "head", "repeat"},
+    "text": TEXT | {"repeat", "textPath"},
+    "counter": TEXT | {"value", "format", "repeat", "textPath"},
+    "image": MEDIA | {"repeat", "frames", "sheet", "fps", "loop", "pixelated"},
+    "video": MEDIA | {"trim", "speed", "volume", "loop", "fadeIn", "fadeOut", "repeat"},
     "captions": TEXT | {"src", "cues", "mode", "active", "voice"},
-    "shader": {"preset", "uniforms", "sksl", "w", "h"},
-    "group": {"children", "layers", "w", "h", "clip", "radius", "fill", "sort", "shadows"},
+    "shader": {"preset", "uniforms", "sksl", "w", "h", "repeat"},
+    "group": {"children", "layers", "w", "h", "clip", "radius", "fill", "sort", "shadows", "speed", "loop",
+              "timeRemap", "combine", "repeat"} | SHAPE,
     "model": PART - {"x", "y", "z", "rotateX", "rotateY", "rotate", "scale"} | {"detail", "parts", "explode",
                                                                               "draw", "light", "lights", "env",
-                                                                              "src", "ground", "edges"},
+                                                                              "src", "ground", "edges",
+                                                                              "animation", "repeat"},
+    "particles": PT.OWN | {"text", "font", "weight", "src", "w", "h", "r"},
+    "svg": {"src", "w", "h", "parts", "clip", "speed", "loop", "timeRemap", "repeat"},
 }
 SEQUENCE = COMMON | {"clips", "transition", "fit", "volume", "w", "h"}
-TRANSITION = {"type", "dur"}
-TRANSITION_ALIAS = {"name": "type", "kind": "type", "style": "type", "duration": "dur", "length": "dur"}
-TRANSITIONS = ("fade", "wipe", "slide", "zoom", "blur", "cut")
+TRANSITION = {"type", "dur", "map", "soft"}
+TRANSITION_ALIAS = {"name": "type", "kind": "type", "style": "type", "duration": "dur", "length": "dur",
+                    "softness": "soft", "feather": "soft", "matte": "map", "src": "map", "image": "map",
+                    "gradient": "map"}
+TRANSITIONS = ("fade", "wipe", "slide", "zoom", "blur", "iris", "push", "whip", "luma", "glitch", "cut")
 TRANSITION_VALUE_ALIAS = {"dissolve": "fade", "crossfade": "fade", "crossdissolve": "fade", "xfade": "fade",
-                          "mix": "fade", "none": "cut", "hard": "cut", "hardcut": "cut", "push": "slide"}
-IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp")  # a sequence clip with one of these is an image
+                          "mix": "fade", "none": "cut", "hard": "cut", "hardcut": "cut", "circle": "iris",
+                          "whippan": "whip", "swish": "whip", "lumawipe": "luma", "matte": "luma",
+                          "gradientwipe": "luma", "rgbsplit": "glitch"}
+IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".svg")  # a sequence clip with one of these is an image
 TYPE_ALIAS = {"rectangle": "rect", "square": "rect", "box": "rect", "shape": "rect", "txt": "text", "label": "text",
               "title": "text", "heading": "text", "string": "text", "img": "image", "picture": "image",
               "photo": "image", "oval": "ellipse", "caption": "captions", "subtitles": "captions",
               "subtitle": "captions", "number": "counter", "count": "counter", "movie": "video", "clip": "video",
-              "svg": "path", "polyline": "line", "star": "polygon", "background": "shader", "container": "group",
+              "polyline": "line", "star": "polygon", "background": "shader", "container": "group",
               "frame": "group", "mesh": "model", "3d": "model", "object": "model", "primitive": "model",
-              "solid": "model"}
+              "solid": "model", "particle": "particles", "emitter": "particles", "particlesystem": "particles",
+              "particle_system": "particles", "particle-system": "particles"}
 # Synonyms other tools use. A per-type entry wins over the general one.
 ALIAS = {"color": "fill", "colour": "fill", "fillColor": "fill", "backgroundColor": "fill", "background": "fill",
          "fontSize": "size", "font_size": "size", "textSize": "size", "fontWeight": "weight",
@@ -165,24 +229,40 @@ ALIAS = {"color": "fill", "colour": "fill", "fillColor": "fill", "backgroundColo
          "width": "w", "height": "h", "rotation": "rotate", "angle": "rotate", "content": "text",
          "alpha": "opacity", "borderRadius": "radius", "cornerRadius": "radius", "border_radius": "radius",
          "lineWidth": "strokeWidth", "stroke_width": "strokeWidth", "borderWidth": "strokeWidth",
+         "strokeDasharray": "dash", "dasharray": "dash", "dashArray": "dash", "strokeDashoffset": "dashOffset",
          "strokeColor": "stroke", "borderColor": "stroke", "source": "src", "file": "src", "url": "src",
          "textAlign": "align", "text_align": "align", "letter_spacing": "letterSpacing", "tracking": "letterSpacing",
          "line_height": "lineHeight", "leading": "lineHeight", "max_width": "maxWidth", "wrap": "maxWidth",
          "animation": "enter", "animate": "enter", "entrance": "enter", "in": "enter", "intro": "enter",
-         "out": "exit", "outro": "exit", "exitAnimation": "exit", "transform": None, "kids": "children",
+         "out": "exit", "outro": "exit", "exitAnimation": "exit", "emphasize": "emphasis", "emphasise": "emphasis",
+         "attention": "emphasis", "emphases": "emphasis", "transform": None, "kids": "children",
          "items": "children", "elements": "children", "visible": None, "zIndex": None,
          "rotationX": "rotateX", "rotationY": "rotateY", "rotateZ": "rotate", "rotationZ": "rotate",
          "translateZ": "z", "backfaceVisibility": "backface", "sfx": "sound", "audio": "sound",
-         "soundEffect": "sound"}
+         "soundEffect": "sound", "copies": "repeat", "instances": "repeat", "clones": "repeat", "repeater": "repeat"}
 TYPE_ALIASES = {
+    "rect": {"corner": "radius"},
     "circle": {"radius": "r", "size": "r"}, "polygon": {"radius": "r", "points": "sides"},
     "line": {"color": "stroke", "colour": "stroke", "fill": "stroke", "width": "strokeWidth"},
     "arrow": {"color": "stroke", "colour": "stroke", "fill": "stroke", "width": "strokeWidth"},
-    "image": {"path": "src", "image": "src"}, "video": {"path": "src", "video": "src", "mute": None},
+    "image": {"path": "src", "image": "src", "sequence": "frames", "images": "frames", "spritesheet": "sheet",
+              "spriteSheet": "sheet", "sprite": "sheet", "atlas": "sheet", "frameRate": "fps", "framerate": "fps",
+              "pixelArt": "pixelated"},
+    "video": {"path": "src", "video": "src", "mute": None},
     "counter": {"number": "value", "to": "value"},
     "captions": {"subtitles": "cues", "lines": "cues"},
     "shader": {"shader": "preset", "code": "sksl", "source": "sksl"},
     "model": MODEL_ALIAS,
+    "particles": {"lifetime": "life", "lifespan": "life", "velocity": "speed", "direction": "angle",
+                  "emitRate": "rate", "emissionRate": "rate", "perSecond": "rate", "count": "burst",
+                  "amount": "burst", "colors": "fill", "colours": "fill", "palette": "fill", "rotationSpeed": "spin",
+                  "angularVelocity": "spin", "sizeOverLifetime": "sizeOverLife",
+                  "opacityOverLifetime": "opacityOverLife", "alphaOverLife": "opacityOverLife",
+                  "colorOverLife": "fillOverLife", "colourOverLife": "fillOverLife",
+                  "colorOverLifetime": "fillOverLife", "image": "src", "char": "text", "character": "text",
+                  "emoji": "text", "friction": "drag", "damping": "drag", "noise": "turbulence",
+                  "wobble": "turbulence", "radius": "r", "warmup": "prewarm", "preWarm": "prewarm", "orient": "align",
+                  "alignToVelocity": "align", "faceVelocity": "align", "flutter": "flip"},
 }
 ENUMS = {
     "anchor": ("center", "topleft", "top", "topright", "left", "right", "bottomleft", "bottom", "bottomright"),
@@ -190,13 +270,14 @@ ENUMS = {
     "split": ("chars", "words", "lines"),
     "fit": ("cover", "contain", "stretch"),
     "case": ("upper", "lower"), "textCase": ("upper", "lower"),
-    "cap": ("butt", "round", "square"), "join": ("miter", "round", "bevel"),
+    "cap": ("butt", "round", "square"), "join": ("miter", "round", "bevel"), "fillRule": ("nonzero", "evenodd"),
     "mode": ("karaoke", "pop"),
     "blend": ("normal", "multiply", "screen", "overlay", "add", "lighten", "darken", "softLight", "difference",
-              "color"),
+              "color", "hardLight", "colorDodge", "colorBurn", "exclusion", "hue", "saturation", "luminosity"),
     "backface": ("visible", "hidden"),
     "sort": ("order", "depth", "pixel"),
-    "shape": ("cube", "sphere", "cylinder", "cone", "torus", "plane", "text", "path"),
+    "combine": ("union", "subtract", "intersect", "xor"),
+    "shape": ("cube", "sphere", "cylinder", "cone", "torus", "plane", "capsule", "lathe", "tube", "text", "path"),
     "detail": ("low", "medium", "high"),
     "role": ("voice", "music", "sfx", "ambience"),
 }
@@ -204,8 +285,14 @@ ENUM_ALIAS = {"middle": "center", "centre": "center", "centered": "center", "mid
               "characters": "chars", "letters": "chars", "char": "chars", "word": "words", "line": "lines",
               "uppercase": "upper", "lowercase": "lower", "fill": "cover", "crop": "cover", "scale": "contain",
               "plus": "add", "additive": "add", "soft-light": "softLight", "softlight": "softLight",
+              "hard-light": "hardLight", "color-dodge": "colorDodge", "colour-dodge": "colorDodge", "dodge": "colorDodge",
+              "color-burn": "colorBurn", "colour-burn": "colorBurn", "burn": "colorBurn",
+              "luminance": "luminosity", "luma": "luminosity", "saturate": "saturation",
+              "merge": "union", "minus": "subtract", "cut": "subtract", "intersection": "intersect",
+              "exclude": "xor", "even-odd": "evenodd", "non-zero": "nonzero", "winding": "nonzero",
               "box": "cube", "cuboid": "cube", "ball": "sphere", "globe": "sphere", "donut": "torus",
-              "doughnut": "torus", "ring": "torus", "tube": "cylinder", "can": "cylinder", "pipe": "cylinder",
+              "doughnut": "torus", "ring": "torus", "can": "cylinder", "pipe": "cylinder", "pill": "capsule",
+              "revolve": "lathe", "revolved": "lathe", "turned": "lathe", "spun": "lathe",
               "card": "plane", "quad": "plane", "svg": "path", "string": "text", "med": "medium", "hi": "high",
               "lo": "low", "vo": "voice", "voiceover": "voice", "narration": "voice", "narrator": "voice",
               "speech": "voice", "dialogue": "voice", "bed": "music", "bgm": "music", "song": "music",
@@ -215,22 +302,28 @@ ENUM_ALIAS = {"middle": "center", "centre": "center", "centered": "center", "mid
 WEIGHTS = {"thin": 100, "extralight": 200, "light": 300, "normal": 400, "regular": 400, "book": 400,
            "medium": 500, "semibold": 600, "demibold": 600, "bold": 700, "extrabold": 800, "heavy": 900,
            "black": 900}
-COLOR_KEYS = {"fill", "stroke", "emph", "active"}
+COLOR_KEYS = {"fill", "stroke", "emph", "active", "unitFill"}
 # Objects some tools nest animated values under; their keys belong on the layer itself.
 WRAPPERS = {"tween", "tweens", "keyframes", "animate", "animation", "animations", "props", "properties", "style"}
 # Props whose value must be one number (after % and expressions are resolved).
 SCALAR = {"x", "y", "w", "h", "r", "opacity", "scale", "scaleX", "scaleY", "rotate", "blur", "size", "weight",
           "strokeWidth", "draw", "drawStart", "zoom", "value", "radius", "dimOutside", "sides", "inner", "x1", "y1",
           "x2", "y2", "bend", "head", "maxWidth", "lineHeight", "letterSpacing", "focusX", "focusY", "speed",
-          "unitX", "unitY", "unitRotate", "unitScale", "unitOpacity", "z", "rotateX", "rotateY", "fov",
-          "depth", "tube", "shine", "metal", "rim", "bands", "explode", "bevel", "transparency"}
-REQUIRED = {"text": ("text",), "image": ("src",), "video": ("src",), "path": ("d", "points"), "line": ("points",),
-            "captions": ("cues", "src", "voice"), "shader": ("preset", "sksl"), "model": ("shape", "parts", "src")}
+          "unitX", "unitY", "unitRotate", "unitScale", "unitOpacity", "unitBlur", "z", "rotateX", "rotateY", "fov",
+          "depth", "tube", "shine", "metal", "rim", "bands", "explode", "bevel", "transparency", "timeRemap",
+          "dashOffset", "corner"}
+REQUIRED = {"text": ("text",), "image": ("src", "frames", "sheet"), "video": ("src",), "svg": ("src",),
+            "path": ("d", "points"),
+            "line": ("points",), "captions": ("cues", "src", "voice"), "shader": ("preset", "sksl"),
+            "model": ("shape", "parts", "src"), "particles": ("rate", "burst", "preset")}
 # Keys whose value is an object of their own: never a tween, even with a "from" key (a light's direction).
 OBJECTS = {"light", "lights", "env", "ground", "shadow", "shadows", "box", "fx", "uniforms", "sound", "enter", "exit",
-           "parts", "transition", "texture", "edges"}
+           "emphasis",
+           "parts", "transition", "texture", "edges", "animation", "repeat", "along", "rough", "mask", "glow",
+           "outline", "innerShadow", "displace", "textPath"}
 # Props that cannot be below 0, and the least each may be.
-AT_LEAST = {"radius": 0, "r": 0, "sides": 3, "blur": 0, "strokeWidth": 0, "size": 0}
+AT_LEAST = {"radius": 0, "r": 0, "sides": 3, "blur": 0, "unitBlur": 0, "strokeWidth": 0, "size": 0, "corner": 0,
+            "glow size": 0, "glow amount": 0, "outline width": 0, "innerShadow blur": 0, "displace amount": 0}
 COLOUR_FIX = f"write {C.FORMATS}"
 TIME_FORMS = 'seconds like 1.5, "45f" (frames), "0:02.5", "title.out+0.2" or a marker name'
 
@@ -399,20 +492,22 @@ def _values(raw: dict, ltype: str, rep: Report, lid):
         if w:
             raw["weight"] = w
             rep.add("info", "renamed-value", lid, f"weight '{v}' read as {w}", "weight takes 100..900")
-    for k in ("italic", "hidden", "clip", "loop", "smooth", "closed", "allowOffscreen", "fixed"):
+    for k in ("italic", "hidden", "clip", "loop", "smooth", "closed", "allowOffscreen", "fixed", "pixelated"):
         if isinstance(raw.get(k), str) and raw[k].lower() in ("true", "false", "yes", "no"):
             raw[k] = raw[k].lower() in ("true", "yes")
     if isinstance(raw.get("italic"), str) and raw["italic"].lower() in ("italic", "oblique", "normal"):
         raw["italic"] = raw["italic"].lower() != "normal"
     for key in ENUMS:
-        _enum(raw, key, rep, lid)
+        if not (ltype == "particles" and key == "shape"):  # a particle's shape, checked by _particles
+            _enum(raw, key, rep, lid)
     for k, v in list(raw.items()):
-        if k in OBJECTS:
+        if k in OBJECTS or (ltype == "particles" and k in PT.OWN):
             continue
         if v is None and (k in SCALAR or k in COLOR_KEYS):
             del raw[k]  # null is the default
             continue
-        if k in SCALAR and isinstance(v, list) and v and all(isinstance(x, (int, float)) for x in v):
+        if k in SCALAR and isinstance(v, list) and v and all(isinstance(x, (int, float)) for x in v) and (
+                k != "radius"):  # a radius list is its corners, checked below
             rep.add("error", "flat-keyframes", lid,
                     f"{k}: {v} is a flat list. Keyframes are a list of [time, value] pairs",
                     f"\"{k}\": [[0, {v[0]}], [\"end\", {v[-1]}]]")
@@ -423,6 +518,9 @@ def _values(raw: dict, ltype: str, rep: Report, lid):
         if isinstance(v, dict) and not _tween(v) and k in ("fill", "stroke"):
             if ltype != "model":  # _model says a model takes no gradient
                 gradient(v, k, rep, lid)
+        elif isinstance(v, dict) and not _tween(v) and k == "unitFill":
+            rep.add("error", "bad-value", lid, "unitFill is one colour for each unit, not a gradient",
+                    "give fill the gradient, or make unitFill an expression of i, e.g. \"=hsl(i * 30)\"")
         elif k in SCALAR or k in COLOR_KEYS or (isinstance(v, dict) and _tween(v)):
             _prop(k, v, rep, lid)
 
@@ -442,6 +540,15 @@ def _prop(k: str, v, rep: Report, lid):
         return
     if isinstance(v, dict):
         _keys(v, TWEEN, TWEEN_ALIAS, rep, lid, f"{k} tween: ")
+        if "smooth" in v:
+            if not isinstance(v["smooth"], bool) or "keys" not in v:
+                rep.add("error", "bad-value", lid, f"{k}: smooth is true or false, beside keys",
+                        f"\"{k}\": {{\"keys\": [[0, 0], [1, 100], [2, 300]], \"smooth\": true}}")
+                return
+            if v["smooth"] and k in COLOR_KEYS:
+                rep.add("error", "bad-value", lid, f"{k}: smooth moves numbers through their keys; colours mix key "
+                        "to key", "leave smooth out")
+                return
         if "keys" in v:
             if not _keyframes(v["keys"]):
                 rep.add("error", "bad-value", lid, f"{k} tween: keys is {_show(v['keys'])}; it is keyframes, a list of "
@@ -474,12 +581,22 @@ def _prop(k: str, v, rep: Report, lid):
         values = [("", v)]
     for where, x in values:
         _constant(k, x, where, rep, lid)
+    grads = [x for _, x in values if isinstance(x, dict)]
+    if grads and (len(grads) < len(values) or len({(_kind(x), len(x.get("stops") or [])) for x in grads}) > 1):
+        rep.add("error", "bad-value", lid, f"{k}: a gradient animates only into a gradient of the same kind (linear, "
+                "radial, sweep, or an angle) with as many stops", "give every key the same kind of gradient and the "
+                "same number of stops")
 
 
 def _constant(k: str, x, where: str, rep: Report, lid):
     if isinstance(x, str) and x.startswith(("=", "$")):
         return
-    if k in SCALAR:
+    if k == "radius" and isinstance(x, list):
+        if len(x) != 4 or not all(_finite(r) and r >= 0 for r in x):
+            rep.add("error", "bad-value", lid, f"radius{where} is {_show(x)}; it is one number, or four for the "
+                    "corners: [top-left, top-right, bottom-right, bottom-left], each 0 or more",
+                    '"radius": [24, 24, 0, 0] rounds the top corners')
+    elif k in SCALAR or k == "along p" or k in LOOK_PROPS:
         if isinstance(x, bool):
             rep.add("error", "bad-value", lid, f"{k}{where} is {str(x).lower()}, which is not a number", "use a number")
         elif isinstance(x, (int, float)):
@@ -495,7 +612,18 @@ def _constant(k: str, x, where: str, rep: Report, lid):
     elif k in COLOR_KEYS and x is not None:
         if isinstance(x, dict) and not where:
             return  # a gradient, checked by the caller
-        _colour(x, f"{k}{where}", rep, lid)
+        if isinstance(x, dict):  # a gradient that animates
+            gradient(x, f"{k}{where}", rep, lid)
+        else:
+            _colour(x, f"{k}{where}", rep, lid)
+
+
+def _kind(g: dict) -> str:
+    """A gradient's kind, as Gradient.of reads it."""
+    for k in ("radial", "sweep"):
+        if k in g:
+            return k
+    return "angle" if "linear" not in g and g.get("angle") is not None else "linear"
 
 
 def gradient(g: dict, where: str, rep: Report, lid):
@@ -526,9 +654,19 @@ def gradient(g: dict, where: str, rep: Report, lid):
                             "positions run from 0 (start) to 1 (end)")
                 s = s[1]
             _colour(s, f"{where} gradient stop {j}", rep, lid)
-    lin, rad = g.get("linear"), g.get("radial")
-    if lin is not None and rad is not None:
-        rep.add("error", "bad-value", lid, f"{where} gradient has both 'linear' and 'radial'; give one")
+    lin, rad, swp, ang = g.get("linear"), g.get("radial"), g.get("sweep"), g.get("angle")
+    kinds = [k for k in ("linear", "radial", "sweep") if g.get(k) is not None]
+    if len(kinds) > 1:
+        rep.add("error", "bad-value", lid, f"{where} gradient has {' and '.join(kinds)}; give one")
+    if ang is not None and not _finite(ang):
+        rep.add("error", "bad-value", lid, f"{where} gradient: angle is {_show(ang)}; it is degrees, 0 running up and "
+                "90 to the right", '{"angle": 90, "stops": ["#ff633f", "#7b5cff"]}')
+    elif ang is not None and (lin is not None or rad is not None):
+        rep.add("warning", "ignored-key", lid, f"{where} gradient: angle is ignored beside "
+                f"{'linear points' if lin is not None else 'radial'}", "give the angle alone, or the points alone")
+    if swp is not None and swp is not True and not (isinstance(swp, list) and len(swp) == 2 and all(map(_finite, swp))):
+        rep.add("error", "bad-value", lid, f"{where} gradient: sweep is {_show(swp)}; it is its middle [x, y], each "
+                "from 0 to 1 of the layer's box", '"sweep": [0.5, 0.5]')
     if lin is not None and not (isinstance(lin, list) and len(lin) == 2 and all(
             isinstance(p, (list, tuple)) and len(p) == 2 and all(map(_finite, p)) for p in lin)):
         rep.add("error", "bad-value", lid, f"{where} gradient: linear is {_show(lin)}; it is two points [[x1, y1], "
@@ -596,10 +734,59 @@ def _motion(raw: dict, key: str, rep: Report, lid):
         for k, x in v.items():
             if why := option_problem(k, x):
                 rep.add("error", "bad-ease" if k == "ease" else "bad-value", lid, f"{key}: {why}")
-    for n in str(spec.get("name", "fade")).split("+"):
-        n = n.strip()
+    names = [n.strip() for n in str(spec.get("name", "fade")).split("+")]
+    picks = any(canonical(n) in ("scramble", "glitch") for n in names if n)  # seed picks their random letters and bands
+    if isinstance(v, dict) and (v.get("order") not in (None, "start") or v.get("seed") is not None and not picks) \
+            and not v.get("stagger") and not (raw.get("split") and raw.get("type") in ("text", "counter")):
+        rep.add("warning", "ignored-key", lid, f"{key}: order sets who goes first in a stagger, and there is none: "
+                "a group enters child by child only with a stagger", "add \"stagger\": 0.08")
+    for n in names:
         if n and canonical(n) is None:
             rep.add("error", "bad-motion", lid, f"{key}: " + unknown("motion", n, PRESETS))
+    if isinstance(v, dict):
+        _matte(v, "luma" in [canonical(n) for n in names if n], f"{key}: ", rep, lid)
+
+
+def _matte(spec: dict, luma: bool, where: str, rep: Report, lid):
+    """A luma wipe's map and soft: a gradient checked as a fill's, and either of them without a luma wipe ignored."""
+    given = [k for k in ("map", "soft") if spec.get(k) is not None]
+    if given and not luma:
+        rep.add("warning", "ignored-key", lid, f"{where}{' and '.join(given)} shape a luma wipe, and this is not one, "
+                f"so {'they are' if len(given) > 1 else 'it is'} ignored", "use \"luma\", or remove them")
+    m = spec.get("map")
+    if luma and isinstance(m, dict):
+        gradient(dict(m, stops=m.get("stops", ["#000", "#fff"])), f"{where}map", rep, lid)
+
+
+def _emphasis(raw: dict, rep: Report, lid):
+    """emphasis: a name, an object or a list of them, each with numbers it can use and a name it knows."""
+    from .presets import EMPHASES, canonical_emphasis, emphasis_problem
+    v = raw.get("emphasis")
+    if v in (None, False, "", []):
+        return
+    for k, item in enumerate(v if isinstance(v, list) else [v]):
+        where = f"emphasis[{k}]: " if isinstance(v, list) else "emphasis: "
+        if isinstance(item, str):
+            item = {"name": item}
+        if not isinstance(item, dict):
+            rep.add("error", "bad-value", lid, f"{where}each is a name like \"pulse\" or an object "
+                    f"{{\"name\": \"pulse\", \"at\": 1.2}}, got {type(item).__name__}")
+            continue
+        _keys(item, EMPHASIS, EMPHASIS_ALIAS, rep, lid, where)
+        for key, x in item.items():
+            if why := emphasis_problem(key, x):
+                rep.add("error", "bad-ease" if key == "ease" else "bad-value", lid, where + why)
+        for n in str(item.get("name", "pulse")).split("+"):
+            n = n.strip()
+            if n and canonical_emphasis(n) is None:
+                rep.add("error", "bad-motion", lid, where + unknown("emphasis", n, EMPHASES))
+        if item.get("stagger") and not (raw.get("split") and raw.get("type") in ("text", "counter")):
+            rep.add("warning", "ignored-key", lid, f"{where}stagger plays it unit by unit across a split text, and "
+                    "this layer is not one, so it plays once on the whole layer",
+                    "drop stagger, or split the text: \"split\": \"chars\"")
+        if item.get("loop") is True and item.get("repeat") is not None:
+            rep.add("warning", "ignored-key", lid, f"{where}loop plays it until the layer ends, so repeat is not read",
+                    "drop repeat, or loop")
 
 
 def _id(obj: dict, rep: Report, path: str) -> str:
@@ -692,6 +879,40 @@ def _box(raw: dict, rep: Report, lid):
     _numbers(b, ("radius",), "box ", rep, lid, least=0)
 
 
+def _svg(raw: dict, rep: Report, lid, comps: dict):
+    """An svg layer's file, size and parts. Its pieces are laid out once, so w and h are numbers; each part is checked
+    as the path layer it changes."""
+    src = raw.get("src")
+    if isinstance(src, str) and src and not src.lower().endswith(".svg"):
+        rep.add("error", "bad-value", lid, f"src '{src}' is not an .svg file, which an svg layer reads",
+                "show other pictures in an image layer: \"type\": \"image\"")
+    for k in ("w", "h"):
+        v = raw.get(k)
+        if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 < v < 1e6):
+            rep.add("error", "bad-value", lid, f"{k} is {_show(v)}; an svg layer's {k} is a number of px above 0, "
+                    "since its pieces are laid out once", "animate scale to change its size")
+    parts = raw.get("parts")
+    if parts is None:
+        return
+    if not isinstance(parts, dict):
+        rep.add("error", "bad-value", lid, f"parts is {_show(parts)}; it maps ids in the file to keys for those "
+                "pieces", '"parts": {"star": {"enter": "pop"}, "*": {"stroke": "#f2f0e8"}}')
+        return
+    for pid, part in parts.items():
+        if not isinstance(part, dict):
+            rep.add("error", "bad-value", lid, f"parts '{pid}' is {_show(part)}; it is an object of layer keys",
+                    f'"parts": {{"{pid}": {{"enter": "pop"}}}}')
+            continue
+        for k in [k for k in ("id", "type", "d", "points", "children", "layers") if k in part]:
+            rep.add("error", "bad-key", lid, f"parts '{pid}': {k} comes from the file", f"drop {k}")
+            del part[k]
+        piece, n = dict(part, id=f"{lid}-{pid}", type="path", d="M0 0"), len(rep.issues)
+        _layer(piece, rep, f"{lid}.parts.{pid}", comps)
+        rep.issues[n:] = [i for i in rep.issues[n:] if i["code"] != "ignored-key"]  # the file may give what it needs
+        part.clear()
+        part.update({k: v for k, v in piece.items() if k not in ("id", "type", "d")})
+
+
 def _layer(raw, rep: Report, path: str, comps: dict):
     if not isinstance(raw, dict):
         rep.add("error", "bad-layer", path, f"{path} must be an object, got {type(raw).__name__}")
@@ -713,7 +934,8 @@ def _layer(raw, rep: Report, path: str, comps: dict):
             rep.add("info", "renamed-key", lid, f"type '{name}' is a component; read as \"use\": \"{name}\"",
                     f"write \"use\": \"{name}\"")
     for wrap in [k for k in raw if k in WRAPPERS and isinstance(raw[k], dict)
-                 and not {"name", "type", "preset"} & set(raw[k])]:  # a motion object is not a wrapper
+                 and not {"name", "type", "preset"} & set(raw[k])  # a motion object is not a wrapper
+                 and not (k == "animation" and _model_file(raw))]:  # nor a model file's clip
         inner = raw.pop(wrap)
         for k, v in inner.items():
             if k in raw:
@@ -734,10 +956,16 @@ def _layer(raw, rep: Report, path: str, comps: dict):
                 rep.add("error", "bad-component", lid, unknown("component", name, list(BUILTIN) + list(comps)))
         for key in ("enter", "exit"):
             _motion(raw, key, rep, lid)
+        _emphasis(raw, rep, lid)
         _layer_sound(raw, rep, lid)
         _timing(raw, rep, lid)
         return  # parameters are checked when the component expands (components.Params)
     t = raw.get("type")
+    if isinstance(t, str) and t.strip().lower() in PT.PRESETS and "preset" not in raw:
+        raw["type"], raw["preset"] = "particles", t.strip().lower()
+        rep.add("info", "renamed-value", lid, f"type '{t}' read as particles with preset '{raw['preset']}'",
+                f"write \"type\": \"particles\", \"preset\": \"{raw['preset']}\"")
+        t = "particles"
     if isinstance(t, str) and t.strip().lower() in ENUMS["shape"] and t.strip().lower() not in TYPES \
             and "shape" not in raw:  # "Text" is a text layer, not a model with shape text
         raw["type"], raw["shape"] = "model", t.strip().lower()
@@ -773,16 +1001,20 @@ def _layer(raw, rep: Report, path: str, comps: dict):
     pos = raw.get(key)
     if pos is not None and "x" not in raw and "y" not in raw:
         del raw[key]
-        if isinstance(pos, (list, tuple)) and len(pos) in (2, 3):
-            pos = dict(zip("xyz", pos))
-        if isinstance(pos, dict) and pos and set(pos) <= {"x", "y", "z"} and not ("z" in pos and "z" in raw):
-            raw.update(pos)
-            rep.add("info", "renamed-key", lid, f"'{key}' read as {' and '.join(sorted(pos))}",
-                    " and ".join(f"write \"{k}\"" for k in sorted(pos)))
+        axes = _position(pos)
+        if axes is not None and not ("z" in axes and "z" in raw):
+            raw.update(axes)
+            rep.add("info", "renamed-key", lid, f"'{key}' read as {' and '.join(sorted(axes))}",
+                    " and ".join(f"write \"{k}\"" for k in sorted(axes)))
         else:
             rep.add("error", "bad-value", lid, f"{key} is {_show(pos)}; it is read as x and y only when it is "
-                    "[x, y], [x, y, z] or {\"x\": ..., \"y\": ...}", "write \"x\" and \"y\"")
-    _keys(raw, COMMON | TYPES[t], lalias, rep, lid, "")
+                    "[x, y], [x, y, z], {\"x\": ..., \"y\": ...}, or keyframes of points such as "
+                    "[[0, [100, 300]], [2, [540, 60]]]", "write \"x\" and \"y\"")
+    # "animation" plays a clip of a model file; on any other layer it is read as "enter", as before.
+    allowed = COMMON | TYPES[t] - (set() if _model_file(raw) else {"animation"})
+    if t == "model":
+        allowed = allowed - {"outline"}  # read as edges (MODEL_ALIAS)
+    _keys(raw, allowed, lalias, rep, lid, "")
     _timing(raw, rep, lid)
     shape = raw.get("shape")
     if t == "model" and isinstance(shape, str) and shape.lower().endswith((".glb", ".gltf", ".obj")):
@@ -792,18 +1024,27 @@ def _layer(raw, rep: Report, path: str, comps: dict):
     for need in [REQUIRED.get(t)]:
         if need and not any(raw.get(k) not in (None, "", []) for k in need):
             rep.add("error", "missing-key", lid, f"a {t} layer needs " + " or ".join(f"'{k}'" for k in need),
-                    {"text": "\"text\": \"Hello\"", "image": "\"src\": \"photo.jpg\"", "video": "\"src\": \"clip.mp4\""}
-                    .get(t, ""))
+                    {"text": "\"text\": \"Hello\"", "image": "\"src\": \"photo.jpg\"", "video": "\"src\": \"clip.mp4\"",
+                     "svg": "\"src\": \"logo.svg\""}.get(t, ""))
     if raw.get("src") not in (None, "") and not isinstance(raw["src"], str):
+        name = {"image": "photo.jpg", "captions": "captions.srt", "model": "model.glb", "svg": "logo.svg"}.get(
+            t, "clip.mp4")
         rep.add("error", "bad-value", lid, f"src is {raw['src']!r}; it is one file name, as a string",
-                f"\"src\": \"{ {'image': 'photo.jpg', 'captions': 'captions.srt', 'model': 'model.glb'}.get(t, 'clip.mp4')}\" "
-                "(a path relative to the scene file)")
+                f"\"src\": \"{name}\" (a path relative to the scene file)")
     if t == "video":
         _volume(raw, rep, lid)
     _values(raw, t, rep, lid)
     _structure(raw, t, rep, lid)
+    _stroke(raw, t, rep, lid)
+    _rough(raw, rep, lid)
+    _along(raw, rep, lid)
+    _text_path(raw, rep, lid)
     _effects(raw, rep, lid)
+    _emphasis(raw, rep, lid)
+    _mask(raw, rep, lid)
+    _looks(raw, rep, lid, t)
     _layer_sound(raw, rep, lid)
+    _repeat(raw, rep, lid, t)
     if "text" in TYPES[t]:
         _text(raw, rep, lid)
     _box(raw, rep, lid)
@@ -817,8 +1058,16 @@ def _layer(raw, rep: Report, path: str, comps: dict):
                 rep.add("error", "bad-value", lid, "preset: " + unknown("shader preset", raw["preset"], SH))
     if t == "model":
         _model(raw, rep, lid)
+    if t == "particles":
+        _particles(raw, rep, lid)
+    if t == "image":
+        _frames(raw, rep, lid)
+    if t == "svg":
+        _svg(raw, rep, lid, comps)
     if t == "group":
         _shadows(raw, rep, lid)
+        _clock(raw, rep, lid)
+        _combine(raw, rep, lid)
     kids = raw.get("children") if raw.get("children") is not None else raw.get("layers")
     if t == "group" and raw.get("children") is not None and raw.get("layers") is not None:
         rep.add("error", "duplicate-key", lid, "a group lists its layers under 'children' or 'layers', not both",
@@ -829,6 +1078,193 @@ def _layer(raw, rep: Report, path: str, comps: dict):
     if t == "group" and isinstance(kids, list):
         for i, k in enumerate(kids):
             _layer(k, rep, f"{lid}.children[{i}]", comps)
+
+
+def _point(v) -> bool:
+    return isinstance(v, (list, tuple)) and len(v) in (2, 3) and not any(isinstance(c, (list, tuple, dict)) for c in v)
+
+
+def _position(pos) -> dict | None:
+    """A layer's position as its x, y and z keys: from [x, y], [x, y, z] or {"x": ..., "y": ...}, from keyframes of
+    points, or from a tween or keys object of points. None when it is none of these."""
+    if _point(pos):
+        return dict(zip("xyz", pos))
+    if isinstance(pos, dict) and pos and set(pos) <= {"x", "y", "z"}:
+        return dict(pos)
+    keys = pos.get("keys") if isinstance(pos, dict) else pos
+    if _keyframes(keys) and all(_point(k[1]) for k in keys) and len({len(k[1]) for k in keys}) == 1:
+        axes = {a: [[k[0], k[1][j], *k[2:]] for k in keys] for j, a in enumerate("xyz"[:len(keys[0][1])])}
+        return {a: dict(pos, keys=v) for a, v in axes.items()} if isinstance(pos, dict) else axes
+    if isinstance(pos, dict) and "keys" not in pos and _point(pos.get("to")):
+        n = len(pos["to"])
+        if "from" in pos and not (_point(pos["from"]) and len(pos["from"]) == n):
+            return None
+        return {a: dict(pos, to=pos["to"][j], **({"from": pos["from"][j]} if "from" in pos else {}))
+                for j, a in enumerate("xyz"[:n])}
+    return None
+
+
+def _stroke(raw: dict, t: str, rep: Report, lid):
+    """dash ([on, off, ...] px, as SVG's stroke-dasharray), the dashOffset that slides it, and a path's corner."""
+    dash = raw.get("dash")
+    if dash is not None:
+        if not (isinstance(dash, list) and dash and all(_finite(d) and d >= 0 for d in dash) and any(dash)):
+            rep.add("error", "bad-value", lid, f"dash is {_show(dash)}; it is lengths in px, dash then gap, "
+                    "repeated along the stroke, at least one above 0", '"dash": [12, 8]; to march the dashes, animate '
+                    "dashOffset")
+        elif raw.get("stroke") is None and t not in ("line", "arrow"):
+            rep.add("warning", "ignored-key", lid, "dash marks out a stroke and this layer has none",
+                    '"stroke": "#f2f0e8", "strokeWidth": 4')
+    elif "dashOffset" in raw:
+        rep.add("warning", "ignored-key", lid, "dashOffset slides a dash pattern and this layer has no dash",
+                '"dash": [12, 8]')
+    if "corner" in raw and raw.get("smooth") is True:
+        rep.add("warning", "ignored-key", lid, "corner rounds the corners between straight pieces, and smooth "
+                "leaves none", "drop smooth to keep the points' straight lines and round their corners")
+
+
+def _rough(raw: dict, rep: Report, lid):
+    """rough: true, an amount in px, or {"amount", "length", "seed", "boil"}, made into the object."""
+    v = raw.get("rough")
+    if v is None or v is False:
+        raw.pop("rough", None)
+        return
+    example = '"rough": {"amount": 3, "seed": 1, "boil": 8}'
+    if v is True:
+        raw["rough"] = v = {}
+    elif _finite(v):
+        raw["rough"] = v = {"amount": v}
+    if not isinstance(v, dict):
+        rep.add("error", "bad-value", lid, f"rough is {_show(v)}; it is true, an amount in px, or an object", example)
+        return
+    _keys(v, ROUGH, ROUGH_ALIAS, rep, lid, "rough: ")
+    for k, least, what in (("amount", 0, "how far in px the line strays, 0 or more"),
+                           ("length", 1, "the px between the points that stray, 1 or more"),
+                           ("boil", 0, "how many times a second it is drawn anew, 0 or more")):
+        if k in v and not (_finite(v[k]) and v[k] >= least):
+            rep.add("error", "bad-value", lid, f"rough {k} is {_show(v[k])}; it is {what}", example)
+    s = v.get("seed")
+    if s is not None and not (isinstance(s, int) and not isinstance(s, bool) and 0 <= s < 2 ** 31):
+        rep.add("error", "bad-value", lid, f"rough seed is {_show(s)}; it is a whole number, 0 or more, that picks the "
+                "wobble", example)
+    if v.get("amount") == 0:
+        rep.add("warning", "ignored-key", lid, "rough with amount 0 draws the shape smooth", example)
+
+
+def _looks(raw: dict, rep: Report, lid, t: str):
+    """glow, outline, innerShadow and displace: true, a number (or a colour for glow and outline), or an object,
+    made into the object. Their sizes animate; colours, displace's scale, speed and seed do not. A model's glow and
+    outline are its own (MODEL_OWN)."""
+    for look, (keys, main, moving, alias) in LOOKS.items():
+        if t == "model" and look in MODEL_OWN:
+            continue
+        v = raw.get(look)
+        if v is None or v is False:
+            raw.pop(look, None)
+            continue
+        example = {"glow": '"glow": {"color": "#ff633f", "size": 24, "amount": 1}',
+                   "outline": '"outline": {"width": 4, "color": "#0a0c10"}',
+                   "innerShadow": '"innerShadow": {"x": 0, "y": 4, "blur": 12, "color": "#00000080"}',
+                   "displace": '"displace": {"amount": 8, "scale": 60, "speed": 1, "seed": 0}'}[look]
+        if v is True:
+            raw[look] = v = {}
+        elif _finite(v) or isinstance(v, list) or (isinstance(v, str) and v.startswith("=")):
+            raw[look] = v = {main: v}
+        elif isinstance(v, str) and look in ("glow", "outline"):
+            raw[look] = v = {"color": v}
+        if not isinstance(v, dict):
+            rep.add("error", "bad-value", lid, f"{look} is {_show(v)}; it is true, a number, or an object", example)
+            continue
+        _keys(v, keys, alias, rep, lid, f"{look}: ")
+        for k in moving:
+            if k in v:
+                _prop(f"{look} {k}", v[k], rep, lid)
+        if v.get("color") is not None:
+            _colour(v["color"], f"{look} color", rep, lid)
+        if look == "displace":
+            for k, ok, what in (("scale", lambda x: _finite(x) and x >= 1, "the size of its waves in px, 1 or more"),
+                                ("speed", _finite, "how many waves a second it slides by, a number"),
+                                ("seed", lambda x: isinstance(x, int) and not isinstance(x, bool) and 0 <= x < 2 ** 31,
+                                 "a whole number, 0 or more, that picks the waves")):
+                if k in v and not ok(v[k]):
+                    rep.add("error", "bad-value", lid, f"displace {k} is {_show(v[k])}; it is {what}", example)
+
+
+def _mask(raw: dict, rep: Report, lid):
+    """mask: the id of the layer that masks this one, or {"layer", "mode", "feather"}, made into the object."""
+    v = raw.get("mask")
+    if v is None or v is False:
+        raw.pop("mask", None)
+        return
+    example = '"mask": {"layer": "lens", "mode": "alpha", "feather": 12}'
+    if isinstance(v, str):
+        raw["mask"] = v = {"layer": v}
+    if not isinstance(v, dict):
+        rep.add("error", "bad-value", lid, f"mask is {_show(v)}; it is the id of the layer that masks this one, or "
+                "an object", example)
+        return
+    _keys(v, MASK, MASK_ALIAS, rep, lid, "mask: ")
+    m = v.get("layer")
+    if isinstance(m, str) and m.strip().lstrip("#"):
+        v["layer"] = m.strip().lstrip("#")
+    else:
+        rep.add("error", "bad-value" if "layer" in v else "missing-key", lid, "mask names no layer"
+                + (f": layer is {_show(m)}" if "layer" in v else "") + "; give it the id of the layer that masks "
+                "this one", example)
+    mode = v.get("mode")
+    if mode is None:
+        v.pop("mode", None)
+    elif not isinstance(mode, str) or mode not in MASK_MODES:
+        low = mode.strip().lower() if isinstance(mode, str) else ""
+        fixed = {x.lower(): x for x in MASK_MODES}.get(low) or MASK_MODE_ALIAS.get(low)
+        if fixed:
+            v["mode"] = fixed
+            rep.add("info", "renamed-value", lid, f"mask mode '{mode}' read as '{fixed}'",
+                    f"write \"mode\": \"{fixed}\"")
+        else:
+            rep.add("error", "bad-value", lid, "mask mode: " + unknown("mask mode", mode, MASK_MODES), example)
+    f = v.get("feather")
+    if f is None:
+        v.pop("feather", None)
+    elif not (_finite(f) and f >= 0):
+        rep.add("error", "bad-value", lid, f"mask feather is {_show(f)}; it is how many px the mask's edge fades "
+                "over, 0 or more", example)
+
+
+COMBINES = {"rect", "circle", "ellipse", "polygon", "path", "line", "arrow", "text", "counter", "group"}
+
+
+def _combine(raw: dict, rep: Report, lid):
+    """combine on a group merges its shapes and text into one shape; without it the group draws no stroke."""
+    kids = raw.get("children") if raw.get("children") is not None else raw.get("layers")
+    kids = [k for k in kids if isinstance(k, dict)] if isinstance(kids, list) else []
+    if not raw.get("combine"):
+        drawn = sorted(SHAPE - {"fill"} & set(raw))
+        if drawn:
+            rep.add("warning", "ignored-key", lid, f"{', '.join(drawn)} on a group draw only with combine, which "
+                    "merges its children into one shape", '"combine": "union"')
+        return
+    left = [str(k.get("id", k.get("type"))) for k in kids if k.get("type") not in COMBINES]
+    if left:
+        rep.add("warning", "ignored-key", lid, f"combine merges shapes and text, so {', '.join(left)} is left out",
+                "move it out of the group")
+    if len(kids) - len(left) < (2 if raw["combine"] != "union" else 1):
+        rep.add("warning", "ignored-key", lid, f"combine {raw['combine']} needs at least two shapes or texts to "
+                "combine", "put the shapes to merge in the group's children")
+
+
+def _clock(raw: dict, rep: Report, lid):
+    """A group's own clock for its children: speed (a number above 0), loop (seconds, above 0) and timeRemap."""
+    sp, lp = raw.get("speed"), raw.get("loop")
+    if sp is not None and not (_finite(sp) and sp > 0):
+        rep.add("error", "bad-value", lid, f"speed is {_show(sp)}; on a group it is a number above 0, how fast its "
+                "children's time runs", "\"speed\": 0.5 for half speed; to change it over time, write timeRemap")
+    if lp is not None and not (_finite(lp) and lp > 0):
+        rep.add("error", "bad-value", lid, f"loop is {_show(lp)}; on a group it is the seconds after which its "
+                "children's time starts again", "\"loop\": 1.2")
+    if "timeRemap" in raw and sp is not None:
+        rep.add("warning", "ignored-key", lid, "speed is ignored: timeRemap gives the children's time itself",
+                "drop speed, or fold it into timeRemap")
 
 
 def _shadows(raw: dict, rep: Report, lid):
@@ -934,6 +1370,11 @@ def _transition(raw: dict, rep: Report, lid):
     elif "dur" in tr and not (_number(d) and math.isfinite(d) and d > 0):
         rep.add("error", "bad-value", lid, f"transition dur is {d!r}; it is seconds, a number above 0",
                 "\"dur\": 0.5 overlaps the clips by half a second; for no overlap use \"type\": \"cut\"")
+    from .presets import option_problem
+    for k in ("map", "soft"):
+        if why := option_problem(k, tr.get(k)):
+            rep.add("error", "bad-value", lid, f"transition {why}")
+    _matte(tr, kind == "luma", "transition: ", rep, lid)
 
 
 def _structure(raw: dict, t: str, rep: Report, lid):
@@ -958,15 +1399,8 @@ def _structure(raw: dict, t: str, rep: Report, lid):
         if bad:
             rep.add("error", "bad-value", lid, f"format is {_show(fmt)}; {bad}. It is text with {{:...}} where the "
                     "number goes, like \"{:,.0f}\", \"{:.1f}%\" or \"$ {:,.2f}\"")
-    if t == "path" and isinstance(raw.get("d"), str) and "$" not in raw["d"]:
-        from .svgpath import parse as svg
-        try:
-            svg(raw["d"])
-        except (ValueError, IndexError) as e:
-            m = re.search(r"could not convert string to float: '(.*)'", str(e))
-            why = (f"'{m.group(1)}' is neither a number nor a path command (M, L, H, V, C, S, Q, T, A, Z)" if m
-                   else str(e) if isinstance(e, ValueError) else "it ends in the middle of a command")
-            rep.add("error", "bad-value", lid, f"d: {why}; d is SVG path data like \"M0 0 L100 0 Q150 50 100 100 Z\"")
+    if t == "path":
+        _path_data(raw.get("d"), "d", rep, lid)
     focus = raw.get("focus")
     if t in ("image", "video") and focus is not None and not isinstance(focus, str) and not (
             isinstance(focus, list) and len(focus) == 2 and all(map(_finite, focus))):
@@ -987,14 +1421,35 @@ def _structure(raw: dict, t: str, rep: Report, lid):
                         "{\"start\": 0.5, \"end\": 2, \"text\": \"...\"}, in seconds",
                         "\"cues\": [[0, 1.5, \"Hello\"]]")
                 break
-    if t == "path" and raw.get("d") is not None and not isinstance(raw["d"], str):
-        rep.add("error", "bad-value", lid, f"d is {raw['d']!r}; it is an SVG path like \"M0 0 L100 0\"")
+    if t == "path" and _keyframes(raw.get("d")):
+        _morph(raw["d"], rep, lid)
+    elif t == "path" and raw.get("d") is not None and not isinstance(raw["d"], str):
+        rep.add("error", "bad-value", lid, f"d is {_show(raw['d'])}; it is an SVG path like \"M0 0 L100 0\", or "
+                "keyframes of paths to morph through", '"d": [[0, "M0 0 L100 0 L50 90 Z"], [1, "M50 0 A50 50 0 1 1 '
+                '49.9 0 Z"]]')
     pts = raw.get("points")
     if t in ("path", "line") and pts is not None and not (
             isinstance(pts, list) and all(isinstance(p, (list, tuple)) and len(p) == 2 and all(map(_number, p))
                                           for p in pts)):
         rep.add("error", "bad-value", lid, "points must be a list of [x, y] number pairs",
                 "\"points\": [[0, 0], [100, 50]]")
+
+
+def _morph(keys: list, rep: Report, lid):
+    """d as keyframes of paths: each key's path, its time and ease, and whether the keys have as many shapes."""
+    _prop("d", keys, rep, lid)  # the times and eases
+    counts = []
+    for j, key in enumerate(keys, 1):
+        if isinstance(key[1], str):
+            _path_data(key[1], f"d at keyframe {j}", rep, lid)
+            counts.append(len(re.findall(r"[Mm]", key[1])))
+        else:
+            rep.add("error", "bad-value", lid, f"d at keyframe {j} is {_show(key[1])}; it is SVG path data like "
+                    '"M0 0 L100 0 L50 90 Z"')
+    if len(set(counts)) > 1:
+        rep.add("info", "morph-contours", lid, f"d's keys are drawn in {' and '.join(map(str, sorted(set(counts))))} "
+                "pieces: a piece with no partner grows from, or shrinks into, the middle of the nearest one",
+                "give each key as many pieces (M commands) to pair them as you want")
 
 
 def _effects(raw: dict, rep: Report, lid):
@@ -1216,13 +1671,124 @@ def _more_lights(obj: dict, rep: Report, lid, most: int):
         _light_values(x, ("azimuth", "elevation", "x", "y", "z", "intensity", "range"), rep, lid, where)
 
 
+def _along(raw: dict, rep: Report, lid):
+    """along: the path a layer rides, as path data or "#id" of a path layer, the share p of its length it is at, and
+    whether it turns with the path."""
+    a = raw.get("along")
+    if a is None:
+        return
+    example = "\"along\": {\"d\": \"M0 0 C300 -200 600 200 900 0\", \"p\": [[0, 0], [2, 1]], \"orient\": true}"
+    if isinstance(a, str):
+        raw["along"] = a = {"d": a}
+        rep.add("info", "renamed-value", lid, f"along {_show(a['d'])} read as its d", f"write \"along\": {{\"d\": ...}}")
+    if not isinstance(a, dict):
+        rep.add("error", "bad-value", lid, f"along is {_show(a)}; it is an object with the path in d", example)
+        return
+    _keys(a, ALONG, ALONG_ALIAS, rep, lid, "along: ")
+    d = a.get("d")
+    if not (isinstance(d, str) and d.strip()):
+        rep.add("error", "missing-key", lid, "along needs d: SVG path data, or \"#id\" of a path layer to ride",
+                example)
+    elif not d.startswith("#"):
+        _path_data(d, "along d", rep, lid)
+    if a.get("p") is not None:
+        _prop("along p", a["p"], rep, lid)
+    if a.get("orient") is not None and not isinstance(a["orient"], bool):
+        rep.add("error", "bad-value", lid, f"along orient is {_show(a['orient'])}; it is true or false", example)
+
+
+def _text_path(raw: dict, rep: Report, lid):
+    """textPath: the path a text's letters stand on, as path data or "#id" of a path layer, how far along it the
+    text is (offset, a share of its length) and which part of the text is there (align)."""
+    v = raw.get("textPath")
+    if v is None:
+        return
+    example = "\"textPath\": {\"d\": \"M100 600 C600 200 1300 200 1800 600\", \"offset\": 0.5, \"align\": \"center\"}"
+    if isinstance(v, str):
+        raw["textPath"] = v = {"d": v}
+    if not isinstance(v, dict):
+        rep.add("error", "bad-value", lid, f"textPath is {_show(v)}; it is path data, \"#id\" of a path layer, or an "
+                "object with the path in d", example)
+        return
+    _keys(v, TEXT_PATH, TEXT_PATH_ALIAS, rep, lid, "textPath: ")
+    d = v.get("d")
+    if not (isinstance(d, str) and d.strip()):
+        rep.add("error", "missing-key", lid, "textPath needs d: SVG path data, or \"#id\" of a path layer", example)
+    elif not d.startswith("#"):
+        _path_data(d, "textPath d", rep, lid)
+    if v.get("offset") is not None:
+        _prop("textPath offset", v["offset"], rep, lid)
+    a = v.get("align")
+    if a is not None:
+        to = TEXT_PATH_ALIGN.get(str(a).strip().lower()) if isinstance(a, str) else None
+        if to is None:
+            rep.add("error", "bad-value", lid, f"textPath align is {_show(a)}; it is start, center or end: which part "
+                    "of the text stands at offset", example)
+        elif to != a:
+            v["align"] = to
+            rep.add("info", "renamed-value", lid, f"textPath align '{a}' read as '{to}'", f"write '{to}'")
+    if "anchor" in raw:
+        rep.add("warning", "ignored-key", lid, "anchor is ignored on a text on a path: the path places its letters",
+                "take anchor off; move the text with x and y, or along the path with textPath offset")
+
+
+def _path_data(d, what: str, rep: Report, lid):
+    """Path data that does not parse, named by what it is."""
+    if not isinstance(d, str) or "$" in d:
+        return
+    from .svgpath import parse as svg
+    try:
+        svg(d)
+    except (ValueError, IndexError) as e:
+        m = re.search(r"could not convert string to float: '(.*)'", str(e))
+        why = (f"'{m.group(1)}' is neither a number nor a path command (M, L, H, V, C, S, Q, T, A, Z)" if m
+               else str(e) if isinstance(e, ValueError) else "it ends in the middle of a command")
+        rep.add("error", "bad-value", lid, f"{what}: {why}; {what.split()[-1]} is SVG path data like "
+                "\"M0 0 L100 0 Q150 50 100 100 Z\"")
+
+
+def _turned(obj: dict, rep: Report, lid, where: str = ""):
+    """A lathe turns its profile round the vertical axis: [r, y] points, r out from the axis, or path data."""
+    prof = obj.get("profile")
+    if obj.get("shape") != "lathe":
+        if prof is not None:
+            rep.add("warning", "ignored-key", lid, f"{where}profile is ignored: only a lathe turns a profile",
+                    "\"shape\": \"lathe\"")
+        return
+    example = "\"profile\": [[0, -100], [70, -60], [50, 100], [0, 100]]"
+    if prof in (None, "", []):
+        rep.add("error", "missing-key", lid, f"{where}a lathe needs a profile: the outline it turns round the "
+                "vertical axis, as [r, y] points (r out from the axis, y down) or path data", example)
+    elif isinstance(prof, str):
+        _path_data(prof, f"{where}profile", rep, lid)
+    elif not (isinstance(prof, list) and len(prof) >= 2 and all(
+            isinstance(p, list) and len(p) == 2 and all(map(_finite, p)) for p in prof)):
+        rep.add("error", "bad-value", lid, f"{where}profile is {_show(prof)}; it is two or more [r, y] points, r out "
+                "from the axis and y down, or path data", example)
+    elif any(p[0] < 0 for p in prof):
+        rep.add("error", "bad-value", lid, f"{where}profile has a point with r below 0; r is the distance out from "
+                "the axis", "turn the profile to the right of the axis: [10, 0], not [-10, 0]")
+    elif all(p[0] == 0 for p in prof):
+        rep.add("error", "bad-value", lid, f"{where}profile's points are all on the axis (r 0), so the lathe has no "
+                "surface", example)
+
+
 def _outline(obj: dict, rep: Report, lid, where: str = ""):
-    """Text and path shapes need their outline; a number in `d` is a depth (d is the path data here)."""
+    """Text, path, tube and lathe shapes need their outline; a number in `d` is a depth (d is the path data
+    here). A tube without d is a cylinder, as it was read before tubes ran along a path."""
     d = obj.get("d")
     if isinstance(d, (int, float)) and not isinstance(d, bool) and "depth" not in obj:
         obj["depth"] = obj.pop("d")
         rep.add("info", "renamed-key", lid, f"{where}'d' read as 'depth'", "write 'depth'")
     shape = obj.get("shape")
+    if shape == "tube" and not isinstance(obj.get("d"), str):
+        obj["shape"] = shape = "cylinder"
+        rep.add("info", "renamed-value", lid, f"{where}shape 'tube' without d read as 'cylinder'",
+                "a tube runs along SVG path data: \"d\": \"M-200 0 C-100 -150 100 150 200 0\"; write cylinder for "
+                "a straight one")
+    if shape == "tube":
+        _path_data(obj["d"], f"{where}d", rep, lid)
+    _turned(obj, rep, lid, where)
     if shape == "text" and not str(obj.get("text", "")).strip():
         rep.add("error", "missing-key", lid, f"{where}a text model needs 'text'",
                 'add "text": "..."')
@@ -1306,7 +1872,336 @@ def _see_through(raw: dict, rep: Report, lid):
                 "put the see-through shape in a model layer of its own")
 
 
+def _model_file(raw: dict) -> bool:
+    """Whether the layer draws a model file, under src or a name agents write for it."""
+    return any(isinstance(raw.get(k), str) and raw[k].strip().lower().endswith(MODEL_FILES)
+               for k in ("src", "source", "file", "url", "model", "shape"))
+
+
+def _animation(raw: dict, rep: Report, lid):
+    """`animation` names a clip of the model file: a string, its number from 0, true for the first, or
+    {"name", "speed", "loop", "start"}. Whether the file has it is checked when the scene loads."""
+    if "animation" not in raw:
+        return
+    v = raw["animation"]
+    if v is None or v is False:
+        del raw["animation"]
+        return
+    named = lambda x: (isinstance(x, str) and x.strip()) or x is True or (  # noqa: E731
+        isinstance(x, int) and not isinstance(x, bool) and x >= 0)
+    if not isinstance(v, dict):
+        if not named(v):
+            rep.add("error", "bad-value", lid, f"animation is {_show(v)}; it names a clip of the model file: "
+                    "its name, its number from 0, or an object like {\"name\": \"Walk\", \"speed\": 1}",
+                    "\"animation\": \"Walk\" (kine probe lists the file's clips)")
+        return
+    _keys(v, ANIMATION, ANIMATION_ALIAS, rep, lid, "animation: ")
+    if "name" in v and not named(v["name"]):
+        rep.add("error", "bad-value", lid, f"animation name is {_show(v['name'])}; it is the clip's name or its "
+                "number from 0", "kine probe lists the file's clips")
+    for k, what in (("speed", "how fast it plays: 1 as made, 2 twice as fast, -1 backwards"),
+                    ("start", "the seconds into the clip at the layer's start")):
+        if k in v and not _finite(v[k]):
+            rep.add("error", "bad-value", lid, f"animation {k} is {_show(v[k])}; it is a number, {what}")
+    if isinstance(v.get("loop"), str) and v["loop"].lower() in ("true", "false", "yes", "no"):
+        v["loop"] = v["loop"].lower() in ("true", "yes")
+    if "loop" in v and not isinstance(v["loop"], bool):
+        rep.add("error", "bad-value", lid, f"animation loop is {_show(v['loop'])}; it takes true (the default: the "
+                "clip repeats) or false (it holds its last pose)")
+
+
+def _repeat(raw: dict, rep: Report, lid, t: str):
+    """`repeat` draws `count` copies of the layer. A model's are placed by x, y, z, rotateX, rotateY, rotate and
+    scale and coloured by fill; a 2D layer's are placed by x, y, rotate and scale in its own plane and take fill,
+    stroke and opacity where the layer has them. Each is a number (a colour), a list taken in turn, or an expression
+    of i (the copy, from 0) and n."""
+    if "repeat" not in raw:
+        return
+    v = raw["repeat"]
+    if v is None or v is False:
+        del raw["repeat"]
+        return
+    example = '"repeat": {"count": 10, "x": "=(i - 4.5) * 60"}'
+    if not isinstance(v, dict):
+        rep.add("error", "bad-value", lid, f"repeat is {_show(v)}; it is an object: how many copies and where each "
+                "one goes", example)
+        return
+    allowed = REPEAT
+    if t != "model":
+        for k in ("z", "rotateX", "rotateY"):
+            if k in v:
+                del v[k]
+                rep.add("error", "unknown-key", lid, f"repeat {k} places a model's copies in depth; a 2D layer's "
+                        "copies lie in its own plane", "place them with x, y, rotate and scale")
+        allowed = {k for k in REPEAT_2D if k not in ("fill", "stroke") or k in TYPES[t]}
+    _keys(v, allowed, REPEAT_ALIAS, rep, lid, "repeat: ")
+    c = v.get("count")
+    if isinstance(c, float) and c.is_integer():
+        v["count"] = c = int(c)
+    if "count" not in v:
+        rep.add("error", "missing-key", lid, "repeat needs a count: how many copies of the layer to draw", example)
+    elif isinstance(c, bool) or not isinstance(c, int) or not 1 <= c <= MAX_COPIES:
+        rep.add("error", "bad-value", lid, f"repeat count is {_show(c)}; it is a whole number from 1 to "
+                f"{MAX_COPIES:,}")
+    for k in sorted(allowed - {"count"}):
+        x = v.get(k)
+        if x is None or (isinstance(x, str) and x.startswith("=")):
+            continue
+        items = x if isinstance(x, list) and x else [x]
+        if k in ("fill", "stroke"):
+            if all(isinstance(y, str) for y in items):
+                for y in items:
+                    _colour(y, f"repeat {k}", rep, lid)
+                continue
+            what = "a colour, a list of colours taken in turn, or an expression of i such as \"=hsl(i * 30)\""
+        elif all(_finite(y) for y in items):
+            continue
+        else:
+            what = "a number, a list of numbers taken in turn, or an expression of i such as \"=i * 60\""
+        rep.add("error", "bad-value", lid, f"repeat {k} is {_show(x)}; it is {what}",
+                "i is the copy's number from 0, n the count; t, d, p and T are the layer's times")
+
+
+PARTICLE_SHAPE_ALIAS = {"dot": "circle", "disc": "circle", "disk": "circle", "box": "square", "strip": "rect",
+                        "rectangle": "rect", "confetti": "rect", "spark": "streak", "line": "streak", "trail": "streak",
+                        "bokeh": "soft", "glow": "soft", "blur": "soft", "bubble": "ring", "circleoutline": "ring"}
+EMITTER_ALIAS = {"dot": "point", "center": "point", "centre": "point", "origin": "point", "box": "rect",
+                 "area": "rect", "square": "rect", "rectangle": "rect", "disc": "circle", "disk": "circle",
+                 "sphere": "circle", "edge": "ring", "outline": "ring", "segment": "line", "bar": "line"}
+RANGE_LEAST = {"life": 0.001, "size": 0, "drag": 0, "flip": 0}
+RANGE_EXAMPLE = {"life": "[1.5, 3]", "speed": "[200, 600]", "angle": "[-120, -60]", "size": "[6, 14]",
+                 "spin": "[-360, 360]", "drag": "1.5", "flip": "[1, 3]"}
+
+
+SHEET = {"src", "cols", "rows", "count"}
+SHEET_ALIAS = {"image": "src", "file": "src", "path": "src", "columns": "cols", "across": "cols", "down": "rows",
+               "frames": "count", "cells": "count", "total": "count"}
+PINGPONG = ("pingpong", "bounce", "yoyo", "boomerang", "alternate")  # loop values read as "pingpong"
+
+
+def _frames(raw: dict, rep: Report, lid):
+    """An image layer's frame-by-frame animation: frames (a pattern, glob, folder or list of files) or sheet
+    ({"src", "cols", "rows", "count"}), played at fps with loop. Whether the files are there is checked on load."""
+    fr, sh = raw.get("frames"), raw.get("sheet")
+    if isinstance(sh, str) and sh.strip():
+        raw["sheet"] = sh = {"src": sh}
+    if isinstance(sh, dict) and sh.get("src") in (None, "") and isinstance(raw.get("src"), str) and raw["src"]:
+        sh["src"] = raw.pop("src")
+        rep.add("info", "renamed-key", lid, f"src '{sh['src']}' read as the sheet's src",
+                f"write \"sheet\": {{\"src\": \"{sh['src']}\", ...}}")
+    given = [k for k in ("src", "frames", "sheet") if raw.get(k) not in (None, "", [])]
+    if len(given) > 1:
+        rep.add("error", "duplicate-key", lid, f"an image shows one of src, frames and sheet; this one has "
+                f"{' and '.join(given)}", "keep one")
+    if fr is not None and not (isinstance(fr, str) and fr.strip() or isinstance(fr, list) and fr and all(
+            isinstance(x, str) and x.strip() for x in fr)):
+        rep.add("error", "bad-value", lid, f"frames is {_show(fr)}; it is a file pattern with the frame number in "
+                "it, a folder of images, or a list of files", "\"frames\": \"run/run_%03d.png\"")
+    if sh is not None and not isinstance(sh, dict):
+        rep.add("error", "bad-value", lid, f"sheet is {_show(sh)}; it is an image of frames in a grid",
+                "\"sheet\": {\"src\": \"run.png\", \"cols\": 8, \"rows\": 2}")
+    elif sh is not None:
+        _keys(sh, SHEET, SHEET_ALIAS, rep, lid, "sheet: ")
+        if not (isinstance(sh.get("src"), str) and sh["src"].strip()):
+            rep.add("error", "missing-key", lid, "a sheet needs src, the image of its frames",
+                    "\"sheet\": {\"src\": \"run.png\", \"cols\": 8, \"rows\": 2}")
+        ok = True
+        for k in ("cols", "rows", "count"):
+            v = sh.get(k)
+            if v is None:
+                continue
+            if _finite(v) and v >= 1 and float(v).is_integer():
+                sh[k] = int(v)
+            else:
+                ok = False
+                rep.add("error", "bad-value", lid, f"sheet {k} is {_show(v)}; it is a whole number, 1 or more")
+        if sh.get("cols") is None and sh.get("rows") is None:
+            rep.add("error", "missing-key", lid, "a sheet needs cols, rows or both: how many frames across and down",
+                    "\"cols\": 8, \"rows\": 2")
+        elif ok and sh.get("count") is not None and sh["count"] > sh.get("cols", 1) * sh.get("rows", 1):
+            rep.add("error", "bad-value", lid, f"sheet count is {sh['count']}, more than its {sh.get('cols', 1)} x "
+                    f"{sh.get('rows', 1)} cells", "count the frames in the sheet, or give more cols or rows")
+    v = raw.get("fps")
+    if v is not None and not (_finite(v) and v > 0):
+        rep.add("error", "bad-value", lid, f"fps is {_show(v)}; it is how many frames of the sequence play a "
+                "second, above 0", "\"fps\": 12")
+    v = raw.get("loop")
+    if isinstance(v, str) and re.sub(r"[-_ ]", "", v.lower()) in PINGPONG:
+        raw["loop"] = "pingpong"
+    elif v is not None and not isinstance(v, bool):
+        rep.add("error", "bad-value", lid, f"loop is {_show(v)}; on an image it is true (start again after the last "
+                "frame, the default), false (hold the last frame) or \"pingpong\" (play back to the first)")
+    v = raw.get("pixelated")
+    if v is not None and not isinstance(v, bool):
+        rep.add("error", "bad-value", lid, f"pixelated is {_show(v)}; it is true or false")
+    if not any(k in given for k in ("frames", "sheet")):
+        for k in ("fps", "loop"):
+            if k in raw:
+                rep.add("warning", "ignored-key", lid, f"{k} plays frames or a sheet, and this image has neither",
+                        "drop it, or give frames or sheet")
+
+
+def _particles(raw: dict, rep: Report, lid):
+    """A particles layer's own keys (particles.OWN), which are its emitter's and not layer props."""
+    pre = raw.get("preset")
+    if pre is not None and pre not in PT.PRESETS:
+        s = suggest(str(pre), PT.PRESETS)
+        if s and s.lower() == str(pre).strip().lower():
+            raw["preset"] = s
+            rep.add("info", "renamed-value", lid, f"preset '{pre}' read as '{s}'", f"write '{s}'")
+        else:
+            rep.add("error", "bad-value", lid, "preset: " + unknown("particles preset", pre, PT.PRESETS))
+    for k in PT.RANGES:
+        v = raw.get(k)
+        if v is None:
+            continue
+        nums = v if isinstance(v, list) and len(v) == 2 else [v]
+        if not all(_finite(x) for x in nums):
+            rep.add("error", "bad-value", lid, f"{k} is {_show(v)}; it is a number, or [min, max] for each particle "
+                    "to draw its own between", f"\"{k}\": {RANGE_EXAMPLE[k]}")
+        elif k in RANGE_LEAST and min(nums) < RANGE_LEAST[k]:
+            rep.add("error", "bad-value", lid, f"{k} is {_show(v)}; it must be "
+                    + ("above 0" if k == "life" else "0 or more"))
+    rate = raw.get("rate")
+    if rate is not None and not (isinstance(rate, str) and rate.startswith("=")):
+        if _finite(rate):
+            if rate < 0:
+                rep.add("error", "bad-value", lid, f"rate is {_show(rate)}; it is particles a second, 0 or more")
+        elif isinstance(rate, dict) or _keyframes(rate):
+            _prop("rate", rate, rep, lid)
+            keys = rate if isinstance(rate, list) else rate.get("keys") or [[0, rate.get("from", 0)],
+                                                                            [1, rate.get("to", 0)]]
+            if any(isinstance(k, (list, tuple)) and len(k) > 1 and not (_finite(k[1]) and k[1] >= 0) for k in keys):
+                rep.add("error", "bad-value", lid, "rate: every key is particles a second, a number 0 or more")
+        else:
+            rep.add("error", "bad-value", lid, f"rate is {_show(rate)}; it is particles a second: a number, "
+                    "keyframes or an expression", "\"rate\": [[0, 200], [2, 0]] tapers off over two seconds")
+    burst = raw.get("burst")
+    if burst is not None:
+        pairs = burst if isinstance(burst, list) else [[0, burst]]
+        if not all(isinstance(p, (list, tuple)) and len(p) == 2 and _is_time(p[0]) and _finite(p[1]) and p[1] >= 0
+                   for p in pairs):
+            rep.add("error", "bad-value", lid, f"burst is {_show(burst)}; it is how many particles leave at once at "
+                    "the layer's start, or a list of [time, count]", "\"burst\": [[0, 120], [1.5, 80]]")
+    g = raw.get("gravity")
+    if g is not None and not (_finite(g) or isinstance(g, list) and len(g) == 2 and all(_finite(x) for x in g)):
+        rep.add("error", "bad-value", lid, f"gravity is {_show(g)}; it is px/s² downward, or [x, y] for a pull in "
+                "any direction", "\"gravity\": 900, or [300, 0] for a wind to the right")
+    tb = raw.get("turbulence")
+    if isinstance(tb, dict):
+        _keys(tb, {"amount", "speed"}, {"strength": "amount", "size": "amount", "rate": "speed", "frequency": "speed"},
+              rep, lid, "turbulence: ")
+        _numbers(tb, ("amount", "speed"), "turbulence ", rep, lid, least=0)
+    elif tb is not None and not (_finite(tb) and tb >= 0):
+        rep.add("error", "bad-value", lid, f"turbulence is {_show(tb)}; it is how far, in px, each particle sways, "
+                "or {\"amount\": px, \"speed\": sways a second}", "\"turbulence\": 30")
+    for k in ("align",):
+        if raw.get(k) is not None and not isinstance(raw[k], bool):
+            rep.add("error", "bad-value", lid, f"{k} is {_show(raw[k])}; it is true or false")
+    pw = raw.get("prewarm")
+    if pw is not None and not (isinstance(pw, bool) or _finite(pw) and pw >= 0):
+        rep.add("error", "bad-value", lid, f"prewarm is {_show(pw)}; it is true (as long as a particle lives) or "
+                "seconds the emitter has run when the layer starts")
+    seed = raw.get("seed")
+    if seed is not None and not (_finite(seed) and float(seed).is_integer()):
+        rep.add("error", "bad-value", lid, f"seed is {_show(seed)}; it is a whole number")
+    em = raw.get("emitter")
+    if isinstance(em, dict):  # {"type": "rect", "w": 400, "h": 200}: its size is the layer's w, h and r
+        inner = dict(em)
+        raw["emitter"] = em = inner.pop("type", inner.pop("shape", "point"))
+        for k, v in inner.items():
+            if k in ("w", "h", "r", "width", "height", "radius") and {"width": "w", "height": "h",
+                                                                         "radius": "r"}.get(k, k) not in raw:
+                raw[{"width": "w", "height": "h", "radius": "r"}.get(k, k)] = v
+            else:
+                rep.add("error", "unknown-key", lid, f"emitter: '{k}' is not read; an emitter's size is the layer's "
+                        "w and h (line, rect) or r (circle, ring)")
+        rep.add("info", "renamed-key", lid, f"emitter object read as \"emitter\": \"{em}\" with its size on the "
+                "layer", f"write \"emitter\": \"{em}\" and w, h or r on the layer")
+    if em is not None:
+        low = re.sub(r"[-_ ]", "", str(em).strip().lower())
+        hit = low if low in PT.EMITTERS else EMITTER_ALIAS.get(low)
+        if hit is None or not isinstance(em, str):
+            rep.add("error", "bad-value", lid, "emitter: " + unknown("emitter", em, PT.EMITTERS))
+        elif hit != em:
+            raw["emitter"] = hit
+            rep.add("info", "renamed-value", lid, f"emitter '{em}' read as '{hit}'", f"write '{hit}'")
+    for k in ("w", "h", "r"):
+        v = raw.get(k)
+        if v is not None and not (_finite(v) or isinstance(v, str) and _lengthish(v)):
+            rep.add("error", "bad-value", lid, f"{k} is {_show(v)}; a particles layer's {k} is its emitter's size, "
+                    "a number or a percentage, and it does not animate", f"\"{k}\": \"100%\"")
+    shape = raw.get("shape")
+    if shape is not None:
+        low = re.sub(r"[-_ ]", "", str(shape).strip().lower())
+        hit = low if low in PT.SHAPES else PARTICLE_SHAPE_ALIAS.get(low)
+        if not isinstance(shape, str):
+            rep.add("error", "bad-value", lid, "shape: " + unknown("particle shape", shape, PT.SHAPES))
+        elif hit is not None:
+            if hit != shape:
+                raw["shape"] = hit
+                rep.add("info", "renamed-value", lid, f"shape '{shape}' read as '{hit}'", f"write '{hit}'")
+        elif shape.lower().endswith(IMAGE_EXTS + (".gif",)) and "src" not in raw:
+            raw["src"] = raw.pop("shape")
+            rep.add("info", "renamed-key", lid, f"shape '{shape}' read as src (an image)",
+                    f"write \"src\": \"{shape}\"")
+        elif len(shape) <= 2 and "text" not in raw:  # a character, or one with a variation selector
+            raw["text"] = raw.pop("shape")
+            rep.add("info", "renamed-key", lid, f"shape '{shape}' read as text (a character)",
+                    f"write \"text\": \"{shape}\"")
+        else:
+            rep.add("error", "bad-value", lid, "shape: " + unknown("particle shape", shape, PT.SHAPES),
+                    "a character goes in \"text\" and an image in \"src\"")
+    if raw.get("text") is not None and (not isinstance(raw["text"], str) or not raw["text"]):
+        rep.add("error", "bad-value", lid, f"text is {_show(raw['text'])}; a particle's text is a character such as "
+                "\"★\"")
+    for k in PT.CURVES:
+        v = raw.get(k)
+        if v is None:
+            continue
+        keys = [[0, v.get("from", v.get("to"))], [1, v.get("to")]] if isinstance(v, dict) else v if isinstance(
+            v, list) else [[0, v]]
+        if not keys or not all(isinstance(p, (list, tuple)) and len(p) == 2 and _finite(p[0]) and 0 <= p[0] <= 1
+                               and _finite(p[1]) and p[1] >= 0 for p in keys):
+            rep.add("error", "bad-value", lid, f"{k} is {_show(v)}; it is keyframes over a particle's life, "
+                    "[share of its life from 0 to 1, value 0 or more]", f"\"{k}\": [[0, 1], [1, 0]]")
+    fill = raw.get("fill")
+    if fill is not None:
+        cols = fill if isinstance(fill, list) and fill else [fill]
+        if all(isinstance(c, str) for c in cols):
+            for c in cols:
+                _colour(c, "fill", rep, lid)
+        else:
+            rep.add("error", "bad-value", lid, f"fill is {_show(fill)}; a particle's fill is a colour, or a list of "
+                    "colours the particles take in turn", "\"fill\": [\"#ff633f\", \"#b9f45d\", \"#f2f0e8\"]")
+    fol = raw.get("fillOverLife")
+    if fol is not None:
+        keys = [[0, fol.get("from", fol.get("to"))], [1, fol.get("to")]] if isinstance(fol, dict) else fol
+        if isinstance(keys, list) and keys and all(isinstance(p, (list, tuple)) and len(p) == 2 and _finite(p[0])
+                                                   and 0 <= p[0] <= 1 and isinstance(p[1], str) for p in keys):
+            for p in keys:
+                _colour(p[1], "fillOverLife", rep, lid)
+        else:
+            rep.add("error", "bad-value", lid, f"fillOverLife is {_show(fol)}; it is keyframes over a particle's "
+                    "life, [share of its life from 0 to 1, colour]", "\"fillOverLife\": [[0, \"#fff6d8\"], [1, "
+                    "\"#ff4a1c\"]]")
+    life = raw.get("life", PT.PRESETS.get(raw.get("preset"), {}).get("life", PT.DEFAULTS["life"]))
+    rate = raw.get("rate", PT.PRESETS.get(raw.get("preset"), {}).get("rate", 0))
+    if isinstance(rate, list) and _keyframes(rate):
+        rate = max((k[1] for k in rate if _finite(k[1])), default=0)
+    burst = raw.get("burst", PT.PRESETS.get(raw.get("preset"), {}).get("burst", 0))
+    try:
+        most = (float(rate) if _finite(rate) else 0.0) * max(life if isinstance(life, list) else [life]) + sum(
+            float(p[1]) for p in (burst if isinstance(burst, list) else [[0, burst]]))
+    except (TypeError, ValueError, IndexError):
+        return  # reported above
+    if most > PT.MOST:
+        rep.add("error", "too-many-particles", lid, f"rate and burst keep up to {most:,.0f} particles alive at once; "
+                f"a particles layer has {PT.MOST:,} at most", "lower rate, burst or life, or split it into layers")
+
+
 def _model(raw: dict, rep: Report, lid):
+    _animation(raw, rep, lid)
     _light(raw, rep, lid)
     _outline(raw, rep, lid)
     _texture(raw, rep, lid)
@@ -1344,10 +2239,6 @@ def _model(raw: dict, rep: Report, lid):
         _text(p, rep, lid, where)
         _outline(p, rep, lid, where)
         _texture(p, rep, lid, where)
-        for k, v in p.items():  # what _values lets through for layers but a part cannot animate or resolve
-            if k in SCALAR and (isinstance(v, (list, dict)) or (isinstance(v, str) and (v.startswith("=") or _lengthish(v)))):
-                rep.add("error", "bad-value", lid, f"{where}{k} is {v!r}; parts take plain numbers (they do not animate)",
-                        "animate the model layer, or make the part its own model layer")
 
 
 def _audio_values(a: dict, rep: Report, lid, where: str):

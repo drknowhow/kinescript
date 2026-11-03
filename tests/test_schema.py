@@ -60,10 +60,9 @@ def test_model_keys_parts_and_light_are_checked():
     assert (a["type"], a["shape"], a["r"], a["metal"]) == ("model", "sphere", 40, 0.5)
     assert b["shape"] == "torus" and b["parts"][0]["shape"] == "sphere"
     errs = sorted(i["message"] for i in rep.issues if i["level"] == "error")
-    assert len(errs) == 5, errs
+    assert len(errs) == 4, errs  # a part's keyframes are fine: parts animate
     assert [m for m in errs if "above" in m] and [m for m in errs if "studoi" in m and "studio" in m]
     assert [m for m in errs if "colr" in m] and [m for m in errs if "'big'" in m]
-    assert [m for m in errs if "parts[1]: x" in m and "do not animate" in m]
 
 
 def test_text_and_path_models_need_their_outline_and_keep_the_2d_types():
@@ -106,6 +105,67 @@ def test_every_error_is_reported_at_once():
                                          ({"duration": 0}, "bad-canvas")])
 def test_canvas_limits(canvas, code):
     assert code in codes(scene([{"type": "rect"}], **canvas))[0]
+
+
+def test_position_keyframes_and_tweens_of_points_split_into_x_and_y():
+    def layer(pos):
+        got, s = codes(scene([{"id": "a", "type": "rect", "w": 10, "h": 10, "position": pos}]))
+        assert s is not None and "renamed-key" in got, got
+        return s.by_id["a"]
+    r = layer([[0, [10, 20]], [1, [30, 40], "linear"]]).raw
+    assert (r["x"], r["y"]) == ([[0, 10], [1, 30, "linear"]], [[0, 20], [1, 40, "linear"]])
+    r = layer({"keys": [[0, [10, 20, 5]], [1, [30, 40, 0]]], "smooth": True}).raw
+    assert r["x"] == {"keys": [[0, 10], [1, 30]], "smooth": True} and r["z"]["keys"] == [[0, 5], [1, 0]]
+    r = layer({"from": [0, 0], "to": [100, 50], "dur": 2}).raw
+    assert (r["x"], r["y"]) == ({"from": 0, "to": 100, "dur": 2}, {"from": 0, "to": 50, "dur": 2})
+    a = layer([[0, [10, 20]], [0.5, [30, 40]]])
+    assert (a.get("x", 0.5), a.get("y", 0.5)) == (30, 40)
+    for bad in ([[0, [10, 20]], [1, [30, 40, 0]]], {"from": [0], "to": [100, 50]}, [[0, 10], [1, 20]]):
+        assert "bad-value" in codes(scene([{"id": "a", "type": "rect", "position": bad}]))[0], bad
+
+
+def test_smooth_is_a_boolean_beside_keys_on_numbers():
+    ok = {"keys": [[0, 0], [1, 100], [2, 300]], "smooth": True}
+    assert not [c for c in codes(scene([{"type": "rect", "x": ok}]))[0] if c == "bad-value"]
+    for k_, v in (("x", {"smooth": True}), ("x", dict(ok, smooth="yes")),
+                  ("fill", {"keys": [[0, "#000000"], [1, "#ffffff"]], "smooth": True})):
+        assert "bad-value" in codes(scene([{"type": "rect", k_: v}]))[0], v
+    assert "bad-value" in codes(scene([{"type": "rect", "x": {"keys": [0, 100]}}]))[0]  # keys object still checked
+
+
+def test_along_is_checked_and_its_route_is_a_path_in_the_same_group():
+    path = {"id": "route", "type": "path", "d": "M0 0 L100 0"}
+    group = {"id": "g", "type": "group", "children": [{"id": "inner", "type": "path", "d": "M0 0 L10 0"}]}
+    box = {"id": "box", "type": "rect", "w": 10, "h": 10}
+    for along, code in (({"d": "#rout"}, "unknown-route"), ({"d": "#box"}, "bad-route"),
+                        ({"d": "#inner"}, "bad-route"), ({"d": "#dot"}, "bad-route"), ({"p": 0.5}, "missing-key"),
+                        ({"d": "M0 0 Lx"}, "bad-value"), ({"d": "M0 0 L1 1", "orient": "yes"}, "bad-value"),
+                        ({"d": "M0 0 L1 1", "p": [[0, 0], [1, "far"]]}, "bad-value")):
+        got = codes(scene([path, group, box, {"id": "dot", "type": "circle", "r": 5, "along": along}]))[0]
+        assert code in got, (along, got)
+    got, s = codes(scene([path, {"id": "dot", "type": "circle", "r": 5, "along": "#route"}]))
+    assert "renamed-value" in got and s.by_id["dot"].along == ("#route", False)
+    aliased = {"route": "M0 0 L9 9", "autoRotate": True}
+    got, s = codes(scene([{"id": "dot", "type": "circle", "r": 5, "along": aliased}]))
+    assert "renamed-key" in got and s.by_id["dot"].along == ("M0 0 L9 9", True)
+
+
+def test_stagger_order_is_checked_and_needs_a_stagger_to_order():
+    assert "bad-value" in codes(scene([{"type": "group", "enter": {"name": "rise", "stagger": 0.1, "order": "middle"}}]))[0]
+    assert "bad-value" in codes(scene([{"type": "group", "enter": {"name": "rise", "stagger": 0.1, "seed": 0.5}}]))[0]
+    got, s = codes(scene([{"type": "group", "enter": {"name": "rise", "order": "center"}}]))
+    assert s is not None and "ignored-key" in got
+    got, s = codes(scene([{"type": "text", "text": "Hi", "split": "chars", "enter": {"name": "rise", "order": "end"}}]))
+    assert s is not None and "ignored-key" not in got  # split text staggers 0.04 s unless told
+
+
+def test_a_groups_clock_is_checked():
+    for clock in ({"speed": 0}, {"speed": [[0, 1], [1, 2]]}, {"loop": -1}, {"loop": True},
+                  {"timeRemap": [[0, 0], [1, "slow"]]}):
+        assert "bad-value" in codes(scene([dict({"type": "group"}, **clock)]))[0], clock
+    got, s = codes(scene([{"type": "group", "speed": 2, "timeRemap": "=t"}]))
+    assert s is not None and "ignored-key" in got
+    assert "unknown-key" in codes(scene([{"type": "rect", "loop": 1}]))[0]
 
 
 def test_flat_list_is_not_keyframes():

@@ -1,0 +1,19 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 6, "bg": "#0a0c10"},
+  "camera": {"rotateX": 18, "rotateY": [[0, -12], ["end", 10]]},
+  "light": {"preset": "studio", "follow": "world", "azimuth": -35, "elevation": 40},
+  "layers": [
+    {"id": "stage", "type": "group", "x": "50%", "y": "48%", "sort": "pixel", "shadows": {"opacity": 0.45, "soft": 3},
+     "children": [
+       {"id": "floor", "type": "rect", "y": 260, "z": -200, "w": 3600, "h": 1700, "radius": 40, "rotateX": 90, "fill": "#242832"},
+       {"id": "far", "type": "model", "src": "media/figure.glb", "h": 520, "z": -760, "rotateY": -90,
+        "x": [[0, 1500], ["end", -1100, "linear"]], "animation": {"name": "walk", "start": 0.5}},
+       {"id": "walker", "type": "model", "src": "media/figure.glb", "h": 520, "z": -180, "rotateY": 90,
+        "x": [[0, -1000], ["end", 1150, "linear"]], "animation": {"name": "walk", "speed": 0.8}},
+       {"id": "waver", "type": "model", "src": "media/figure.glb", "h": 520, "x": 420, "z": 260, "rotateY": -25,
+        "animation": {"name": "wave", "start": 0.4}}
+     ]},
+    {"id": "title", "type": "text", "text": "glTF skins, played on the layer's clock", "x": "50%", "y": "11%",
+     "size": 56, "weight": 700, "fill": "#e8e2d0", "fixed": true, "at": 0.4, "enter": {"name": "rise", "dur": 0.6}}
+  ]
+}

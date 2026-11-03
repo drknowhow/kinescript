@@ -5,16 +5,18 @@ index packed into it, so every part of a model draws in one call and hides the o
 from __future__ import annotations
 
 import math
+import re
 
 import numpy as np
 import skia
 
 from . import color as C
 from . import media, mesh, models, schema, space, svgpath
-from .props import compile_prop
+from .props import PLACE, PLACE_DEFAULT, compile_prop
 
 MATERIAL = ("fill", "shine", "metal", "rim", "bands", "glow", "texture", "transparency")
 MAX_MATERIALS = 8
+COPY_SLOTS = schema.COPY_SLOTS  # materials once a model's copies take fills of their own (_copies)
 # Lights are fixed to the camera by default, like a studio key light on the camera rig: turning a model
 # changes its shading, orbiting the camera around it does not. "follow": "world" fixes one in the scene instead.
 LIGHTS = {"studio": {"key": 0.85, "fill": 0.25, "ambient": 0.22, "rim": 0.35, "from": "topleft"},
@@ -449,9 +451,39 @@ def _material(get, emit=None) -> tuple:
             1.0 - min(1.0, max(0.0, float(get("transparency", 0.0)))))
 
 
+def _shaped(r, font: skia.Font, line: str) -> tuple[skia.Path, float]:
+    """A line that needs shaping (marks, right-to-left letters, letters from another font) as the outline a text
+    layer draws: its words in bidi order, each as its pieces (render._pieces), from x 0 on the baseline; and its
+    width. TextBlob.Iter gives no glyph positions, so the pieces are drawn on Skia's SVG canvas, which writes
+    shaped glyphs as path data. Colour emoji have no outline and come out empty."""
+    from .render import _bidi_order, _strong  # render imports this module
+    words = [w for w in line.split(" ") if w]
+    if not words:
+        return skia.Path(), 0.0
+    order, rtls, around = _bidi_order(words, _strong(line) == "R")
+    space, size = font.measureText(" "), font.getSize()
+    widths = [r._measure(font, words[k], rtls[k], around[k]) for k in order]
+    width = sum(widths) + space * (len(words) - 1)
+    pad = 4 * size  # the canvas starts at 0, 0: draw well inside it, then move the outline back
+    st = skia.DynamicMemoryWStream()
+    c = skia.SVGCanvas.Make(skia.Rect(0, 0, width + 2 * pad, 2 * pad), st,
+                            skia.SVGCanvas.kConvertTextToPaths_Flag | skia.SVGCanvas.kNoPrettyXML_Flag)
+    x = pad
+    for k, w in zip(order, widths):
+        r._draw_pieces(c, r._pieces(font, words[k], rtls[k], around[k]), words[k], x, pad, font, skia.Paint())
+        x += w + space
+    del c  # writes the document
+    data = " ".join(re.findall(r' d="([^"]*)"', bytes(st.detachAsData()).decode("utf-8", "replace")))
+    path = svgpath.parse(data) if data.strip() else skia.Path()
+    path.offset(-pad, -pad)
+    return path, width
+
+
 def _text_path(r, num, raw) -> tuple[skia.Path, float]:
-    """Outline of the text, centred on the origin (lines on their middle, capitals on theirs), and its size."""
-    from .render import _covers, _fallback, _ignorable  # render imports this module
+    """Outline of the text, centred on the origin (lines on their middle, capitals on theirs), and its size. A
+    line with marks, right-to-left letters or letters the font lacks is shaped as a text layer's is, unless
+    letterSpacing sets its characters apart."""
+    from .render import _covers, _fallback, _ignorable, _shapes  # render imports this module
     size = float(num("size", 120))
     fam = raw.get("font") or r.s.theme.get("font")
     font = skia.Font(r._typeface(fam, int(num("weight", 600)), bool(raw.get("italic"))), size)
@@ -460,11 +492,15 @@ def _text_path(r, num, raw) -> tuple[skia.Path, float]:
     path = skia.Path()
     for i, line in enumerate(lines):
         glyphs = font.textToGlyphs(line)
+        if not ls and (not all(glyphs) or any(map(_shapes, line))):
+            gp, width = _shaped(r, font, line)
+            path.addPath(gp, -width / 2, i * lh)
+            continue
         if all(glyphs):
             fonts = [font] * len(glyphs)
             xs = np.array(font.getXPos(glyphs)) + ls * np.arange(len(glyphs))
             width = font.measureText(line) + ls * max(0, len(glyphs) - 1)
-        else:  # a letter the font lacks comes from the system font that has it (CJK, emoji), unshaped
+        else:  # spaced letters: one the font lacks comes from the system font that has it (CJK, emoji), unshaped
             fonts, glyphs, adv = [], [], []
             for ch in line:
                 if _ignorable(ch):
@@ -487,11 +523,11 @@ def _text_path(r, num, raw) -> tuple[skia.Path, float]:
     return path, size
 
 
-def _svg_path(num, raw) -> tuple[skia.Path, float]:
+def _svg_path(num, raw, stroke: bool = True) -> tuple[skia.Path, float]:
     """The `d` outline (or its stroke's, with round ends, given strokeWidth) centred on the origin, scaled to
     fit w and/or h when given, and its size."""
     path = svgpath.parse(str(raw.get("d", "")))
-    sw = float(num("strokeWidth", 0) or 0)
+    sw = float(num("strokeWidth", 0) or 0) if stroke else 0.0
     if sw > 0:
         outline = skia.Path()
         skia.Paint(Style=skia.Paint.kStroke_Style, StrokeWidth=sw, StrokeCap=skia.Paint.kRound_Cap,
@@ -544,12 +580,69 @@ def _extruded(r, shape: str, num, raw, detail: str) -> mesh.Mesh:
     return m
 
 
-def _shape(r, shape: str, num, raw, detail: str, slot=None) -> mesh.Mesh:
+def _traced(r, key, make):
+    """make(): a lathe's profile or a tube's path as lines, kept in r._solids by key."""
+    if len(r._solids) > 64:
+        r._solids.clear()
+    hit = r._solids.get(key)
+    if hit is None:
+        hit = r._solids[key] = make()
+    return hit
+
+
+def _profile(prof, k: float) -> tuple[list, float]:
+    """A lathe's profile as lines of [r, y] points with y centred on 0, and its size: [[r, y], ...] (closed when
+    the last point is the first) or path data, its x the distance from the axis."""
+    if isinstance(prof, str):
+        path = svgpath.parse(prof)
+        b = path.computeTightBounds()
+        lines = mesh.polylines(path, max(1.0, min(10.0, max(b.width(), b.height()) * 0.04)) / k)
+    elif isinstance(prof, list) and len(prof) >= 2:
+        q = np.asarray(prof, float).reshape(-1, 2)
+        shut = len(q) > 3 and bool(np.allclose(q[0], q[-1]))
+        lines = [(q[:-1] if shut else q, shut)]
+    else:
+        lines = []
+    if not lines:
+        return [], 0.0
+    ys = np.concatenate([q[:, 1] for q, _ in lines])
+    mid = (ys.min() + ys.max()) / 2
+    extent = max(float(np.ptp(ys)), 2 * max(float(np.abs(q[:, 0]).max()) for q, _ in lines))
+    return [(q - [0.0, mid], c) for q, c in lines], extent
+
+
+def _swept(r, shape: str, num, raw, detail: str, slot=None, grow: float = 1.0) -> mesh.Mesh:
+    """A lathe turned from its profile, or a tube of radius r along its path d (fitted to w and/or h as a path
+    shape is), at its size and centred on the origin. A tube draws the first `grow` share of its length. The
+    lines are kept per profile or path, the mesh in slot while its values hold."""
+    k = mesh.DETAIL.get(detail, 1.0)
+    around = max(6, round(24 * k))
+    if shape == "lathe":
+        prof = raw.get("profile")
+        key = ("lathe", _hashable(prof), k)
+
+        def turned():
+            lines, extent = _traced(r, key, lambda: _profile(prof, k))
+            return mesh.lathe(lines, 2 * around, 3 * max(1.0, min(10.0, extent * 0.04)) / k)
+        return _kept(r, slot, key, turned)
+    w, h, grow = num("w", None), num("h", None), round(max(0.0, min(1.0, grow)), 4)
+    route = ("tube", str(raw.get("d", "")), w, h, k)
+
+    def along():
+        path, extent = _svg_path(num, raw, stroke=False)
+        return mesh.polylines(path, max(1.0, min(10.0, extent * 0.04)) / k)
+    rad = max(0.1, round(float(num("r", 12)), 2))
+    return _kept(r, slot, route + (rad, grow), lambda: mesh.tube(_traced(r, route, along), rad, around, grow))
+
+
+def _shape(r, shape: str, num, raw, detail: str, slot=None, grow: float = 1.0) -> mesh.Mesh:
     """One shape's mesh at its size, centred on the origin. num(key, default) reads its numbers, raw its text.
     With a slot, a primitive is kept there while its size holds: placing it again each frame copied the mesh
-    and made every _fixed result be worked out again."""
+    and made every _fixed result be worked out again. A tube draws the first `grow` share of its length."""
     if shape in mesh.EXTRUDED:
         return _extruded(r, shape, num, raw, detail)
+    if shape in mesh.SWEPT:
+        return _swept(r, shape, num, raw, detail, slot, grow)
     s3, tube = mesh.size(shape, num)
     return _kept(r, slot, (shape, detail, tube, s3), lambda: mesh.placed(mesh.unit(shape, detail, tube), s3))
 
@@ -564,23 +657,59 @@ def _kept(r, slot, key, make):
     return hit[1]
 
 
-def _parts(r, L):
-    """The model's parts merged once: mesh, and for each material slot the part keys that override the layer."""
+def _parts(r, L, t: float = 0.0, T: float = 0.0):
+    """The model's parts merged: mesh, and for each material slot the part keys that override the layer, at the
+    layer's time t (scene time T). Parts whose keys are all plain values merge once; when one moves or changes
+    size, the mesh is merged again on the frames where its values change, and is kept while they hold. Parts with
+    the same material keys share a slot, whose values are read at t."""
     hit = r._models.get(L.id)
+    raw = L.raw.get("parts") or []
     if hit is None:
-        detail = L.raw.get("detail", "medium")
-        meshes, slots, keys = [], [], [{}]
-        for p in L.raw.get("parts") or []:
+        slots, keys, first = [], [{}], [None]  # each part's slot; each slot's keys and the part that set them
+        for i, p in enumerate(raw):
             own = {k: p[k] for k in MATERIAL if k in p}
             if own not in keys:
                 keys.append(own)
-            m = _shape(r, p.get("shape", "cube"), lambda k, d, p=p: p.get(k, d), p, detail)
-            meshes.append(mesh.placed(m, (1.0, 1.0, 1.0), mesh.part_matrix(p)))
+                first.append(i)
             slots.append(keys.index(own))
         if len(keys) > MAX_MATERIALS:
             raise ValueError(f"layer '{L.id}': {len(keys)} different materials; a model takes at most {MAX_MATERIALS}")
-        hit = r._models[L.id] = (mesh.merge(meshes, slots) if meshes else None, keys)
-    return hit
+        props = L.parts if len(L.parts) == len(raw) else [{} for _ in raw]
+        moving = [i for i, pp in enumerate(props) if any(not v.static for k, v in pp.items() if k not in MATERIAL)]
+        tinted = [s for s, i in enumerate(first) if i is not None and any(
+            not v.static for k, v in props[i].items() if k in MATERIAL)]
+        still = None if moving or not raw else _merge(r, L, raw, slots)
+        hit = r._models[L.id] = (still, keys, slots, first, props, moving, tinted)
+    still, keys, slots, first, props, moving, tinted = hit
+    if moving:
+        vals = [dict(p, **{k: L.part(i, k, t, T) for k in props[i] if k not in MATERIAL})
+                if i in moving else p for i, p in enumerate(raw)]
+        held = tuple(_hashable(vals[i]) for i in moving)
+        still = _kept(r, ("parts", L.id), held, lambda: _merge(r, L, vals, slots))
+    if tinted:
+        keys = [dict(o, **{k: L.part(first[s], k, t, T) for k in o if k != "texture"})
+                if s in tinted else o for s, o in enumerate(keys)]
+    return still, keys
+
+
+def _merge(r, L, parts: list, slots: list) -> mesh.Mesh:
+    """Parts with their values, placed in the model and merged into one mesh. A primitive's mesh at its size is
+    kept for each part, so moving a part places the same mesh again."""
+    detail = L.raw.get("detail", "medium")
+    meshes = []
+    for i, p in enumerate(parts):
+        m = _shape(r, p.get("shape", "cube"), lambda k, d, p=p: p.get(k, d), p, detail, ("part", L.id, i))
+        meshes.append(mesh.placed(m, (1.0, 1.0, 1.0), mesh.part_matrix(p)))
+    return mesh.merge(meshes, slots)
+
+
+def _hashable(v):
+    """A value as a key: lists and dicts as tuples."""
+    if isinstance(v, dict):
+        return tuple(sorted((k, _hashable(x)) for k, x in v.items()))
+    if isinstance(v, (list, tuple)):
+        return tuple(_hashable(x) for x in v)
+    return v
 
 
 def _imported(r, L, taken: int):
@@ -590,10 +719,29 @@ def _imported(r, L, taken: int):
     if hit is None:
         imp = models.load(L.src)
         M, mats = models.slots(imp, MAX_MATERIALS - taken)
-        own = [{k: v for k, v in m.items() if k not in L.raw} for m in mats]
+        mine = set(L.raw) | ({"fill"} if "fill" in (L.raw.get("repeat") or {}) else set())
+        own = [{k: v for k, v in m.items() if k not in mine} for m in mats]
         m = imp.mesh._replace(M=np.where(M < 0, 0, M + taken).astype(np.int32))
-        hit = r._models[("src", L.id)] = (m, own, imp.size)
+        hit = r._models[("src", L.id)] = (m, own, imp.size, imp)
     return hit
+
+
+def playing(L, imp, t: float) -> tuple[int, float] | None:
+    """The animation of the layer's model file it plays at its time t, and the time into it: "animation" names
+    it, or is {"name", "speed", "loop", "start"}, on the layer's clock. A clip loops unless loop is false, which
+    holds its ends. None when there is none to play (kine check reports a name the file does not have)."""
+    spec = L.raw.get("animation")
+    if spec is None or spec is False or imp.motion is None:
+        return None
+    spec = spec if isinstance(spec, dict) else {"name": spec}
+    i = models.clip_index(imp, spec.get("name", 0))
+    if i is None:
+        return None
+    length = imp.motion.clips[i][2]
+    at = float(spec.get("start", 0)) + t * float(spec.get("speed", 1))
+    if length <= 0:
+        return i, 0.0
+    return i, at % length if spec.get("loop", True) else min(max(at, 0.0), length)
 
 
 def _fit(g, size) -> float:
@@ -602,19 +750,27 @@ def _fit(g, size) -> float:
     return min(s) if s else 300.0 / max(float(size.max()), 1e-9)
 
 
-def model(r, L, g, t: float = 0.0, T: float = 0.0) -> tuple[mesh.Mesh, list[tuple], list, list]:
+def model(r, L, g, t: float = 0.0, T: float = 0.0, grow: float = 1.0) -> tuple[mesh.Mesh, list[tuple], list, list]:
     """The model's mesh in its own space at its time t (scene time T), its materials, and each material's texture
-    and emission texture (a model file's) or None. "texture": false on the layer turns both off."""
-    parts, keys = _parts(r, L)
+    and emission texture (a model file's) or None. "texture": false on the layer turns both off. A tube shape
+    draws the first `grow` share of its length."""
+    parts, keys = _parts(r, L, t, T)
     shape = L.raw.get("shape")
     meshes = [] if parts is None else [parts]
     if L.src:
-        m, own, size = _imported(r, L, len(keys))
+        m, own, size, imp = _imported(r, L, len(keys))
         keys = keys + own
         fit = _fit(g, size)
-        meshes.insert(0, _kept(r, ("fit", L.id), fit, lambda: m._replace(P=m.P * fit)))
+        play = playing(L, imp, t)
+        if play is None:
+            meshes.insert(0, _kept(r, ("fit", L.id), fit, lambda: m._replace(P=m.P * fit)))
+        else:  # posed at this time: a new mesh, kept while the time into the clip holds (its ends, a pause)
+            def posed():
+                P, N = models.pose(imp, *play)
+                return m._replace(P=P * fit, N=N)
+            meshes.insert(0, _kept(r, ("fit", L.id), (fit, play), posed))
     elif shape:
-        meshes.insert(0, _shape(r, shape, g, L.raw, L.raw.get("detail", "medium"), ("shape", L.id)))
+        meshes.insert(0, _shape(r, shape, g, L.raw, L.raw.get("detail", "medium"), ("shape", L.id), grow))
     if len(meshes) == 1:
         m = meshes[0]
     else:  # the same pieces as last frame: the same mesh (compared by identity, so the pieces are held)
@@ -622,11 +778,76 @@ def model(r, L, g, t: float = 0.0, T: float = 0.0) -> tuple[mesh.Mesh, list[tupl
         if hit is None or len(hit[0]) != len(meshes) or any(a is not b for a, b in zip(hit[0], meshes)):
             hit = r._models[("cat", L.id)] = (meshes, mesh.cat(meshes))
         m = hit[1]
+    if L.copies is not None:
+        m, keys = _copies(r, L, m, keys, t, T)
     accent = r.s.theme.get("accent", "#ff633f")
     root = lambda k, d=None: g(k, accent if k == "fill" and d is None else d)  # noqa: E731
     mats = [_material(lambda k, d=None, o=o: o.get(k, root(k, d)), o.get("emit")) for o in keys]
     glows = [_texture(r, o.get("emitTexture")) if L.raw.get("texture") is not False else None for o in keys]
     return m, mats, [_texture(r, o.get("texture", L.raw.get("texture")), L, t, T) for o in keys], glows
+
+
+def _copies(r, L, m, keys: list, t: float, T: float) -> tuple[mesh.Mesh, list]:
+    """The model's copies ("repeat") at its time t (scene time T): mesh m placed once for each and merged, so they
+    sort as one model, and its materials keys with one for each copy fill in place of each without a fill of its
+    own, which that copy takes as it would the layer's fill. The mesh is kept while m and the copies' values hold;
+    its triangles while m's do, so moving copies keep them."""
+    cols, fills = L.copied(t, T)
+    n, free = L.copies.n, [s for s, o in enumerate(keys) if "fill" not in o]
+    q = slot = None
+    if fills is not None and free:
+        most = max(1, (COPY_SLOTS - len(keys) + len(free)) // len(free))
+        pal = r._models.get(("palette", L.id))
+        if pal is None or pal[0] is not fills or pal[1] != most:  # a fill that holds is the same list each frame
+            pal = r._models[("palette", L.id)] = (fills, most, *_palette(fills, most))
+        colours, q = pal[2:]
+        slot, out = np.zeros((len(keys), len(colours)), np.int32), []
+        for s, o in enumerate(keys):
+            slot[s] = len(out) + (np.arange(len(colours)) if s in free else 0)
+            out += [dict(o, fill=c) for c in colours] if s in free else [o]
+        keys = out
+    vals = list(cols.values()) + [q]
+    hit = r._models.get(("copies", L.id))
+    if hit is not None and hit[0] is m and len(hit[1]) == len(vals) and all(
+            a is b or (a is not None and b is not None and np.array_equal(a, b)) for a, b in zip(hit[1], vals)):
+        return hit[2], keys
+    A = {k: np.asarray(cols[k], float) if k in cols else np.full(n, PLACE_DEFAULT[k]) for k in PLACE}
+    R = _turns(A["rotateX"], A["rotateY"], A["rotate"]).transpose(0, 2, 1)
+    s = A["scale"][:, None, None]
+    P = (m.P @ R) * s + np.stack([A["x"], A["y"], A["z"]], 1)[:, None, :]
+    N = (m.N @ R) * np.where(s < 0, -1.0, 1.0)  # a mirrored copy's normals turn round with it
+    if hit is not None and hit[0] is m:  # the same mesh copied: the same triangles
+        Tn, U = hit[2].T, hit[2].U
+    else:
+        Tn = (m.T[None] + (np.arange(n) * len(m.P))[:, None, None]).reshape(-1, 3).astype(np.int32)
+        U = None if m.U is None else np.tile(m.U, (n, 1))
+    M = np.tile(m.M, n) if q is None else slot[m.M[None, :], q[:, None]].ravel()
+    merged = mesh.Mesh(P.reshape(-1, 3), N.reshape(-1, 3), Tn, M.astype(np.int32), U)
+    r._models[("copies", L.id)] = (m, vals, merged)
+    return merged, keys
+
+
+def _turns(rx, ry, rz) -> np.ndarray:
+    """(n, 3, 3) rotations by rotateX, rotateY and then rotate, in degrees, as a part's (mesh.part_matrix)."""
+    a, b, c = (np.radians(np.asarray(v, float)) for v in (rx, ry, rz))
+    one, zero = np.ones_like(a), np.zeros_like(a)
+    turn = lambda *e: np.stack(e, -1).reshape(-1, 3, 3)  # noqa: E731
+    return (turn(one, zero, zero, zero, np.cos(a), -np.sin(a), zero, np.sin(a), np.cos(a))
+            @ turn(np.cos(b), zero, np.sin(b), zero, one, zero, -np.sin(b), zero, np.cos(b))
+            @ turn(np.cos(c), -np.sin(c), zero, np.sin(c), np.cos(c), zero, zero, zero, one))
+
+
+def _palette(fills: list, most: int) -> tuple[list, np.ndarray]:
+    """The colours the copies' fills (one each) are drawn in, at most `most`, and each copy's among them: each
+    distinct fill in the order the copies first take it; past `most`, that many spread along that order, each copy
+    taking the nearest."""
+    colours = list(dict.fromkeys(fills))
+    if len(colours) <= most:
+        at = {c: j for j, c in enumerate(colours)}
+        return colours, np.array([at[c] for c in fills], np.int32)
+    colours = [colours[round(j * (len(colours) - 1) / max(most - 1, 1))] for j in range(most)]
+    a, b = np.asarray(fills, float), np.asarray(colours, float)
+    return colours, ((a[:, None, :] - b[None]) ** 2).sum(-1).argmin(1).astype(np.int32)
 
 
 def _inner(p: np.ndarray) -> np.ndarray:
@@ -1053,13 +1274,11 @@ def _lines(r, L, m, T, ids, front, w, cos: float, exact: bool) -> tuple:
     end, so a line is hidden only by what is in front of it. exact: by the sort's own key; else by each face's
     nearest corner, for triangles _unswim is to cut."""
     weld, face, first, ends, sides, same = _topology(r, L, m)
-
-    def creases():  # the cosine of the angle between the faces either side of each edge
-        a, b, c = (m.P[m.T[first, k]] for k in range(3))
-        n = np.cross(b - a, c - a)
-        n = np.r_[n / (np.linalg.norm(n, axis=1, keepdims=True) + 1e-30), np.zeros((1, 3))]
-        return (n[sides[:, 0]] * n[sides[:, 1]]).sum(1) * np.where(same, -1.0, 1.0)
-    dots = _fixed(r, L, m, "creases", creases)
+    c = r._models.get(("copies", L.id)) if L.copies is not None else None
+    if c is not None and c[2] is m:  # a copy turns and scales its faces together: its creases are the one's
+        dots = np.tile(_fixed(r, L, c[0], "creases1", lambda: _creases(c[0], _welded(r, L, c[0]))), L.copies.n)
+    else:
+        dots = _fixed(r, L, m, "creases", lambda: _creases(m, (weld, face, first, ends, sides, same)))
     rows = np.flatnonzero(front)
     fid = face[ids[rows]]
     seen = np.zeros(len(first) + 1, bool)  # each face toward the camera; the last, past a border, never is
@@ -1079,6 +1298,15 @@ def _lines(r, L, m, T, ids, front, w, cos: float, exact: bool) -> tuple:
     return va, vb, np.maximum(top[ends[e, 0]], top[ends[e, 1]])
 
 
+def _creases(m, topo: tuple) -> np.ndarray:
+    """The cosine of the angle between the faces either side of each edge of mesh m (its _topology)."""
+    _, _, first, _, sides, same = topo
+    a, b, c = (m.P[m.T[first, k]] for k in range(3))
+    n = np.cross(b - a, c - a)
+    n = np.r_[n / (np.linalg.norm(n, axis=1, keepdims=True) + 1e-30), np.zeros((1, 3))]
+    return (n[sides[:, 0]] * n[sides[:, 1]]).sum(1) * np.where(same, -1.0, 1.0)
+
+
 def wire(xy: np.ndarray, T: np.ndarray) -> np.ndarray:
     """Each edge of triangles T once, as its two ends at points xy: what kine look --wire draws."""
     e = np.sort(T[:, [[0, 1], [1, 2], [2, 0]]].reshape(-1, 2), axis=1).astype(np.int64)
@@ -1087,10 +1315,24 @@ def wire(xy: np.ndarray, T: np.ndarray) -> np.ndarray:
 
 
 def _topology(r, L, m) -> tuple:
-    """mesh.edges of the model's mesh, kept while its triangles are (a size that animates keeps them)."""
+    """mesh.edges of the model's mesh, kept while its triangles are (a size that animates keeps them). A model
+    file's animation moves points it welds, so a posed mesh's are worked out each time. Copies (repeat) take the
+    edges of the mesh they copy, once for each: on the merged mesh, copies that touch would share points."""
+    c = r._models.get(("copies", L.id)) if L.copies is not None else None
+    if c is None or c[2] is not m:
+        return _welded(r, L, m)
+    one = _welded(r, L, c[0])
+    hit = r._models.get(("edges", L.id, "copies"))
+    if hit is None or hit[0] is not one:
+        hit = r._models[("edges", L.id, "copies")] = (one, mesh.tiled(one, L.copies.n, len(c[0].T)))
+    return hit[1]
+
+
+def _welded(r, L, m) -> tuple:
     hit = r._models.get(("edges", L.id))
-    if hit is None or hit[0] is not m.T or hit[1] != len(m.P):
-        hit = r._models[("edges", L.id)] = (m.T, len(m.P), mesh.edges(m.P, m.T))
+    if hit is None or hit[0] is not m.T or hit[1] != len(m.P) or (L.raw.get("animation") not in (None, False)
+                                                                  and hit[3] is not m.P):
+        hit = r._models[("edges", L.id)] = (m.T, len(m.P), mesh.edges(m.P, m.T), m.P)
     return hit[2]
 
 
@@ -1115,14 +1357,16 @@ def _combined(emit: bool = False) -> skia.RuntimeEffect:
 def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float = 0.0):
     """Draw model layer L on canvas c at its time t (scene_t on the scene's clock). Returns its projected bounds
     in device pixels, or None."""
-    m, mats, texs, glows = model(r, L, g, t, scene_t)
+    amt = max(0.0, min(1.0, float(g("draw")) * reveal))
+    grows = L.raw.get("shape") == "tube" and not L.src  # a tube is drawn along its length, not bottom to top
+    m, mats, texs, glows = model(r, L, g, t, scene_t, amt if grows else 1.0)
+    amt = 1.0 if grows else amt
     lt, more, env = _lighting(r, L, m, t, scene_t)
     fg = fog(r, scene_t) if r._stage is None else None  # a stage fogs each pixel it shows
     P, N, T, M = m.P, m.N, m.T, m.M
     U = None  # texture coordinates, when any material has a texture (a file without them: check says no-uvs)
     if any(tx is not None for tx in texs + glows):
         U = m.U if m.U is not None else np.zeros((len(P), 2))
-    amt = max(0.0, min(1.0, float(g("draw")) * reveal))
     tid = slice(None)  # each triangle's index in the whole mesh
     if amt < 1.0:
         tid = _fixed(r, L, m, "order", lambda: mesh.build_order(m))[:math.ceil(amt * len(T))]

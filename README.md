@@ -35,8 +35,8 @@ rendered from.
   typewriter reveal with a caret, `**emphasis**` markup, and per-unit expressions (`"unitY": "=sin(T*4 + i)*12"`
   for a wave).
 - **Footage.** Video layers with trim, speed, loop, cover/contain fit, punch-in `zoom` around a `focus` point, and
-  rounded picture-in-picture. A `sequence` turns a cut list into clips with fade, wipe, slide, zoom or blur
-  transitions. Clip audio and music beds are mixed automatically.
+  rounded picture-in-picture. A `sequence` turns a cut list into clips with fade, wipe, slide, zoom, blur, iris,
+  push, whip, glitch or luma transitions. Clip audio and music beds are mixed automatically.
 - **Sound on the same timeline.** Voice-over, music and effects are cues like layers, a voice's words are cues
   too, a voice can be spoken from text, and sounds with a role are levelled and ducked for you
   ([Sound](https://github.com/drknowhow/kinescript#sound)).
@@ -45,8 +45,58 @@ rendered from.
 - **Finishing.** Per-layer blur, shadow, blend modes and colour adjustments; a scene grade with vignette and film
   grain; optional motion blur.
 - **Components.** `lowerThird`, `titleCard`, `callout`, `focus` (dim everything but a region), `progress`,
-  `kinetic`, plus your own with `{{param}}` placeholders.
+  `kinetic`, the charts `barChart`, `lineChart` and `pieChart`, plus your own with `{{param}}` placeholders.
 - **Outputs.** H.264 `.mp4`, ProRes 4444 `.mov` and VP9 `.webm` with alpha for compositing, `.gif`, PNG sequences.
+
+## 2D
+
+Paths, shapes, masks and effects are drawn by the same Skia renderer as everything else, and every frame is still a
+function of the scene and its number alone.
+
+- **Motion along paths.** `along` rides a layer along SVG path data or a path layer (`"#route"`), turned with the
+  path when `orient` is set. `position` takes keyframes of points, and `{"keys": [...], "smooth": true}` passes
+  through every key without stopping and without overshooting them.
+- **Groups with their own time.** A group's enter with a `stagger` brings its children in one by one, in an `order`
+  (`start`, `end`, `center`, `edges` or `random`). `speed`, `loop` and `timeRemap` run a group's children on a clock
+  of their own, so a looping icon is one group with `"loop": 1.2`.
+- **Vector shapes.** `d` takes keyframes and morphs any path into any other. Strokes take `dash` and `dashOffset`
+  (marching dashes that still draw on), `corner` rounds every corner, and a rect's `radius` takes four values.
+  `rough` wobbles an outline as if drawn by hand and `boil` redraws it several times a second. `combine` merges a
+  group's shapes and text into one shape, so a badge with a word cut out of it is a group of a rect and a text.
+  Gradients take `angle` and `sweep`, fill text and strokes, and animate.
+- **Masks and blends.** `mask` shows a layer through another by its alpha or luma, or their inverse, with a
+  `feather`; the mask moves on its own clock, so a lens can slide over a layer that holds still. Seven more blend
+  modes: hardLight, colorDodge, colorBurn, exclusion, hue, saturation and luminosity.
+- **Layer effects.** `glow`, `outline`, `innerShadow` and `displace` (noise waves that slide), sized by keys that
+  animate.
+- **Many at once.** `repeat` copies a shape, text, image or group up to 10,000 times, each copy placed and coloured
+  by an expression of its number `i`. A `particles` layer emits by `rate` or `burst`, with `life`, `speed`,
+  `gravity`, `drag`, and size, opacity and fill over each particle's life; `confetti`, `sparks`, `snow`, `dust` and
+  `bubbles` are presets. Each particle comes from its number and a `seed`, so any frame renders on its own. An
+  `image` with `frames` or a `sheet` plays frame-by-frame animation.
+- **Type on curves.** `textPath` lays text along a path, each letter turned to it, and `offset` slides it along.
+  `unitFill` and `unitBlur` colour and blur each letter by an expression, and `sweep(i, n, p, soft)` runs a
+  highlight across a line.
+- **SVG files.** An `.svg` in an image layer draws as vectors, sharp at any size. An `svg` layer turns the file's
+  shapes into layers named by their ids, so each piece can draw on, enter in turn, morph or take a mask.
+- **Motion library.** Twelve more enter and exit motions, among them `land` (drops in and bounces), `squash`,
+  `elastic`, `rise-mask`, `scramble`, `glitch` and `whip`. `emphasis` plays `pulse`, `shake`, `float` and seven more
+  in the middle of a layer's life, once, repeated or looped. Sequences also cut by `iris`, `push`, `whip`, `glitch`
+  and `luma`, and `barChart`, `lineChart` and `pieChart` are charts whose bars grow, line draws on and slices sweep
+  round.
+- **Motion an agent can read.** `kine look --trails` draws each moving layer's path over the frames, a dot a frame,
+  so the spacing shows eases, overshoots and stops; `--onion 3` draws the three frames before each one over it.
+  `kine probe --curve title.x` gives a key's value and speed at every frame. `kine check` warns `stop-and-go`,
+  `strobe` and `slow-effects`.
+
+A dot that rides a dashed route as it draws on:
+
+```json
+{"id": "route", "type": "path", "d": "M200 700 C 600 300 1300 1000 1720 400", "stroke": "#9299a8",
+ "strokeWidth": 5, "dash": [14, 10], "draw": [[0, 0], [3, 1, "inOutSine"]]},
+{"id": "dot", "type": "circle", "r": 18, "fill": "#ff633f", "glow": 24,
+ "along": {"d": "#route", "p": [[0, 0], [3, 1, "inOutSine"]], "orient": true}}
+```
 
 ## 3D
 
@@ -64,10 +114,13 @@ no depth draw exactly as before.
   each pixel, so models and cards pass through each other with a clean edge, and a model's `ground` shadow lies
   on a floor layer. With `"shadows": true` its models cast shadows from the key light onto the floor, walls and
   each other.
-- **Model layers.** `"type": "model"` draws a lit `cube`, `sphere`, `cylinder`, `cone`, `torus` or `plane`, or
-  several shapes merged as `parts` so their triangles are depth-sorted together. Materials take `fill`, `shine`,
-  `metal`, `rim`, `bands` (toon steps), `glow`, `transparency` (see-through, the far side showing) and `texture`,
-  wrapped round the shape with `repeat` and `offset`: an
+- **Model layers.** `"type": "model"` draws a lit `cube` (`r` rounds it), `sphere`, `cylinder`, `cone`, `capsule`,
+  `torus` or `plane`, a `lathe` turned from a profile, a `tube` along a path (its `draw` grows it), or
+  several shapes merged as `parts` so their triangles are depth-sorted together; part keys animate like layer keys.
+  `repeat` draws copies of a model merged into one mesh, each placed and coloured by an expression of its number
+  `i`: a waving grid of 100 cubes is one layer. Materials take `fill`, `shine`, `metal`, `rim`, `bands` (toon
+  steps), `glow`, `transparency` (see-through, the far side showing) and `texture`, wrapped round the shape with the
+  texture's `repeat` and `offset`: an
   image, a video that plays on the model, or `"#groupId"`, a group of layers drawn on it at each frame's time, such as
   an app on a phone's screen. `light`, for the scene or one model, takes `studio`, `soft`,
   `dramatic` or `flat`, or your own amounts, and every amount, its `azimuth`, `elevation` and colour animate. It
@@ -79,8 +132,12 @@ no depth draw exactly as before.
   SVG path data, filled, or stroked with `strokeWidth` for line icons. Both take a `depth` and a 45-degree `bevel`.
 - **Model files.** `src` reads `.glb` and `.gltf` (glTF 2.0) and `.obj` with its `.mtl`: node transforms, base
   colours and base colour textures, emission (`emissiveFactor` and `emissiveTexture`, or `Ke` and `map_Ke`),
-  transparency (`alphaMode` `BLEND`, or `d` and `Tr`), and metallic and roughness as `metal` and `shine`. `ground` puts a soft shadow under any model, straight
-  down or, with `"from": "light"`, cast along its key light.
+  transparency (`alphaMode` `BLEND`, or `d` and `Tr`), and metallic and roughness as `metal` and `shine`.
+  Meshopt-compressed and quantized files (`gltfpack -c`) are read as they are; Draco-compressed ones with
+  `pip install "kinescript[draco]"`.
+  `animation` plays a glTF file's clips on the layer's clock: node movement, morph target weights and skins, with
+  `speed`, `loop` and `start`. `ground` puts a soft shadow under any model, straight down or, with
+  `"from": "light"`, cast along its key light.
 
 A 3D title that builds in and turns to face the camera:
 
@@ -163,10 +220,13 @@ An agent cannot watch a video, so Kinescript gives it things it can read:
 | `kine check scene.json` | every problem at once as JSON, each with its layer, time range and a fix |
 | `kine look scene.json --boxes` | one PNG of many labelled frames, with every layer outlined and the top-level ones named |
 | `kine look scene.json --wire --depth` | the same frames with every model's triangles drawn over them, and each stage's depth image, nearer brighter |
+| `kine look scene.json --trails --onion 3` | the same frames with each moving layer's path, a dot a frame, so the spacing shows its speed, eases and stops, and the three frames before each one drawn fainter over it |
 | `kine look scene.json --audio` | the same frames with the sound under them: a lane per role and the mix, the duck and issues, plus each sound's measured loudness |
-| `kine probe scene.json --at 3.2` | resolved in/out of every layer and each visible layer's screen box |
+| `kine probe scene.json --at 3.2` | resolved in/out of every layer and each visible layer's screen box and anchor |
+| `kine probe scene.json --curve title.x` | the value and its speed at every frame, where it holds still and its fastest frame |
 | `kine still` / `kine render` | a frame, a range (`--from/--to`), a draft (`-q draft --scale 0.5`) or the final file |
 | `kine watch scene.json` | the contact sheet, made again every time the file is saved |
+| `kine edit scene.json` | a browser page to edit layers, comment on frames, captions and voice, and draw on the frame, for an agent to read (`--port`, `--no-open`) |
 | `kine voice scene.json` | each sound with text spoken into its file, with its word times, skipping what has not changed |
 
 `kine check` reports unknown keys and bad values, missing media and out-of-range trims, text off the canvas or
@@ -179,8 +239,9 @@ ceiling. An unknown key names the intended key first. Common names from other to
 errors.
 
 The same tools are available over MCP (`kine mcp`) as `kine_docs`, `kine_check`, `kine_look`, `kine_still`,
-`kine_probe`, `kine_render` and `kine_voice`. They take a scene as a file path or as the JSON object itself, and `kine_look`
-and `kine_still` return images inline.
+`kine_probe`, `kine_render`, `kine_voice` and `kine_feedback`. They take a scene as a file path or as the JSON object itself, and `kine_look`
+and `kine_still` return images inline. `kine_feedback` lists, answers and resolves the review notes kept in
+`<scene>.feedback.json` (`list` returns open notes in time order, marked `stale` when the scene changed after the note).
 
 ```json
 {
@@ -272,13 +333,56 @@ More scenes in [`examples/`](https://github.com/drknowhow/kinescript/tree/main/e
 - [`product.json`](https://github.com/drknowhow/kinescript/blob/main/examples/product.json): a glTF can, its label
   a texture inside the file, turning on a table under a studio light and environment, with its shadow on the table
   and two more cans out of focus behind it, 6 s.
+- [`cubes.json`](https://github.com/drknowhow/kinescript/blob/main/examples/cubes.json): a ripple through a grid of
+  144 cubes, one model layer with `repeat`, each copy placed and coloured by an expression of its number, 6 s.
+- [`shapes.json`](https://github.com/drknowhow/kinescript/blob/main/examples/shapes.json): a rounded box, a
+  capsule, a lathed vase and cup, and a tube that draws a route between them, 6 s.
+- [`character.json`](https://github.com/drknowhow/kinescript/blob/main/examples/character.json): a skinned glTF
+  figure playing its `walk` and `wave` clips: two walk across a floor with their shadows while a third waves, 6 s.
 - [`voiceover.json`](https://github.com/drknowhow/kinescript/blob/main/examples/voiceover.json): titles cued from
   the words of a voice-over, karaoke captions of it, and a music bed that dips under it, 5.4 s.
 - [`narrated.json`](https://github.com/drknowhow/kinescript/blob/main/examples/narrated.json): the same idea
   with a voice written as text, a marked word and a click on it. Run `kine voice examples/narrated.json` first.
+- [`logo.json`](https://github.com/drknowhow/kinescript/blob/main/examples/logo.json): the brand mark draws on,
+  its arms morph into a play mark and back, and the wordmark slides out from behind it through a mask while the dot
+  glows, 6 s.
+- [`kinetic.json`](https://github.com/drknowhow/kinescript/blob/main/examples/kinetic.json): a title whose letters
+  rise from the middle out and pop in a random order, a version badge cut out of its plate with `combine`, a line
+  that drops from behind a rule through a mask, and keyframe squares looping on a dashed track, 6 s.
+- [`explainer.json`](https://github.com/drknowhow/kinescript/blob/main/examples/explainer.json): hand-drawn boxes
+  that boil, and a dot that rides a dashed route through `kine check`, which glows, into the video box, with a lens
+  mask lighting the route round the dot, 6 s.
+- [`confetti.json`](https://github.com/drknowhow/kinescript/blob/main/examples/confetti.json): a counter runs to a
+  million and three confetti bursts go off behind and beside it, over drifting dust, 6 s.
+- [`flipbook.json`](https://github.com/drknowhow/kinescript/blob/main/examples/flipbook.json): a pixel-art figure
+  from an eight-cell sprite sheet walks up to a flame drawn as twelve numbered files, 6 s.
+- [`textpath.json`](https://github.com/drknowhow/kinescript/blob/main/examples/textpath.json): a title rises letter
+  by letter onto an arch, a ring of text turns once round a counter of its degrees, and a line types itself along a
+  wave, 6 s.
+- [`sweep.json`](https://github.com/drknowhow/kinescript/blob/main/examples/sweep.json): a highlight runs across a
+  line, a word's letters take the colours of a turning wheel, and words come into focus one by one, all by unit
+  expressions of `i`, `n` and `sweep`, 6 s.
+- [`vector.json`](https://github.com/drknowhow/kinescript/blob/main/examples/vector.json): an SVG emblem grows from
+  its own 120 px to 600, sharp all the way, beside a spinner played from an eight-cell SVG sheet, 6 s.
+- [`svg.json`](https://github.com/drknowhow/kinescript/blob/main/examples/svg.json): the same emblem as an svg layer,
+  brought on piece by piece by its ids in the file: the badge pops, the ring's dashes march, the star draws on and
+  turns and the dots pop one by one, 6 s.
+- [`motions.json`](https://github.com/drknowhow/kinescript/blob/main/examples/motions.json): twelve cards, each
+  brought on by one of the motions 1.6.1 adds, from `land` and `squash` to `scramble`, `glitch` and `whip`, under a
+  title that rises from behind its edge, 7 s.
+- [`emphasis.json`](https://github.com/drknowhow/kinescript/blob/main/examples/emphasis.json): ten cards that pulse,
+  beat, shake, wiggle, wobble, float, bob, flash, tada and spin in the middle of their lives, under a title a wave
+  runs across, 6 s.
+- [`transitions.json`](https://github.com/drknowhow/kinescript/blob/main/examples/transitions.json): six two-clip
+  sequences cutting at once, by iris, push, whip, glitch and two luma wipes, one through a radial map and one
+  through a map dark at both ends, 5 s.
+- [`charts.json`](https://github.com/drknowhow/kinescript/blob/main/examples/charts.json): a bar chart whose bars
+  grow in turn under their counting values, a line that draws on through five points, and a doughnut whose slices
+  sweep round, 5 s.
 
-`edit.json`, `import.json`, `textures.json`, `screens.json`, `edges.json`, `product.json`, `voiceover.json` and
-`narrated.json` read sample media: run `python examples/make_media.py` first to generate it.
+`edit.json`, `import.json`, `textures.json`, `screens.json`, `edges.json`, `product.json`, `voiceover.json`,
+`narrated.json`, `flipbook.json`, `vector.json` and `svg.json` read sample media: run `python examples/make_media.py` first to
+generate it.
 
 ## Performance
 
@@ -294,10 +398,10 @@ Measured on the development machine (Intel Core Ultra 7 265, 20 threads, NVIDIA 
 [`python bench/stages.py`](https://github.com/drknowhow/kinescript/blob/main/bench/stages.py) splits the time
 per frame into drawing, conversion and readback, and writing to ffmpeg for several workloads, and times whole
 renders. [`python bench/stress.py`](https://github.com/drknowhow/kinescript/blob/main/bench/stress.py) generates
-26 scenes that each push one thing far past the examples (2000 layers, 60 cuts, 4K, 120 s, 16-sample motion blur
-with alpha, 600 caption cues, a stage of 16 layers, a textured model of 102,400 triangles and more), then checks,
-renders and probes each one in its own process and reports time, peak memory and whether the output holds every
-frame.
+41 scenes that each push one thing far past the examples (2000 layers, 60 cuts, 4K, 120 s, 16-sample motion blur
+with alpha, 600 caption cues, 200 morphing paths, 50 masks, a stage of 16 layers, a textured model of 102,400
+triangles and more), then checks, renders and probes each one in its own process and reports time, peak memory and
+whether the output holds every frame.
 
 Rendering uses Skia on the GPU through a hidden OpenGL context, one per worker process. Frames are split into
 chunks, encoded in parallel and joined without re-encoding, while another ffmpeg process mixes the audio.
@@ -307,11 +411,14 @@ Within one process, such as the MCP server, the workers stay warm for two minute
 
 - Without a usable GPU, Kinescript falls back to Skia's CPU rasteriser. With the Windows `skia-python` wheel this is
   very slow (about 0.65 s per 1080p frame for the launch video); use `--scale 0.5` for previews on such machines.
-  `KINE_BACKEND=cpu` forces this path.
-- 3D is drawn by Skia with a depth sort, not a GL pipeline: model files' animations and skins are not played, and
-  models cast shadows on each other only inside a stage. Separate layers hide each other per pixel only inside a
+  `KINE_BACKEND=cpu` forces this path. Blur, shadows, masks and layer effects draw in offscreen layers, which the
+  CPU fills slowly: a blur over a whole 1080p layer takes about 0.44 s, and a split text whose letters blur as they
+  enter blurs a layer for each letter (up to 179 s a frame for `bench/stress.py`'s `text-split`). `kine check` warns
+  `slow-effects` when a frame's effects pass 0.25 s.
+- 3D is drawn by Skia with a depth sort, not a GL pipeline: models cast shadows on each other only inside a stage,
+  and a skinned vertex follows at most four joints. Separate layers hide each other per pixel only inside a
   stage, and parts of one model that cut through each other meet at a stepped seam. A textured model is drawn
-  solid whatever its `transparency`. Draco- and meshopt-compressed model files are not read.
+  solid whatever its `transparency`. Draco-compressed model files need the `draco` extra.
 - Audio is mixing and levelling (trim, gain over time, fades, speed, loop, pan, role levels, ducking, a loudness
   target), with no effects such as EQ, compression of single sounds or reverb.
 - Kinescript does not speak by itself: `kine voice` needs a plugin or a command. The Kokoro plugin times words
@@ -319,7 +426,13 @@ Within one process, such as the MCP server, the workers stay warm for two minute
   the ElevenLabs plugin needs an API key and a network connection.
 - Video is decoded and resampled by ffmpeg to the scene frame rate. Jumping backwards or far ahead reopens the
   decoder, which is slower than sequential playback.
-- Text layout is single-script left-to-right with greedy wrapping. No shaping for complex scripts or bidi.
+- Text wraps greedily, with no hyphenation. Right-to-left words are put in order on a line by part of the Unicode
+  bidi algorithm applied to whole words; explicit embeddings and isolates are not supported. `split: "chars"` and
+  `letterSpacing` draw each letter on its own, so Arabic letters do not join there (`kine check` warns
+  `unjoined-letters`).
+- An `svg` layer leaves out text, `<style>` sheets, `<image>`, clip paths, masks, filters, patterns, markers and the
+  file's own animation, and an `.svg` in an image layer leaves out text, `<style>` sheets, `<symbol>`, `<image>` and
+  markers; `kine check` names what a file loses (`svg-unsupported`). Turn text into paths when saving.
 - Expressions are limited to arithmetic and the listed helpers; attribute access and other names are rejected.
 
 ## Project layout

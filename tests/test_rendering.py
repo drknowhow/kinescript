@@ -67,6 +67,55 @@ def test_a_grade_keeps_top_level_blends_blending_with_the_background(backend, bl
             assert np.abs(_renderer(spec, backend).frame(0) - graded).max() <= 2, (grade, blur)
 
 
+def _lum(c):
+    return c @ np.array([0.3, 0.59, 0.11])
+
+
+def _set_lum(c, lum):
+    """W3C compositing's SetLum, with its ClipColor."""
+    c = c + (lum - _lum(c))
+    lo, hi, mid = c.min(), c.max(), _lum(c)
+    if lo < 0:
+        c = mid + (c - mid) * mid / (mid - lo)
+    if hi > 1:
+        c = mid + (c - mid) * (1 - mid) / (hi - mid)
+    return c
+
+
+def _set_sat(c, sat):
+    out, span = np.zeros(3), c.max() - c.min()
+    if span > 0:
+        out = (c - c.min()) * sat / span
+    return out
+
+
+W3C = {  # backdrop b, source s in 0..1, from the W3C compositing spec
+    "hardLight": lambda b, s: np.where(s <= 0.5, b * 2 * s, b + (2 * s - 1) - b * (2 * s - 1)),
+    "colorDodge": lambda b, s: np.where(b == 0, 0, np.where(s >= 1, 1, np.minimum(1, b / np.maximum(1e-9, 1 - s)))),
+    "colorBurn": lambda b, s: np.where(b >= 1, 1, np.where(s <= 0, 0, 1 - np.minimum(1, (1 - b) / np.maximum(s, 1e-9)))),
+    "exclusion": lambda b, s: b + s - 2 * b * s,
+    "hue": lambda b, s: _set_lum(_set_sat(s, b.max() - b.min()), _lum(b)),
+    "saturation": lambda b, s: _set_lum(_set_sat(b, s.max() - s.min()), _lum(b)),
+    "luminosity": lambda b, s: _set_lum(b, _lum(s)),
+}
+
+
+@pytest.mark.parametrize("backend", ["cpu", "gpu"])
+@pytest.mark.parametrize("blend", list(W3C))
+def test_the_newer_blend_modes_mix_as_the_w3c_formulas_do(backend, blend):
+    b, s = np.array([48, 128, 255]) / 255, np.array([255, 160, 64]) / 255  # backdrop #3080ff, layer #ffa040
+    layers = [{"id": "m", "type": "rect", "x": 160, "y": 90, "w": 100, "h": 100, "fill": "#ffa040", "blend": blend}]
+    got = _renderer(scene(layers, bg="#3080ff"), backend).frame(0)[90, 160, :3].astype(float)
+    assert np.abs(got - np.round(W3C[blend](b, s) * 255)).max() <= 2, (got, W3C[blend](b, s) * 255)
+
+
+def test_displace_draws_alike_on_both_backends():
+    spec = scene([{"id": "b", "type": "rect", "x": 160, "y": 90, "w": 160, "h": 80, "fill": "#ffffff",
+                   "displace": {"amount": 6, "scale": 30, "speed": 1}}], bg="#000000")
+    cpu, gpu = (_renderer(spec, b).frame(10)[..., :3].astype(int) for b in ("cpu", "gpu"))
+    assert (np.abs(cpu - gpu) > 16).mean() < 0.002
+
+
 @pytest.mark.parametrize("backend", ["cpu", "gpu"])
 def test_a_grade_with_a_blend_on_a_see_through_canvas(backend):
     layers = [{"id": "m", "type": "rect", "x": 160, "y": 90, "w": 100, "h": 100, "fill": "#808080",
@@ -283,13 +332,57 @@ def test_check_warns_that_split_chars_unjoins_arabic():
     assert not _codes(res, "unjoined-letters")
 
 
-def test_check_warns_that_3d_text_does_not_shape():
-    style = skia.FontStyle(600, 5, skia.FontStyle.kUpright_Slant)
-    if _fallback(style, ord("ש")) is None:
-        pytest.skip("no installed font has Hebrew")
-    res = check(scene([{"id": "m", "type": "model", "shape": "text", "text": "שלום", "x": 160,
-                        "y": 90, "size": 60, "depth": 10}]))
-    assert _codes(res, "unshaped-3d-text")
+def _need(ch, script):
+    if _fallback(skia.FontStyle(600, 5, skia.FontStyle.kUpright_Slant), ord(ch)) is None:
+        pytest.skip(f"no installed font has {script}")
+
+
+def _ink(layer):
+    """Where a layer drawn white on black covers, cut to its ink."""
+    spec = scene([dict({"x": 160, "y": 90, "size": 50, "weight": 600, "fill": "#ffffff"}, **layer)], bg="#000000")
+    on = Renderer(k.Scene(spec), backend="cpu").frame(0)[..., :3].max(-1) > 127
+    ys, xs = np.nonzero(on)
+    return on[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+
+
+def _within_a_pixel(a, b) -> float:
+    """The smaller share of either ink that has the other's ink within a pixel of it."""
+    h, w = min(a.shape[0], b.shape[0]), min(a.shape[1], b.shape[1])
+
+    def share(p, q):
+        grown, padded = np.zeros((h, w), bool), np.pad(q[:h, :w], 1)
+        for dy in range(3):
+            for dx in range(3):
+                grown |= padded[dy:dy + h, dx:dx + w]
+        return p[:h, :w][grown].sum() / p[:h, :w].sum()
+    return min(share(a, b), share(b, a))
+
+
+@pytest.mark.parametrize("text, ch, script", [("שלום", "ש", "Hebrew"), ("مرحبا", "م", "Arabic"),
+                                              ("Hi שלום 42", "ש", "Hebrew"), ("É", "E", "Latin")])
+def test_3d_text_is_shaped_as_a_text_layer_is(text, ch, script):
+    _need(ch, script)
+    solid = {"id": "m", "type": "model", "shape": "text", "text": text, "depth": 1, "light": "flat"}
+    ref = _ink({"id": "t", "type": "text", "text": text})
+    assert _within_a_pixel(_ink(solid), ref) > 0.97
+    # letterSpacing draws each character on its own: unjoined, right to left text backwards, the mark not raised.
+    assert _within_a_pixel(_ink(dict(solid, letterSpacing=0.01)), ref) < 0.9
+
+
+def test_check_warns_about_3d_text_it_cannot_draw_as_written():
+    _need("ש", "Hebrew")
+    m = {"id": "m", "type": "model", "shape": "text", "text": "שלום", "x": 160, "y": 90, "size": 60, "depth": 10}
+    assert not _codes(check(scene([m])), "unshaped-3d-text")
+    spaced = _codes(check(scene([dict(m, letterSpacing=4)])), "unshaped-3d-text")
+    assert len(spaced) == 1 and spaced[0]["message"].startswith("letterSpacing draws each character")
+    # Each character named is one 3D text draws nothing for: a colour emoji font has no outlines (and with no emoji
+    # font installed, missing-glyph names it).
+    for text, cp in (("\U0001F600", "U+1F600"), ("❤️", "U+2764"), ("❤", "U+2764")):
+        drawn = Renderer(k.Scene(scene([dict(m, text=text)], bg="#000000")), backend="cpu").frame(0)[..., :3].max()
+        res = check(scene([dict(m, text=f"hi {text}")]))
+        named = _codes(res, "unshaped-3d-text") + _codes(res, "missing-glyph")
+        assert bool(named) == (drawn < 40), (text, drawn, named)
+        assert not named or cp in named[0]["message"]
 
 
 def test_text_in_other_scripts_is_pure_function_of_index():
@@ -298,6 +391,8 @@ def test_text_in_other_scripts_is_pure_function_of_index():
          "x": "50%", "y": 50, "size": 28, "enter": {"name": "type", "dur": 1.5}, "caret": True},
         {"id": "b", "type": "text", "text": "a\U0001F600b é́ 世界", "x": "50%", "y": 120, "size": 28,
          "split": "chars", "enter": {"name": "rise", "stagger": 0.05}},
+        {"id": "c", "type": "model", "shape": "text", "text": "مرحبا שָׁלוֹם é́", "x": "50%", "y": 155, "size": 28,
+         "depth": 6, "rotateY": "=t * 30"},
     ])
     r = Renderer(k.Scene(spec), backend="cpu")
     seq = [r.frame(n).copy() for n in range(0, 40, 3)]

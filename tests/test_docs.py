@@ -95,7 +95,7 @@ def test_every_recipe_loads_with_no_rewrites(tmp_path):
     for obj in _objects(_section("RECIPES (layers to paste into \"layers\")")):
         obj = obj.replace('"a.mp4"', json.dumps(clip)).replace('"b.mp4"', json.dumps(clip))
         layers.append(json.loads(obj))
-    assert len(layers) >= 9
+    assert len(layers) >= 8
     spec = {"canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 4}, "layers": layers}
     f = tmp_path / "recipes.json"
     f.write_text(json.dumps(spec))
@@ -104,21 +104,15 @@ def test_every_recipe_loads_with_no_rewrites(tmp_path):
     s.close()
 
 
-def test_bar_chart_recipe_passes_check_as_a_three_bar_chart():
-    """Small models copy the bar recipe once per bar, often with bigger text; the copies must not
-    warn. At 64 px a centre-anchored label at y 920 reaches into the bar, so this guards the anchor."""
-    bar = [json.loads(o) for o in _objects(_section("RECIPES (layers to paste into \"layers\")"))
-           if json.loads(o).get("id", "").startswith("bar1")]
-    assert {L["id"] for L in bar} == {"bar1", "bar1-value", "bar1-label"}
-    layers = []
-    for n, dx in enumerate((-400, 0, 400), 1):
-        for L in json.loads(json.dumps(bar).replace("bar1", f"bar{n}")):
-            L["x"] += dx
-            if L["id"].endswith("-label"):
-                L["size"] = 64
-            layers.append(L)
-    r = check({"canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 3}, "layers": layers})
-    assert r["ok"] and not [i for i in r["issues"] if i["level"] != "info"], r["issues"]
+def test_bar_chart_recipe_passes_check_with_bigger_text():
+    """Small models paste the chart recipe and often make the text bigger; neither must warn. The values ride up
+    on the bars, so this also guards their ease against the strobe warning at the default height."""
+    chart = [json.loads(o) for o in _objects(_section("RECIPES (layers to paste into \"layers\")"))
+             if json.loads(o).get("use") == "barChart"]
+    assert len(chart) == 1
+    for extra in ({}, {"size": 64, "valueSize": 80}):
+        r = check({"canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 3}, "layers": [dict(chart[0], **extra)]})
+        assert r["ok"] and not [i for i in r["issues"] if i["level"] != "info"], r["issues"]
 
 
 def test_contrast_warning_names_the_shape_behind_but_not_the_background():

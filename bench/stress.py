@@ -103,6 +103,164 @@ def keys_dense() -> dict:
     return _scene(out)
 
 
+def along_100() -> dict:  # 60 darts on 6 paths that draw on, and 40 bars round closed paths of their own
+    out = []
+    for n in range(6):
+        y = 140 + n * 150
+        out.append({"id": f"route{n}", "type": "path", "d": f"M80 {y} C560 {y - 220} 1360 {y + 220} 1840 {y}",
+                    "stroke": "#2c3440", "strokeWidth": 4, "draw": [[0, 0], [2, 1]]})
+        out += [{"id": f"dart{n}-{k}", "type": "polygon", "sides": 3, "r": 12, "rotate": 90, "fill": "$accent",
+                 "along": {"d": f"#route{n}", "p": [[k * 0.15, 0], [k * 0.15 + 3, 1, "linear"]], "orient": True}}
+                for k in range(10)]
+    for n in range(40):
+        cx, cy = 140 + (n % 10) * 182, 1000 - (n // 10) * 40
+        out.append({"id": f"bar{n}", "type": "rect", "w": 18, "h": 6, "fill": "#e8e2d0",
+                    "along": {"d": f"M{cx - 60} {cy} a60 18 0 1 0 120 0 a60 18 0 1 0 -120 0 Z",
+                              "p": f"=t * 0.4 + {n / 40}", "orient": True}})
+    return _scene(out)
+
+
+def strokes_300() -> dict:  # 100 dashed paths that march and draw on, 100 stars whose corners round, 100 tabs
+    out = []
+    for n in range(100):
+        x, y = 60 + (n % 10) * 186, 50 + (n // 10) * 34
+        out.append({"id": f"dash{n}", "type": "path", "d": f"M{x} {y} q40 -24 80 0 t80 0", "stroke": "#e8e2d0",
+                    "strokeWidth": 3, "dash": [10, 6], "dashOffset": f"=t * -48 + {n}", "draw": [[0, 0], [2, 1]]})
+        out.append({"id": f"star{n}", "type": "polygon", "x": x + 40, "y": 420 + (n // 10) * 34, "sides": 5,
+                    "r": 15, "inner": 0.5, "fill": "$accent", "corner": [[0, 0], [4, 6, "linear"]]})
+        out.append({"id": f"tab{n}", "type": "rect", "x": x + 110, "y": 420 + (n // 10) * 34, "w": 60, "h": 24,
+                    "fill": "#4a7dff", "radius": [[0, [12, 12, 0, 0]], [4, [0, 0, 12, 12]]]})
+    return _scene(out)
+
+
+def rough_200() -> dict:  # 100 outlined cards boiling 8 times a second, and 100 rough lines that draw on
+    out = []
+    for n in range(100):
+        x, y = 100 + (n % 10) * 180, 70 + (n // 10) * 46
+        out.append({"id": f"card{n}", "type": "rect", "x": x, "y": y, "w": 120, "h": 34, "radius": 6,
+                    "fill": "#ffd25a", "stroke": "#14171c", "strokeWidth": 3,
+                    "rough": {"amount": 2.5, "seed": n, "boil": 8}})
+        out.append({"id": f"scrawl{n}", "type": "line", "points": [[x - 60, y + 560], [x, y + 540], [x + 60, y + 560]],
+                    "stroke": "#e8e2d0", "strokeWidth": 3, "rough": {"amount": 2, "length": 8, "seed": n},
+                    "draw": [[0, 0], [3, 1]]})
+    return _scene(out)
+
+
+def combine_60() -> dict:  # 60 badges with a word cut out, half of them with a hole moving through as well
+    out = []
+    for n in range(60):
+        kids = [{"id": f"plate{n}", "type": "rect", "w": 240, "h": 96, "radius": 24},
+                {"id": f"word{n}", "type": "text", "text": WORDS[n % len(WORDS)].upper(), "size": 40, "weight": 800}]
+        if n % 2:
+            kids.append({"id": f"hole{n}", "type": "circle", "r": 22, "y": 30,
+                         "x": [[0, -110], [4, 110, "linear"]]})
+        out.append({"id": f"badge{n}", "type": "group", "x": 260 + (n % 6) * 280, "y": 110 + (n // 6) * 96,
+                    "combine": "subtract", "fill": "$accent", "children": kids})
+    return _scene(out)
+
+
+def morph_200() -> dict:  # 200 paths morphing triangle, circle, star and back, a tenth of a second apart
+    tri, disc = "M0 -30 L30 22 L-30 22 Z", "M0 -30 A30 30 0 1 1 -0.1 -30 Z"
+    star = "M0 -32 L8 -10 L30 -10 L12 4 L19 26 L0 13 L-19 26 L-12 4 L-30 -10 L-8 -10 Z"
+    out = []
+    for n in range(200):
+        a = round((n % 20) * 0.05 + (n // 20) * 0.02, 3)
+        out.append({"id": f"m{n}", "type": "path", "x": 150 + (n % 20) * 85, "y": 130 + (n // 20) * 88,
+                    "fill": ("#ff5a36", "#4a7dff", "#e8e2d0")[n % 3],
+                    "d": [[a, tri], [a + 1, disc], [a + 2, star], [a + 3, tri]]})
+    return _scene(out)
+
+
+def masks_50() -> dict:  # 50 masked layers: 25 gradient cards seen through words, 25 through a moving lens
+    out = []
+    for n in range(50):
+        x, y = 190 + (n % 5) * 385, 100 + (n // 5) * 98
+        if n % 2:
+            out.append({"id": f"lens{n}", "type": "circle", "r": 40, "y": y,
+                        "x": [[0, x - 150], [4, x + 150, "inOutSine"]]})
+            card = {"id": f"card{n}", "type": "rect", "x": x, "y": y, "w": 340, "h": 84, "radius": 12,
+                    "mask": {"layer": f"lens{n}", "feather": 16},
+                    "fill": {"angle": 90, "stops": ["#ff5a36", "#4a7dff"]}}
+        else:
+            out.append({"id": f"word{n}", "type": "text", "text": WORDS[n % len(WORDS)].upper(), "x": x, "y": y,
+                        "size": 64, "weight": 800})
+            card = {"id": f"card{n}", "type": "rect", "x": x, "y": y, "w": 340, "h": 84, "mask": f"word{n}",
+                    "fill": [[0, {"angle": 0, "stops": ["#ffd166", "#ef476f"]}],
+                             [4, {"angle": 360, "stops": ["#ffd166", "#ef476f"]}, "linear"]]}
+        out.append(card)
+    return _scene(out)
+
+
+def glow_text() -> dict:  # a glowing title over lines that glow, are outlined, shaded inside and displaced
+    out = [{"id": "title", "type": "text", "text": "GLOW", "x": "50%", "y": 260, "size": 220, "weight": 800,
+            "fill": "#ffe1d6", "glow": {"color": "#ff633f", "size": [[0, 16], [2, 48, "inOutSine"], [4, 16, "inOutSine"]]},
+            "outline": {"width": 3, "color": "#ff633f"}}]
+    for n in range(12):
+        x, y, kind = 330 + (n % 3) * 630, 520 + (n // 3) * 140, ("glow", "outline", "innerShadow", "displace")[n % 4]
+        layer = {"id": f"line{n}", "type": "text", "text": _sentence(n, 3).upper(), "x": x, "y": y, "size": 56,
+                 "weight": 800, "fill": "#e8ecf2"}
+        if kind == "innerShadow":
+            layer = {"id": f"card{n}", "type": "rect", "x": x, "y": y, "w": 520, "h": 100, "radius": 18,
+                     "fill": "#2b3240", "innerShadow": {"y": 6, "blur": 14, "color": "#000000c0"}}
+        else:
+            layer[kind] = {"glow": {"size": 20}, "outline": {"width": 4, "color": "#4a7dff"},
+                           "displace": {"amount": 6, "scale": 40, "speed": 1, "seed": n}}[kind]
+        out.append(layer)
+    return _scene(out)
+
+
+def _drawing_svg(n: int = 500) -> str:
+    """An svg of n shapes in a grid, 1920x1080: circles, outlined rounded rects, hexagons filled with one of three
+    gradients, open curves and turned squares in groups of their own. Written to WORK; returns its path."""
+    pal = ("#ff633f", "#b9f45d", "#f2f0e8", "#9299a8", "#7b5cff", "#242832")
+    out = []
+    for i in range(n):
+        x, y, col = 40 + (i % 25) * 75, 40 + (i // 25) * 50, pal[i % len(pal)]
+        kind = i % 5
+        if kind == 0:
+            out.append(f'<circle cx="{x}" cy="{y}" r="{12 + i % 9}" fill="{col}"/>')
+        elif kind == 1:
+            out.append(f'<rect x="{x - 15}" y="{y - 12}" width="30" height="24" rx="5" fill="{col}" '
+                       f'stroke="#0a0c10" stroke-width="2"/>')
+        elif kind == 2:
+            pts = " ".join(f"{x + 16 * math.cos(a * math.pi / 3):.1f},{y + 16 * math.sin(a * math.pi / 3):.1f}"
+                           for a in range(6))
+            out.append(f'<polygon points="{pts}" fill="url(#g{i % 3})"/>')
+        elif kind == 3:
+            out.append(f'<path d="M{x - 18} {y} C {x - 6} {y - 20} {x + 6} {y + 20} {x + 18} {y}" fill="none" '
+                       f'stroke="{col}" stroke-width="3"/>')
+        else:
+            out.append(f'<g transform="translate({x} {y}) rotate({i * 7})"><rect x="-10" y="-10" width="20" '
+                       f'height="20" fill="{col}"/></g>')
+    grads = "".join(f'<linearGradient id="g{j}"><stop offset="0" stop-color="{pal[j]}"/>'
+                    f'<stop offset="1" stop-color="{pal[j + 2]}"/></linearGradient>' for j in range(3))
+    WORK.mkdir(parents=True, exist_ok=True)
+    path = WORK / f"drawing{n}.svg"
+    path.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">'
+                    f'<defs>{grads}</defs>{"".join(out)}</svg>', encoding="utf-8")
+    return path.as_posix()
+
+
+def svg_500() -> dict:  # an svg layer of 500 pieces standing still: drawn once into a picture, then played back
+    return _scene([{"id": "drawing", "type": "svg", "src": _drawing_svg(), "w": 1920, "h": 1080}])
+
+
+def _example(name: str) -> dict:
+    return json.loads((ROOT / "examples" / f"{name}.json").read_text(encoding="utf-8"))
+
+
+def logo() -> dict:
+    return _example("logo")
+
+
+def kinetic() -> dict:
+    return _example("kinetic")
+
+
+def explainer() -> dict:
+    return _example("explainer")
+
+
 def counters() -> dict:
     return _scene([{"id": f"c{n}", "type": "counter", "x": 120 + (n % 10) * 180, "y": 80 + (n // 10) * 100,
                     "size": 40, "value": {"from": 0, "to": 10 ** (1 + n % 6), "dur": 3.5}, "format": "{:,.0f}"}
@@ -259,6 +417,106 @@ def dof_stage() -> dict:  # a stage with a floor taking shadows, models and card
                   light={"preset": "studio", "follow": "world", "azimuth": -40, "elevation": 35})
 
 
+def _snake_gltf(joints: int = 24, rings: int = 289, seg: int = 40) -> str:
+    """A tube 600 long on a chain of `joints` joints, each vertex weighted to the two it lies between, with a 2 s
+    "slither" clip that bends each joint a little later than the one before (33 LINEAR rotation keys a joint):
+    rings x seg vertices, 11,560 and 23,040 triangles by default. Written to WORK as a .gltf; returns its path."""
+    import base64
+    import numpy as np
+    length, r, step = 600.0, 18.0, 600.0 / joints
+    a = np.linspace(0, 2 * np.pi, seg, endpoint=False)
+    rim = np.stack([np.cos(a), np.zeros(seg), np.sin(a)], 1)
+    y = np.linspace(0, length, rings)
+    P = (rim[None] * r + y[:, None, None] * [0, 1, 0]).reshape(-1, 3)
+    N = np.tile(rim, (rings, 1))
+    i, j = np.arange(rings - 1)[:, None] * seg, np.arange(seg)[None]
+    a0, a1 = i + j, i + (j + 1) % seg
+    T = np.r_[np.stack([a0, a0 + seg, a1], -1).reshape(-1, 3), np.stack([a1, a0 + seg, a1 + seg], -1).reshape(-1, 3)]
+    u = P[:, 1] / step
+    j0 = np.minimum(np.floor(u), joints - 1).astype(int)
+    f = np.clip(u - j0, 0, 1)
+    f = np.where(j0 + 1 < joints, f * f * (3 - 2 * f), 0.0)
+    jw = np.stack([j0, np.minimum(j0 + 1, joints - 1), np.zeros_like(j0), np.zeros_like(j0)], 1)
+    ww = np.stack([1 - f, f, np.zeros_like(f), np.zeros_like(f)], 1)
+    blob, views, accessors = bytearray(), [], []
+
+    def add(arr, ctype, kind):
+        views.append({"buffer": 0, "byteOffset": len(blob), "byteLength": arr.nbytes})
+        blob.extend(arr.tobytes() + b"\0" * (-arr.nbytes % 4))
+        acc = {"bufferView": len(views) - 1, "componentType": ctype, "count": len(arr), "type": kind}
+        if kind == "VEC3":
+            acc.update(min=arr.min(0).tolist(), max=arr.max(0).tolist())
+        accessors.append(acc)
+        return len(accessors) - 1
+
+    attrs = {"POSITION": add(P.astype("<f4"), 5126, "VEC3"), "NORMAL": add(N.astype("<f4"), 5126, "VEC3"),
+             "JOINTS_0": add(jw.astype("<u1"), 5121, "VEC4"), "WEIGHTS_0": add(ww.astype("<f4"), 5126, "VEC4")}
+    ibm = np.tile(np.eye(4), (joints, 1, 1))
+    ibm[:, 1, 3] = -np.arange(joints) * step
+    axis = np.array([0.35, 0.0, 1.0]) / np.hypot(0.35, 1.0)
+    t = np.arange(33) / 16
+    samplers, channels = [], []
+    for n in range(1, joints):
+        half = np.radians(14 * np.sin(np.pi * t - 0.5 * n)) / 2
+        q = np.c_[axis[None] * np.sin(half)[:, None], np.cos(half)]
+        samplers.append({"input": add(t.astype("<f4"), 5126, "SCALAR"), "output": add(q.astype("<f4"), 5126, "VEC4")})
+        channels.append({"sampler": len(samplers) - 1, "target": {"node": n, "path": "rotation"}})
+    nodes = [{"name": f"j{n}", **({"translation": [0, step, 0]} if n else {}),
+              **({"children": [n + 1]} if n + 1 < joints else {})} for n in range(joints)]
+    nodes.append({"name": "tube", "mesh": 0, "skin": 0})
+    doc = {"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": [0, joints]}], "nodes": nodes,
+           "skins": [{"joints": list(range(joints)),
+                      "inverseBindMatrices": add(ibm.transpose(0, 2, 1).reshape(-1, 16).astype("<f4"), 5126, "MAT4")}],
+           "meshes": [{"primitives": [{"attributes": attrs, "material": 0,
+                                       "indices": add(T.astype("<u4").ravel(), 5125, "SCALAR")}]}],
+           "materials": [{"pbrMetallicRoughness": {"baseColorFactor": [0.18, 0.55, 1.0, 1.0], "metallicFactor": 0.2,
+                                                   "roughnessFactor": 0.35}}],
+           "animations": [{"name": "slither", "samplers": samplers, "channels": channels}],
+           "accessors": accessors, "bufferViews": views,
+           "buffers": [{"byteLength": len(blob),
+                         "uri": "data:application/octet-stream;base64," + base64.b64encode(bytes(blob)).decode()}]}
+    WORK.mkdir(parents=True, exist_ok=True)
+    path = WORK / "snake.gltf"
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    return path.as_posix()
+
+
+def skinned() -> dict:  # 6 skinned tubes of 24 joints and 23,040 triangles each and 12 arms, posed every frame
+    src = _snake_gltf()
+    out = [{"id": f"snake{n}", "type": "model", "src": src, "h": 640, "x": 260 + n * 280, "y": "42%",
+            "rotateY": 30 * n, "animation": {"name": "slither", "start": 0.3 * n, "speed": 0.8 + 0.1 * n}}
+           for n in range(6)]
+    out += [{"id": f"arm{n}", "type": "model", "src": _m("arm.glb"), "h": 180, "x": 120 + n * 152, "y": "86%",
+             "animation": {"name": ("wave", "curl")[n % 2], "start": 0.1 * n}} for n in range(12)]
+    return _scene(out, light="studio", camera={"rotateY": [[0, -8], ["end", 8]]})
+
+
+def repeat_1000() -> dict:  # one model of 1000 cubes, each moved, turned and coloured by expressions every frame
+    return _scene([{"id": "grid", "type": "model", "shape": "cube", "w": 26, "detail": "low", "x": "50%", "y": "55%",
+                    "edges": {"width": 1, "angle": 40}, "rotateY": [[0, -20], ["end", 20]],
+                    "repeat": {"count": 1000, "x": "=(i % 40 - 19.5) * 40", "z": "=(floor(i / 40) - 12) * 40",
+                               "y": "=sin(t * 3 + (i % 40) * 0.3 + floor(i / 40) * 0.2) * 40",
+                               "rotateY": "=t * 90 + i * 7",
+                               "fill": "=hsl((i % 40) * 9 + t * 45, 0.7, 0.55)"}}],
+                  camera={"rotateX": 32}, light="studio")
+
+
+def repeat_10k() -> dict:  # one circle's 10,000 copies, each moved by two expressions every frame
+    return _scene([{"id": "swarm", "type": "circle", "r": 5, "x": "50%", "y": "50%",
+                    "repeat": {"count": 10000,
+                               "x": "=cos(i * 2.39996 + t * (0.2 + (i % 7) * 0.05)) * sqrt(i) * 5.2",
+                               "y": "=sin(i * 2.39996 + t * (0.2 + (i % 7) * 0.05)) * sqrt(i) * 5.2",
+                               "fill": "=hsl(i * 0.036, 0.7, 0.6)"}}])
+
+
+def particles_5k() -> dict:  # 5,000 alive from the first frame: a fountain of stars spun, shrunk and faded over life
+    return _scene([{"id": "fountain", "type": "particles", "rate": 2500, "life": 2, "prewarm": True, "x": "50%",
+                    "y": "92%", "speed": [600, 1100], "angle": [-115, -65], "gravity": 700, "drag": 0.4,
+                    "size": [10, 22], "shape": "star", "spin": [-360, 360], "turbulence": 20,
+                    "fill": ["#ff633f", "#b9f45d", "#f2f0e8", "#4a7dff", "#ffd166"],
+                    "sizeOverLife": [[0, 0.4], [0.1, 1], [1, 0.6]], "opacityOverLife": [[0, 1], [0.8, 1], [1, 0]]}])
+
+
 def captions_600() -> dict:
     cues = [[round(n * 0.05, 2), round(n * 0.05 + 0.05, 2), _sentence(n, 3)] for n in range(600)]
     return _scene([{"id": "cc", "type": "captions", "mode": "karaoke", "cues": cues},
@@ -292,6 +550,18 @@ SCENES = {
     "expressions": (expressions, ".mp4", "600 layers, 4 expressions each"),
     "keys-dense": (keys_dense, ".mp4", "300 layers x 121 keyframes on x, y, rotate, plus colour keys"),
     "counters": (counters, ".mp4", "100 counters formatting every frame"),
+    "along-100": (along_100, ".mp4", "100 layers riding paths: 60 on 6 path layers that draw on, 40 round closed paths"),
+    "strokes-300": (strokes_300, ".mp4", "100 marching dashed paths that draw on, 100 stars rounding, 100 four-corner tabs"),
+    "rough-200": (rough_200, ".mp4", "100 outlined cards boiling 8 times a second, 100 rough lines drawing on"),
+    "combine-60": (combine_60, ".mp4", "60 badges with a word cut out, 30 with a hole moving through them too"),
+    "morph-200": (morph_200, ".mp4", "200 paths morphing triangle, circle, star and back"),
+    "masks-50": (masks_50, ".mp4", "50 masked cards: 25 seen through words, 25 through a moving lens"),
+    "glow-text": (glow_text, ".mp4", "a 220 px title glowing and outlined over 12 lines with glow, outline, inner "
+                                      "shadow or displace"),
+    "svg-500": (svg_500, ".mp4", "an svg layer of 500 shapes, gradients and groups standing still"),
+    "logo": (logo, ".mp4", "examples/logo.json: the mark draws on and morphs, the word slides out through a mask"),
+    "kinetic": (kinetic, ".mp4", "examples/kinetic.json: stagger orders, a combined badge, a mask, marching dashes"),
+    "explainer": (explainer, ".mp4", "examples/explainer.json: boiling rough boxes, a dot riding a route, a lens mask"),
     "shaders": (shaders, ".mp4", "4 full-frame SkSL presets blended, grain and vignette"),
     "uhd-4k": (uhd_4k, ".mp4", "3840x2160: shader, split text, stroke draw, shadow, grade"),
     "long-120s": (long_120s, ".mp4", "3600 frames: worker split, segment joins"),
@@ -306,6 +576,10 @@ SCENES = {
     "stage-16": (stage_16, ".mp4", "a stage: 12 rings and 4 cards passing through them, merged by depth per pixel"),
     "textured-100k": (textured_100k, ".mp4", "a textured .obj of 102,400 triangles turning under world light and env"),
     "dof-stage": (dof_stage, ".mp4", "a stage of 10 models and 3 cards with floor shadows and focus pulls"),
+    "skinned": (skinned, ".mp4", "6 skinned glTF tubes of 24 joints and 23k triangles and 12 arms, posed every frame"),
+    "repeat-1000": (repeat_1000, ".mp4", "one model of 1000 cubes moved, turned and coloured by expressions, with edges"),
+    "repeat-10k": (repeat_10k, ".mp4", "one circle repeated 10,000 times, each copy moved by expressions every frame"),
+    "particles-5k": (particles_5k, ".mp4", "a fountain keeping 5,000 stars alive, spun, shrunk and faded over life"),
     "captions-600": (captions_600, ".mp4", "600 karaoke cues and 200 pop cues in 30 s"),
     "odd-size": (odd_size, ".mp4", "1365x767 canvas into H.264 (even rounding)"),
     "gif": (gif_out, ".gif", "hello.json to GIF"),

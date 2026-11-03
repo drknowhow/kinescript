@@ -6,28 +6,34 @@ import json
 import math
 import re
 from pathlib import Path
+from typing import Any, Callable
 
 from . import color as C
-from . import components, media, models, schema
+from . import components, media, models, schema, svgpath
 from . import presets as P
 from . import voice as V
+from . import particles
 from . import words as W
-from .props import Ctx, Prop, compile_prop, is_keyframes
+from .props import FIELD, UNIT, Copies, Ctx, Prop, compile_prop, is_keyframes
 from .timing import Timeline, parse_clock
 
 LAYER_TYPES = {"rect", "circle", "ellipse", "path", "line", "arrow", "polygon", "text", "counter",
-               "image", "video", "group", "captions", "shader", "model"}
-STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "children", "layers", "src", "trim", "texture",
-          "speed", "fit", "text", "cues", "d", "points", "font", "split", "format", "align", "anchor",
+               "image", "video", "group", "captions", "shader", "model", "particles"}
+STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "emphasis", "children", "layers", "src", "trim",
+          "texture", "speed", "fit", "text", "cues", "d", "points", "font", "split", "format", "align", "anchor",
           "blend", "clip", "mode", "volume", "hidden", "note", "words", "stops", "cap", "join", "loop",
           "allowOffscreen", "style", "audio", "shadow", "box", "fx", "fill", "stroke", "emph", "active",
           "sksl", "preset", "uniforms", "caret", "case", "italic", "smooth", "closed", "focus", "use",
           "backface", "fixed", "sort", "shape", "detail", "parts", "light", "span", "sound", "voice",
-          "fadeIn", "fadeOut", "sequence"}
+          "fadeIn", "fadeOut", "sequence", "animation", "repeat", "profile", "along", "dash", "rough", "mask",
+          "glow", "outline", "innerShadow", "displace", "frames", "sheet", "fps", "pixelated", "textPath"}
+PART_STRUCT = {"shape", "texture", "text", "font", "d", "italic", "profile"}  # a part's keys that never animate
 # Property defaults by name; everything not listed defaults to None.
 DEFAULTS = {"x": 0.0, "y": 0.0, "opacity": 1.0, "scale": 1.0, "scaleX": 1.0, "scaleY": 1.0, "rotate": 0.0,
             "blur": 0.0, "draw": 1.0, "zoom": 1.0, "z": 0.0, "rotateX": 0.0, "rotateY": 0.0}
 DEPTH_PROPS = ("z", "rotateX", "rotateY")
+PLACED = ("x", "y", "rotate", "scale", "scaleX", "scaleY", "blur")  # what Layer.placed gives, in this order
+ROUTES = ("path", "line", "arrow", "polygon")  # the layers an along "#id" rides
 
 
 class SceneError(ValueError):
@@ -65,20 +71,37 @@ def _where(owner, message: str) -> str:
 
 
 class Layer:
-    __slots__ = ("id", "type", "raw", "t_in", "t_out", "props", "enter", "exit", "children", "parent",
-                 "index", "src", "video", "ahead", "ctx")
+    __slots__ = ("id", "type", "raw", "t_in", "t_out", "props", "enter", "exit", "emphasis", "children", "parent",
+                 "index", "src", "video", "ahead", "ctx", "parts", "copies", "xf", "along", "turn", "clock",
+                 "rough", "morph", "mask", "looks", "warp", "particles", "seq", "onpath")
 
     def __init__(self, lid: str, ltype: str, raw: dict, parent: "Layer | None", index: int):
         self.id, self.type, self.raw, self.parent, self.index = lid, ltype, raw, parent, index
         self.t_in = self.t_out = 0.0
         self.props: dict[str, Prop] = {}
         self.enter = self.exit = None
+        self.emphasis: list[P.Emphasis] = []
         self.children: list[Layer] = []
         self.src: str | None = None
         self.video: media.VideoSource | None = None
         # (size, decoder) opened before the clip first draws (Renderer._prime); it becomes .video when it does.
         self.ahead: tuple[tuple[int, int], media.VideoSource] | None = None
         self.ctx: Ctx | None = None
+        self.parts: list[dict[str, Prop]] = []  # a model's parts' keys, each compiled like a layer's
+        self.copies: Copies | None = None  # its "repeat"
+        self.xf: tuple[list, list] | None = None  # placed(): the constant values, and which of PLACED change
+        self.along: tuple[str, bool] | None = None  # the path it rides (data or "#id") and whether it turns with it;
+        # how far along is props["along"]
+        self.turn: float | None = None  # seconds after its group starts that the group's staggered enter reaches it
+        self.clock: tuple[float, float] | None = None  # a group's speed and loop for its children (timeRemap in props)
+        self.rough: tuple[float, float, int, float] | None = None  # rough's amount, length, seed and boil
+        self.morph: list | None = None  # a path's d keyframes, parsed; props["morph"] is how far through them it is
+        self.mask: tuple["Layer", str, float] | None = None  # the layer that masks it, the mode and the feather in px
+        self.looks: dict | None = None  # its glow, outline and innerShadow; their sizes are props "glow size"
+        self.warp: dict | None = None  # its displace; its amount is the prop "displace amount"
+        self.particles: particles.Emitter | None = None  # a particles layer's emitter
+        self.seq: media.Frames | None = None  # an image layer's frames or sheet; src is its first frame, or the sheet
+        self.onpath: str | None = None  # a text's textPath d (data or "#id"); how far along is props["textPath offset"]
 
     @property
     def dur(self) -> float:
@@ -88,11 +111,84 @@ class Layer:
         p = self.props.get(name)
         if p is None:
             return DEFAULTS.get(name, default)
+        if p.static:
+            return p.value
         try:
-            return p.at(t, self.dur, T, i)
+            return p.fn(t, self.t_out - self.t_in, T, i)
         except (ArithmeticError, ValueError, TypeError) as e:  # a user expression, e.g. 1/(t-0.7) at t=0.7
             raise SceneError(f"layer '{self.id}': {name} failed at t={t:.3f}s (scene {T:.3f}s): "
                              f"{type(e).__name__}: {e}", layer=self.id) from e
+
+    def unit_fn(self, name: str, t: float, T: float, n: int) -> Callable[[int], Any]:
+        """The unit key `name` at t as a function of the unit's number i, for a split text of n units: one call a
+        unit, as get is. An expression sees n as well as i (keyframes keep no value)."""
+        p, d = self.props[name], self.t_out - self.t_in
+        if p.static:
+            v = p.value
+            return lambda i: v
+        fn, each = p.fn, isinstance(p.value, str)
+
+        def at(i: int):
+            try:
+                return fn(t, d, T, i, n) if each else fn(t, d, T, i)
+            except (ArithmeticError, ValueError, TypeError) as e:
+                raise SceneError(f"layer '{self.id}': {name} failed at t={t:.3f}s (scene {T:.3f}s) for unit {i} of "
+                                 f"{n}: {type(e).__name__}: {e}", layer=self.id) from e
+        return at
+
+    def unit_count(self, t: float, T: float = 0.0) -> int:
+        """About how many units this split text has at t, for checking its unit expressions before it is laid out:
+        its letters, words or lines (a counter's as its value is written then), or 1 when it is not split."""
+        split = self.raw.get("split")
+        if split not in ("chars", "words", "lines"):
+            return 1
+        try:
+            if self.type == "counter":
+                v = float(self.get("value", t, T, 0, 0))
+                text = FIELD.sub(lambda m: format(v, m.group(1)), str(self.raw.get("format", "{:,.0f}")))
+            else:
+                text = str(self.raw.get("text", ""))
+        except (SceneError, ValueError, TypeError):  # its value or format is reported on its own
+            return 1
+        text = text.replace("**", "")
+        n = len("".join(text.split())) if split == "chars" else len(text.split()) if split == "words" else (
+            text.count("\n") + 1)
+        return max(1, n)
+
+    def placed(self, t: float, T: float = 0.0) -> list:
+        """The values of PLACED at t, as get gives them, with the constant ones read once. Do not change the list."""
+        if self.xf is None:
+            self.xf = ([self.get(k, 0.0) for k in PLACED],
+                       [(j, k) for j, k in enumerate(PLACED) if k in self.props and not self.props[k].static])
+        still, moving = self.xf
+        if not moving:
+            return still
+        out = still.copy()
+        for j, k in moving:
+            out[j] = self.get(k, t, T)
+        return out
+
+    def part(self, i: int, name: str, t: float, T: float = 0.0):
+        """Part i's value of `name` at the layer's time t, with i as the part's number in expressions."""
+        try:
+            return self.parts[i][name].at(t, self.dur, T, i)
+        except (ArithmeticError, ValueError, TypeError) as e:
+            raise SceneError(f"layer '{self.id}': parts[{i}]: {name} failed at t={t:.3f}s (scene {T:.3f}s): "
+                             f"{type(e).__name__}: {e}", layer=self.id) from e
+
+    def copied(self, t: float, T: float = 0.0) -> tuple[dict[str, list], list | None]:
+        """Each of the model's copies' placement and fill at the layer's time t (Copies.at)."""
+        try:
+            return self.copies.at(t, self.dur, T)
+        except (ArithmeticError, ValueError, TypeError) as e:
+            raise SceneError(f"layer '{self.id}': {e} at t={t:.3f}s (scene {T:.3f}s)", layer=self.id) from e
+
+    def copy_columns(self, t: float, T: float = 0.0) -> dict[str, list]:
+        """Each of the 2D layer's copies' values at the layer's time t (Copies.columns)."""
+        try:
+            return self.copies.columns(t, self.dur, T)
+        except (ArithmeticError, ValueError, TypeError) as e:
+            raise SceneError(f"layer '{self.id}': {e} at t={t:.3f}s (scene {T:.3f}s)", layer=self.id) from e
 
     def visible(self, T: float) -> bool:
         return self.t_in <= T < self.t_out and not self.raw.get("hidden")
@@ -157,6 +253,7 @@ class Scene:
         self._compile_lights()
         self.audio = self._build_audio()
         self._check_media()
+        self._check_masks()
         self._raise_errors()
         try:
             self.duration = self.timeline.solve(cv.get("duration"))
@@ -205,19 +302,86 @@ class Scene:
                       fix + " (paths are relative to the scene file)")
             return True
 
+        def svg(src: str, owner, what: str):
+            """A bad svg fails here; elements in it that are not drawn warn."""
+            try:
+                v = media.vector(src)
+            except media.MediaError as e:
+                self.note("error", "bad-media", owner, f"{what} {e}", "save it again as svg from a drawing program, "
+                          "or as .png")
+                return
+            if v.undrawn:
+                names = ", ".join(f"<{k}>" for k, kind in media.SVG_UNDRAWN.items() if kind in v.undrawn
+                                  and k not in ("tspan", "textPath", "animateTransform", "animateMotion", "set"))
+                self.note("warning", "svg-unsupported", owner, f"{what} {Path(src).name} has {names}, left out "
+                          "when it is drawn", "; ".join(media.SVG_FIX[k] for k in v.undrawn))
+
         self.surfaces: set[str] = set()  # groups drawn as a texture, and so not where they stand
         for layer in self.all_layers():
-            if layer.src and not missing(layer.src, layer.id, f"{layer.type} src") and layer.type == "model":
+            for m in (layer.enter, layer.exit):
+                src = m.opts.get("map") if m else None
+                if isinstance(src, str) and not missing(src, layer.id, "luma map"):
+                    if src.lower().endswith(".svg"):
+                        svg(src, layer.id, "luma map")
+                        continue
+                    try:
+                        media.image(src)
+                    except media.MediaError as e:
+                        self.note("error", "bad-media", layer.id, f"luma map {e}", "save it again as .png or .jpg")
+            q = layer.seq
+            if q is not None and q.files is not None and isinstance(layer.raw.get("frames"), list):
+                for f in dict.fromkeys(q.files[1:]):
+                    if missing(f, layer.id, "frames file"):
+                        break
+            if q is not None and q.files is None and Path(layer.src).is_file():
+                try:
+                    img = media.still(layer.src)
+                except media.MediaError as e:
+                    if not layer.src.lower().endswith(".svg"):  # an svg's is reported with its src
+                        self.note("error", "bad-media", layer.id, f"sheet {e}", "save it again as .png")
+                else:
+                    w, h = img.width(), img.height()
+                    if w % q.cols or h % q.rows:
+                        self.note("warning", "sheet-grid", layer.id, f"sheet {Path(layer.src).name} is "
+                                  f"{w:g} x {h:g} px, "
+                                  f"which {q.cols} column{'s' * (q.cols > 1)} and {q.rows} row{'s' * (q.rows > 1)} do "
+                                  "not divide evenly, so its frames cut through pixels and drift",
+                                  "check cols and rows against the sheet")
+            here = bool(layer.src) and not missing(layer.src, layer.id, f"{layer.type} src")
+            if here and layer.type != "model" and layer.src.lower().endswith(".svg"):
+                svg(layer.src, layer.id, f"{layer.type} src")
+            if here and layer.type == "model":
                 try:
                     imp = models.load(layer.src)
                 except ValueError as e:
                     self.note("error", "bad-model", layer.id, f"model src {e}",
                               "export it again as glTF 2.0 (.glb) or .obj")
                 else:
+                    name = Path(layer.src).name
                     if layer.raw.get("texture") and imp.mesh.U is None:
-                        self.note("warning", "no-uvs", layer.id, f"{Path(layer.src).name} has no texture "
+                        self.note("warning", "no-uvs", layer.id, f"{name} has no texture "
                                   "coordinates, so its texture shows as one colour (its corner pixel)",
                                   "export it again with UVs, or put the texture on a part instead")
+                    play = layer.raw.get("animation")
+                    clip = play.get("name", 0) if isinstance(play, dict) else play
+                    if play is not None and models.clip_index(imp, clip) is None:
+                        clips = models.clip_names(imp)
+                        close = schema.suggest(str(clip), clips) if clips and isinstance(clip, str) else None
+                        self.note("error", "unknown-animation", layer.id, f"animation {clip!r} is not in {name}, "
+                                  + (f"whose animations are {', '.join(map(repr, clips))}" if clips
+                                     else "which has no animations"),
+                                  f"did you mean {close!r}?" if close else
+                                  "name one of them, or its number from 0" if clips else "drop animation")
+                    crowded = (imp.about or {}).get("crowded", 0)
+                    if crowded:
+                        self.note("warning", "skin-influences", layer.id, f"{crowded} vertices of {name} are moved "
+                                  "by more than four joints; each follows the four in JOINTS_0, and the weights of "
+                                  "the others are dropped",
+                                  "export it again with at most four joint influences per vertex")
+            if layer.along and layer.along[0].startswith("#"):
+                self._check_route(layer, layer.along[0][1:])
+            if layer.onpath and layer.onpath.startswith("#"):
+                self._check_route(layer, layer.onpath[1:], "textPath")
             if layer.type != "model":
                 continue
             for spec in [layer.raw.get("texture")] + [p.get("texture") for p in layer.raw.get("parts") or []
@@ -230,6 +394,8 @@ class Scene:
                     self._check_surface(layer, src[1:])
                 elif missing(self.path(src), layer.id, "texture"):
                     continue
+                elif kind == "image" and src.lower().endswith(".svg"):
+                    svg(self.path(src), layer.id, "texture")
                 elif kind == "image":
                     try:
                         media.image(self.path(src))
@@ -294,21 +460,85 @@ class Scene:
             for name, prop in layer.props.items():
                 if name.startswith("u_"):
                     continue
+                each = name in UNIT and isinstance(prop.value, str)  # a unit expression: the first unit and the last
                 for t in (0.0, d / 2, max(0.0, d - 1e-3), d):  # d: the last keyframe value itself
                     try:
-                        v = prop.at(t, d, layer.t_in + t, 0)
+                        if each:
+                            n = layer.unit_count(t, layer.t_in + t)
+                            prop.at(t, d, layer.t_in + t, 0, n)
+                            v = prop.at(t, d, layer.t_in + t, n - 1, n)
+                        else:
+                            v = prop.at(t, d, layer.t_in + t, 0)
                     except Exception as e:  # noqa: BLE001 - any failure inside a user expression
                         self.note("error", "bad-expression", layer.id,
                                   f"{name} failed at t={t:.2f}s: {type(e).__name__}: {e}")
                         break
                     if name in schema.COLOR_KEYS:
-                        if v is not None and not (isinstance(v, (tuple, list)) and len(v) in (3, 4)):
+                        if v is not None and not (isinstance(v, (tuple, list)) and len(v) in (3, 4)
+                                                  or isinstance(v, C.Gradient)):
                             self._bad_colour(v, name if t == 0 else f"{name} at t={t:.2f}s", layer.id)
                             break
-                    elif name in schema.SCALAR and (isinstance(v, bool) or not isinstance(v, (int, float))):
+                    elif name in schema.SCALAR and (isinstance(v, bool) or not isinstance(v, (int, float))) and not (
+                            name == "radius" and isinstance(v, list) and len(v) == 4):  # four corners
                         self.note("error", "bad-value", layer.id, f"{name} is {v!r} at t={t:.2f}s; expected a number",
                                   "use a number, a percentage like '50%', or an expression starting with '='")
                         break
+
+    def _check_route(self, layer: Layer, rid: str, key: str = "along"):
+        """An along (or textPath) "#pathId" on `layer` names a path, line, arrow or polygon in its group that rides no
+        path."""
+        r = self.by_id.get(rid)
+        rides = "rides" if key == "along" else "follows"
+        if r is None:
+            close = schema.suggest(rid, list(self.by_id))
+            self.note("error", "unknown-route", layer.id, f"{key} '#{rid}' names no layer",
+                      (f"did you mean '#{close}'? " if close else "") + f"give the path it {rides} that id, or "
+                      "write the path data in d")
+        elif r.type not in ROUTES or r is layer:
+            what = "the layer itself" if r is layer else f"a {r.type} layer"
+            self.note("error", "bad-route", layer.id, f"{key} '#{rid}' is {what}; it {rides} a path, line, arrow or "
+                      "polygon", "name a path layer, or write the path data in d")
+        elif r.parent is not layer.parent:
+            self.note("error", "bad-route", layer.id, f"{key} '#{rid}' is in another group, where its points are "
+                      "somewhere else", f"put '{rid}' and '{layer.id}' in the same group")
+        elif r.along:
+            self.note("error", "bad-route", layer.id, f"{key} '#{rid}' rides a path itself",
+                      f"give '{layer.id}' the path '{r.along[0]}' as well, or take along off '{rid}'")
+
+    def _check_masks(self):
+        """Each mask names a layer beside the one it masks, in the same group: not the layer itself, nor one inside it,
+        and layers do not mask one another in a ring. A layer named by a mask draws only as one (Renderer._cut)."""
+        self.mattes: set[str] = set()  # layers that draw only as masks
+        for layer in self.all_layers():
+            spec = layer.raw.get("mask")
+            if not isinstance(spec, dict) or not isinstance(spec.get("layer"), str):
+                continue
+            mid = spec["layer"]
+            m = self.by_id.get(mid)
+            if m is None:
+                close = schema.suggest(mid, list(self.by_id))
+                self.note("error", "mask-unknown", layer.id, f"mask '{mid}' names no layer",
+                          (f"did you mean '{close}'? " if close else "") + "give the layer that masks it that id")
+            elif m is layer:
+                self.note("error", "bad-mask", layer.id, f"mask '{mid}' is the layer itself",
+                          "name another layer beside it, the shape to show it through")
+            elif m.parent is not layer.parent:
+                inside = any(x is layer for x in _lineage(m))
+                self.note("error", "bad-mask", layer.id, f"mask '{mid}' is " + (
+                    "inside the layer it masks" if inside else "in another group, where it stands somewhere else"),
+                    f"put '{mid}' beside '{layer.id}' in the same group")
+            else:
+                layer.mask = (m, spec.get("mode", "alpha"), float(spec.get("feather", 0)))
+                self.mattes.add(mid)
+        for layer in self.all_layers():
+            seen, m = {layer.id}, layer.mask
+            while m is not None and m[0].id not in seen:
+                seen.add(m[0].id)
+                m = m[0].mask
+            if m is not None and m[0] is layer:
+                self.note("error", "bad-mask", layer.id, f"'{layer.id}' is masked by '{layer.mask[0].id}', which is "
+                          "masked in turn by the layers it masks, so none of them could be drawn",
+                          "take the mask off one of them")
 
     def _check_surface(self, layer: Layer, gid: str):
         """A "#groupId" texture on model `layer` names a group that does not hold the model."""
@@ -338,7 +568,14 @@ class Scene:
                               f"wholly outside {within} ({lo:.3f}s to {hi:.3f}s), so it is never shown",
                               "move at into that span, or set \"hidden\": true to keep it off on purpose")
                     continue
-                walk(L.children, max(lo, L.t_in), min(hi, L.t_out), f"its group '{L.id}'")
+                for k, e in enumerate(L.emphasis):
+                    if e.at >= L.dur - 1e-9:
+                        where = f"emphasis[{k}]" if isinstance(L.raw.get("emphasis"), list) else "emphasis"
+                        self.note("warning", "late-emphasis", L.id, f"{where} ({'+'.join(e.names)}) starts {e.at:g}s "
+                                  f"into '{L.id}', which lasts {L.dur:.3f}s, so it never plays",
+                                  f"give it an at under {L.dur:.3f}, or make the layer last longer")
+                if L.clock is None:  # a group with a clock of its own shows its children at other times
+                    walk(L.children, max(lo, L.t_in), min(hi, L.t_out), f"its group '{L.id}'")
 
         walk(self.layers, 0.0, self.duration, "the scene")
         sounds = {s.id for s in self.audio if not s.layer}
@@ -441,27 +678,88 @@ class Scene:
         """An expression can fail at one moment only, like 1/(t-0.7) at t=0.7. `kine check` evaluates each at every
         frame its layer is on (every few frames past `budget` evaluations in all), so it finds that, not the render.
         Not part of loading: render workers load the scene too, and 2400 expressions take about 0.15 s."""
-        spans = [(L, name, prop, math.ceil(L.t_in * self.fps - 1e-6), math.ceil(L.t_out * self.fps - 1e-6))
-                 for L in self.all_layers() for name, prop in L.props.items()
-                 if not prop.static and isinstance(prop.value, str)]
+        spans = [(L, where + name, prop, i, math.ceil(L.t_in * self.fps - 1e-6), math.ceil(L.t_out * self.fps - 1e-6))
+                 for L in self.all_layers()
+                 for where, i, props in [("", 0, L.props)] + [(f"parts[{i}]: ", i, p) for i, p in enumerate(L.parts)]
+                 for name, prop in props.items() if not prop.static and isinstance(prop.value, str)]
         stride = max(1, -(-sum(n1 - n0 for *_, n0, n1 in spans) // budget))
-        for layer, name, prop, n0, n1 in spans:
+        for layer, name, prop, i, n0, n1 in spans:
+            each = name in UNIT  # a unit expression: the first unit and the last
             for n in range(n0, n1, stride):
                 T = n / self.fps
                 t = T - layer.t_in
                 try:
-                    v = prop.at(t, layer.dur, T, 0)
+                    if each:
+                        units = layer.unit_count(t, T)
+                        prop.at(t, layer.dur, T, 0, units)
+                        v = prop.at(t, layer.dur, T, units - 1, units)
+                    else:
+                        v = prop.at(t, layer.dur, T, i)
                 except Exception as e:  # noqa: BLE001 - any failure inside a user expression
                     self.note("error", "bad-expression", layer.id, f"{name} failed at t={t:.2f}s (frame {n}): "
                               f"{type(e).__name__}: {e}", "guard the expression, e.g. max(…, 0.001) under a division")
                     break
-                if name in schema.COLOR_KEYS and not (isinstance(v, (tuple, list)) and len(v) in (3, 4)):
+                if name.split(": ")[-1] in schema.COLOR_KEYS and not (isinstance(v, (tuple, list)) and len(v) in (3, 4)
+                                                                       or isinstance(v, C.Gradient)):
                     self._bad_colour(v, f"{name} at t={t:.2f}s (frame {n})", layer.id)
                     break
+        for layer in self.all_layers():  # a layer's repeat: every copy, at every few frames past the budget
+            c = layer.copies
+            if c is None:
+                continue
+            n0, n1 = math.ceil(layer.t_in * self.fps - 1e-6), math.ceil(layer.t_out * self.fps - 1e-6)
+            frames = range(n0, max(n1, n0 + 1), max(1, -(-(n1 - n0) * c.n * len(c.keys) // budget))) \
+                if c.moves() else [n0]
+            most = 0
+            for n in frames:
+                T = n / self.fps
+                t = T - layer.t_in
+                try:
+                    fills = c.columns(t, layer.dur, T).get("fill")
+                except (ArithmeticError, ValueError, TypeError) as e:
+                    self.note("error", "bad-expression", layer.id, f"{e} at t={t:.2f}s (frame {n})",
+                              "guard the expression, e.g. max(…, 0.001) under a division")
+                    break
+                most = max(most, len(set(fills or ())))
+            if most > schema.COPY_SLOTS and layer.type == "model":
+                self.note("warning", "repeat-colours", layer.id, f"repeat fill gives {most} different colours at "
+                          f"once; a model draws at most {schema.COPY_SLOTS}, so copies take the nearest of those",
+                          "fewer steps of colour, e.g. hsl(floor(i / n * 32) * 11, 0.7, 0.55)")
 
     def path(self, src: str) -> str:
         p = Path(src)
         return str(p if p.is_absolute() else (self.base / p))
+
+    def _frames(self, layer: Layer):
+        """An image layer's frames (a pattern, glob, folder or list of files) or sheet, as layer.seq, with its first
+        frame, or the sheet, as layer.src. Numbers missing from a sequence are reported here."""
+        raw, sheet = layer.raw, layer.raw.get("sheet")
+        if isinstance(sheet, dict):
+            cols, rows = int(sheet.get("cols", 1)), int(sheet.get("rows", 1))
+            layer.src = self.path(sheet["src"])
+            layer.seq = media.Frames(None, cols, rows, int(sheet.get("count") or cols * rows))
+            return
+        spec = raw["frames"]
+        if isinstance(spec, list):
+            files, gaps = [self.path(s) for s in spec], []  # each is checked by _check_media
+        else:
+            files, gaps = media.sequence(self.path(spec))
+        if not files:
+            p = Path(self.path(spec))
+            folder = p if p.is_dir() else p.parent
+            near = sorted(x.name for x in folder.iterdir() if x.is_file()) if folder.is_dir() else []
+            self.note("error", "media-missing", layer.id, f"frames {spec} match no files" + (
+                " (a folder of frames is read for .png, .jpg, .webp, .bmp, .gif and .svg)" if p.is_dir() else ""),
+                (f"files in {folder}: {', '.join(near[:12])}" if near else f"folder {folder} does not exist"
+                 if not folder.is_dir() else f"folder {folder} is empty") + " (paths are relative to the scene file)")
+            return
+        if gaps:
+            shown = ", ".join(map(str, gaps[:8])) + (f" and {len(gaps) - 8} more" if len(gaps) > 8 else "")
+            self.note("warning", "missing-frames", layer.id, f"frames {spec} skip number{'s' * (len(gaps) > 1)} "
+                      f"{shown}, so {'each' if len(gaps) > 1 else 'it'} shows the frame before",
+                      "render the missing frames again, or number the files without gaps")
+        layer.src = files[0]
+        layer.seq = media.Frames(files, 1, 1, len(files))
 
     def _read_words(self) -> dict[str, dict]:
         """Each audio entry's word times, read before the layers so cues and captions can use them:
@@ -581,13 +879,17 @@ class Scene:
                 raise SceneError(f"duplicate layer id '{lid}'", layer=lid)
             if ltype == "captions":
                 raw = dict({"x": "50%", "y": "86%", "size": 46, "weight": 700}, **raw)
+            elif ltype == "particles":
+                raw = particles.expand(raw, self.theme)
             layer = Layer(lid, ltype, raw, parent, len(self.by_id))
             self.by_id[lid] = layer
             if raw.get("sound") is not None:
                 self._sounding.append(layer)
             natural = None
-            if ltype in ("video", "image", "model") or (ltype == "captions" and raw.get("src")):
+            if ltype in ("video", "image", "model") or (ltype in ("captions", "particles") and raw.get("src")):
                 layer.src = self.path(raw["src"]) if raw.get("src") else None
+            if ltype == "image" and (raw.get("frames") or isinstance(raw.get("sheet"), dict)):
+                self._frames(layer)
             info = None
             if ltype == "video" and layer.src and Path(layer.src).is_file():  # a folder or missing file: _check_media
                 try:
@@ -646,15 +948,52 @@ class Scene:
             pctx = parent.ctx if parent and parent.ctx else self.ctx
             try:
                 for k, v in raw.items():
+                    if ltype == "particles" and k in particles.OWN:
+                        continue  # read by its emitter
                     if k in schema.COLOR_KEYS and (not isinstance(v, dict) or "to" in v or "keys" in v):
                         layer.props[k] = compile_prop(k, v, pctx)  # a colour, or a tween of one; not a gradient
-                    elif k not in STRUCT:
+                    elif k not in STRUCT or (ltype == "model" and k in schema.MODEL_OWN):  # a model's glow animates
                         layer.props[k] = compile_prop(k, v, pctx)
+                if ltype == "model":
+                    layer.parts = [{k: compile_prop(k, v, pctx) for k, v in p.items() if k not in PART_STRUCT}
+                                   for p in raw.get("parts") or [] if isinstance(p, dict)]
+                if isinstance(raw.get("repeat"), dict):
+                    layer.copies = Copies(raw["repeat"], pctx)
+                if ltype == "particles":
+                    layer.particles = particles.Emitter(raw, pctx, lid)
+                d = raw.get("d")
+                if ltype == "path" and isinstance(d, list) and d:  # morphing: its key, eased, as a number
+                    layer.morph = [svgpath.parse(k[1]) for k in d]
+                    layer.props["morph"] = compile_prop("morph", [[k[0], j, *k[2:]] for j, k in enumerate(d)], pctx)
+                looks = {k: raw[k] for k in schema.LOOKS
+                         if isinstance(raw.get(k), dict) and not (ltype == "model" and k in schema.MODEL_OWN)}
+                for look, spec in looks.items():
+                    for k in schema.LOOKS[look][2]:
+                        if k in spec:
+                            layer.props[f"{look} {k}"] = compile_prop(f"{look} {k}", spec[k], pctx)
+                layer.warp = looks.pop("displace", None)
+                layer.looks = looks or None
+                rough = raw.get("rough")
+                if isinstance(rough, dict):  # amount, length, seed, boil
+                    layer.rough = (float(rough.get("amount", 3)), float(rough.get("length", 12)),
+                                   int(rough.get("seed", 0)), float(rough.get("boil", 0)))
+                on = raw.get("textPath")
+                if ltype in ("text", "counter") and isinstance(on, dict) and isinstance(on.get("d"), str):
+                    layer.onpath = on["d"]
+                    layer.props["textPath offset"] = compile_prop("textPath offset", on.get("offset", 0), pctx)
+                along = raw.get("along")
+                if isinstance(along, dict) and isinstance(along.get("d"), str):
+                    layer.along = (along["d"], along.get("orient") is True)
+                    layer.props["along"] = compile_prop("along", along.get("p", [[0, 0], ["end", 1]]), pctx)
                 for un, uv in (raw.get("uniforms") or {}).items():
                     if not isinstance(uv, (int, float, str)) or (isinstance(uv, str) and uv.startswith("=")):
                         layer.props["u_" + un] = compile_prop("u_" + un, uv, pctx)
                 layer.enter = P.parse(raw.get("enter"), key="enter")
                 layer.exit = P.parse(raw.get("exit"), key="exit")
+                for m in (layer.enter, layer.exit):
+                    if m and isinstance(m.opts.get("map"), str):  # a luma wipe's image, from the scene's folder
+                        m.opts["map"] = self.path(m.opts["map"])
+                layer.emphasis = P.parse_emphasis(raw.get("emphasis"))
             except (ValueError, SyntaxError) as e:
                 raise SceneError(f"layer '{lid}': {e}", layer=lid) from e
             out.append(layer)
@@ -666,6 +1005,12 @@ class Scene:
                     raise SceneError(str(e)) from e
                 kids = [x for k in kids for x in (k if isinstance(k, list) else [k])]
                 self._build(kids, layer, layer.children)
+                if any(raw.get(k) is not None for k in ("speed", "loop", "timeRemap")):
+                    layer.clock = (float(raw.get("speed") or 1), float(raw.get("loop") or 0))
+                if layer.enter and layer.enter.stagger:  # the group enters child by child, not as one picture
+                    m = layer.enter
+                    for kid, k in zip(layer.children, P.turns(len(layer.children), m.order, m.seed)):
+                        kid.turn = k * m.stagger
             prev = lid
 
     def _camera(self, raw) -> Layer | None:
@@ -837,7 +1182,9 @@ def _num(v, ref):
 
 
 def _infer_type(raw: dict) -> str:
-    for key, t in (("shape", "model"), ("parts", "model"), ("text", "text"), ("cues", "captions"), ("d", "path"),
+    for key, t in (("rate", "particles"), ("burst", "particles"), ("emitter", "particles"), ("frames", "image"),
+                   ("sheet", "image"), ("shape", "model"),
+                   ("parts", "model"), ("text", "text"), ("cues", "captions"), ("d", "path"),
                    ("points", "path"), ("children", "group"), ("layers", "group"), ("r", "circle")):
         if key in raw:
             return t

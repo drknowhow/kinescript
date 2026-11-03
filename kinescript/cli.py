@@ -63,6 +63,10 @@ def main(argv=None) -> int:
                     "the frames dimmed")
     lk.add_argument("--audio", action="store_true", help="draw the sound under the frames (a lane per role and the "
                     "mix, with levels, the duck and issues) and print its measurements")
+    lk.add_argument("--trails", action="store_true", help="draw each moving layer's path over the frames, a dot a "
+                    "frame, so their spacing shows speed, eases and stops")
+    lk.add_argument("--onion", type=int, default=0, metavar="N", help="draw the N frames before each frame over it, "
+                    "fainter the older they are")
     lk.add_argument("-o", "--out")
 
     ck = sub.add_parser("check", help="lint layout, timing, contrast, reading time and sound; prints JSON")
@@ -72,7 +76,10 @@ def main(argv=None) -> int:
     pr = sub.add_parser("probe", help="resolved timeline and layer boxes at --at; or, for a media file, "
                                       "its duration, size, fps and audio")
     pr.add_argument("scene")
-    pr.add_argument("--at", type=float)
+    when = pr.add_mutually_exclusive_group()
+    when.add_argument("--at", type=float)
+    when.add_argument("--curve", metavar="ID.KEY", help="a layer's key at every frame and how fast it changes, where "
+                      "it holds still and its fastest frame, such as title.x")
 
     v = sub.add_parser("voice", help="speak each sound's text into its file and time its words (only the ones "
                                      "whose text changed, unless --force)")
@@ -88,6 +95,11 @@ def main(argv=None) -> int:
     w = sub.add_parser("watch", help="re-render a contact sheet whenever the scene file changes")
     w.add_argument("scene")
     w.add_argument("-n", "--count", type=int, default=12)
+
+    ed = sub.add_parser("edit", help="open a browser editor: scrub the scene and leave notes for the agent")
+    ed.add_argument("scene")
+    ed.add_argument("--port", type=int, default=8765, help="0 picks a free port")
+    ed.add_argument("--no-open", action="store_true", help="do not open the browser")
 
     sub.add_parser("mcp", help="run the MCP server on stdio")
     sub.add_parser("doctor", help="report ffmpeg, GPU and font availability")
@@ -154,6 +166,10 @@ def _run(a) -> int:
         p.write_text(json.dumps(STARTER, indent=2), encoding="utf-8")
         _emit({"ok": True, "out": str(p)})
         return 0
+    if a.cmd == "edit":
+        from .editor import serve
+        serve(a.scene, a.port, not a.no_open)
+        return 0
     if a.cmd == "mcp":
         from .mcp import serve
         serve()
@@ -191,7 +207,7 @@ def _run(a) -> int:
         from .verify import contact_sheet
         out = a.out or _default_out(a.scene, "_sheet.png")
         _emit(dict(ok=True, **contact_sheet(a.scene, out, a.count, a.cols, a.width, a.at, a.boxes, a.audio,
-                                            wire=a.wire, depth=a.depth)))
+                                            wire=a.wire, depth=a.depth, trails=a.trails, onion=a.onion)))
         return 0
     if a.cmd == "voice":
         from .voice import generate
@@ -206,6 +222,10 @@ def _run(a) -> int:
         from .verify import probe, probe_media
         if Path(a.scene).suffix.lower() != ".json" and Path(a.scene).exists():
             _emit(probe_media(a.scene))
+            return 0
+        if a.curve:
+            from .verify import curve
+            _emit(curve(a.scene, a.curve))
             return 0
         _emit(probe(a.scene, a.at))
         return 0

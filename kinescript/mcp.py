@@ -25,7 +25,8 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"}}, "required": ["scene"]}},
     {"name": "kine_look", "description": "Contact sheet: `count` frames in one labelled image. boxes=true outlines each "
      "layer with its id. wire=true draws every model's drawn triangles; depth=true shows each stage's depth image, "
-     "nearer brighter. audio=true draws the sound under the frames on the same time axis (a lane per role and the "
+     "nearer brighter. trails=true draws each moving layer's path, a dot a frame, so their spacing shows speed, "
+     "eases and stops; onion=N draws the N frames before each frame over it, fainter. audio=true draws the sound under the frames on the same time axis (a lane per role and the "
      "mix, with levels, the duck and issues in red) and returns its measurements. times are read as kine_still reads "
      "at; one outside the scene draws its first or last frame, with a note. Use it to review motion, layout "
      "and sound without watching video.",
@@ -35,6 +36,8 @@ TOOLS = [
                                                       "boxes": {"type": "boolean", "default": False},
                                                       "wire": {"type": "boolean", "default": False},
                                                       "depth": {"type": "boolean", "default": False},
+                                                      "trails": {"type": "boolean", "default": False},
+                                                      "onion": {"type": "integer", "default": 0},
                                                       "audio": {"type": "boolean", "default": False},
                                                       "width": {"type": "integer", "default": 400}}, "required": ["scene"]}},
     {"name": "kine_still", "description": "One full-size frame at time `at` (seconds), returned as an image, then "
@@ -46,9 +49,11 @@ TOOLS = [
                                                       "scale": {"type": "number", "default": 0.5}},
                      "required": ["scene", "at"]}},
     {"name": "kine_probe", "description": "Resolved timeline (every layer's in/out) and, with `at`, every visible "
-     "layer's screen box, alpha and text at that time. Given a media file instead of a scene, its duration, size, "
-     "fps and audio.",
-     "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"}, "at": {"type": "number"}},
+     "layer's screen box, anchor position (pos), alpha and text at that time. With `curve` (\"title.x\") "
+     "instead, that key's value at every frame and how fast it changes, where it holds still and its fastest "
+     "frame. Given a media file instead of a scene, its duration, size, fps and audio.",
+     "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"}, "at": {"type": "number"},
+                                                      "curve": {"type": "string"}},
                      "required": ["scene"]}},
     {"name": "kine_voice", "description": "Speak each sound's `text` into its file (voice/<id>.wav unless it has a "
      "src) and write its word times, so layers can cue from words (\"vo1:render\") and captions can follow it. Only "
@@ -67,6 +72,17 @@ TOOLS = [
                                                       "quality": {"type": "string", "enum": ["draft", "standard", "high"]},
                                                       "scale": {"type": "number"}, "from": {"type": "number"},
                                                       "to": {"type": "number"}}, "required": ["scene", "out"]}},
+    {"name": "kine_feedback", "description": "Review notes a person left on a scene's video (kine edit), kept in \"<scene>.feedback.json\". "
+     "list gives the open notes in time order (status=resolved or all for others): time, layer id, point, text, and "
+     "stale=true when the scene changed after the note was made. get shows one note. resolve closes it, with an "
+     "optional text saying what changed; reply adds a text and leaves it open. still=true on get or list returns "
+     "the frame at each note's time with its point marked.",
+     "inputSchema": {"type": "object", "properties": {"scene": {"type": "string", "description": "Path to the scene .json"},
+                                                      "action": {"type": "string", "enum": ["list", "get", "resolve", "reply"]},
+                                                      "id": {"type": "string"}, "text": {"type": "string"},
+                                                      "status": {"type": "string", "enum": ["open", "resolved", "all"], "default": "open"},
+                                                      "still": {"type": "boolean", "default": False}},
+                     "required": ["scene", "action"]}},
 ]
 
 
@@ -117,13 +133,17 @@ def call(name: str, args: dict) -> list[dict]:
         sc = _need(args, "scene")
         if isinstance(sc, str) and Path(sc).suffix.lower() != ".json" and Path(sc).is_file():
             return [_text(probe_media(sc))]
+        if args.get("curve"):
+            from .verify import curve
+            return [_text(curve(_scene(args), args["curve"]))]
         return [_text(probe(_scene(args), args.get("at")))]
     if name == "kine_look":
         from .verify import contact_sheet
         out = str(Path(tempfile.gettempdir()) / f"kine_look_{os.getpid()}.png")
         info = contact_sheet(_scene(args), out, int(args.get("count", 12)), None, int(args.get("width", 400)),
                              args.get("times"), bool(args.get("boxes")), bool(args.get("audio")),
-                             wire=bool(args.get("wire")), depth=bool(args.get("depth")))
+                             wire=bool(args.get("wire")), depth=bool(args.get("depth")),
+                             trails=bool(args.get("trails")), onion=int(args.get("onion", 0)))
         del info["out"]  # a temporary file, gone once read
         return [_image(out), _text(info)]
     if name == "kine_still":
@@ -147,6 +167,32 @@ def call(name: str, args: dict) -> list[dict]:
         res = render(sc, out, args.get("quality", "standard"), None, float(args.get("scale", 1.0)),
                      args.get("from"), args.get("to"))
         return [_text(res)]
+    if name == "kine_feedback":
+        from . import feedback as fb
+        path, action = _need(args, "scene"), _need(args, "action")
+        if not isinstance(path, str) or not Path(path).is_file():
+            raise ValueError("scene must be the path to a scene .json file")
+        try:
+            if action == "list":
+                status = args.get("status", "open")
+                notes = fb.listing(path, None if status == "all" else status)
+            elif action == "get":
+                notes = [fb.get(path, _need(args, "id"))]
+            elif action == "resolve":
+                fb.resolve(path, _need(args, "id"), args.get("text"))
+                notes = [fb.get(path, args["id"])]
+            elif action == "reply":
+                fb.reply(path, _need(args, "id"), _need(args, "text"))
+                notes = [fb.get(path, args["id"])]
+            else:
+                raise ValueError(f"unknown action {action}")
+        except fb.FeedbackError as e:
+            raise ValueError(str(e)) from e
+        out = [_text({"notes": notes})]
+        if args.get("still") and action in ("list", "get"):
+            for n in notes:
+                out.append(_image(fb.marked_still(_scene(args), n)))
+        return out
     raise ValueError(f"unknown tool {name}")
 
 

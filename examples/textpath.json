@@ -1,0 +1,21 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 6, "bg": "#0a0c10"},
+  "layers": [
+    {"id": "arc", "type": "path", "d": "M 260 520 C 640 160 1280 160 1660 520", "stroke": "$track", "strokeWidth": 4,
+     "draw": [[0, 0], [0.8, 1, "easeOut"]]},
+    {"id": "title", "type": "text", "text": "VIDEO YOU CAN DIFF", "size": 96, "weight": 700, "fill": "$sheet",
+     "textPath": {"d": "#arc", "offset": 0.5, "align": "center"}, "at": 0.4, "split": "chars",
+     "enter": {"name": "rise", "dur": 0.5, "stagger": 0.03}},
+    {"id": "ring", "type": "text", "text": "KINESCRIPT \u2022 JSON IN \u2022 VIDEO OUT \u2022 ", "font": "$mono", "size": 34,
+     "letterSpacing": 6, "fill": "$cue", "at": 0.6, "enter": {"name": "fade", "dur": 0.6},
+     "textPath": {"d": "M 816 660 A 144 144 0 1 1 1104 660 A 144 144 0 1 1 816 660 Z",
+                  "offset": [[0.6, 0], [6, 1, "linear"]]}},
+    {"id": "turn", "type": "counter", "value": [[0.6, 0], [6, 360, "linear"]], "format": "{:.0f}\u00b0",
+     "font": "$mono", "size": 56, "fill": "$key", "x": "50%", "y": 660, "at": 0.6, "enter": {"name": "fade", "dur": 0.6}},
+    {"id": "wave", "type": "path", "d": "M 200 960 C 520 880 840 1040 1160 960 S 1560 880 1720 960",
+     "stroke": "$track", "strokeWidth": 3},
+    {"id": "typed", "type": "text", "text": "offset runs the letters along the path", "font": "$mono", "size": 30,
+     "fill": "$annotation", "caret": true, "textPath": {"d": "#wave", "offset": 0.08}, "at": 1.2,
+     "enter": {"name": "type", "dur": 2.2}}
+  ]
+}

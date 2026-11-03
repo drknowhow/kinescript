@@ -1,18 +1,24 @@
 """Footage and image access through ffmpeg/ffprobe pipes."""
 from __future__ import annotations
 
+import fnmatch
 import json
+import math
 import os
 import re
 import shutil
 import queue
 import subprocess
 import threading
+import xml.etree.ElementTree as ET
 from functools import lru_cache
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 import skia
+
+from . import svgdoc
 
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
 FFPROBE = shutil.which("ffprobe") or "ffprobe"
@@ -228,19 +234,169 @@ def yuv_matrix(info: dict):
 
 
 def image(src: str) -> skia.Image:
-    """The decoded image, once per file version."""
+    """The decoded image, once per file version. An svg comes as pixels: drawn at its own size times the whole number
+    that takes its longer side to 512 px or more (at most 4096), for a model's texture or a particle's sprite."""
     return _image(*_version(src))
 
 
 @lru_cache(maxsize=64)
 def _image(src: str, mtime: int, size: int) -> skia.Image:
+    if src.lower().endswith(".svg"):
+        v = vector(src)
+        longest = max(v.w, v.h)
+        k = min(max(1, math.ceil(512 / longest)), 4096 / longest)
+        surf = skia.Surface.MakeRaster(skia.ImageInfo.MakeN32Premul(max(1, round(v.w * k)), max(1, round(v.h * k))))
+        c = surf.getCanvas()
+        c.scale(surf.width() / v.w, surf.height() / v.h)
+        c.drawPicture(v.picture)
+        return surf.makeImageSnapshot()
     data = Path(src).read_bytes() if Path(src).exists() else None
     if data is None:
         raise MediaError(f"image not found: {src}")
     img = skia.Image.MakeFromEncoded(skia.Data.MakeWithCopy(data))
     if img is None:
-        raise MediaError(f"cannot decode image {src} (png, jpg, webp, gif, bmp are supported)")
+        raise MediaError(f"cannot decode image {src} (png, jpg, webp, gif, bmp and svg are supported)")
     return img
+
+
+def still(src: str) -> skia.Image | Vector:
+    """What an image layer draws from src: its vector drawing for an svg, else the decoded image."""
+    return vector(src) if src.lower().endswith(".svg") else image(src)
+
+
+class Vector:
+    """An svg file as a vector drawing: its picture, drawn at the file's own size w x h, and `undrawn`, the kinds of
+    element in it that skia's svg reader leaves out, in SVG_FIX's order."""
+    __slots__ = ("picture", "w", "h", "undrawn")
+
+    def __init__(self, picture: skia.Picture, w: float, h: float, undrawn: tuple):
+        self.picture, self.w, self.h, self.undrawn = picture, w, h, undrawn
+
+    def width(self) -> float:
+        return self.w
+
+    def height(self) -> float:
+        return self.h
+
+
+# Elements skia's svg reader does not draw, by kind; each kind's fix is in SVG_FIX. The reader draws shapes, paths,
+# strokes, gradients, patterns, clip paths, masks, opacity, transforms, <use> of a shape and most filters.
+SVG_UNDRAWN = {"text": "text", "tspan": "text", "textPath": "text", "style": "style", "symbol": "symbol",
+               "image": "image", "marker": "marker", "switch": "switch", "foreignObject": "foreignObject",
+               "feDropShadow": "feDropShadow", "animate": "animation", "animateTransform": "animation",
+               "animateMotion": "animation", "set": "animation"}
+SVG_FIX = {"text": "turn text into paths (Inkscape: Path > Object to Path; Illustrator: Type > Create Outlines)",
+           "style": "write fill and stroke on the elements instead of in a <style> sheet (Illustrator: Styling: "
+                    "Presentation Attributes)",
+           "symbol": "put the shapes of each <symbol> where it is used",
+           "image": "show a picture in an image layer of its own",
+           "marker": "turn the stroke and its markers into paths (Inkscape: Path > Stroke to Path)",
+           "switch": "keep the one branch of the <switch> you want",
+           "foreignObject": "draw it with svg shapes",
+           "feDropShadow": "drop the filter and give the layer a shadow",
+           "animation": "an svg's own animation does not play: animate the layer instead"}
+_START_TAG = re.compile(rb"<[A-Za-z][^>]*>")
+_HREF = re.compile(rb"(\s)href(\s*=)")
+
+
+def _xlink(tag: re.Match) -> bytes:
+    t = tag.group(0)
+    return t if b"xlink:href" in t else _HREF.sub(rb"\1xlink:href\2", t, count=1)
+
+
+def vector(src: str) -> Vector:
+    """The svg file src as a vector drawing, once per file version."""
+    return _vector(*_version(src))
+
+
+@lru_cache(maxsize=64)
+def _vector(src: str, mtime: int, size: int) -> Vector:
+    data = Path(src).read_bytes() if Path(src).exists() else None
+    if data is None:
+        raise MediaError(f"svg not found: {src}")
+    try:
+        root = ET.fromstring(data)
+    except ET.ParseError as e:
+        raise MediaError(f"cannot read svg {src}: {e}") from None
+    if root.tag.rsplit("}", 1)[-1] != "svg":
+        raise MediaError(f"cannot read svg {src}: it is <{root.tag.rsplit('}', 1)[-1]}>, not <svg>")
+    found = {SVG_UNDRAWN.get(el.tag.rsplit("}", 1)[-1]) for el in root.iter() if isinstance(el.tag, str)}
+    undrawn = tuple(k for k in SVG_FIX if k in found)
+    w, h = svgdoc.size(root)
+    # The reader follows xlink:href only; SVG 2 writes href (a <use>, a gradient taking another's stops).
+    dom = skia.SVGDOM.MakeFromStream(skia.MemoryStream(skia.Data.MakeWithCopy(_START_TAG.sub(_xlink, data))))
+    if dom is None:
+        raise MediaError(f"cannot read svg {src}")
+    dom.setContainerSize(skia.Size(w, h))
+    rec = skia.PictureRecorder()
+    c = rec.beginRecording(skia.Rect.MakeWH(w, h))
+    c.clipRect(skia.Rect.MakeWH(w, h))  # what lies outside its viewport is not shown, as in a browser
+    dom.render(c)
+    return Vector(rec.finishRecordingAsPicture(), w, h, undrawn)
+
+
+FRAME_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".svg")  # the files a folder of frames is read for
+SEQUENCE_FPS = 12  # frames a second of a sequence or sheet without fps: hand-drawn animation's usual rate
+_NUMBER = re.compile(r"%0?\d*d|#+")  # the number in a pattern: run_%03d.png (as ffmpeg writes it) or run_####.png
+
+
+class Frames(NamedTuple):
+    """An image layer's frame-by-frame animation: `files` in order, a missing number holding the file before it, or
+    None for a sheet, whose `count` frames are its cells of `cols` x `rows`, row by row from the top left."""
+    files: list | None
+    cols: int
+    rows: int
+    count: int
+
+    def at(self, t: float, fps: float, loop) -> int:
+        """The frame shown at the layer's own time t: frame k from k / fps seconds. loop True starts again after the
+        last, "pingpong" plays back to the first and on, and False holds the last."""
+        k, n = math.floor(t * fps + 1e-6), self.count
+        if loop == "pingpong" and n > 1:
+            k %= 2 * n - 2
+            return k if k < n else 2 * n - 2 - k
+        return k % n if loop else min(max(k, 0), n - 1)
+
+
+def _natural(name: str) -> list:
+    """A sort key that puts run_2 before run_10."""
+    return [(0, int(s), "") if s.isdigit() else (1, 0, s.lower()) for s in re.split(r"(\d+)", name) if s]
+
+
+def sequence(spec: str) -> tuple[list[str], list[int]]:
+    """The files of an image sequence and the numbers missing from it. `spec` is a pattern with the number in it
+    (run_%03d.png or run_####.png), a glob (run_*.png) or a folder of images. When the names differ only in their
+    number, frame k is the lowest number plus k, and a missing number shows the file before it, so the others keep
+    their times; otherwise the files go in name order, numbers counted as numbers."""
+    p = Path(spec)
+    parts = _NUMBER.split(p.name)
+    if p.is_dir():
+        found = [x for x in p.iterdir() if x.is_file() and x.suffix.lower() in FRAME_EXTS]
+    elif len(parts) > 1:  # the number is the first %d or # run; the rest must match as written
+        rx = re.compile(re.escape(parts[0]) + r"(\d+)" + "".join(map(re.escape, parts[1:])), re.I)
+        found = [x for x in p.parent.iterdir() if x.is_file() and rx.fullmatch(x.name)] if p.parent.is_dir() else []
+    elif any(ch in p.name for ch in "*?["):
+        found = [x for x in p.parent.iterdir() if x.is_file() and fnmatch.fnmatch(x.name.lower(), p.name.lower())
+                 ] if p.parent.is_dir() else []
+    else:
+        return ([str(p)] if p.is_file() else []), []
+    if len(parts) > 1 and not p.is_dir():
+        nums = {x: int(rx.fullmatch(x.name).group(1)) for x in found}
+    else:  # numbered when the names differ only in their last number: run_1.png, run_2.png
+        shapes = {re.sub(r"\d+(\D*)$", r"#\1", x.name.lower()) for x in found}
+        nums = ({x: int(re.findall(r"\d+", x.name)[-1]) for x in found}
+                if len(shapes) == 1 and "#" in next(iter(shapes)) else {})
+    if found and len(nums) == len(found) and len(set(nums.values())) == len(found):
+        by = {n: str(x) for x, n in nums.items()}
+        files, missing, last = [], [], by[min(by)]
+        for n in range(min(by), max(by) + 1):
+            if n in by:
+                last = by[n]
+            else:
+                missing.append(n)
+            files.append(last)
+        return files, missing
+    return [str(x) for x in sorted(found, key=lambda x: _natural(x.name))], []
 
 
 class VideoSource:

@@ -13,8 +13,10 @@ A property is one of:
 from __future__ import annotations
 
 import ast
+import colorsys
 import math
 import re
+from bisect import bisect_right
 from typing import Any, Callable
 
 from . import color as C
@@ -47,9 +49,37 @@ def noise(x: float, seed: float = 0.0) -> float:
     return h(i) * (1 - u) + h(i + 1) * u
 
 
+def _hex(c) -> str:
+    out = "#" + "".join(f"{round(max(0.0, min(1.0, float(v))) * 255):02x}" for v in c[:3])
+    return out + (f"{round(max(0.0, min(1.0, float(c[3]))) * 255):02x}" if len(c) > 3 and c[3] < 1 else "")
+
+
+def hsl(h: float, s: float = 0.7, l: float = 0.55) -> str:  # noqa: E741 - the name everyone knows
+    """A colour from its hue in degrees (0 red, 120 green, 240 blue, and round again), saturation and lightness
+    from 0 to 1, as #rrggbb."""
+    return _hex(colorsys.hls_to_rgb((float(h) / 360.0) % 1.0, max(0.0, min(1.0, float(l))),
+                                    max(0.0, min(1.0, float(s)))))
+
+
+def mix(a, b, t: float) -> str:
+    """The colour t of the way from colour a to colour b (t from 0 to 1), mixed as keyframes mix a fill."""
+    return _hex(C.mix(C.parse(a), C.parse(b), max(0.0, min(1.0, float(t)))))
+
+
+def sweep(i: float, n: float, p: float, soft: float = 1.0) -> float:
+    """1 for the units a sweep across n of them has passed at p (0 to 1), 0 for those it has not reached, and in
+    between, eased, over `soft` units at its front. It starts before unit 0 and ends past the last one."""
+    soft = max(0.0, float(soft))
+    front = float(p) * (float(n) + soft)
+    if soft == 0:
+        return 1.0 if i < front else 0.0
+    x = max(0.0, min(1.0, (front - float(i)) / soft))
+    return x * x * (3 - 2 * x)
+
+
 EXPR_ENV: dict[str, Any] = {k: getattr(math, k) for k in (
     "sin", "cos", "tan", "pi", "sqrt", "floor", "ceil", "exp", "log", "atan2", "hypot", "tau")}
-EXPR_ENV.update(abs=abs, min=min, max=max, round=round, noise=noise,
+EXPR_ENV.update(abs=abs, min=min, max=max, round=round, noise=noise, hsl=hsl, mix=mix, sweep=sweep,
                 clamp=lambda v, a=0.0, b=1.0: max(a, min(b, v)),
                 lerp=lambda a, b, t: a + (b - a) * t,
                 wiggle=lambda freq, amp, t, seed=0: noise(t * freq, seed) * amp,
@@ -88,13 +118,17 @@ def lerp(a, b, t: float):
         return a + (b - a) * t
     if isinstance(a, tuple) and isinstance(b, tuple) and len(a) == len(b) == 4:  # parsed colours
         return C.mix(a, b, t)
+    if isinstance(a, C.Gradient) and isinstance(b, C.Gradient):
+        return a.mix(b, t)
     if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)) and len(a) == len(b):
         return [lerp(x, y, t) for x, y in zip(a, b)]
     return b if t >= 1 else a
 
 
 def _norm(v):
-    """Colours become RGBA tuples once, so draw code never re-parses them."""
+    """Colours become RGBA tuples and gradients Gradients once, so draw code never re-parses them."""
+    if isinstance(v, dict) and "stops" in v:
+        return C.Gradient.of(v)
     return C.parse(v) if C.is_color(v) else v
 
 
@@ -115,8 +149,12 @@ class Prop:
     def __init__(self, static: bool, value=None, fn: Callable | None = None, keys: Callable | None = None):
         self.static, self.value, self.fn, self.keys = static, value, fn, keys
 
-    def at(self, t: float, d: float, T: float = 0.0, i: int = 0):
-        return self.value if self.static else self.fn(t, d, T, i)
+    def at(self, t: float, d: float, T: float = 0.0, i: int = 0, n: int | None = None):
+        """The value at t of a layer d long, for unit (or copy, or part) i; n, the unit count, goes to a unit key's
+        expression."""
+        if self.static:
+            return self.value
+        return self.fn(t, d, T, i) if n is None else self.fn(t, d, T, i, n)
 
     def held(self, t0: float, t1: float, d: float) -> bool:
         """Whether the value is the same at every time in [t0, t1]: a constant, or keyframes before their first key or
@@ -183,20 +221,30 @@ class _FloatPow(ast.NodeTransformer):
 
 
 _GLOBALS = {"__builtins__": {}, "_pow": _pow}
+ARGS = ("t", "d", "p", "T", "i")  # what an expression function takes, in order (expr_fn)
+FIELD = re.compile(r"\{:([^{}]*)\}")  # where a counter's format writes its value, and how
+UNIT = {"unitX", "unitY", "unitRotate", "unitScale", "unitOpacity", "unitFill", "unitBlur"}  # n, the unit count, too
 
 
-def compile_expr(src: str, name: str, allowed: set[str]):
+def compile_expr(src: str, name: str, allowed: set[str], args: tuple[str, ...] = ()):
     """Compile a scene expression. Only arithmetic, comparisons and calls to the whitelisted
     helpers are accepted (no attributes, subscripts or lambdas), because scene files may come
-    from other agents and are evaluated with eval()."""
+    from other agents and are evaluated with eval(). With args, the code evaluates to a function
+    of those names."""
     try:
-        return _compile_expr(src, name, allowed)
+        return _compile_expr(src, name, allowed, args)
     except (RecursionError, MemoryError):  # "-" * 50000 + "1", or a sum of 5000 terms
         raise ValueError(f"'{name}': the expression is nested too deeply to read ({len(src)} characters); "
                          "write it shorter, or split it across keyframes") from None
 
 
-def _compile_expr(src: str, name: str, allowed: set[str]):
+def expr_fn(src: str, name: str, env: dict, args: tuple[str, ...] = ARGS) -> Callable:
+    """The expression as a function of args, (t, d, p, T, i) unless given, whose globals are env's helpers, so a
+    call builds no dict."""
+    return eval(compile_expr(src, name, set(env) | set(args), args), dict(env, **_GLOBALS))
+
+
+def _compile_expr(src: str, name: str, allowed: set[str], args: tuple[str, ...] = ()):
     tree = ast.parse(src, mode="eval")
     for node in ast.walk(tree):
         if not isinstance(node, _SAFE_NODES):
@@ -208,8 +256,12 @@ def _compile_expr(src: str, name: str, allowed: set[str]):
             raise ValueError(f"'{name}': only direct helper calls are allowed")
         if isinstance(node, ast.BinOp) and (_sequence(node.left) or _sequence(node.right)):
             raise ValueError(f"'{name}': arithmetic works on numbers, not on text or lists")
-    tree = ast.fix_missing_locations(_FloatPow().visit(tree))
-    return compile(tree, f"<{name}>", "eval")
+    tree = _FloatPow().visit(tree)
+    if args:
+        params = ast.arguments(posonlyargs=[], args=[ast.arg(a) for a in args], kwonlyargs=[], kw_defaults=[],
+                               defaults=[])
+        tree = ast.Expression(ast.Lambda(params, tree.body))
+    return compile(ast.fix_missing_locations(tree), f"<{name}>", "eval")
 
 
 def _finite(v) -> bool:
@@ -235,16 +287,47 @@ def _tween_secs(raw: dict, key: str, default: float, name: str) -> float:
     return float(v)
 
 
-def compile_prop(name: str, raw, ctx: Ctx) -> Prop:
+HOLD = E.EASES["hold"]
+
+
+def _slopes(pts: list) -> list[float]:
+    """The speed at each of a smooth prop's keys: Fritsch-Butland, so no value passes either neighbour, and zero where a
+    run of keys starts or ends: at the first and last key, at a hold, and where two keys share a time."""
+    m = [0.0] * len(pts)
+    for k in range(1, len(pts) - 1):
+        (t0, v0, _), (t1, v1, e1), (t2, v2, e2) = pts[k - 1], pts[k], pts[k + 1]
+        if e1 is HOLD or e2 is HOLD or not t0 < t1 < t2:
+            continue
+        a, b = (v1 - v0) / (t1 - t0), (v2 - v1) / (t2 - t1)
+        if a * b > 0:
+            h0, h1 = t1 - t0, t2 - t1
+            m[k] = 3 * (h0 + h1) / ((2 * h1 + h0) / a + (h1 + 2 * h0) / b)
+    return m
+
+
+def compile_prop(name: str, raw, ctx: Ctx, smooth: bool = False) -> Prop:
+    """smooth: keyframes pass through every key without stopping, at rest only where a run of keys starts and ends,
+    and each key's ease is ignored except hold."""
     if name in NOT_ANIMATABLE:
         return Prop(True, raw)
-    if isinstance(raw, str) and raw.startswith("="):
-        env = dict(EXPR_ENV, W=ctx.w, H=ctx.h, fps=ctx.fps)
-        code = compile_expr(raw[1:], name, set(env) | {"t", "d", "p", "T", "i"})
+    if isinstance(raw, str) and raw.startswith("=") and name in UNIT:  # a split text's unit i of n
+        fn = expr_fn(raw[1:], name, dict(EXPR_ENV, W=ctx.w, H=ctx.h, fps=ctx.fps), ARGS + ("n",))
 
-        def fx(t, d, T, i, code=code, env=env):
+        def fu(t, d, T, i, n=1, fn=fn):
             try:
-                v = eval(code, _GLOBALS, dict(env, t=t, d=d, p=(t / d if d else 0.0), T=T, i=i))
+                v = fn(t, d, t / d if d else 0.0, T, i, n)
+            except OverflowError:
+                raise ValueError("gives a number too large for a float, not a finite number") from None
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and not _finite(v):
+                raise ValueError(f"gives {_show(v)}, not a finite number")
+            return _norm(v)
+        return Prop(False, raw, fn=fu)
+    if isinstance(raw, str) and raw.startswith("="):
+        fn = expr_fn(raw[1:], name, dict(EXPR_ENV, W=ctx.w, H=ctx.h, fps=ctx.fps))
+
+        def fx(t, d, T, i, fn=fn):
+            try:
+                v = fn(t, d, t / d if d else 0.0, T, i)
             except OverflowError:  # 10.0**400, exp(1000), floor(inf)
                 raise ValueError("gives a number too large for a float, not a finite number") from None
             if isinstance(v, (int, float)) and not isinstance(v, bool) and not _finite(v):
@@ -253,29 +336,146 @@ def compile_prop(name: str, raw, ctx: Ctx) -> Prop:
         return Prop(False, raw, fn=fx)  # value keeps the source: Scene.check_expressions finds expressions by it
     if isinstance(raw, dict) and ("to" in raw or "keys" in raw):
         if "keys" in raw:
-            return compile_prop(name, raw["keys"], ctx)
+            return compile_prop(name, raw["keys"], ctx, smooth=raw.get("smooth") is True)
         delay, dur = (_tween_secs(raw, k, default, name) for k, default in (("delay", 0), ("dur", 0.6)))
         keys = [[delay, raw.get("from", raw["to"])], [delay + dur, raw["to"], raw.get("ease", "outCubic")]]
         return compile_prop(name, keys, ctx)
     if is_keyframes(raw):
         keys = [(k[0], _norm(length(k[1], name, ctx)), E.get(k[2] if len(k) > 2 else "inOutCubic")) for k in raw]
         fps = ctx.fps
-        cache: dict[float, list] = {}
+        if smooth and not all(isinstance(v, (int, float)) and not isinstance(v, bool) for _, v, _ in keys):
+            raise ValueError(f"{name}: smooth moves numbers through their keys; colours and lists mix key to key, so "
+                             "leave smooth out")
+        cache: dict[float, tuple] = {}  # layer length -> (keys in time order, their times, smooth's slopes)
 
-        def points(d):
-            pts = cache.get(d)
-            if pts is None:
-                pts = cache[d] = sorted(((key_time(k, d, fps), v, e) for k, v, e in keys), key=lambda x: x[0])
-            return pts
+        def sorted_keys(d):
+            hit = cache.get(d)
+            if hit is None:
+                pts = sorted(((key_time(k, d, fps), v, e) for k, v, e in keys), key=lambda x: x[0])
+                hit = cache[d] = (pts, [p[0] for p in pts], _slopes(pts) if smooth else None)
+            return hit
+
+        def fs(t, d, T, i):  # cubic Hermite between keys, with the slopes _slopes gives
+            pts, times, m = sorted_keys(d)
+            if t <= times[0]:
+                return pts[0][1]
+            j = bisect_right(times, t)
+            if j == len(pts):
+                return pts[-1][1]
+            t0, v0, _ = pts[j - 1]
+            t1, v1, e1 = pts[j]
+            if e1 is HOLD:
+                return v0
+            h = t1 - t0
+            s = (t - t0) / h
+            s2 = s * s
+            s3 = s2 * s
+            return (2 * s3 - 3 * s2 + 1) * v0 + (s3 - 2 * s2 + s) * h * m[j - 1] + (3 * s2 - 2 * s3) * v1 \
+                + (s3 - s2) * h * m[j]
 
         def fk(t, d, T, i):
-            pts = points(d)
-            if t <= pts[0][0]:
+            pts, times, _ = sorted_keys(d)
+            if t <= times[0]:
                 return pts[0][1]
-            for (t0, v0, _), (t1, v1, e1) in zip(pts, pts[1:]):
-                if t < t1:
-                    u = (t - t0) / (t1 - t0) if t1 > t0 else 1.0
-                    return lerp(v0, v1, e1(u))
-            return pts[-1][1]
-        return Prop(False, fn=fk, keys=points)
+            j = bisect_right(times, t)  # the first key after t; keys at equal times leave the later one in force
+            if j == len(pts):
+                return pts[-1][1]
+            t0, v0, _ = pts[j - 1]
+            t1, v1, e1 = pts[j]
+            return lerp(v0, v1, e1((t - t0) / (t1 - t0)))
+        return Prop(False, fn=fs if smooth else fk, keys=lambda d: sorted_keys(d)[0])
     return Prop(True, _norm(length(raw, name, ctx)))
+
+
+PLACE = ("x", "y", "z", "rotateX", "rotateY", "rotate", "scale")  # where a copy of a model is (Copies)
+PLACE_DEFAULT = {k: (1.0 if k == "scale" else 0.0) for k in PLACE}
+COPY_PAINT = ("fill", "stroke")  # a copy's own colours, in place of the layer's
+COPY_KEYS = (*PLACE, *COPY_PAINT, "opacity")
+_MOVES = {"t", "p", "T"}  # an expression reading none of these gives each copy the same value at every frame
+
+
+class Copies:
+    """A layer's "repeat": `n` copies of it. A model's are copies of its mesh, each placed by x, y, z, rotateX,
+    rotateY, rotate and scale and coloured by fill; a 2D layer's are placed by x, y, rotate and scale in its own
+    space and take fill, stroke and opacity. A key is a number (fill and stroke: a colour), a list taken in turn
+    (copy i takes item i, round again), or an expression over i (the copy, from 0), n and the layer's t, d, p and
+    T. Keys that do not change over time are worked out once, so a still grid of 1000 copies costs nothing a
+    frame."""
+    __slots__ = ("n", "keys", "env", "still")
+
+    def __init__(self, raw: dict, ctx: Ctx):
+        self.n = int(raw.get("count", 1))
+        self.env = dict(EXPR_ENV, W=ctx.w, H=ctx.h, fps=ctx.fps, n=self.n)
+        self.keys: dict[str, tuple] = {}  # key -> ("expr", code, moves) | ("list", values) | ("const", value)
+        self.still: dict[str, list] = {}
+        for k in COPY_KEYS:
+            v = raw.get(k)
+            if v is None:
+                continue
+            if isinstance(v, str) and v.startswith("="):
+                try:
+                    code = compile_expr(v[1:], f"repeat {k}", set(self.env) | {"t", "d", "p", "T", "i"})
+                except SyntaxError as e:
+                    raise ValueError(f"repeat {k}: '{v}' is not an expression Kinescript reads ({e.msg})") from None
+                self.keys[k] = ("expr", code, bool(_MOVES & set(code.co_names)))
+            elif isinstance(v, list):
+                self.keys[k] = ("list", [self._value(k, x, j) for j, x in enumerate(v)])
+            else:
+                self.keys[k] = ("const", self._value(k, v, 0))
+
+    @staticmethod
+    def _value(k: str, v, i: int):
+        """v as copy i's value of key k: a finite number, or for fill and stroke a colour as (r, g, b, a)."""
+        if k in COPY_PAINT:
+            if isinstance(v, tuple) and len(v) == 4:
+                return v
+            if not C.is_color(v):
+                raise ValueError(f"repeat {k} gives {_show(v)} for copy {i}, not a colour")
+            return C.parse(v)
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not _finite(v):
+            raise ValueError(f"repeat {k} gives {_show(v)} for copy {i}, not a finite number")
+        return float(v)
+
+    def _column(self, k: str, t: float, d: float, T: float) -> list:
+        kind, *spec = self.keys[k]
+        if kind == "const":
+            return [spec[0]] * self.n
+        if kind == "list":
+            return [spec[0][i % len(spec[0])] for i in range(self.n)]
+        loc = dict(self.env, t=t, d=d, p=(t / d if d else 0.0), T=T)
+        code, out, paint = spec[0], [], k in COPY_PAINT
+        add = out.append
+        for i in range(self.n):
+            loc["i"] = i
+            try:
+                v = eval(code, _GLOBALS, loc)
+            except OverflowError:
+                raise ValueError(f"repeat {k} gives a number too large for a float for copy {i}") from None
+            except (ArithmeticError, ValueError, TypeError) as e:
+                raise ValueError(f"repeat {k} failed for copy {i}: {type(e).__name__}: {e}") from None
+            # A finite float is taken as it is: _value's checks took 2.1 ms of the 7.5 that two expressions over
+            # 10,000 copies took.
+            add(v if not paint and type(v) is float and -math.inf < v < math.inf else self._value(k, v, i))
+        return out
+
+    def columns(self, t: float, d: float, T: float = 0.0) -> dict[str, list]:
+        """Each key's value for every copy at the layer's time t (scene time T), as a list per key it sets."""
+        cols = {}
+        for k, spec in self.keys.items():
+            if spec[0] == "expr" and spec[2]:
+                cols[k] = self._column(k, t, d, T)
+            else:
+                if k not in self.still:
+                    self.still[k] = self._column(k, t, d, T)
+                cols[k] = self.still[k]
+        return cols
+
+    def at(self, t: float, d: float, T: float = 0.0) -> tuple[dict[str, list], list | None]:
+        """Each copy's placement at the layer's time t (scene time T), as a list per key it sets, and each copy's
+        fill as (r, g, b, a), or None when it sets none."""
+        cols = self.columns(t, d, T)
+        return {k: v for k, v in cols.items() if k in PLACE}, cols.get("fill")
+
+    def moves(self) -> bool:
+        """Whether a key changes over time."""
+        return any(s[0] == "expr" and s[2] for s in self.keys.values())

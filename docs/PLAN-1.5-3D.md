@@ -232,27 +232,69 @@ nine rounds: a floor reaching to just in front of the camera took eight.
 - glTF animation: node translation, rotation and scale channels (LINEAR, STEP, CUBICSPLINE), morph target weights,
   and skins (`JOINTS_0`, `WEIGHTS_0`, inverse bind matrices; linear blend skinning in numpy). The layer key
   `animation` takes a clip name or `{"name", "speed", "loop", "start"}` on the layer's clock.
+  Built on branch `gltf-animation`, with the probe, check and make_media bullets below: `models.pose` sets the
+  clip's channels on the node tree, blends morph targets and skins on the file's own primitives, then replays the
+  edge cuts `_refine` made when the file was read (it now records them), so the posed mesh has the same triangles
+  and sorts the same way. Skins and default morph weights apply at rest too. The model keeps its rest size and
+  centre. Posing `arm.glb` (1,314 vertices) takes 0.36 ms; `bench/same.py` finds no frame that differs.
+  Merged (#76).
 - `parts` animate: part keys take keyframes and expressions like layer keys. The merged mesh is rebuilt only on
   frames where a part moves.
+  Built on branch `animated-parts`: part keys compile like layer keys (`Layer.parts`, read with `Layer.part`, `i`
+  the part's number). The mesh merges again when a moving part's values change, kept by those values; a part's
+  primitive is kept at its size, so a move places the same mesh again. Material slots come from the parts' raw
+  keys, so animating a colour never changes how many slots there are; a slot's values are read for its first part.
+  Merged (#77).
 - `repeat`: `{"count": n, "x": "...", "y": "...", "z": "...", "rotateY": "...", "scale": "...", "fill": "..."}`,
   with expressions over `i`, `n` and `t` in the existing AST-checked expression engine. The copies merge into one
   mesh and sort together, so a waving grid of 400 cubes is one layer.
+  Built on branch `repeat-copies`: `props.Copies` evaluates each key for every copy, once for keys that read no
+  time; `render3d._copies` places the model's mesh (shape, parts or a posed file) for each and merges them, keeping
+  the triangles while the base mesh holds. Each distinct fill takes a material slot (64 in all, `COPY_SLOTS`), the
+  rest snap to the nearest kept colour; `_effect`'s if-chain compiles for 64 slots on the GPU. Edges and creases
+  come from one copy (`mesh.tiled`). Expressions gained `hsl` and `mix`. `examples/cubes.json` (144 copies, 15,552
+  triangles): 23.3 ms a frame at 1080p on the GPU, 151 ms on the CPU; `bench/same.py` finds no frame that differs.
 - `kine probe` on a model file lists its animations with durations, skins, morph targets, textures and texture
   coordinate sets.
 - Check rules: `unknown-animation` (naming the clips the file has), `skin-influences` (a vertex with more than
   four joints; the extra weights are dropped).
 - `examples/make_media.py` writes a skinned, animated glTF (a tube bending on three joints) and a textured one, so
   tests and examples need no downloaded assets.
+  With the stress scenes (branch `phase5-stress`) it also writes `figure.glb`: a figure of 8,352 triangles on 11
+  joints, with a 1 s `walk` loop and a 2 s `wave` loop, for `examples/character.json`. Merged (#79).
 
 ### Phase 6: shapes, 3D text, compressed files
 
 - `cube` takes `radius` for a rounded box. New shapes: `capsule`; `lathe`, where `profile` (`[[r, y], ...]` or
   path data) turns around the vertical axis; and `tube`, a round tube along path data `d`, where `draw` grows it
   along its length for 3D lines and routes.
+  Merged (#80). A cube's `r` (or `radius`) rounds it: `unit` pushes each face's grid onto a box with
+  ellipsoid corners, so scaled to w, h and depth they are round; `capsule` (`r`, `h` end to end) is built the
+  same way, both kept as unit meshes that scale per frame. `lathe` takes `[[r, y], ...]` or path data; bends
+  past 40 degrees keep a normal each side, and an open profile off the axis is two-sided. `tube` runs along `d`
+  with mitred bends and round ends; its `draw` cuts the path and rebuilds the mesh, 1.7 ms a frame for a
+  7,008-triangle route. `"shape": "tube"` without `d` is still a cylinder, as 1.4 read it.
+  `examples/shapes.json` shows all four; 180 frames render in 11.0 s on the GPU (6 workers). `bench/same.py`
+  finds no frame that differs.
 - Shaped 3D text: glyph runs from `TextBlob.MakeFromShapedText` (HarfBuzz, which 2D text already uses), read with
   `TextBlob.Iter`, outlines from `Font.getPath`. Arabic letters join, marks sit on their letters and right-to-left
   runs read right to left. `unshaped-3d-text` narrows to colour emoji, which have no outline to extrude.
+  Merged (#81). `TextBlob.Iter` gives glyph ids but no positions, so a line that needs shaping
+  is laid out as a text layer's (`_bidi_order`, `_pieces`) and drawn on Skia's SVG canvas with text converted to
+  paths; the `d` of each path is the outline. Building it takes 0.9 ms for `مرحبا بالعالم` at 120 px, against
+  0.03 ms for a plain line, and the solid is kept per text. Plain lines are built as before, so `title3d.json` and
+  `edges.json` keep their bytes. `letterSpacing` still draws characters one by one, unshaped, and
+  `unshaped-3d-text` warns about that and about colour emoji.
 - `EXT_meshopt_compression` decoded in numpy. Draco per decision 2.
+  Merged (#82). `meshopt.py` follows meshoptimizer's reference decoder: vertex codec versions
+  0 and 1, triangle and index-sequence codecs, and the four filters; `KHR_meshopt_compression` is the same format
+  and is read too. Checked against the WASM decoder of meshoptimizer 1.3.0 on 60 random buffers: every byte
+  matches but 3 of 2,664 values of the 16-bit octahedral and quaternion filters, which round halves the other
+  way (off by one). gltfpack's output of the four sample models renders within a mean of 0.14 of a level of the
+  originals once `KHR_texture_transform` is applied (gltfpack quantizes texture coordinates with it).
+  A 99,264-triangle file loads in 130 ms (75 ms uncompressed). Draco goes through DracoPy 1.7 or later, the
+  `draco` extra (also in `dev`, so CI runs its tests); gltf-transform's Draco output of the sample models renders
+  within 0.09 of the originals, the skinned figure included.
 
 ### Phase 7: tooling and release
 
@@ -263,9 +305,12 @@ nine rounds: a floor reaching to just in front of the camera took eight.
   peak memory in the 1.5 report.
   Merged (#70): `textured-100k` (an .obj globe of 102,400 triangles with normals,
   coordinates and a map_Kd image, turning under world light and `env`) and `dof-stage` (a stage of 10 models and
-  3 cards on a floor with shadows, focus pulled from the near row to the far row to the cards). `skinned` and
-  `repeat-1000` wait for Phase 5. Results in `docs/stress-test-1.5/`, 120 frames at 1080p each, render wall time
-  and peak memory of the render processes (development machine, 2026-10-31):
+  3 cards on a floor with shadows, focus pulled from the near row to the far row to the cards).
+  `skinned` and `repeat-1000` came after Phase 5 (branch `phase5-stress`): `skinned` is six snakes from a 24-joint
+  glTF of 23,040 triangles and twelve `arm.glb`, each on its own clip and start; `repeat-1000` is 1,000 cubes on a
+  40 by 25 grid in one layer, each rising, turning and coloured by `hsl`, with edges. Results in
+  `docs/stress-test-1.5/`, 120 frames at 1080p each, render wall time and peak memory of the render processes
+  (development machine, 2026-10-31; `skinned` and `repeat-1000` 2026-11-01):
 
   | scene | GPU, 4 workers | CPU, 2 workers |
   |---|---|---|
@@ -273,19 +318,27 @@ nine rounds: a floor reaching to just in front of the camera took eight.
   | `stage-16` | 2.90 s, 41 fps, 736 MB | 42.2 s, 3 fps, 718 MB |
   | `textured-100k` | 3.15 s, 38 fps, 999 MB | 41.9 s, 3 fps, 600 MB |
   | `dof-stage` | 2.66 s, 45 fps, 1000 MB | 209.5 s, 0.6 fps, 1883 MB |
+  | `skinned` | 3.89 s, 31 fps, 866 MB | 12.1 s, 10 fps, 298 MB |
+  | `repeat-1000` | 6.60 s, 18 fps, 1371 MB | 27.3 s, 4 fps, 557 MB |
 
   `kine check` of `dof-stage` takes 1.0 s on the GPU and 49.8 s on the CPU, where it warns
-  `slow-depth-of-field`.
+  `slow-depth-of-field`. `skinned` warns `triangle-budget` on both backends.
 - Examples: `stage.json`, `product.json` (a textured glTF turntable under world lights with `env`, depth of field
   and a floor that takes its shadow), `character.json`, `cubes.json`.
   `product.json` merged (#72): `examples/make_media.py` writes `can.glb`, a can
   whose body takes `label.png` as an embedded base colour texture, under a steel lid, rim and ring pull. It turns on
   a table in a stage with shadows and depth of field, two more cans out of focus behind it. 180 frames render in
-  16.0 s on the GPU (6 workers). `character.json` and `cubes.json` wait for Phase 5.
+  16.0 s on the GPU (6 workers).
+  `cubes.json` came with `repeat` (branch `repeat-copies`): a ripple through 144 cubes in one model layer.
+  `character.json` came with the stress scenes (branch `phase5-stress`): two copies of `figure.glb` walk across a
+  floor in a stage with shadows, one near and one far, while a third waves. 180 frames render in 6.2 s on the GPU
+  (6 workers).
 - README 3D section and its limitations line, `kine docs`, site/, CHANGELOG with measured numbers, version 1.5.0.
   A 3D shot in the launch video is optional and means re-measuring the promo.
   Built on branch `release-1.5.0`: the README's model files and limits, the site's 3D section rewritten for 1.5
   with a product turntable demo, version 1.5.0. The launch video is unchanged, so its numbers stand.
+  Merged (#74), tagged v1.5.0. Phases 5 and 6 followed in 1.5.1 (branch `release-1.5.1`): the site's 3D section
+  names the new shapes, `repeat`, animated parts, shaped 3D text, file animation and compressed files.
 
 ## Out of scope
 
@@ -309,7 +362,7 @@ nine rounds: a floor reaching to just in front of the camera took eight.
 2. Draco as an optional extra, `pip install kinescript[draco]` (DracoPy), keeping today's error that names the file
    when the extra is missing.
 3. 1.5.0 ships with Phases 0 to 4 and 7. Phases 5 and 6 go in if they pass their checks by then, otherwise in
-   1.5.1.
+   1.5.1. They went in 1.5.1.
 
 Byte identity is checked with `bench/same.py`, which draws sampled frames at this tree and at a git revision on
 both backends, instead of committed frame hashes: CI renders on Linux's CPU backend, whose bytes differ from a

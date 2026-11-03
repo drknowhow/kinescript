@@ -1,0 +1,19 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 5, "bg": "#0a0c10"},
+  "layers": [
+    {"id": "title", "type": "text", "text": "THREE CHARTS", "x": "50%", "y": "11%", "size": 72, "weight": 700,
+     "letterSpacing": 8, "fill": "$sheet", "at": 0.1, "enter": {"name": "rise-mask", "dur": 0.7}},
+    {"id": "bars-head", "type": "text", "text": "barChart", "font": "$mono", "size": 30, "x": 350, "y": 330,
+     "fill": "$annotation", "at": 0.3, "enter": "fade"},
+    {"use": "barChart", "id": "bars", "x": 350, "y": 620, "w": 480, "h": 340, "size": 24, "valueSize": 30,
+     "data": [["Q1", 42], ["Q2", 58], ["Q3", 71], ["Q4", 64]], "highlight": "Q3", "at": 0.5},
+    {"id": "line-head", "type": "text", "text": "lineChart", "font": "$mono", "size": 30, "x": 960, "y": 330,
+     "fill": "$annotation", "at": 0.3, "enter": "fade"},
+    {"use": "lineChart", "id": "line", "x": 960, "y": 620, "w": 440, "h": 300, "size": 24, "color": "$key",
+     "data": [["Mon", 12], ["Tue", 19], ["Wed", 15], ["Thu", 27], ["Fri", 34]], "at": 0.7},
+    {"id": "pie-head", "type": "text", "text": "pieChart", "font": "$mono", "size": 30, "x": 1530, "y": 330,
+     "fill": "$annotation", "at": 0.3, "enter": "fade"},
+    {"use": "pieChart", "id": "pie", "x": 1530, "y": 650, "r": 140, "inner": 0.55, "size": 24,
+     "data": [["Video", 46], ["Web", 31], ["Print", 23]], "at": 0.9}
+  ]
+}

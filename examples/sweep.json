@@ -1,0 +1,14 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 6, "bg": "#0a0c10"},
+  "layers": [
+    {"id": "highlight", "type": "text", "text": "a highlight runs across the line", "x": "50%", "y": "28%",
+     "size": 84, "split": "chars", "fill": "$sheet",
+     "unitFill": "=mix('#f2f0e8', '#ff633f', sweep(i, n, clamp((t - 0.5) / 2.5), 4))"},
+    {"id": "wheel", "type": "text", "text": "ONE KEY, EVERY LETTER", "x": "50%", "y": "50%", "size": 120,
+     "weight": 700, "split": "chars", "unitFill": "=hsl(i / n * 360 + t * 60, 0.75, 0.62)",
+     "unitY": "=sin(t * 3 + i * 0.6) * 14", "at": 0.3, "enter": {"name": "fade", "dur": 0.6}},
+    {"id": "focus", "type": "text", "text": "words come into focus one by one", "x": "50%", "y": "72%", "size": 72,
+     "split": "words", "fill": "$sheet", "unitBlur": "=14 * (1 - sweep(i, n, clamp((t - 1) / 3), 1))",
+     "unitOpacity": "=0.25 + 0.75 * sweep(i, n, clamp((t - 1) / 3), 1)"}
+  ]
+}

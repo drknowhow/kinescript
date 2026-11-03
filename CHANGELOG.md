@@ -6,6 +6,328 @@
   87.9, 138.0 and 144.0.post1 among them, bind `skia.M44` without `Rows`, so any scene using depth (z, rotateX,
   rotateY or a camera) stopped with "a bug in Kinescript" at `space.py:79`. With an older skia-python installed,
   importing Kinescript now fails at once and names the version to install.
+- `kine edit scene.json` opens a browser editor built around the clip. Hover outlines the layer under the pointer,
+  a click selects it and opens a small panel beside it with its values and a note field (a click also pins the note
+  at that point), and dragging moves it: `x` and `y` are written to the scene file in one save. Under the clip, each
+  layer has a bar for its in and out time, lit while it is on screen, and an eye that hides it in the preview only
+  (the scene file is not changed; `/frame` and `/hit` take `hide=id,id`); click a bar to jump there and select the
+  layer. Every edit is logged as a note for the agent. Animated values and layers inside groups are not edited here, and scenes
+  with comments are not rewritten. It serves on 127.0.0.1 only and draws frames on the CPU.
+- `kine edit` also comments on sound and captions. A strip under the clip lines up each sound's lane with the scene's
+  time: a voice shows its words, a captions layer its cues, music and effects their span. Click a word, cue or sound
+  to comment on it (a comment on a voiced word also names the captions layer that shows it), or change a voice's
+  `text`, `speaker`, `at` or `volume` (the note reminds the agent to run `kine_voice`). `✎ Draw` (or `D`) draws on the
+  frame, `+ scene` leaves a note on the whole scene, and note marks sit on the strip. Captions layers can change `y`,
+  `size`, `fill` and `active`.
+- `kine_feedback` (MCP): review notes kept in `<scene>.feedback.json` beside the scene. Each has a time, an optional
+  point, layer id, sound, word or drawn strokes, and a status; `list`, `get`, `reply` and `resolve` work on them, and
+  `still` returns the frame at the note's time with its point ringed and its strokes drawn. A note is `stale` once the
+  scene file has changed.
+
+## 1.6.1 (2026-11-01)
+
+- Chart components `barChart`, `lineChart` and `pieChart`, each taking `data` as numbers, `[label, number]` pairs or
+  `{"label": ..., "value": ...}` objects. A bar chart's bars grow from a baseline in turn, each value counting up
+  above its bar and each label under the baseline; `highlight` colours bars by number (from 1) or label. A line
+  chart draws its line on through the points, and a dot and the value pop on at each point as the line reaches it;
+  it takes values below 0 and keeps its axis at 0. A pie chart's slices sweep round from twelve o'clock as one eased
+  sweep, each labelled outside with its share; `inner` leaves a hole for a doughnut. Their parts are ordinary layers
+  with the chart's id in front (`sales-bar1`, `sales-value1`). `kine docs` shows a `barChart` recipe in place of
+  the three layers it gave for one bar, and wraps the built-in components' parameters at 108 characters.
+  `examples/charts.json` plays all three.
+- Sequence transitions `iris`, `push`, `whip`, `luma` and `glitch`. `iris` opens the next clip in a circle from the
+  middle. `push` moves both clips left by the sequence's width, side by side; `whip` does too, faster and blurred
+  across inside each clip. `glitch` breaks the outgoing clip up over the first half and brings the next one in
+  broken up until it settles. `luma` shows the next clip where a map is dark first and where it is light last: `map`
+  is a gradient as a fill takes or an image file, stretched over the clip (a left-to-right gradient if none), and
+  `soft` (0 to 1, 0.2 if none) is how far the edge spreads. `"push"` used to be read as `"slide"`.
+- `luma` is also an enter and exit motion, with `map` and `soft`; on a split text it wipes the whole text.
+- `"fade": false` on an enter or exit keeps the layer opaque while it moves, so
+  `{"name": "left", "dist": 1920, "fade": false}` slides it in solid, and a whip's blur stays inside its box.
+- `kine check` checks a transition's or motion's `map` (a gradient as a fill's, or a file that exists and decodes)
+  and `soft`, and warns of either on something that is not a luma wipe. `examples/transitions.json` plays the six.
+- `emphasis`: motions in the middle of a layer's life, each cycle starting and ending at rest. `"emphasis": "pulse"`
+  plays one cycle as the layer starts; `[{"name": "shake", "at": 1.4, "repeat": 2}, {"name": "float", "loop": true}]`
+  plays two shakes 1.4 s in and floats until the layer ends. The ten are `pulse`, `heartbeat`, `shake`, `wiggle`,
+  `wobble`, `float`, `bob`, `flash`, `tada` and `spin`, with `dist`, `amount` and `deg` as for enter and exit. They
+  combine with each other and with enter and exit, and with `stagger` on a split text each unit plays in turn, as a
+  wave. `kine check` names an unknown one with the closest, a dur, at or repeat it cannot use, and one that starts
+  after its layer ends (`late-emphasis`). A group that holds still is drawn from a picture once its layers'
+  emphases end. `examples/emphasis.json` plays all ten.
+- `kine check` read text turned near 90 degrees as tiny (`tiny-text`): it took the text's scale from the matrix's
+  diagonal, which a turn empties, rather than from its determinant.
+- `examples/motions.json` lays its cards out from their middles, as was meant, instead of from their top left
+  corners, which pushed the grid to the right.
+- Twelve enter and exit motions. `land` drops in from above and bounces, each bounce a quarter as high (`bounces`
+  [3], `dist` [160]); `squash` does too, long as it falls and flat as it lands, with its bottom edge on the ground
+  (`amount` [0.35] is how far it flattens). `elastic` grows in with a springy overshoot, `swing` hangs from its top
+  edge and swings down to rest (`deg` [60]), and `stretch` opens sideways from its middle. `iris` opens a circle from
+  the middle, `clock` sweeps round from twelve o'clock, `blinds` opens in strips (`count` [6]) and `rise-mask` rises
+  from behind its own bottom edge. `scramble` settles text from random letters and digits, left to right, and
+  `glitch` splits the colours and jumps slices of the layer sideways, both picked by `seed`. `whip` slides in fast
+  from the right, blurred along the way (`dist` [400], below 0 from the left; `amount` [48] px of blur). As exits they
+  play backwards. With `split`, each unit wipes, rises, scrambles, glitches or swings in its own box, so `"split":
+  "lines"` with `rise-mask` brings each line up from behind its own edge; a wipe on split text used to show every
+  unit whole from the first frame. land, squash, swing, elastic and scramble take longer than 0.5 s unless given a
+  `dur` (1, 1, 1.2, 0.9 and 0.8 s), since bounces and swings need the time to settle. `bounce` stays `pop`.
+  `examples/motions.json` brings on all twelve.
+- The svg layer: `{"type": "svg", "src": "logo.svg"}` turns an svg file into a group of path layers, one for each
+  path, rect, circle, ellipse, line, polyline and polygon, with the file's transforms, fill, fill-rule, stroke (width,
+  caps, joins and dashes), opacity and linear and radial gradients, so each piece draws on, enters, moves and morphs as
+  a path layer does. A piece is named `<id>-<its id in the file>`, and a `<g>` with an id or an opacity becomes a
+  group of its pieces. `parts` gives keys to a piece or group by its id in the file and `"*"` to every shape:
+  `"parts": {"star": {"enter": "pop"}, "*": {"stroke": "#f2f0e8"}}`. `kine check` names an id the file lacks
+  (`unknown-part`, with the closest one) and what the layer leaves out (`svg-unsupported`: text, `<style>` sheets,
+  `<image>`, clip paths, masks, filters, patterns, markers and animation). w and h take the viewBox by its
+  preserveAspectRatio, and `slice` clips to them. Colours are read as SVG reads them (CSS names, hex, `rgb()`,
+  `hsl()`, `currentColor`), so `red` is `#ff0000`, and styles inherit as in a browser. Shapes gain `fillRule`:
+  `evenodd` leaves holes where a path's outlines overlap. A group whose layers all hold still is drawn once into a picture
+  and played back, to the same bytes: `svg-500`, a new stress scene of 500 pieces, draws in 1.5 ms a frame on the
+  GPU against 6.9 ms piece by piece. Path data takes arc flags run into the numbers after them (`a1 1 0 011 1`),
+  as drawing programs save them. `examples/svg.json` brings an emblem on piece by piece.
+- SVG files: an image layer with an `.svg` src draws it as vectors, sharp at any size. Its own size is its width and
+  height (in px, pt, mm, cm or in), the viewBox's shape for a missing one and the viewBox's size for both, as a
+  browser sizes an svg in an `<img>`; what lies outside it is cut off. A faded svg fades as one drawing. Sheets, image
+  sequences (a folder of `.svg` frames too), sequence clips, model textures and particle sprites take `.svg`; a
+  texture or a sprite gets it as pixels, drawn at a whole multiple of its size that takes the longer side to at least
+  512 px (at most 4096). skia's svg reader leaves out text, `<style>` sheets, `<symbol>`, `<image>`, markers,
+  `<switch>`, `feDropShadow` and an svg's own animation: `kine check` names them (`svg-unsupported`) with a fix for
+  each, and `kine probe logo.svg` gives the size and the same list. SVG 2's plain `href` (on a `<use>`, or a
+  gradient taking another's stops) is read as `xlink:href`, which is all the reader follows. A file that is not an
+  svg is an error at load. `examples/vector.json` grows an emblem from its own 120 px to 600 and plays a spinner
+  from an svg sheet.
+- Per-unit paint: `unitFill` colours each unit of a split text and `unitBlur` blurs it, beside `unitX`, `unitY`,
+  `unitRotate`, `unitScale` and `unitOpacity`. Unit expressions now see `n`, how many units there are, as well as
+  `i`, and the new helper `sweep(i, n, p, soft)` is 1 for the units a sweep has passed and 0 for the rest, eased over
+  `soft` units at its front, so `"unitFill": "=mix('#f2f0e8', '#ff633f', sweep(i, n, p, 3))"` runs a highlight
+  across a line. `unitFill` colours a unit's plain letters, over a gradient fill too; emphasised words keep theirs.
+  Loading and `kine check` try each unit expression on the first unit and the last, with `n` counted from the text.
+  `examples/sweep.json` runs a highlight, a rainbow and a focus pull across three lines.
+- Text on a path: `textPath` lays a text's or a counter's letters along SVG path data in the layer's space, or along
+  `"#id"` of a path, line, arrow or polygon in the same group where that layer draws it, each letter turned to the
+  path where its middle is: `{"d": "#arc", "offset": [[0, 0], [3, 1]], "align": "center"}`. `offset` is how far
+  along, a share of the path's length, and animates; `align` says which part of the text stands there. Later lines
+  stand below the first. An open path leaves out the letters past its ends, which `kine check` warns as
+  `text-off-path`, and a closed one takes them round again. Split units, their enters and the unit keys still apply,
+  moving each unit along and across the path, and a typing caret follows the last letter. `kine check` reads
+  `text-overlap` from the letters where they stand, so a label inside a ring of text is not an overlap. Letters draw
+  through `TextBlob.MakeFromRSXform`, one blob for each colour. `examples/textpath.json` arches a title over a curve,
+  turns a ring of text round a counter and types a line along a wave.
+- Image sequences: an `image` layer plays `frames`, numbered files named by a pattern (`"run/run_%03d.png"` or
+  `"run/run_####.png"`), a glob, a folder or a list, or the cells of a `sheet` (`{"src": "walk.png", "cols": 8,
+  "rows": 2, "count": 14}`), at `fps` (12 unless given). `loop` starts again after the last frame (the default),
+  holds it (`false`) or plays back to the first (`"pingpong"`). The frame comes from the layer's own time, so any
+  frame renders alone, and a motion-blur sub-frame shows its frame's drawing. A number missing from the files shows
+  the frame before it, and `kine check` warns `missing-frames`; a sheet that its columns and rows do not divide warns
+  `sheet-grid`. Cells draw strictly inside their own rectangle, so a neighbour's edge never shows. `pixelated` scales
+  any image with hard pixel edges. `examples/flipbook.json` walks a pixel-art sprite sheet up to a flame drawn as
+  twelve files.
+- A `particles` layer: an emitter with `rate` (particles a second; keyframes taper it) and `burst` (how many leave at
+  once, or `[[time, count], ...]`), or one of the presets `confetti`, `sparks`, `snow`, `dust` and `bubbles`. Each
+  particle draws its own `life`, `speed`, `angle`, `size`, `spin`, `drag` and `flip` from a number or `[min, max]`,
+  falls by `gravity`, sways by `turbulence`, can turn along its path (`align`), and changes over its life by
+  `sizeOverLife`, `opacityOverLife` and `fillOverLife`. It is a circle, square, rect, triangle, star, ring, soft dot or
+  streak, a character (`text`) or an image (`src`), tinted by `fill`, a colour or a list taken in turn. `emitter`
+  spreads births over a point, line, rect, circle or ring, and `prewarm` starts it full. A particle's birth, start and
+  path come from its number and the seed in closed form, so any frame renders alone, and particles stay where they
+  were born while x, y or along move the layer. They draw from one sprite in one drawAtlas call: the new
+  `particles-5k` stress scene keeps 5,000 alive and renders at 131 to 159 fps on the GPU (7.6 ms a frame drawn and
+  read back) and draws a frame in 104 ms on the CPU, where `kine check` warns `particle-cost` past 0.25 s a frame.
+  `examples/confetti.json` bursts confetti over a counter.
+- `repeat` works on 2D layers: shapes, text, counters, images, video, shaders and groups take `{"count": 60,
+  "rotate": "=i * 6", "x": "=cos(i * 0.1047) * 300", "fill": "=hsl(i * 6)"}`, up to 10,000 copies. A copy is the
+  layer moved by its own x, y, rotate and scale in the layer's space, in its own fill, stroke and opacity; the
+  layer's keys, enter, exit, effects and mask act on all its copies as one picture, and its box in `kine check` and
+  `kine look --boxes` holds every copy. A shape's path and paints are made once and drawn for every copy in one
+  loop. Other layers are recorded once a frame and replayed for each copy, or drawn copy by copy when the copies
+  change their colours. The new `repeat-10k` stress scene, one circle's 10,000 copies each moved by two
+  expressions, renders at 39 to 41 fps on the GPU and draws a frame in 83 ms on the CPU. `z`, `rotateX` and `rotateY`
+  stay a model's.
+- Copies' expressions take a finite float as it is, without the checks a value of another kind goes through: two
+  expressions over 10,000 copies take 5.4 ms a frame, from 7.5. A model's copies come out the same.
+
+## 1.6.0 (2026-11-01)
+
+- The 1.6 stress report is in `docs/stress-test-1.6/`: the Phase 0 and 2D stress scenes and the three new examples,
+  on the development machine's GPU and CPU. `bench/stress.py` gains `logo`, `kinetic` and `explainer`, which read
+  the examples. On the GPU the seven 2D scenes render 120 frames at 1080p in 0.77 to 1.60 s, and the examples their
+  180 frames in 0.55 to 0.61 s; on the CPU they take 0.93 to 26.1 s and 1.99 to 3.91 s. `vs-1.5.1.txt` times GPU
+  frames against 1.5.1 in alternating runs: six of the seven Phase 0 scenes draw 6% to 37% faster, and `text-wrap`
+  1% slower. On the CPU `text-split` does not finish in 900 s: a frame takes up to 179 s while its letters blur in,
+  each in a layer from the frame's top left corner to the letter, which 1.6 keeps so its pixels stay the same and
+  `slow-effects` now reports.
+- `slow-effects` counts the letters of a split text that blur as they enter, which on the CPU each blur a layer
+  reaching from the frame's top left corner to the letter. `text-split` takes up to 179 s a CPU frame while its
+  letters blur in, and `kine check` did not warn; its estimates for three frames are now 1.04, 28.6 and 165 s
+  against a measured 1.05, 36.0 and 179 s.
+- Examples of the 2D features: `logo.json` (draw on, morphing, a mask and a glow), `kinetic.json` (stagger orders,
+  `combine`, a mask, marching dashes and a looping group) and `explainer.json` (`rough` with `boil`, a dashed route
+  ridden with `along`, a lens mask and a glow).
+- `kine check`'s contrast rule reads a text with an alpha or luma mask only inside its mask's box, and skips it
+  while the two do not meet. It read the whole box, so a word sliding out from behind a shape through a mask was
+  reported at 1.0:1 against the shape it was hidden by.
+- Smooth keyframes: `"x": {"keys": [[0, 200], [1, 700], [2, 960]], "smooth": true}` passes through each key without
+  stopping, on a monotone cubic through the keys (Fritsch-Butland), so no value overshoots its neighbours. It is at
+  rest only at the first and last key, at a turn, and around a `hold` key; other eases on the keys are ignored. It
+  takes numbers only, and `kine check` says so for a colour.
+- `position` takes keyframes of points, `[[0, [200, 540]], [2, [960, 300]]]`, a keys object of them (smooth too) and
+  a tween of points, each read as x and y (and z). A two-item list of keyframes such as `[[0, 10], [1, 20]]` was read
+  as x `[0, 10]` and y `[1, 20]`; it is an error now.
+- `kine check` warns `stop-and-go` where an inner key brings a layer's move to rest between two moves the same way,
+  which the default inOutCubic does at every key, and suggests smooth keys or a linear ease.
+- `along` moves a layer along a path: `"along": {"d": "M0 0 C300 -200 600 200 900 0", "p": [[0, 0], [2, 1]],
+  "orient": true}`. `p` is the share of the path's length, a key like any other (0 to 1 over the layer by default);
+  a closed path goes round again past 1. `orient` turns the layer with the path. `d` is path data moved by x and y,
+  or `"#id"` of a path, line, arrow or polygon in the same group, ridden where that layer is drawn, so a dot can ride
+  a route that draws on. `kine check` names a route that is missing, in another group or not a path. The
+  `along-100` stress scene (100 riders, 60 of them on path layers) draws a 1080p frame in 5.6 ms on the GPU,
+  0.7 ms more than with the riders standing still.
+- A group's enter with a stagger enters its children in turn, as split text enters its units, and the group itself
+  does not move: `"enter": {"name": "rise", "stagger": 0.08}`. Before, a group ignored its stagger and entered as one
+  picture. `order` sets who goes first, for groups and split text: `start` (the default, as before), `end`, `center`
+  (from the middle out), `edges` (from both ends in) or `random`, with a whole-number `seed` picking the shuffle.
+  `kine check` warns when `order` has no stagger to order.
+- A group runs its children on a clock of its own: `speed` (2 runs them twice as fast), `loop` (seconds after which
+  they start again, so a looping icon is one group with `"loop": 1.2`) and `timeRemap` (keyframes or an expression
+  giving their time at the group's time; a number freezes them). The group's own keys, enter and exit keep the
+  scene's time, and so do sounds. `time` stays an alias of `at`, so the remap is named as in After Effects.
+- Gradients: `"angle": 90` gives a linear gradient by its direction, corner to corner as CSS draws one (0 runs up,
+  90 to the right), and `"sweep": [0.5, 0.5]` goes round its middle from the top, clockwise, turned by `angle`, as
+  CSS's conic-gradient does. A gradient animates into another of the same kind with as many stops, by keyframes or a
+  tween, its points, angle, stop positions and colours (mixed in OKLab) moving together; `kine check` says when the
+  kinds or stop counts differ. A text layer took a gradient fill without complaint but drew it in the paper colour;
+  it draws the gradient now, across the whole block of text, and emphasised words keep their colour.
+- Strokes: `dash` (`[on, off, ...]` px, as SVG's stroke-dasharray) marks out the stroke of a shape, image or
+  video, and `dashOffset` slides the pattern back along it; animate it for marching dashes. A dashed stroke still
+  draws on, with its dashes where they lie on the whole path, and an arrow's head stays whole. `corner` (px) rounds
+  every corner of a path, line or polygon, and `draw` and riders on it follow the rounded line. `radius` takes four
+  values, `[top-left, top-right, bottom-right, bottom-left]`, on a rect, group, image or video, and they animate.
+  `strokeDasharray` and `strokeDashoffset` are read as `dash` and `dashOffset`, and `corner` on a rect as `radius`;
+  `kine check` warns about a dash with no stroke and a corner on a smooth line. The `strokes-300` stress scene
+  (100 marching dashed paths that draw on, 100 stars whose corners round as it plays, 100 tabs whose four radii
+  animate) draws a 1080p frame in 6.2 ms on the GPU, 3.2 ms more than the same layers without those keys.
+- `rough` wobbles a shape's outline as if drawn by hand: `"rough": {"amount": 3, "seed": 1, "boil": 8}` moves
+  points `length` px apart (12 by default) up to `amount` px, the same way for the same seed, and `boil` draws it
+  anew that many times a second for a hand-drawn flicker. `true` takes the defaults and a number is the amount.
+  Fill, stroke and `draw` follow the wobbled line, and an arrow's head is wobbled where the smooth line puts it.
+  The seed for each boil comes from the layer's time, so a frame is still a function of its time alone. The
+  `rough-200` stress scene (100 outlined cards boiling 8 times a second, 100 rough lines drawing on) draws a 1080p
+  frame in 4.1 ms on the GPU, 1.6 ms more than without `rough`.
+- `combine` on a group (`union`, `subtract`, `intersect` or `xor`) merges its shapes and text into one shape drawn
+  with the group's own fill, stroke, `draw`, `dash` and `rough`, so a word cut out of a badge is a group of a rect
+  and a text with `"combine": "subtract"`, and a stroke runs round the merged outline only. A filled child gives
+  its fill's outline and a line or arrow its stroke's; nested groups give their children's. A frame merges again
+  only from the first child that changed. `kine check` warns about children it leaves out (images, videos,
+  shaders, models, captions), a combine with too few children, and a stroke on a group without `combine`. The
+  `combine-60` stress scene (60 badges with a word cut out, 30 with a hole moving through them as well) draws a
+  1080p frame in 5.9 ms on the GPU, 4.0 ms more than the same layers drawn as themselves.
+- A path's `d` takes keyframes and morphs through them, any path into any other:
+  `"d": [[0, "M0 0 L100 0 L50 90 Z"], [1, "M50 0 A50 50 0 1 1 49.9 0 Z"]]`. Each piece of one key pairs with
+  the piece of its size in the next, both resampled by length to the same number of points, and starts where its
+  points move least; a piece with no partner grows from, or shrinks into, the middle of the nearest one. Each key
+  is drawn as written on its own time, and a pair is matched once, so a frame between keys is one interpolation.
+  An ease that overshoots carries the shape on past the key. `kine check` notes (`morph-contours`) keys drawn in
+  different numbers of pieces. The `morph-200` stress scene (200 paths morphing triangle, circle, star and back)
+  draws a 1080p frame in 2.2 ms on the GPU, 1.0 ms more than the same paths standing still; matching its 600
+  pairs takes 0.7 s once.
+- Blend modes `hardLight`, `colorDodge`, `colorBurn`, `exclusion`, `hue`, `saturation` and `luminosity`, as
+  CSS's mix-blend-mode draws them; `luminosity` lays a layer's light and shade over the colours below it.
+- `mask` on any layer shows it through another layer beside it in the same group: `"mask": "lens"`, or
+  `{"layer": "lens", "mode": "alpha", "feather": 12}` with mode `alpha` (shown where the mask is opaque), `luma`
+  (where it is bright), `alphaInvert` or `lumaInvert`. The mask layer draws only as a mask, on its own clock and by
+  its own x and y, so it can move over a layer that holds still; `feather` blurs its edge. Video inside a word is a
+  video layer masked by a text layer. The layer and its mask are recorded first and cut in a layer only as large as
+  both. `kine check` reports `mask-unknown`, `bad-mask` (the layer itself, one in another group or inside the layer,
+  layers masking one another in a ring) and warns `mask-misses` where a mask never overlaps its layer. The
+  `masks-50` stress scene (25 gradient cards seen through words, 25 through a feathered lens moving over them) draws
+  a 1080p frame in 5.4 ms on the GPU, against 2.0 ms for the same layers unmasked, and in 0.46 s on the CPU against
+  0.06 s; the 25 feathers' blurs are 0.30 s of that.
+- Layer effects: `glow` (a blurred copy behind the layer, in its own colours or the glow's: `{"color": "#ff633f",
+  "size": 24, "amount": 1}`, or `"glow": 24`), `outline` (a round line outside the layer's edge: `{"width": 4,
+  "color": "#000000"}`), `innerShadow` (`{"x": 0, "y": 4, "blur": 12, "color": "#00000080"}`) and `displace`
+  (`{"amount": 8, "scale": 60, "speed": 1, "seed": 0}`: noise waves `scale` px across move the layer's pixels by up
+  to `amount` px and slide `speed` waves a second). Their sizes animate. A layer with effects is drawn offscreen in a
+  layer only as large as what it draws; in one the size of the frame the CPU took 16.5 s a `glow-text` frame.
+  `displace` samples the layer between pixels, so bent edges stay smooth. On a model, `glow` and `outline` keep their
+  meanings (its material's glow, its edges); put the model in a group to glow or outline it. The `glow-text` stress
+  scene (a 220 px title with glow and outline over 12 lines with one effect each) draws a 1080p frame in 8.0 ms on
+  the GPU, against 4.8 ms without the effects, and in 0.31 s on the CPU, against 0.01 s; the title's glow alone adds
+  0.6 ms on the GPU.
+- `kine check` warns `slow-effects` where it draws on the CPU and a frame's offscreen effects (blur, shadow, glow,
+  outline, inner shadow, masks and their feathers, displace) would take more than 0.25 s. Skia's CPU blur takes
+  0.44 s for a 1080p layer, and a layer's `blur` or `shadow` blurs one the size of the frame. The estimate counts the
+  pixels each effect blurs; on `glow-text`, `masks-50` and layers with blur or shadow it came within 2% below to 35%
+  above the measured time.
+- `kine look --trails` draws each moving layer's path over the frames, a dot where its anchor is on each frame, so
+  the dots' spacing shows its speed and where it eases, overshoots or stops; each tile rings the dot for its own
+  frame. It draws the 24 layers that travel furthest, and a dot every few frames past 600 frames. `kine look --onion
+  3` draws the three frames before each one over it, fainter the older they are, so only what moves shows
+  twice. `kine probe --at` gives each visible layer's `pos`, its anchor on the frame. The trails draw every frame
+  at a quarter of the thumbnails' scale: 5 to 6 ms a frame on the GPU and 4 to 8 ms on the CPU for the `glow-text`
+  and `masks-50` stress scenes.
+- `kine probe scene.json --curve title.x` gives a key's value at every frame, read as the renderer reads it through
+  eases, expressions and group clocks, and how fast it changes a second: signed for a number, and a distance for a
+  colour (in 0-255 channels) or for `position` (x and y as a point). It also lists the spans where the value holds
+  still for 2 frames or more, and the fastest frame. `kine_probe` takes `curve` the same way.
+- `kine check` warns `strobe` where a layer moves more than 40 px a frame at 1080p for five frames running in a
+  scene without motion blur, where the eye sees separate copies instead of one moving thing.
+- 2D frames cost less Python: keyframes find their segment by bisection, expressions compile once to a function,
+  layers keep their constant placement values and solid fills reuse one paint per colour. Draw time per frame on the
+  development machine's GPU fell from 15.8 to 12.5 ms for 2,000 layers, 7.3 to 5.4 ms for 600 layers of four
+  expressions each and 9.1 to 5.8 ms for 300 layers of 121 keyframes. Frames are byte-identical to 1.5.1 (`bench/same.py`).
+
+## 1.5.1 (2026-11-01)
+
+- Compressed model files are read. Meshopt-compressed buffer views (`EXT_meshopt_compression` and
+  `KHR_meshopt_compression`, as `gltfpack -c` writes them) are decoded in numpy, with their octahedral,
+  quaternion, exponential and colour filters; a 99,264-triangle file of 418 KB loads in 130 ms, against 75 ms for
+  the same mesh uncompressed at 2.4 MB. Draco-compressed meshes (`KHR_draco_mesh_compression`) are read with
+  `pip install "kinescript[draco]"` (DracoPy); without it `kine check` names the extra. `KHR_texture_transform` on
+  a base colour or emissive texture moves its texture coordinates, which gltfpack uses for the ones it quantizes.
+- 3D text is shaped as a text layer is: Arabic letters join, marks sit on their letters and right-to-left runs
+  read right to left. A line that needs none of this is built as before. `letterSpacing` still draws each
+  character on its own, unshaped, and colour emoji have no outline, so 3D text leaves them out; `unshaped-3d-text`
+  now warns about those two only.
+- New model shapes. A cube takes `r` (or `radius`) and rounds its edges and corners. `capsule` is a cylinder with
+  round ends (`r`, and `h` end to end). `lathe` turns a `profile`, `[[r, y], ...]` points or path data, round the
+  vertical axis: vases, cups, bottles. `tube` runs a round tube of radius `r` along SVG path data `d`, with round
+  ends, and its `draw` grows it along its length. `"shape": "tube"` without `d` is read as a cylinder, as before.
+  `kine check` names a lathe without a profile, a profile point left of the axis and path data that does not
+  parse. `examples/shapes.json` shows the four on a floor; its 180 frames render in 11.0 s on the development
+  machine's GPU, and the growing tube's mesh is rebuilt in 1.7 ms a frame.
+- `repeat` on a model layer draws copies of it, merged into one mesh that sorts as one model:
+  `{"count", "x", "y", "z", "rotateX", "rotateY", "rotate", "scale", "fill"}`, each a number (fill: a colour), a list
+  taken in turn, or an expression of `i` (the copy, from 0), `n` and the layer's times. Keys that read no time are
+  worked out once. A copy's fill recolours what the layer's fill would, each colour a material of its own up to 64;
+  past that a copy takes the nearest kept colour and `kine check` warns `repeat-colours`. Edges and crease angles are
+  worked out for one copy and repeated. `examples/cubes.json` waves 144 cubes (15,552 triangles) at 23.3 ms a frame
+  at 1080p on the GPU and 151 ms on the CPU, 0.73 ms of it placing and colouring the copies.
+- Expressions take `hsl(hue, sat, light)` and `mix(a, b, p)`, which give colours: `"fill": "=hsl(i * 30)"`.
+- Parts animate. A part's keys take keyframes and expressions like a layer's, with `i` its number from 0 in an
+  expression: its place, turn, scale, size and material. The parts merge into one mesh again only on frames where a
+  part moves or changes size, and the mesh is kept while their values hold; parts whose keys are plain values merge
+  once, as before. `kine check` evaluates part expressions at every frame, and names the part when one fails.
+- glTF animation. A model layer's `animation` plays a clip of its file on the layer's clock: its name, its number
+  from 0, `true` for the first, or `{"name", "speed", "loop", "start"}`. Node translation, rotation and scale
+  channels (LINEAR, STEP and CUBICSPLINE keys, rotations along the sphere), morph target weights and skins
+  (`JOINTS_0`, `WEIGHTS_0` and inverse bind matrices, blended in numpy) move the mesh, which is cut for the depth
+  sort the same way at every pose. Posing `examples/media/arm.glb` (1,314 vertices) takes 0.36 ms.
+- Skins and morph target weights apply to a model file at rest too: a skinned mesh stands as its joints place it,
+  without its own node's transform, as glTF says, and a mesh with default `weights` takes them. Files without
+  either are drawn as before.
+- glTF sparse accessors are read, as exporters often store morph targets; a file with one used to be refused.
+- `kine probe` on a model file lists its animations with their durations, skins with their joint counts, morph
+  targets, textures and texture coordinate sets.
+- `kine check` reports `unknown-animation`, naming the clips the file has, and warns `skin-influences` when
+  vertices take more than four joints (`JOINTS_1`); they follow the first four.
+- `examples/make_media.py` writes `arm.glb`, a tube skinned to three joints with a looping `wave` clip and an
+  eased `curl`, and `figure.glb`, a figure of 8,352 triangles on 11 joints with a `walk` and a `wave` loop.
+- `examples/character.json`: two figures walk across a floor in a stage with shadows, one near and one far, while
+  a third waves. 180 frames render in 6.2 s on the development machine's GPU.
+- `bench/stress.py` has `skinned`, six snakes from a 24-joint glTF of 23,040 triangles and twelve `arm.glb`, each
+  on its own clip and start, and `repeat-1000`, 1,000 moving cubes in one layer with `repeat`. On the development
+  machine's GPU they render 120 frames at 1080p in 3.89 s and 6.60 s, on the CPU in 12.1 s and 27.3 s; the results
+  are in `docs/stress-test-1.5/`.
 
 ## 1.5.0 (2026-11-01)
 

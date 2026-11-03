@@ -9,6 +9,7 @@ import pytest
 
 import kinescript as k
 from kinescript import ease, media, svgpath
+from kinescript.presets import turns
 from kinescript.props import Ctx, compile_prop
 from kinescript.render import _GL, Renderer
 from kinescript.timing import Timeline, TimingError
@@ -72,6 +73,46 @@ def test_keyframes_negative_time_counts_from_layer_end():
     assert p.at(3.5, 4) == pytest.approx(50)
 
 
+def test_keys_at_the_same_time_jump_and_any_key_count_interpolates_its_own_segment():
+    p = compile_prop("x", [[0, 0], [1, 10, "linear"], [1, 50], [2, 60, "linear"]], Ctx(100, 100, 30))
+    assert [p.at(t, 2) for t in (0.5, 1.0, 1.5, 3.0)] == [pytest.approx(5), 50, pytest.approx(55), 60]
+    keys = [[i * 0.1, (i * 37) % 11, "linear"] for i in range(121)]
+    dense = compile_prop("x", keys, Ctx(100, 100, 30))
+    for t in (0.0, 0.05, 3.33, 7.95, 12.0, 13.0):
+        j = min(int(t / 0.1), 119)
+        u = min(1.0, (t - j * 0.1) / 0.1)
+        assert dense.at(t, 12) == pytest.approx(keys[j][1] + (keys[j + 1][1] - keys[j][1]) * u)
+
+
+def test_smooth_keys_pass_through_each_key_without_stopping_or_overshooting():
+    ctx = Ctx(100, 100, 30)
+    p = compile_prop("x", {"keys": [[0, 0], [1, 100, "outBack"], [2, 300], [3, 300], [4, 0]], "smooth": True}, ctx)
+    v = [p.at(n / 100, 4) for n in range(401)]
+    assert (v[0], v[100], v[200], v[300], v[400]) == (0, pytest.approx(100), pytest.approx(300), 300, 0)
+    assert v[101] - v[99] > 2  # moving through the key at 1 s; the outBack on it is ignored
+    assert all(b >= a for a, b in zip(v[:200], v[1:201])) and max(v) == pytest.approx(300) and min(v) == 0
+    assert v[1] - v[0] < 0.1 and v[201] - v[199] < 0.1  # at rest where the run starts and where it turns
+    held = compile_prop("x", {"keys": [[0, 0], [1, 100], [2, 200, "hold"], [3, 300], [3, 0], [4, 50]],
+                              "smooth": True}, ctx)
+    assert [held.at(t, 4) for t in (1.5, 1.99, 2.0, 3.0)] == [100, 100, 200, 0]  # a hold, and keys at one time jump
+    assert 200 < held.at(2.5, 4) < 300
+    with pytest.raises(ValueError, match="smooth"):
+        compile_prop("fill", {"keys": [[0, "#000000"], [1, "#ffffff"]], "smooth": True}, ctx)
+
+
+def test_check_warns_of_a_key_that_stops_a_move_and_smooth_or_linear_keys_clear_it():
+    def issues(x):
+        spec = scene([{"id": "dot", "type": "circle", "r": 10, "y": 90, "x": x}], duration=3)
+        return [i for i in check(spec)["issues"] if i["code"] == "stop-and-go"]
+    (hit,) = issues([[0, 20], [1, 120], [2, 300]])
+    assert (hit["layer"], hit["from"]) == ("dot", 1) and "smooth" in hit["fix"]
+    assert not issues({"keys": [[0, 20], [1, 120], [2, 300]], "smooth": True})
+    assert not issues([[0, 20], [1, 120, "linear"], [2, 300]])  # moving into the key
+    assert not issues([[0, 20], [1, 120], [2, 20]])  # a turn stops it anyway
+    assert not issues([[0, 20], [1, 120], [1.5, 120], [2.5, 300]])  # a pause written as a held key
+    assert not issues([[0, 20], [1, 120], [2, 300, "hold"]])
+
+
 def test_percent_lengths_use_matching_axis():
     ctx = Ctx(1920, 1080, 30)
     assert compile_prop("x", "50%", ctx).value == 960
@@ -124,6 +165,235 @@ def test_a_css_gradient_stroke_draws():
     assert f[90, 61][0] > 200 > f[90, 61][2] and f[90, 258][2] > 200 > f[90, 258][0]
 
 
+RED_BLUE = ["#ff0000", "#0000ff"]
+
+
+def _lit(f, over=150):
+    """(xs, colours) of the pixels brighter than `over` in some channel."""
+    ys, xs = np.nonzero(f[..., :3].max(-1) > over)
+    return xs, f[ys, xs, :3].astype(int)
+
+
+def test_text_takes_a_gradient_fill_and_stroke_and_keeps_its_emphasis_colour():
+    text = {"id": "t", "type": "text", "text": "HHHH **HH**", "x": "50%", "y": "50%", "size": 60, "weight": 800,
+            "fill": {"angle": 90, "stops": RED_BLUE}, "emph": "#00ff00"}
+    xs, cols = _lit(_frame(scene([text], bg="#000000"), 0), 200)
+    green = (cols[:, 1] > 200) & (cols[:, 0] < 60)
+    assert cols[xs < xs.min() + 20].mean(0)[0] > 200  # red at its left: it used to draw in the paper colour
+    assert green.any() and xs[green].min() > 160 and not (cols.min(1) > 200).any()
+    outline = dict(text, text="HHHHHH", fill="#000000", stroke={"linear": [[0, 0], [1, 0]], "stops": RED_BLUE},
+                   strokeWidth=3)
+    xs, cols = _lit(_frame(scene([outline], bg="#000000"), 0))
+    left, right = cols[xs < xs.min() + 10].mean(0), cols[xs > xs.max() - 10].mean(0)
+    assert left[0] > 200 > left[2] and right[2] > 200 > right[0]
+
+
+@pytest.mark.parametrize("fill, red, blue", [
+    ({"sweep": True, "stops": RED_BLUE}, (30, 165), (30, 155)),  # from the top, clockwise
+    ({"sweep": [0.5, 0.5], "angle": 90, "stops": RED_BLUE}, (95, 220), (85, 220)),  # from the right
+])
+def test_a_sweep_gradient_turns_round_its_middle(fill, red, blue):
+    f = _frame(scene([{"id": "c", "type": "circle", "x": 160, "y": 90, "r": 80, "fill": fill}], bg="#000000"), 0)
+    assert f[red][0] > 240 > 15 > f[red][2] and f[blue][2] > 240 > 15 > f[blue][0]
+
+
+@pytest.mark.parametrize("angle, red, blue", [(0, (138, 160), (42, 160)), (90, (90, 62), (90, 257)),
+                                              (180, (42, 160), (138, 160))])
+def test_an_angle_gradient_runs_as_css_reads_one(angle, red, blue):
+    f = _frame(scene([{"id": "r", "type": "rect", "x": 160, "y": 90, "w": 200, "h": 100,
+                       "fill": {"angle": angle, "stops": RED_BLUE}}], bg="#000000"), 0)
+    assert f[red][0] > 240 > 15 > f[red][2] and f[blue][2] > 240 > 15 > f[blue][0]
+
+
+def test_a_gradient_animates_into_another():
+    tween = {"from": {"angle": 90, "stops": RED_BLUE}, "to": {"angle": 90, "stops": RED_BLUE[::-1]}, "dur": 1,
+             "ease": "linear"}
+    ring = [[0, {"sweep": True, "stops": RED_BLUE}], [1, {"sweep": True, "angle": 180, "stops": RED_BLUE}, "linear"]]
+    spec = scene([{"id": "r", "type": "rect", "x": 100, "y": 90, "w": 120, "h": 100, "fill": tween},
+                  {"id": "c", "type": "circle", "x": 250, "y": 90, "r": 50, "fill": None, "strokeWidth": 10,
+                   "stroke": ring}], bg="#000000", duration=1)
+    assert check(spec)["ok"]
+    r = Renderer(k.Scene(spec), backend="cpu")
+    first, mid, last = (r.frame(n).astype(int) for n in (0, 15, 29))
+    assert first[90, 42][0] > 240 and last[90, 42][2] > 240 and 60 < mid[90, 42][0] < 200  # the rect's left edge
+    assert first[44, 252][0] > 240 and last[136, 248][0] > 240  # the ring starts at the top, then at the bottom
+    assert np.array_equal(_frame(spec, 15), mid)  # a pure function of the frame
+
+
+def _combine(op, kids, **group):
+    return dict({"id": "g", "type": "group", "x": 160, "y": 90, "combine": op, "fill": "#ffffff", "children": kids},
+                **group)
+
+
+TWO_DISCS = [{"id": "a", "type": "circle", "x": -40, "r": 60}, {"id": "b", "type": "circle", "x": 40, "r": 60}]
+
+
+@pytest.mark.parametrize("op, left, middle, right", [
+    ("union", True, True, True), ("subtract", True, False, False), ("intersect", False, True, False),
+    ("xor", True, False, True),
+])
+def test_combine_merges_a_groups_shapes_into_one(op, left, middle, right):
+    f = _frame(scene([_combine(op, TWO_DISCS)], bg="#000000"), 0)
+    assert [f[90, x, 0] > 200 for x in (80, 160, 240)] == [left, middle, right]
+
+
+def test_a_combined_shape_strokes_only_its_outline_and_takes_text_lines_and_nested_groups():
+    union = _combine("union", TWO_DISCS, fill="#000000", stroke="#ffffff", strokeWidth=6)
+    f = _frame(scene([union], bg="#000000"), 0)
+    assert f[90, 220, 0] < 20 and f[90, 140, 0] < 20 and f[90, 60, 0] > 200  # no stroke where the discs overlap
+    cut = _combine("subtract", [{"id": "plate", "type": "rect", "w": 260, "h": 110},
+                                {"id": "word", "type": "text", "text": "IIII", "size": 90, "weight": 800}])
+    plate = _combine("subtract", cut["children"][:1])
+    lit, whole = (_frame(scene([s], bg="#000000"), 0)[..., 0] > 200 for s in (cut, plate))
+    assert 0.5 < lit.sum() / whole.sum() < 0.95 and not (lit & ~whole).any()  # the letters are holes in the plate
+    bar = _combine("subtract", [{"id": "plate", "type": "rect", "w": 200, "h": 100},
+                                {"id": "inner", "type": "group", "children": [
+                                    {"id": "line", "type": "line", "points": [[-120, 0], [120, 0]], "strokeWidth": 10}]}])
+    f = _frame(scene([bar], bg="#000000"), 0)
+    assert f[90, 160, 0] < 20 and f[60, 160, 0] > 200  # a line takes the outline of its stroke
+
+
+def test_a_combining_group_merges_again_only_when_a_child_changes():
+    still = scene([_combine("subtract", [{"id": "p", "type": "rect", "w": 200, "h": 100},
+                                         {"id": "h", "type": "circle", "r": 30}]),
+                   _combine("subtract", [{"id": "q", "type": "rect", "w": 200, "h": 100},
+                                         {"id": "m", "type": "circle", "r": 30, "x": [[0, -80], [1, 80]]}],
+                            id="moving", y=40)], bg="#000000", duration=1)
+    r = Renderer(k.Scene(still), backend="cpu")
+    r.frame(0)
+    kept, moved = r._combos["g"][1][-1], r._combos["moving"][1]
+    f = r.frame(15)
+    assert r._combos["g"][1][-1] is kept and r._combos["moving"][1][0] is moved[0]  # the rect, not merged again
+    assert r._combos["moving"][1][-1] is not moved[-1]
+    assert np.array_equal(f, _frame(still, 15))
+
+
+def test_check_does_not_read_combined_text_for_contrast():
+    badge = _combine("subtract", [{"id": "plate", "type": "rect", "w": 260, "h": 110},
+                                  {"id": "word", "type": "text", "text": "SALE", "size": 60}], fill="#ff633f")
+    issues = check(scene([badge], bg="#f2f0e8"))["issues"]
+    assert not [i for i in issues if i["code"] in ("contrast", "text-hidden")], issues
+
+
+def test_check_reads_masked_text_for_contrast_where_its_mask_shows_it():
+    def contrast(window):
+        layers = [{"id": "plate", "type": "rect", "x": 60, "y": 90, "w": 120, "h": 120, "fill": "#ffffff"},
+                  {"id": "win", "type": "rect", "anchor": "left", "y": 90, "w": 160, "h": 180, **window},
+                  {"id": "word", "type": "text", "text": "HELLO", "x": 160, "y": 90, "size": 40, "fill": "#ffffff",
+                   "mask": "win"}]
+        return [i["code"] for i in check(scene(layers, bg="#000000", duration=2))["issues"]].count("contrast")
+    assert contrast({"x": 0}) == 1  # it shows over the white plate
+    assert contrast({"x": 125}) == 0  # it shows only over the black past the plate
+    assert contrast({"x": [[0, 400], [1, 400], [2, 125]]}) == 0  # nothing shows at the time check reads it
+
+
+TRIANGLE, DISC = "M0 -70 L70 50 L-70 50 Z", "M0 -70 A70 70 0 1 1 -0.1 -70 Z"
+SQUARE, RING = "M-60 -60 H60 V60 H-60 Z", "M-70 0 A70 70 0 1 0 70 0 A70 70 0 1 0 -70 0 Z M-35 0 A35 35 0 1 1 35 0 "     "A35 35 0 1 1 -35 0 Z"
+
+
+def _morphing(d, **kw):
+    return dict({"id": "m", "type": "path", "x": 160, "y": 90, "fill": "#ffffff", "d": d}, **kw)
+
+
+def test_a_path_morphs_through_its_d_keyframes_and_is_each_key_on_its_time():
+    spec = scene([_morphing([[0, TRIANGLE], [1, DISC, "linear"], [2, SQUARE]])], bg="#000000", duration=2)
+    r = Renderer(k.Scene(spec), backend="cpu")
+    for n, d in ((0, TRIANGLE), (30, DISC)):
+        assert np.array_equal(r.frame(n), _frame(scene([_morphing(d)], bg="#000000", duration=2), 0)), n
+    tri, disc = (_frame(scene([_morphing(d)], bg="#000000"), 0)[..., 0] > 128 for d in (TRIANGLE, DISC))
+    mid = r.frame(15)[..., 0] > 128
+    assert tri.sum() < mid.sum() < disc.sum() and (mid & tri).sum() > 0.9 * tri.sum()  # it grows from one to the other
+    assert np.array_equal(_frame(spec, 15)[..., 0] > 128, mid)  # a pure function of the frame
+    pair = r._morphs[("m", 0)]
+    r.frame(20)
+    assert r._morphs[("m", 0)] is pair  # matched once for the pair, then only mixed
+
+
+def test_a_shape_with_no_partner_grows_from_the_middle_and_open_paths_morph():
+    spec = scene([_morphing([[0, SQUARE], [1, RING, "linear"]])], bg="#000000", duration=1.5)
+    r = Renderer(k.Scene(spec), backend="cpu")
+    first, mid, last = (r.frame(n)[..., 0] > 128 for n in (0, 15, 30))
+    assert first[90, 160] and not mid[90, 160] and not last[90, 160] and mid[90, 160 + 25] and not last[90, 160 + 25]
+    wave = _morphing([[0, "M-100 0 L100 0"], [1, "M-100 0 C-40 -120 40 120 100 0", "linear"]], fill=None,
+                     stroke="#ffffff", strokeWidth=4)
+    f = _frame(scene([wave], bg="#000000", duration=1), 15)[..., 0]
+    assert f[90, 70:100].max() < 20 and f[:90, 110:140].max() > 200  # off the straight line, above it on the left
+
+
+def test_morph_matches_any_two_paths_point_for_point_from_where_they_move_least():
+    from kinescript import morph, svgpath
+    for a, b in ((TRIANGLE, DISC), (SQUARE, RING), ("M0 0 L100 50", "M0 0 Q50 -60 100 50"), (RING, TRIANGLE)):
+        pa, pb = morph.match(svgpath.parse(a), svgpath.parse(b))
+        assert pa.isInterpolatable(pb), (a, b)
+    turned = "M60 -60 V60 H-60 V-60 Z"  # the same square, started at another corner and drawn the other way
+    pa, pb = morph.match(svgpath.parse(SQUARE), svgpath.parse(turned))
+    a, b = (np.array([[p.x(), p.y()] for p in q.getPoints(q.countPoints())]) for q in (pa, pb))
+    assert np.abs(a - b).max() < 2  # each point stays where it is
+
+
+DASHED = {"id": "l", "type": "line", "points": [[20, 90], [300, 90]], "strokeWidth": 6, "cap": "butt",
+          "stroke": "#ffffff", "dash": [20, 20]}
+
+
+@pytest.mark.parametrize("extra, lit", [
+    ({}, (25, 105, 115)),
+    ({"dash": [20]}, (25, 105, 115)),  # an odd list repeats, as in SVG
+    ({"dashOffset": -10}, (45, 115)),  # the pattern 10 px further along
+    ({"drawStart": 0.25}, (105, 115)),  # the dashes stay where they lie on the whole line
+])
+def test_dash_marks_out_a_stroke_and_dash_offset_slides_it(extra, lit):
+    f = _frame(scene([dict(DASHED, **extra)], bg="#000000"), 0)
+    assert [x for x in (25, 45, 95, 105, 115) if f[90, x, 0] > 200] == list(lit)
+
+
+def test_a_dashed_arrow_keeps_its_head_whole():
+    arrow = {"id": "a", "type": "arrow", "x1": 40, "y1": 90, "x2": 280, "y2": 90, "strokeWidth": 4,
+             "stroke": "#ffffff", "head": 22, "dash": [6, 30]}
+    f = _frame(scene([arrow], bg="#000000"), 0)
+    assert f[95, 271, 0] > 200 and f[85, 271, 0] > 200  # 10 px down each side of the head, inside a gap of the dash
+
+
+def test_corner_rounds_a_paths_corners():
+    square = {"id": "p", "type": "path", "points": [[0, 0], [200, 0], [200, 120], [0, 120]], "closed": True,
+              "x": 60, "y": 30, "fill": "#ffffff"}
+    sharp, round_ = (_frame(scene([dict(square, **extra)], bg="#000000"), 0) for extra in ({}, {"corner": 30}))
+    assert sharp[31, 61, 0] > 200 and round_[31, 61, 0] < 20 and round_[90, 61, 0] > 200
+
+
+def test_rough_wobbles_a_shape_the_same_for_the_same_seed_and_boils_on_time():
+    def frames(rough, *ns):
+        layer = {"id": "r", "type": "rect", "x": 160, "y": 90, "w": 200, "h": 100, "fill": "#ffffff", "rough": rough}
+        r = Renderer(k.Scene(scene([layer], bg="#000000", duration=1)), backend="cpu")
+        return [r.frame(n).astype(int)[..., 0] for n in ns]
+    smooth = _frame(scene([{"id": "r", "type": "rect", "x": 160, "y": 90, "w": 200, "h": 100, "fill": "#ffffff"}],
+                          bg="#000000"), 0).astype(int)[..., 0]
+    one, again, two = frames({"amount": 4, "seed": 1}, 0, 20)[0], *frames({"amount": 4, "seed": 1}, 0),         frames({"amount": 4, "seed": 2}, 0)[0]
+    assert np.array_equal(one, again) and not np.array_equal(one, two) and not np.array_equal(one, smooth)
+    assert (one[46:134, 66:254] > 200).all() and (one[:34] < 20).all() and (one[:, :54] < 20).all()  # within 4 px
+    still, a, b, c = frames({"amount": 4, "seed": 1, "boil": 4}, 0, 0, 7, 8)  # boil 4 at 30 fps: anew at frame 8
+    assert np.array_equal(a, b) and not np.array_equal(b, c)
+    assert np.array_equal(frames({"amount": 4, "seed": 1}, 0, 25)[0], frames({"amount": 4, "seed": 1}, 25)[0])
+
+
+def test_a_rough_line_stays_open():
+    line = {"id": "l", "type": "line", "points": [[20, 40], [160, 150], [300, 40]], "strokeWidth": 4,
+            "stroke": "#ffffff", "rough": {"amount": 2, "seed": 4}}
+    f = _frame(scene([line], bg="#000000"), 0)
+    assert f[40:46, 100:220, 0].max() < 20 and f[140:156, 150:170, 0].max() > 200  # no stroke back to its start
+
+
+@pytest.mark.parametrize("layer", [
+    {"id": "r", "type": "rect", "x": 160, "y": 90, "w": 200, "h": 100, "fill": "#ffffff", "radius": [40, 0, 40, 0]},
+    {"id": "g", "type": "group", "x": 160, "y": 90, "w": 200, "h": 100, "anchor": "center", "fill": "#ffffff",
+     "radius": [40, 0, 40, 0], "children": []},
+    {"id": "r", "type": "rect", "x": 160, "y": 90, "w": 200, "h": 100, "fill": "#ffffff",
+     "radius": [[0, [0, 0, 0, 0]], [1, [40, 0, 40, 0], "linear"]]},
+])
+def test_radius_takes_four_corners(layer):
+    f = _frame(scene([layer], bg="#000000", duration=1), 29)
+    assert [f[y, x, 0] > 200 for y, x in ((41, 61), (41, 258), (138, 258), (138, 61))] == [False, True, False, True]
+
+
 def test_colour_keyframes_mix_in_oklab():
     p = compile_prop("fill", [[0, "#ff0000"], [1, "#0000ff", "linear"]], Ctx(10, 10, 30))
     mid = p.at(0.5, 1)
@@ -152,6 +422,18 @@ def test_frame_is_pure_function_of_index():
         {"id": "t", "type": "text", "text": "Hi **there**", "x": "50%", "y": "50%", "size": 40, "split": "chars",
          "enter": {"name": "rise+blur", "stagger": 0.05}},
         {"id": "c", "type": "circle", "r": 10, "x": "=160+cos(t*3)*100", "y": 40, "fill": "#ff5a36"},
+        {"id": "w", "type": "text", "text": "one two three four", "y": 150, "x": "50%", "size": 24, "split": "words",
+         "enter": {"name": "rise", "stagger": 0.1, "order": "random", "seed": 3}},
+        {"id": "r", "type": "rect", "x": 60, "y": 120, "w": 60, "h": 40, "fill": "#4a7dff",
+         "rough": {"amount": 3, "seed": 2, "boil": 8}},
+        {"id": "lens", "type": "circle", "r": 30, "x": "=160+sin(t*2)*80", "y": 90},
+        {"id": "sheet", "type": "rect", "x": 160, "y": 90, "w": 200, "h": 60, "fill": "#3ddbd9",
+         "mask": {"layer": "lens", "feather": 6}},
+        {"id": "heat", "type": "text", "text": "heat", "x": 260, "y": 30, "size": 28, "fill": "#ffd166",
+         "glow": {"size": "=6+4*sin(t*3)"}, "outline": 2, "displace": {"amount": 3, "scale": 20, "speed": 2}},
+        {"id": "ring", "type": "circle", "r": 4, "x": 160, "y": 90,
+         "repeat": {"count": 12, "x": "=cos(i*0.5236+t)*70", "y": "=sin(i*0.5236+t)*40", "fill": "=hsl(i*30+t*90)"}},
+        {"id": "fizz", "type": "particles", "preset": "sparks", "x": "=60+t*100", "y": 60, "flip": [1, 2]},
     ], duration=2)
     r = Renderer(k.Scene(spec), backend="cpu")
     sequential = [r.frame(n).copy() for n in range(0, 30)]
@@ -159,10 +441,253 @@ def test_frame_is_pure_function_of_index():
     assert np.array_equal(sequential[17], alone)
 
 
+def _card(**looks):
+    """A red card, x 120 to 200 and y 70 to 110, on a black canvas."""
+    return scene([dict({"id": "b", "type": "rect", "x": 160, "y": 90, "w": 80, "h": 40, "fill": "#ff0000"}, **looks)],
+                 bg="#000000", duration=1)
+
+
+def test_a_glow_lights_round_a_layer_in_its_own_colour_or_the_glows():
+    plain, own = _frame(_card(), 0), _frame(_card(glow=24), 0)
+    tinted = _frame(_card(glow={"color": "#00ff00", "size": 24}), 0)
+    half = _frame(_card(glow={"size": 24, "amount": 0.5}), 0)
+    assert plain[90, 208, :3].max() == 0
+    assert own[90, 208, 0] > 40 and own[90, 208, 1:3].max() == 0  # 8 px past the edge
+    assert tinted[90, 208, 1] > 40 and tinted[90, 208, 0] == 0
+    assert abs(int(half[90, 208, 0]) - int(own[90, 208, 0]) / 2) <= 2
+    assert tuple(own[90, 160, :3]) == tuple(tinted[90, 160, :3]) == (255, 0, 0)  # the layer itself, on top
+    grows = _card(glow={"size": [[0, 0], [1, 30, "linear"]]})
+    assert _frame(grows, 0)[90, 208, 0] == 0 and _frame(grows, 29)[90, 208, 0] > 40
+
+
+def test_an_outline_rings_a_layer_outside_its_edge_and_an_inner_shadow_shades_inside_it():
+    f = _frame(_card(outline={"width": 6, "color": "#ffffff"}), 0)
+    assert tuple(f[90, 203, :3]) == (255, 255, 255) and f[90, 210, :3].max() == 0
+    assert tuple(f[90, 160, :3]) == (255, 0, 0)
+    spec = _card(fill="#ffffff", innerShadow={"x": 0, "y": 6, "blur": 4, "color": "#000000"})
+    spec["canvas"]["bg"] = "#808080"
+    f = _frame(spec, 0)
+    assert f[72, 160, 0] < 30 and tuple(f[100, 160, :3]) == (255, 255, 255)  # dark under the top edge only
+    assert tuple(f[65, 160, :3]) == (128, 128, 128)  # nothing outside
+
+
+def test_displace_bends_a_layer_smoothly_and_its_waves_slide():
+    still = _frame(_card(fill="#ffffff"), 0)
+    spec = _card(fill="#ffffff", displace={"amount": 6, "scale": 30, "speed": 2})
+    a, b = _frame(spec, 0), _frame(spec, 15)
+    assert not np.array_equal(a, still) and not np.array_equal(a, b)
+    assert len(np.unique(a[60:120, 190:210, 0])) > 10  # sampled between pixels: a bent edge is smooth, not in steps
+    assert tuple(a[90, 160, :3]) == (255, 255, 255)
+    held = _card(fill="#ffffff", displace={"amount": 6, "scale": 30, "speed": 0})
+    assert np.array_equal(_frame(held, 0), _frame(held, 15))
+    assert np.array_equal(_frame(_card(fill="#ffffff", displace={"amount": 0}), 0), still)
+    mixed = _card(fill="#ff8000", blend="multiply", displace=4)
+    mixed["canvas"]["bg"] = "#808080"
+    assert np.abs(_frame(mixed, 0)[90, 160, :3].astype(int) - (128, 64, 0)).max() <= 1  # blends with what is behind
+
+
+def test_a_masked_layer_is_displaced_inside_its_mask():
+    spec = _masked("lens")
+    spec["layers"][1]["displace"] = {"amount": 8, "scale": 20}
+    f, flat = _frame(spec, 0), _frame(_masked("lens"), 0)
+    assert np.array_equal(f[:, 200:], flat[:, 200:]) and f[:, :120, :3].max() == 0  # cut where the mask is
+    assert tuple(f[90, 140, :3]) == (255, 255, 255)
+
+
+def _masked(mask, **lens):
+    """A white sheet over the left half of a black canvas, cut by `mask`; the lens, a circle at x 160, overlaps it
+    from x 120 to 160 and stands off it from 160 to 200."""
+    return scene([dict({"id": "lens", "type": "circle", "r": 40, "x": 160, "y": 90, "fill": "#ff0000"}, **lens),
+                  {"id": "sheet", "type": "rect", "x": 80, "y": 90, "w": 160, "h": 180, "fill": "#ffffff",
+                   "mask": mask}], bg="#000000", duration=1)
+
+
+def test_a_mask_shows_a_layer_through_another_and_is_not_drawn_itself():
+    f = _frame(_masked("lens"), 0)
+    assert tuple(f[90, 140, :3]) == (255, 255, 255)  # the sheet, where the lens is
+    assert f[90, 60, :3].max() == 0 and f[90, 180, :3].max() == 0  # nothing where it is not, nor the lens itself
+    inv = _frame(_masked({"layer": "lens", "mode": "alphaInvert"}), 0)
+    assert inv[90, 140, 0] == 0 and inv[90, 60, 0] == 255 and inv[90, 180, 0] == 0
+    soft = _frame(_masked({"layer": "lens", "feather": 30}), 0)
+    assert soft[90, 135, 0] > 200 and 60 < soft[90, 120, 0] < 200 and 0 < soft[90, 110, 0] < 60  # the edge fades
+    half = _frame(_masked({"layer": "lens", "mode": "luma"}, fill="#808080"), 0)
+    assert abs(int(half[90, 140, 0]) - 128) <= 2 and half[90, 60, 0] == 0  # grey keeps half
+    rest = _frame(_masked({"layer": "lens", "mode": "lumaInvert"}, fill="#808080"), 0)
+    assert abs(int(rest[90, 140, 0]) - 127) <= 2 and rest[90, 60, 0] == 255
+    faint = _frame(_masked("lens", opacity=0.5), 0)
+    assert abs(int(faint[90, 140, 0]) - 128) <= 2  # a mask's opacity is how much it keeps
+
+
+def test_a_masked_layer_blends_with_what_is_behind_it():
+    for mode in ("alpha", "alphaInvert"):
+        spec = scene([{"id": "lens", "type": "rect", "x": 80, "y": 90, "w": 160, "h": 180},
+                      {"id": "m", "type": "rect", "x": 160, "y": 90, "w": 320, "h": 180, "fill": "#ff8000",
+                       "blend": "multiply", "mask": {"layer": "lens", "mode": mode}}], bg="#808080", duration=1)
+        f = _frame(spec, 0)
+        kept = (40, 280) if mode == "alpha" else (280, 40)
+        assert np.abs(f[90, kept[0], :3].astype(int) - (128, 64, 0)).max() <= 1, (mode, f[90, kept[0]])
+        assert tuple(f[90, kept[1], :3]) == (128, 128, 128), mode
+    alone = scene([{"id": "m", "type": "rect", "x": 160, "y": 90, "w": 320, "h": 180, "fill": "#ff8000",
+                    "blend": "multiply", "mask": {"layer": "lens", "mode": "alphaInvert"}},
+                   {"id": "lens", "type": "rect", "x": 80, "y": 90, "w": 160, "h": 180, "at": 0.5}],
+                  bg="#808080", duration=1)
+    assert np.abs(_frame(alone, 0)[90, 40, :3].astype(int) - (128, 64, 0)).max() <= 1  # no mask yet: all of it
+
+
+def test_a_mask_moves_on_its_own_clock_and_cuts_motion_blur_as_it_moves():
+    spec = _masked("lens", at=0.5, x=[[0, 40], [0.5, 140, "linear"]])
+    r = Renderer(k.Scene(spec), backend="cpu")
+    assert r.frame(0)[..., :3].max() == 0  # before the mask starts, nothing shows through it
+    assert r.frame(15)[90, 40, 0] == 255 and r.frame(15)[90, 140, 0] == 0
+    assert r.frame(29)[90, 140, 0] == 255 and r.frame(29)[90, 40, 0] == 0
+    # A sheet that holds still behind a moving mask is drawn on every sub-frame: it smears as a moving disc does.
+    blur = {"samples": 8, "shutter": 0.5}
+    moving = dict(_masked("lens", x=[[0, 40], [1, 280, "linear"]], fill="#ffffff"), motionBlur=blur)
+    disc = dict(scene([{"id": "d", "type": "circle", "r": 40, "y": 90, "x": [[0, 40], [1, 280, "linear"]],
+                        "fill": "#ffffff"},
+                       {"id": "cover", "type": "rect", "x": 240, "y": 90, "w": 160, "h": 180, "fill": "#000000"}],
+                      bg="#000000", duration=1), motionBlur=blur)
+    a, b = _frame(moving, 10), _frame(disc, 10)
+    edge = a[90, 70:90, 0]  # the disc's left edge, at x 80 on this frame
+    assert ((edge > 0) & (edge < 255)).any() and np.abs(a.astype(int) - b).max() <= 2
+
+
+def test_check_warns_when_a_mask_never_overlaps_its_layer():
+    def misses(spec):
+        return [i["layer"] for i in check(spec)["issues"] if i["code"] == "mask-misses"]
+    assert misses(_masked("lens")) == []
+    assert misses(_masked("lens", x=300)) == ["sheet"]
+    assert misses(_masked({"layer": "lens", "mode": "alphaInvert"}, x=300)) == []  # all of it shows then
+
+
+def test_check_sees_the_mask_over_a_clip_it_does_not_decode(clip):
+    spec = scene([{"id": "word", "type": "text", "text": "CLIP", "size": 80, "x": 160, "y": 90},
+                  {"id": "v", "type": "video", "src": clip, "x": 160, "y": 90, "anchor": "center", "w": 320, "h": 180,
+                   "mask": "word"}], duration=1)
+    assert not [i for i in check(spec)["issues"] if i["code"] == "mask-misses"]
+    cut, whole = _frame(spec, 0), _frame(dict(spec, layers=[dict(spec["layers"][1], mask=None)]), 0)
+    same = (cut == whole).all(axis=2)
+    assert 1000 < same.sum() < same.size / 2 and not same[5, 5] and not same[175, 315]  # the clip in the word only
+
+
 def _boxes(spec, T=0.0):
     r = Renderer(k.Scene(spec), track=True, backend="cpu")
     r.draw(T)
     return r
+
+
+def test_check_warns_of_a_move_too_fast_to_follow_unless_motion_blur_smears_it():
+    def strobes(spec):
+        return {(i["layer"], i["from"]) for i in check(spec)["issues"] if i["code"] == "strobe"}
+    spec = scene([{"id": "zip", "type": "circle", "r": 5, "y": 90, "x": [[0.5, 0], [1, 320, "linear"]]},  # 21 px/f
+                  {"id": "cut", "type": "circle", "r": 5, "y": 40, "x": [[0, 20], [1, 20], [1, 300]]},
+                  {"id": "drift", "type": "circle", "r": 5, "y": 140, "x": [[0, 20], [2, 300, "linear"]]},
+                  {"id": "rider", "type": "circle", "r": 5, "along": {"d": "M0 0 L320 180", "p": "=t * 2"}}],
+                 duration=2)
+    assert strobes(spec) == {("zip", 0.5), ("rider", 0)}
+    assert not strobes(dict(spec, motionBlur={"samples": 4}))
+
+
+def test_stagger_orders_put_each_unit_in_its_turn():
+    assert turns(5, "start") == [0, 1, 2, 3, 4] and turns(5, "end") == [4, 3, 2, 1, 0]
+    assert turns(5, "center") == [2, 1, 0, 1, 2] and turns(4, "center") == [1, 0, 0, 1]
+    assert turns(5, "edges") == [0, 1, 2, 1, 0] and turns(4, "edges") == [0, 1, 1, 0]
+    shuffled = turns(8, "random", seed=3)
+    assert sorted(shuffled) == list(range(8)) and shuffled == turns(8, "random", seed=3) != turns(8, "random", 4)
+
+
+def test_a_group_with_a_staggered_enter_brings_its_children_in_one_by_one():
+    def lit(order, n):
+        kids = [{"id": f"k{j}", "type": "rect", "x": 60 + j * 100, "y": 90, "w": 40, "h": 40, "fill": "#ffffff"}
+                for j in range(3)]
+        spec = scene([{"id": "row", "type": "group", "children": kids,
+                       "enter": {"name": "fade", "dur": 0.2, "stagger": 0.3, "order": order}}], bg="#000000",
+                     duration=1)
+        img = _frame(spec, n)
+        return [int(img[90, 60 + j * 100, 0] > 128) for j in range(3)]
+    assert lit("start", 8) == [1, 0, 0] and lit("start", 17) == [1, 1, 0] and lit("start", 26) == [1, 1, 1]
+    assert lit("end", 8) == [0, 0, 1] and lit("center", 8) == [0, 1, 0] and lit("edges", 8) == [1, 0, 1]
+    s = k.Scene(scene([{"id": "g", "type": "group", "enter": {"name": "rise", "dur": 0.2, "stagger": 0.3},
+                        "children": [{"type": "rect"}, {"type": "rect"}, {"type": "rect"}]}], duration=2))
+    r = Renderer(s, backend="cpu")
+    assert not r._holds(s.by_id["g"], 0.5, 0.52, 0.51) and r._holds(s.by_id["g"], 0.9, 0.92, 0.91)
+
+
+def test_a_group_runs_its_children_on_its_own_clock():
+    kid = {"id": "kid", "type": "rect", "w": 10, "h": 10, "y": 90, "x": [[0, 0], [1, 100, "linear"]]}
+
+    def x(T, **clock):
+        spec = scene([dict({"id": "g", "type": "group", "children": [kid]}, **clock)], duration=3)
+        return _middle(_boxes(spec, T), "kid")
+    assert (50, 90, 10) == x(0.25, speed=2) and (50, 90, 10) == x(1.5, loop=1) and (50, 90, 10) == x(2.5, loop=1)
+    assert (75, 90, 10) == x(2.0, timeRemap=0.75)  # a number freezes them
+    assert (25, 90, 10) == x(1.0, timeRemap=[[0, 0], [2, 0.5, "linear"]])
+    assert (60, 90, 10) == x(1.0, timeRemap="=t * 0.6", speed=4)  # timeRemap wins over speed
+    looped = scene([{"id": "g", "type": "group", "loop": 1, "children": [dict(kid, dur=1)]}], duration=3,
+                   bg="#000000")
+    for spec in (looped, dict(looped, motionBlur={"samples": 4})):  # a sub-frame sees the group's clock too
+        assert _frame(spec, 75).max() > 0  # 2.5 s: the kid's 0.5 s again
+        r = Renderer(k.Scene(spec), backend="cpu")
+        sequential = [r.frame(n).copy() for n in range(0, 80, 5)]
+        assert np.array_equal(sequential[-1], _frame(spec, 75))
+
+
+def test_a_frozen_group_still_staggers_in_and_its_late_children_are_not_called_unseen():
+    spec = scene([{"id": "g", "type": "group", "timeRemap": 0, "enter": {"name": "fade", "dur": 0.1, "stagger": 0.5},
+                   "children": [{"id": f"k{j}", "type": "rect", "x": 60 + j * 100, "y": 90, "w": 40, "h": 40,
+                                 "fill": "#ffffff"} for j in range(2)]}], duration=2, bg="#000000")
+    img = _frame(spec, 30)
+    assert img[90, 60, 0] > 128 and img[90, 160, 0] > 128
+    late = scene([{"id": "g", "type": "group", "dur": 1, "speed": 3,
+                   "children": [{"id": "late", "type": "rect", "at": 2, "dur": 0.5, "w": 10, "h": 10}]}], duration=2)
+    assert "never-shown" not in [i["code"] for i in check(late)["issues"]]
+    assert "late" in _boxes(late, 0.75).boxes
+
+
+def test_split_text_enters_in_the_order_given():
+    def middle_of_ink(order):
+        spec = scene([{"id": "t", "type": "text", "text": "ABCDE", "x": 160, "y": 90, "size": 40, "split": "chars",
+                       "fill": "#ffffff", "enter": {"name": "fade", "dur": 0.1, "stagger": 0.2, "order": order}}],
+                     bg="#000000", duration=1)
+        cols = np.nonzero(_frame(spec, 3)[:, :, 0].max(0) > 128)[0]
+        return (cols.min() + cols.max()) / 2
+    assert middle_of_ink("start") < 135 and 150 < middle_of_ink("center") < 170 and middle_of_ink("end") > 185
+
+
+def _middle(r, lid):
+    left, top, right, bottom = r.boxes[lid]["rect"]
+    return pytest.approx(((left + right) / 2, (top + bottom) / 2, right - left), abs=0.5)
+
+
+def test_a_layer_rides_its_path_round_a_corner_and_turns_with_it():
+    def at(T, along, **kw):
+        return _boxes(scene([dict({"id": "a", "type": "rect", "w": 20, "h": 6, "along": along}, **kw)], duration=2), T)
+    line = {"d": "M40 40 L140 40 L140 140", "p": [[0, 0], [2, 1, "linear"]], "orient": True}  # 200 px long
+    assert (90, 40, 20) == _middle(at(0.5, line), "a")
+    assert (140, 90, 6) == _middle(at(1.5, line), "a")  # down the second side, turned to it
+    assert (150, 85, 20) == _middle(at(1.5, dict(line, orient=False), x=10, y=-5), "a")  # x and y move the path
+    assert (140, 140, 6) == _middle(at(0, dict(line, p=1.5)), "a")  # an open path stops at its end
+    assert (140, 40, 20) == _middle(at(1, {"d": line["d"]}), "a")  # p runs 0 to 1 over the layer by default
+    square = {"d": "M100 60 L140 60 L140 100 L100 100 Z", "p": 1.25}  # closed, 160 px: round again past 1
+    assert (140, 60, 20) == _middle(at(0, square), "a")
+
+
+def test_a_layer_rides_a_path_layer_where_it_is_drawn():
+    route = {"id": "route", "type": "path", "d": "M0 0 L100 0", "anchor": "center", "x": 160, "y": 90, "rotate": 90,
+             "scale": 0.5, "stroke": "#ffffff"}  # drawn from (160, 65) down to (160, 115)
+
+    def at(p, **kw):
+        dot = dict({"id": "dot", "type": "rect", "w": 20, "h": 6, "along": {"d": "#route", "p": p, "orient": True}},
+                   **kw)
+        return _boxes(scene([route, dot]))
+    assert (160, 65, 6) == _middle(at(0), "dot")
+    assert (165, 115, 6) == _middle(at(1, x=5), "dot")
+    moving = scene([dict(route, x=[[0, 100], [2, 200]]), {"id": "dot", "type": "circle", "r": 6,
+                                                          "along": {"d": "#route", "p": 0.5}}], duration=2)
+    r = Renderer(k.Scene(moving), backend="cpu")
+    assert not r._holds(r.s.by_id["dot"], 0.9, 1.1, 1.0)  # its path moves under it
+    sequential = [r.frame(n).copy() for n in range(0, 40, 3)]
+    assert np.array_equal(sequential[-1], _frame(moving, 39))
 
 
 def test_depth_frame_is_pure_function_of_index():
@@ -812,6 +1337,39 @@ def test_gpu_and_cpu_agree_on_depth_of_field():
         assert np.abs(cpu - gpu).mean() < 1.0
 
 
+def test_check_warns_about_slow_effects_on_the_cpu(monkeypatch):
+    import kinescript.verify as V
+    soft = scene([{"id": "soft", "type": "rect", "x": 160, "y": 90, "w": 40, "h": 40, "blur": 4}], duration=1)
+    glowing = scene([{"id": "g", "type": "text", "text": "Hi", "x": 160, "y": 90, "size": 40, "glow": 12}], duration=1)
+    plain = scene([{"id": "p", "type": "rect", "x": 160, "y": 90, "w": 40, "h": 40}], duration=1)
+    letters = scene([{"id": "s", "type": "text", "text": "Hello", "x": 160, "y": 90, "size": 40, "split": "chars",
+                      "enter": {"name": "blur", "dur": 1}}], duration=1)  # each letter blurs in a layer of its own
+    monkeypatch.setattr(V, "SLOW_EFFECTS", 0.0005)  # 320x180 frames are too small to be slow
+    try:
+        on_gpu = {i["code"] for i in check(soft)["issues"]}
+    except RuntimeError:
+        on_gpu = set()
+    assert "slow-effects" not in on_gpu or _GL.get("ctx") is None
+    monkeypatch.setitem(_GL, "ctx", None)  # as on a machine with no GPU
+    warned = [i for i in check(soft)["issues"] if i["code"] == "slow-effects"]
+    assert warned and "0.44 s for a 1080p layer" in warned[0]["message"], warned
+    assert any(i["code"] == "slow-effects" for i in check(glowing)["issues"])
+    assert any(i["code"] == "slow-effects" for i in check(letters)["issues"])
+    assert not any(i["code"] == "slow-effects" for i in check(plain)["issues"])
+
+
+def test_effects_are_counted_by_the_pixels_they_blur():
+    def filtered(layer):
+        r = Renderer(k.Scene(scene([dict({"id": "a", "type": "rect", "x": 160, "y": 90, "w": 40, "h": 40}, **layer)],
+                                   duration=1)), backend="cpu")
+        r.draw(0)
+        return r.filtered
+    assert filtered({}) == 0 and filtered({"blur": 4}) == 320 * 180  # blur's layer is the frame
+    small = filtered({"glow": 8})  # glow's is the rect and 1.5 times its size round it
+    assert (40 + 24) ** 2 <= small <= (42 + 26) ** 2, small
+    assert filtered({"outline": 3}) < filtered({"outline": 9})
+
+
 def test_check_warns_about_focus_on_nothing_and_slow_depth_of_field(monkeypatch):
     def codes(camera):
         return {i["code"] for i in check(_focus_stage(camera))["issues"]}
@@ -1331,6 +1889,52 @@ def test_check_reports_a_mix_without_roles_that_is_quiet_or_at_its_limiter(tone)
     assert _heard(spec)["audio-loudness"]["level"] == "info"
     spec["audio"] = [{"src": tone, "gain": 24}]
     assert _heard(spec)["audio-peak"]["level"] == "warning"
+
+
+def test_look_draws_trails_and_onion_skins(tmp_path):
+    import skia
+    from kinescript.verify import contact_sheet
+    spec = scene([{"id": "dot", "type": "circle", "r": 6, "y": 90, "x": [[0, 40], [1, 280, "linear"]], "fill": "#ffffff"},
+                  {"id": "still", "type": "rect", "x": 160, "y": 40, "w": 20, "h": 20, "fill": "#4a7dff"}],
+                 duration=1, bg="#000000")
+
+    def sheet(name, **kw):
+        info = contact_sheet(spec, str(tmp_path / name), times=[0.5], width=320, **kw)
+        return info, skia.Image.open(info["out"]).toarray(colorType=skia.kRGBA_8888_ColorType)
+    _, plain = sheet("p.png")
+    info, trail = sheet("t.png", trails=True)
+    assert info["trails"] == ["dot"]  # the rect stands still
+    y = 34 + 90  # the tile starts 8 px in and 34 px down; the dot moves 8 px a frame, at x 160 in frame 15
+    assert plain[y, 8 + 240, :3].max() == 0 and trail[y, 8 + 240, 0] > 150 > trail[y, 8 + 240, 1]  # frame 25's dot
+    _, onion = sheet("o.png", onion=2)
+    assert 60 < onion[y, 8 + 152, 0] < 120 and 25 < onion[y, 8 + 144, 0] < 65  # frames 14 and 13, fainter
+    still = onion[34 + 40, 8 + 160].astype(int) - plain[34 + 40, 8 + 160]  # what holds still looks the same:
+    assert np.abs(still).max() <= 1  # the same on the GPU, a level off at most where the CPU blends it
+    assert contact_sheet(spec, str(tmp_path / "n.png"), count=1, width=320, trails=True)["trails"] == ["dot"]
+    assert probe(spec, at=0.5)["visible"]["dot"]["pos"] == [160.0, 90.0]
+def test_probe_curve_samples_a_key_and_its_speed():
+    from kinescript.mcp import call
+    from kinescript.verify import curve
+    spec = scene([{"id": "a", "type": "rect", "w": 10, "h": 10, "y": 90,
+                   "x": [[0, 0], [1, 100, "linear"], [1.5, 100], [2, 40, "linear"]],
+                   "fill": [[0, "#000000"], [1, "#ffffff"]]},
+                  {"id": "g", "type": "group", "speed": 2,
+                   "children": [{"id": "kid", "type": "rect", "w": 10, "h": 10, "x": [[0, 0], [1, 100, "linear"]]}]}],
+                 duration=2)
+    c = curve(spec, "a.x")
+    assert c["frames"] == 60 and c["value"][15] == 50 and c["speed"][15] == 100 and c["speed"][0] is None
+    assert c["stops"] == [{"from": 1.0, "to": 1.5, "frames": [30, 45], "value": 100}]
+    assert round(c["fastest"]["speed"]) == -120 and c["fastest"]["frame"] > 45 and c["range"] == [0, 100]
+    kid = curve(spec, "kid.x")  # its group's clock runs twice as fast, and it ends at the group's second second
+    assert kid["value"][15] == 100 and kid["speed"][5] == 200 and kid["value"][30] is None
+    fill = curve(spec, "a.color")
+    assert fill["curve"] == "a.fill" and fill["kind"] == "colour" and fill["value"][0] == "#000000"
+    assert fill["value"][30] == "#ffffff" and fill["speed"][15] > 0 and fill["stops"][0]["from"] == 1.0
+    assert curve(spec, "a.position")["value"][15] == [50, 90] and curve(spec, "a.opacity")["fastest"] is None
+    for bad, says in (("b.x", "no layer 'b'"), ("a.wobble", "has no wobble"), ("a", "such as title.x")):
+        with pytest.raises(ValueError, match=says):
+            curve(spec, bad)
+    assert json.loads(call("kine_probe", {"scene": spec, "curve": "a.x"})[0]["text"])["speed"][15] == 100
 
 
 def test_look_draws_the_sound_and_returns_its_measurements(mix_media, tmp_path):
