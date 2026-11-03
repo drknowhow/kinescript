@@ -11,7 +11,7 @@ license = "MIT"
 license-files = ["LICENSE", "kinescript/fonts/*-OFL.txt"]
 authors = [{ name = "Dr. Know How" }]
 requires-python = ">=3.10"
-dependencies = ["skia-python>=87", "numpy>=1.24", "glfw>=2.5"]
+dependencies = ["skia-python>=144.1", "numpy>=1.24", "glfw>=2.5"]
 keywords = [
     "video", "video rendering", "video editing", "programmatic video", "motion graphics", "animation",
     "json", "skia", "gpu", "ffmpeg", "3d", "captions", "voice-over", "text to speech", "audio mixing",

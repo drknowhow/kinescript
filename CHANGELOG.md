@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Kinescript needs skia-python 144.1 or later, and `pyproject.toml` now says so (it said 87). Earlier releases,
+  87.9, 138.0 and 144.0.post1 among them, bind `skia.M44` without `Rows`, so any scene using depth (z, rotateX,
+  rotateY or a camera) stopped with "a bug in Kinescript" at `space.py:79`. With an older skia-python installed,
+  importing Kinescript now fails at once and names the version to install.
 - `kine edit scene.json` opens a browser editor built around the clip. Hover outlines the layer under the pointer,
   a click selects it and opens a small panel beside it with its values and a note field (a click also pins the note
   at that point), and dragging moves it: `x` and `y` are written to the scene file in one save. Under the clip, each
