@@ -23,7 +23,7 @@
   <header class="top">
     <a href="./" aria-label="Kinescript home"><img src="assets/logo-transparent.svg" alt="kinescript" width="834" height="200"></a>
     <nav aria-label="Sections">
-      <a href="#demos">Demos</a><a class="opt" href="#sound">Sound</a><a class="opt" href="#motion">2D</a><a class="opt" href="#depth">3D</a><a class="opt" href="#agents">Agents</a><a href="#install">Install</a><a href="https://github.com/drknowhow/kinescript">GitHub</a>
+      <a href="#demos">Demos</a><a class="opt" href="#sound">Sound</a><a class="opt" href="#motion">2D</a><a class="opt" href="#depth">3D</a><a class="opt" href="#agents">Agents</a><a class="opt" href="#editor">Editor</a><a href="#install">Install</a><a href="https://github.com/drknowhow/kinescript">GitHub</a>
     </nav>
   </header>
 
@@ -572,9 +572,45 @@ kine render voice.json -o voice.mp4</code></pre>
           <li><b>kine_probe</b>timeline and layer boxes</li>
           <li><b>kine_render</b>a draft, a range or the final file</li>
           <li><b>kine_voice</b>speaks a scene's text and times its words</li>
+          <li><b>kine_feedback</b>reads and answers the notes left in the editor</li>
         </ul>
       </div>
       <p class="note"><code>kine docs</code> prints the whole scene reference, about 400 lines: rules, a complete scene, every layer type with its defaults, and recipes. It is written to fit in a model's context.</p>
+    </div>
+  </section>
+
+  <section id="editor" aria-labelledby="editor-title">
+    <h2 id="editor-title">Review it on the frame.</h2>
+    <p class="sub">An agent can check a scene, but a person still has to say what looks wrong. <code>kine edit</code> opens the scene in the browser, and what they point at comes back to the agent as notes.</p>
+
+    <div class="tool">
+      <div class="tool-head">
+        <h3><code>kine edit scene.json</code></h3>
+        <p>Click a layer on the frame to select it, or drag it to move it. A sidebar shows its values and a note field, and the frame outlines what the sidebar applies to. Under the clip each layer and sound has a lane, colour-coded by kind, with an eye that hides a layer in the preview only. Click a word of the voice or a caption to comment on it, play a sound on its own, or draw on the frame.</p>
+      </div>
+      <figure class="sheet">
+        <a href="media/editor.jpg"><img src="media/editor.jpg" width="1600" height="1000" loading="lazy" alt="The kine edit page showing the narrated example. The word Check is selected on the frame and outlined, its text, size and fill are in a sidebar on the right, and under the clip there is a coloured lane for each layer, the voice with its words, the music and a sound effect."></a>
+        <figcaption>The narrated example with the word <code>check</code> selected. The strip under the clip is the scene's layers and sounds at the playhead; the yellow lane is the selected layer. Open the image for full size.</figcaption>
+      </figure>
+      <figure class="sheet">
+        <a href="media/editor-shapes.jpg"><img src="media/editor-shapes.jpg" width="1600" height="1000" loading="lazy" alt="The kine edit page showing the explainer example, with a dashed route between two boxes selected and outlined on the frame."></a>
+        <figcaption>The explainer demo with its route selected. Shapes, text, groups and captions can all be picked on the frame.</figcaption>
+      </figure>
+    </div>
+
+    <div class="tool">
+      <div class="tool-head">
+        <h3><code>kine_feedback</code></h3>
+        <p>Notes are kept in <code>scene.feedback.json</code> beside the scene, each with a time and, when there is one, a point, layer, sound, word or drawn strokes. A note is marked <code>stale</code> once the scene changes. An agent lists the open ones, replies, and resolves them over MCP; with <code>still</code> set it gets the frame with the point ringed and the strokes drawn on it.</p>
+      </div>
+      <div class="pane">
+        <div class="pane-head"><span>scene.feedback.json, one note</span></div>
+        <pre class="code out"><code>{"id": "n1", "t": 1.7, "kind": "pin", "status": "open",
+ "text": "Too heavy next to the caption; try 140.",
+ "x": 0.47, "y": 0.4, "layer": "check",
+ "scene": "42955e2cf790", "created": 1793666638, "replies": []}</code></pre>
+      </div>
+      <p class="note">The editor serves on <code>127.0.0.1</code> only and draws frames on the CPU. It changes plain numbers and text in the scene file in one save, and refuses when the file changed under it, when the scene has comments, or when the result would not load.</p>
     </div>
   </section>
 
@@ -615,7 +651,7 @@ kine render scene.json -o scene.mp4</code></pre>
   </main>
 
   <footer>
-    <span class="brand"><img src="assets/mark.svg" alt="" width="200" height="200">Kinescript 1.7.0, MIT licence</span>
+    <span class="brand"><img src="assets/mark.svg" alt="" width="200" height="200">Kinescript 1.7.1, MIT licence</span>
     <nav aria-label="Project links">
       <a href="https://github.com/drknowhow/kinescript">Source</a>
       <a href="https://pypi.org/project/kinescript/">PyPI</a>
