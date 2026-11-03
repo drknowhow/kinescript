@@ -56,3 +56,8 @@ the plugin asks ElevenLabs' forced alignment for them, which is billed like spee
 
 To run it from a Python other than Kinescript's, set `KINE_VOICE_CMD_ELEVENLABS` to that Python and the module:
 `["/path/to/python", "-m", "kinescript_elevenlabs"]`.
+
+## Not affiliated
+
+ElevenLabs is a trademark of its owner. This plugin is not affiliated with or endorsed by ElevenLabs; it calls their
+public API with your key, and ElevenLabs' terms apply to that use and to the speech it returns.

@@ -73,3 +73,8 @@ marks work around it. Keep each link to one word: misaki joins `[New York](...)`
 It runs on the GPU when the installed PyTorch was built for it, and on the CPU otherwise (a GPU newer than the
 PyTorch build, such as an RTX 50 series card with a CUDA 12.4 build, would fail on the first line).
 `KOKORO_DEVICE=cpu` or `KOKORO_DEVICE=cuda` picks one.
+
+## Not affiliated
+
+This plugin is not affiliated with or endorsed by the makers of Kokoro; it calls the `kokoro` package, whose own
+licence applies to it and to its voices.

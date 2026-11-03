@@ -90,3 +90,8 @@ sound fills its place, so a laugh does not stretch the words around it. Word tim
 
 It runs on the GPU when the installed PyTorch was built for it, and on the CPU otherwise. `CHATTERBOX_DEVICE=cpu`
 or `CHATTERBOX_DEVICE=cuda` picks one.
+
+## Not affiliated
+
+Chatterbox is Resemble AI's. This plugin is not affiliated with or endorsed by Resemble AI; it calls the
+`chatterbox-tts` package, whose own licence and terms apply to it and to the speech it makes.

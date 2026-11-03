@@ -8,7 +8,7 @@ version = "1.7.1"
 description = "Render motion graphics, video edits and voice-over from JSON scenes, with checks for agents and a browser editor."
 readme = "README.md"
 license = "MIT"
-license-files = ["LICENSE", "kinescript/fonts/*-OFL.txt"]
+license-files = ["LICENSE", "kinescript/fonts/*-OFL.txt", "kinescript/meshoptimizer-LICENSE.txt"]
 authors = [{ name = "Dr. Know How" }]
 requires-python = ">=3.10"
 dependencies = ["skia-python>=144.1", "numpy>=1.24", "glfw>=2.5"]
