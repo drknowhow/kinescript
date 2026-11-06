@@ -59,6 +59,13 @@ SCENE (top level)
               frame, a half rounding up (2.45 s at 30 fps: 74). Vertical video: "w": 1080, "h": 1920.
               Keep w and h even: .mp4, .webm and .gif need it, so an odd size loses its last
               column or row there.
+              poster: the time a rendered video opens on, as seconds or a cue ("title.in+0.5").
+              A player, feed or page shows a video's first frame before it plays, and a scene
+              that fades in from its background shows an empty one; with poster set, the video
+              file's frame 0 is the frame at that time instead, and the rest stay in place. It
+              plays for that one frame (1/fps s) before the opening.
+              check warns "blank-first-frame" when frame 0 shows nothing and poster is unset.
+              kine still --at poster saves it as an image, for a page's <video poster>.
   layers      the list of layers.
   theme       {"accent": "#ff633f"}: then "$accent" anywhere means that value.
   markers     {"drop": 12.5}: named times, usable as "at": "drop". A marker is seconds or a clock
@@ -801,8 +808,9 @@ COMMANDS
                                   a lane per role and one for the mix, the duck, and issues in red;
                                   its JSON gives each sound's loudness and gain and the mix's.
   kine still scene.json --at 2.5  one frame as PNG (-o to name it, .png or .jpg); --at -1 is 1 s
-                                  before the end; --at end is the last frame; a time past the end
-                                  draws the last frame, with a note. --scale 0.5 halves the size.
+                                  before the end; --at end is the last frame; --at poster is the
+                                  frame canvas.poster names; a time past the end draws the last
+                                  frame, with a note. --scale 0.5 halves the size.
   kine probe scene.json --at 2    every layer's and sound's start and end, and at 2 s each visible
                                   layer's screen box and anchor (pos)
   kine probe scene.json --curve title.x
@@ -833,6 +841,9 @@ COMMANDS
                                   -j 4 runs 4 render processes, at most one per frame and one
                                   per CPU (more is cut, with a note); without -j, or -j 0, kine
                                   picks. A GIF's "frames" is the number of frames in the GIF.
+                                  With canvas.poster set, a video's frame 0 is the poster frame
+                                  (the result's "poster" says which); --no-poster keeps frame 0.
+                                  PNG frames and a render --from after 0 s keep every frame.
                                   A frame is the same whichever frames come before it, except
                                   that on the GPU text drawn in depth (a camera, z, rotateX or
                                   rotateY) can differ by a level or two at a few edge pixels

@@ -35,10 +35,11 @@ TOP = {"canvas", "theme", "markers", "grade", "motionBlur", "audio", "components
 TOP_ALIAS = {"layer": "layers", "elements": "layers", "objects": "layers", "items": "layers", "scene": "layers",
              "children": "layers", "tracks": "layers", "motion_blur": "motionBlur", "colorGrade": "grade",
              "music": "audio", "sound": "audio", "marker": "markers"}
-CANVAS = {"w", "h", "fps", "bg", "duration"}
+CANVAS = {"w", "h", "fps", "bg", "duration", "poster"}
 CANVAS_ALIAS = {"width": "w", "height": "h", "background": "bg", "backgroundColor": "bg", "background_color": "bg",
                 "bgColor": "bg", "color": "bg", "fill": "bg", "frameRate": "fps", "framerate": "fps",
-                "frame_rate": "fps", "length": "duration", "dur": "duration", "seconds": "duration"}
+                "frame_rate": "fps", "length": "duration", "dur": "duration", "seconds": "duration",
+                "thumbnail": "poster", "posterFrame": "poster", "coverFrame": "poster"}
 FX = {"brightness", "contrast", "saturate", "saturation", "hue", "exposure", "temperature", "tint", "gray", "invert"}
 GRADE = FX | {"vignette", "grain"}
 SHADOW = {"x", "y", "blur", "color"}
@@ -2379,7 +2380,7 @@ def normalize(spec) -> tuple[dict, Report]:
     if cv is None:
         cv = spec["canvas"] = {}
     for k in [k for k in spec if k in ("width", "height", "fps", "bg", "background", "backgroundColor",
-                                       "duration", "frameRate", "w", "h")]:
+                                       "duration", "frameRate", "w", "h", "poster", "thumbnail")]:
         to = CANVAS_ALIAS.get(k, k)
         if isinstance(cv, dict) and to not in cv:
             cv[to] = spec.pop(k)
@@ -2416,6 +2417,13 @@ def normalize(spec) -> tuple[dict, Report]:
     elif isinstance(d, bool) or (d is not None and not isinstance(d, (int, float, str))):
         rep.add("error", "bad-canvas", "canvas", f"canvas.duration is {_show(d)}; it is a number of seconds, a time "
                 "such as \"outro.out\", or \"auto\" to end with the last layer")
+    pt = cv.get("poster")
+    if isinstance(pt, (int, float)) and not isinstance(pt, bool) and not (_finite_secs(pt) and pt >= 0):
+        rep.add("error", "bad-canvas", "canvas", f"canvas.poster must be 0 or more seconds (got {show(pt)})",
+                "use seconds, or a time such as \"title.in+0.5\"")
+    elif isinstance(pt, bool) or (pt is not None and not isinstance(pt, (int, float, str))):
+        rep.add("error", "bad-canvas", "canvas", f"canvas.poster is {_show(pt)}; it is a time: seconds, or a time such "
+                "as \"title.in+0.5\"")
     bg = cv.get("bg")
     if isinstance(bg, dict):
         gradient(bg, "canvas.bg", rep, "canvas")

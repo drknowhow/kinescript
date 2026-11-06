@@ -713,11 +713,17 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
         end, k = min(L.t_out, scene.duration), bisect.bisect_left(grid, L.t_in)
         if L.t_in < end and not (k < len(grid) and grid[k] < end):
             extra.add((L.t_in + end) / 2)
+    # What frame 0 and the poster frame show: a video's first frame is what a player or feed shows before it plays.
+    poster_t = None if scene.poster_frame is None else scene.poster_frame / scene.fps
+    opening: dict[float, list | None] = {0.0: None} if poster_t is None else {0.0: None, poster_t: None}
+    extra.update(t for t in opening if t not in grid)  # 0 is on the grid; a time off it is an extra sample
     for T in sorted(set(grid) | extra):
         try:
             r.draw(T)
         except (ValueError, RuntimeError, OSError) as e:
             return broke(e, T)
+        if T in opening:
+            opening[T] = [lid for lid, b in r.boxes.items() if lid not in scene.mattes and _shows(b, W, H)]
         for lid in r.inside:
             add("warning", "camera-inside-model", lid, T, "the camera is inside this model, so it sees only the "
                 "model's inside, which is not drawn", "move the camera back (a higher camera z) or the model away")
@@ -809,6 +815,14 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
                     if ix * iy / area > 0.15:
                         add("warning", "text-overlap", f"{texts[i][0]}+{texts[j][0]}", T,
                             "two text layers overlap", "offset one of them or separate them in time")
+    if poster_t is None and opening[0.0] == []:
+        add("warning", "blank-first-frame", None, 0.0, "frame 0 shows only the background, and a player, feed or "
+            "page that shows a video before it plays shows its first frame, so there the video looks blank",
+            "set canvas.poster to a time that shows the title, such as \"title.in+0.5\": the rendered video then "
+            "opens on that frame. Or have a layer on screen from 0 s")
+    elif poster_t is not None and opening[poster_t] == []:
+        add("warning", "blank-poster", "canvas", poster_t, f"the poster frame ({poster_t:.2f}s) shows only the "
+            "background, and a rendered video opens on it", "move canvas.poster to a time the title is on screen")
     for lid, (drawn, met) in cuts.items():
         if not met:
             m = scene.by_id[lid].mask[0].id
@@ -1030,6 +1044,12 @@ def _unheard(scene: Scene, rep: dict | None) -> list[dict]:
 
 
 _RANK = {"error": 0, "warning": 1, "info": 2}
+
+
+def _shows(b: dict, W: int, H: int) -> bool:
+    """A layer's box draws something on the canvas: not a group, at least 30% opaque and partly inside the frame."""
+    l, t, r, bb = b["rect"]
+    return b["type"] != "group" and b["alpha"] >= 0.3 and r > max(l, 0) and bb > max(t, 0) and l < W and t < H
 
 
 def _result(issues: list[dict], duration: float | None = None) -> dict:

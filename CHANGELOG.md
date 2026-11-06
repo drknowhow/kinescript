@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- `canvas.poster`: the time a rendered video opens on, in seconds or as a cue (`"title.in+0.5"`, a marker, a word).
+  Players, feeds and pages show a video's first frame before it plays, and a scene that fades in from its
+  background showed an empty one there. With `poster` set, frame 0 of an .mp4, .mov, .webm or .gif is the frame at
+  that time, and every other frame stays where it was; the render's result says which frame (`"poster"`).
+  `kine render --no-poster` keeps frame 0, and a PNG sequence or a render `--from` after 0 s always does. A top-level
+  `poster`, and `thumbnail` or `posterFrame` in canvas, are read as `canvas.poster`.
+- `kine still --at poster` (and `kine_still` with `"at": "poster"`) draws the poster frame, for a page's
+  `<video poster>`.
+- `kine check` warns `blank-first-frame` when frame 0 shows only the background and no poster is set, and
+  `blank-poster` when the poster frame shows only the background.
+
 ## 1.7.1 (2026-11-02)
 
 - The README and the PyPI page now describe the editor (`kine edit`) and `kine_feedback`, and the project site has an
