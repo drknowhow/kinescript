@@ -59,7 +59,7 @@ class SceneError(ValueError):
 
 SHAKE = 8.0  # px a camera shake moves the view, at most, when its amount is not given
 # Parts of a scene that are not layers; an issue there reads "canvas: ...", not "layer 'canvas': ...".
-SECTIONS = ("canvas", "brand", "variant", "intro", "outro", "markers", "theme", "grade", "motionBlur", "mix", "camera",
+SECTIONS = ("canvas", "brand", "variant", "intro", "outro", "music", "markers", "theme", "grade", "motionBlur", "mix", "camera",
             "light", "lights",
             "env", "fog", "components")
 
@@ -214,6 +214,15 @@ class Scene:
     def __init__(self, spec: dict, base_dir: str | Path = ".", notes: list[dict] | None = None):
         spec, report = schema.normalize(spec)
         self.issues: list[dict] = list(notes or []) + report.issues
+        self._raise_errors()
+        branded, problems = brandlib.apply_audio(spec, base_dir)  # the brand's sound defaults, as kine voice reads
+        if branded is not spec:
+            spec, again = schema.normalize(branded)  # the defaults are checked as if the scene had written them
+            seen = {(i["code"], i.get("layer"), i["message"]) for i in self.issues}
+            self.issues += [i for i in again.issues if (i["code"], i.get("layer"), i["message"]) not in seen]
+        for m in problems:
+            self.note("error", "brand-audio", "audio", m, "add the file to the brand (kine brand add-file BRAND FILE "
+                      "--kind audio) and set audio.music.src, or give music a src")
         self._raise_errors()
         self.spec = spec
         self.base = Path(base_dir)

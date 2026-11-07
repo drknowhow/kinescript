@@ -115,7 +115,8 @@ def _spec(scene, base) -> tuple[dict, Path]:
             raise FileNotFoundError(f"scene file not found: {p}")
         spec, _ = schema.loads(p.read_text(encoding="utf-8-sig"))
         base = p.parent
-    return schema.normalize(spec)[0], base
+    from . import brand
+    return brand.apply_audio(schema.normalize(spec)[0], base)[0], base  # the brand's voice defaults, as the scene
 
 
 def voices(spec: dict) -> list[tuple[str, dict]]:

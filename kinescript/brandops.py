@@ -19,7 +19,7 @@ from xml.etree import ElementTree
 from . import brand as B
 
 SOURCE = ".kinescript-source.json"  # in a project's copy: the library id and the digest it was copied at
-KINDS = {"fonts": (B.FONT_EXTS, 20 << 20), "logos": (B.LOGO_EXTS, 10 << 20)}
+KINDS = {"fonts": (B.FONT_EXTS, 20 << 20), "logos": (B.LOGO_EXTS, 10 << 20), "audio": (B.AUDIO_EXTS, 50 << 20)}
 _ID = re.compile(r"[a-z0-9][a-z0-9-]{0,62}")
 
 DEFAULT = {
@@ -221,6 +221,12 @@ def _sniff(kind: str, name: str, data: bytes) -> None:
         raise BrandOpError(f"{name} is {len(data) >> 20} MB; {kind} take up to {cap >> 20} MB")
     if kind == "fonts":
         ok = data[:4] in (b"\x00\x01\x00\x00", b"OTTO", b"true", b"ttcf")
+    elif kind == "audio":
+        ok = {".wav": data[:4] == b"RIFF" and data[8:12] == b"WAVE",
+              ".mp3": data[:3] == b"ID3" or (len(data) > 1 and data[0] == 0xFF and data[1] & 0xE0 == 0xE0),
+              ".flac": data[:4] == b"fLaC", ".ogg": data[:4] == b"OggS", ".opus": data[:4] == b"OggS",
+              ".m4a": data[4:8] == b"ftyp",
+              ".aac": len(data) > 1 and data[0] == 0xFF and data[1] & 0xF0 == 0xF0}.get(ext, False)
     elif ext == ".png":
         ok = data[:8] == b"\x89PNG\r\n\x1a\n"
     elif ext in (".jpg", ".jpeg"):
@@ -284,7 +290,7 @@ def remove_file(ref, rel: str, base_rev: str | None = None) -> dict:
     rel = str(rel).replace("\\", "/")
     parts = rel.split("/")
     if len(parts) != 2 or parts[0] not in KINDS or parts[1] in ("", ".", ".."):
-        raise BrandOpError(f"{rel}: only files under fonts/ or logos/ can be removed, such as logos/acme.svg")
+        raise BrandOpError(f"{rel}: only files under fonts/, logos/ or audio/ can be removed, such as logos/acme.svg")
     try:
         p = B.inside(folder, rel)
     except ValueError as e:

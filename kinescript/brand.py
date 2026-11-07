@@ -22,12 +22,16 @@ ALIASES = {"void": "bg", "ink": "bg", "sheet": "text", "paper": "text", "track":
            "key": "accent2", "annotation": "muted"}
 FACES = ("display", "body", "mono")
 # Parts whose entries become "$part.name" theme values (and "$part" for the whole object).
-GROUPS = ("text", "charts", "logos", "placements", "bug", "motion", "components", "intro", "outro")
+GROUPS = ("text", "charts", "logos", "placements", "bug", "motion", "components", "intro", "outro", "audio")
 BOOKENDS = {"intro": ("sting", 2.0), "outro": ("endCard", 3.0)}  # the built-in that draws each, its default dur
 PARTS = {"kinescriptBrand", "id", "name", "description", "palettes", "default", "fonts", "safeArea", "lock", *GROUPS}
-LOCKABLE = ("palettes", "fonts", *GROUPS, "safeArea")
+LOCKABLE = ("palettes", "fonts", *(g for g in GROUPS if g != "audio"), "safeArea")
 LOGO_FILES = ("file", "onDark", "onLight")
 FONT_EXTS = (".ttf", ".otf", ".ttc")
+AUDIO_EXTS = (".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus")
+AUDIO_ROLES = ("voice", "music", "sfx", "ambience")
+SOUND_KEYS = ("gain", "volume", "fadeIn", "fadeOut", "loop", "pan")  # a role's defaults a sound takes
+VOICE_KEYS = ("speaker", "backend", "rate", "options")  # and a voice with text
 LOGO_EXTS = (".svg", ".png", ".jpg", ".jpeg", ".webp")
 
 
@@ -91,6 +95,13 @@ def _files(spec: dict) -> list[tuple[str, str, tuple]]:
     for part in BOOKENDS:
         if isinstance(spec.get(part), dict) and "scene" in spec[part]:
             out.append((f"{part}.scene", spec[part]["scene"], (".json",)))
+        snd = spec[part].get("sound") if isinstance(spec.get(part), dict) else None
+        snd = snd.get("src") if isinstance(snd, dict) else snd
+        if snd is not None:
+            out.append((f"{part}.sound", snd, AUDIO_EXTS))
+    aud = spec.get("audio") if isinstance(spec.get("audio"), dict) else {}
+    if isinstance(aud.get("music"), dict) and "src" in aud["music"]:
+        out.append(("audio.music.src", aud["music"]["src"], AUDIO_EXTS))
     return out
 
 
@@ -196,6 +207,23 @@ def validate(folder: str | Path, spec: dict | None = None) -> list[dict]:
         dur = spec.get(part, {}).get("dur") if isinstance(spec.get(part), dict) else None
         if dur is not None and (isinstance(dur, bool) or not isinstance(dur, (int, float)) or not 0 < dur <= 60):
             out.append(_issue("error", "brand-key", f"{part}.dur is {dur!r}; it is seconds, above 0 and at most 60"))
+    aud = spec.get("audio")
+    if isinstance(aud, dict):
+        for k, v in aud.items():
+            if k == "mix":
+                if not isinstance(v, dict):
+                    out.append(_issue("error", "brand-key", "audio.mix must be an object like the scene's mix"))
+            elif k not in AUDIO_ROLES:
+                out.append(_issue("warning", "brand-key", f"audio.{k} is not a role or mix",
+                                  "audio takes " + ", ".join((*AUDIO_ROLES, "mix"))))
+            elif not isinstance(v, dict):
+                out.append(_issue("error", "brand-key", f"audio.{k} must be an object of that role's defaults"))
+            else:
+                known = set(SOUND_KEYS) | (set(VOICE_KEYS) if k == "voice" else set()) | (
+                    {"src", "trim"} if k == "music" else set())
+                for key in sorted(set(v) - known):
+                    out.append(_issue("warning", "brand-key", f"audio.{k}.{key} is not a default a sound takes",
+                                      "known: " + ", ".join(sorted(known))))
     lock = spec.get("lock", [])
     if not isinstance(lock, list):
         out.append(_issue("error", "brand-lock", "lock must be a list such as [\"palettes\", \"fonts\"]"))
@@ -311,6 +339,62 @@ def resolve(brand: Brand, variant: str | None = None) -> tuple[dict, dict[str, s
     if "safeArea" in brand.spec:
         put("safeArea", brand.spec["safeArea"], "safeArea")
     return theme, owner
+
+
+def apply_audio(spec: dict, base) -> tuple[dict, list[str]]:
+    """The scene with its brand's sound defaults in: each sound in "audio" takes its role's defaults for the keys
+    it leaves out (a voice with text also its speaker, backend, rate and options), "music": true adds the brand's
+    music bed under the whole video, and the brand's mix sits under the scene's. Returns the new spec and problems.
+    The scene and kine voice both read sounds through this, so a voice is spoken with what the scene will check."""
+    name = spec.get("brand")
+    if not isinstance(name, str) or not name:
+        return spec, ([] if not spec.get("music") else ["\"music\": true takes the brand's music, and the scene "
+                                                          "names no brand"])
+    folder = Path(base) / name
+    try:
+        bspec = read(folder)
+    except ValueError:
+        return spec, []  # the scene reports the brand itself
+    aud = bspec.get("audio") if isinstance(bspec.get("audio"), dict) else {}
+    out, problems = dict(spec), []
+    sounds = [dict(a) if isinstance(a, dict) else a for a in spec.get("audio") or []]
+    for a in sounds:
+        if not isinstance(a, dict):
+            continue
+        d = aud.get(a.get("role"))
+        if not isinstance(d, dict):
+            continue
+        keys = SOUND_KEYS + (VOICE_KEYS if a.get("role") == "voice" and a.get("text") else ())
+        for k in keys:
+            if k in d and k not in a:
+                a[k] = d[k]
+    ask = spec.get("music")
+    if ask and not any(isinstance(a, dict) and a.get("id") == "music" for a in sounds):
+        conf = {k: v for k, v in (aud.get("music") or {}).items()} if isinstance(aud.get("music"), dict) else {}
+        if isinstance(conf.get("src"), str):
+            try:
+                conf["src"] = str(inside(folder, conf["src"]))
+            except ValueError as e:
+                problems.append(f"audio.music.src: {e}")
+                conf.pop("src")
+        if isinstance(ask, dict):
+            conf.update(ask)  # a src given here is the scene's own, relative to the scene
+        if "src" not in conf:
+            problems.append("\"music\": true takes the brand's music bed, and the brand has no audio.music.src")
+        else:
+            sounds.append({"id": "music", "role": "music", "at": 0, "until": "end", "loop": True, **conf})
+    if sounds or "audio" in spec:
+        out["audio"] = sounds
+    if isinstance(aud.get("mix"), dict):
+        mine = spec.get("mix") if isinstance(spec.get("mix"), dict) else {}
+        mix = {**aud["mix"], **mine}
+        for k in ("levels", "duck"):
+            if isinstance(aud["mix"].get(k), dict) and isinstance(mine.get(k), dict):
+                mix[k] = {**aud["mix"][k], **mine[k]}
+        if spec.get("mix") is False or (spec.get("mix") is not None and not isinstance(spec.get("mix"), dict)):
+            mix = spec["mix"]
+        out["mix"] = mix
+    return out, problems
 
 
 def _logo_paths(folder: Path, logo):

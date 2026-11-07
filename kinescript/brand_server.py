@@ -24,7 +24,8 @@ ANCHORS = ["topleft", "top", "topright", "left", "center", "right", "bottomleft"
 WRITES = ("init", "use", "set", "replace", "add_file", "remove_file")
 _draw_lock = threading.Lock()  # one Renderer draws at a time
 FILE_TYPES = {".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-              ".webp": "image/webp"}
+              ".webp": "image/webp", ".wav": "audio/wav", ".mp3": "audio/mpeg", ".m4a": "audio/mp4",
+              ".aac": "audio/aac", ".flac": "audio/flac", ".ogg": "audio/ogg", ".opus": "audio/ogg"}
 
 
 def folder_of(ref: str, project: Path) -> Path:
@@ -42,7 +43,8 @@ def state(project: Path) -> dict:
     return {"library": str(ops.library()), "brands": ops.list_library(), "project": str(project),
             "projectBrand": (copy / B.FILE).is_file(), "gallery": list(ops.GALLERY), "roles": list(B.ROLES),
             "required": list(B.REQUIRED), "fallback": B.FALLBACK, "faces": list(B.FACES),
-            "lockable": list(B.LOCKABLE), "anchors": ANCHORS}
+            "lockable": list(B.LOCKABLE), "anchors": ANCHORS,
+            "audioRoles": list(B.AUDIO_ROLES)}
 
 
 def brand_info(ref: str, project: Path) -> dict:
@@ -119,8 +121,8 @@ def make_handler(project: Path, start: str | None = None):
 
         def _file(self, ref, rel):
             folder = folder_of(ref, project)
-            if not rel.startswith("logos/"):
-                raise BadRequest("only logos are served")
+            if not rel.startswith(("logos/", "audio/")):
+                raise BadRequest("only logos and sounds are served")
             try:
                 p = B.inside(folder, rel)
             except ValueError as e:

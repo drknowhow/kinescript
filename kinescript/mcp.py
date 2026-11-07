@@ -32,7 +32,7 @@ TOOLS = [
      "(~/.kinescript/brands). show: a brand's brand.json, files, issues and rev. init: a new library brand (id) from "
      "the default or from another. use: copy a brand into project/brand (refuses to replace a copy edited there "
      "unless force). set: one value by path (\"palettes.dark.accent\"), null removes it; a change that breaks the "
-     "brand is refused. replace: write the whole brand.json (spec) at once, refused the same way. add_file: a font or logo (kind fonts|logos) from a local file, or data_base64 with name; "
+     "brand is refused. replace: write the whole brand.json (spec) at once, refused the same way. add_file: a font, logo or sound (kind fonts|logos|audio) from a local file, or data_base64 with name; "
      "then set the brand entry that names it. remove_file: delete fonts/NAME or logos/NAME. check: the brand's "
      "issues. preview: a still of a sample scene in the brand, written to out. Writes take base_rev (the rev you "
      "read) and refuse when the brand changed since. brand is a library id or a brand folder.",
@@ -42,7 +42,7 @@ TOOLS = [
          "brand": {"type": "string"}, "id": {"type": "string"}, "from": {"type": "string"},
          "dir": {"type": "string"}, "project": {"type": "string"}, "force": {"type": "boolean"},
          "path": {"type": "string"}, "value": {}, "spec": {"type": "object"}, "base_rev": {"type": "string"},
-         "kind": {"type": "string", "enum": ["fonts", "logos"]}, "file": {"type": "string"},
+         "kind": {"type": "string", "enum": ["fonts", "logos", "audio"]}, "file": {"type": "string"},
          "name": {"type": "string"}, "data_base64": {"type": "string"}, "replace": {"type": "boolean"},
          "variant": {"type": "string"}, "out": {"type": "string"}},
          "required": ["action"]}},

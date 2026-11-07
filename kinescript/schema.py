@@ -30,7 +30,7 @@ from .timing import KEYWORDS, LIMIT, finite as _finite_secs, parse_clock, show
 # Keys that are always allowed and ignored: notes to self.
 COMMENT = {"note", "notes", "comment", "comments", "description", "name"}
 
-TOP = {"canvas", "brand", "variant", "intro", "outro", "theme", "markers", "grade", "motionBlur", "audio", "components", "layers", "meta",
+TOP = {"canvas", "brand", "variant", "intro", "outro", "music", "theme", "markers", "grade", "motionBlur", "audio", "components", "layers", "meta",
        "version", "$schema", "camera", "light", "lights", "env", "fog", "mix"}
 TOP_ALIAS = {"layer": "layers", "elements": "layers", "objects": "layers", "items": "layers", "scene": "layers",
              "children": "layers", "tracks": "layers", "motion_blur": "motionBlur", "colorGrade": "grade",
@@ -2446,7 +2446,7 @@ def normalize(spec) -> tuple[dict, Report]:
         if spec.get(k) is not None and not isinstance(spec[k], str):
             rep.add("error", "bad-value", k, f"{k} is {_show(spec[k])}; write it as text like {example}")
             spec.pop(k)
-    for k in ("intro", "outro"):
+    for k in ("intro", "outro", "music"):
         if spec.get(k) is not None and not isinstance(spec[k], (bool, dict)):
             rep.add("error", "bad-value", k, f"{k} is {_show(spec[k])}; write true, or an object of the brand's {k} "
                     "parameters to change, such as {\"tagline\": \"Part two\"}")
