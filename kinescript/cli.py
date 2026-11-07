@@ -44,10 +44,13 @@ def main(argv=None) -> int:
     r.add_argument("-j", "--workers", type=int, help="render processes, at most one per frame and one per CPU "
                                                      "(by default kine picks)")
     r.add_argument("--transparent", action="store_true", help="drop the background (use .mov or .webm)")
+    r.add_argument("--no-poster", dest="poster", action="store_false",
+                   help="keep frame 0 in place when the scene sets canvas.poster")
 
     s = sub.add_parser("still", help="render one frame to PNG/JPG")
     s.add_argument("scene")
-    s.add_argument("--at", required=True, help='seconds; negative counts from the end; "end" is the last frame')
+    s.add_argument("--at", required=True, help='seconds; negative counts from the end; "end" is the last frame; '
+                                                '"poster" is the frame canvas.poster names')
     s.add_argument("-o", "--out")
     s.add_argument("--scale", type=float, default=1.0)
 
@@ -194,12 +197,13 @@ def _run(a) -> int:
         from .output import render
         output.WARM = 0  # one render, then the process exits: shut the workers down inside it, as timed
         out = a.out or _default_out(a.scene, ".mp4")
-        _emit(dict(ok=True, **render(a.scene, out, a.quality, a.workers, a.scale, a.start, a.end, a.transparent)))
+        _emit(dict(ok=True, **render(a.scene, out, a.quality, a.workers, a.scale, a.start, a.end, a.transparent,
+                                     a.poster)))
         return 0
     if a.cmd == "still":
         from .output import still
         at = str(a.at).strip()  # --at -1 is 1 s before the end: its own name, not the same file as --at 1
-        tag = "end" if at.lower() == "end" else f"end{at}s" if at.startswith("-") else f"{at}s"
+        tag = at.lower() if at.lower() in ("end", "poster") else f"end{at}s" if at.startswith("-") else f"{at}s"
         out = a.out or _default_out(a.scene, f"_{tag}.png")
         _emit(dict(ok=True, **still(a.scene, at, out, a.scale)))
         return 0

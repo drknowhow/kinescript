@@ -269,12 +269,32 @@ class Scene:
         self.depth = {L.id for L in self.layers if uses_depth(L)}
         self.is3d = self.camera is not None or bool(self.depth)
         self.frames = max(1, math.floor(self.duration * self.fps + 0.5 + 1e-6))  # half a frame up: 2.45 s and 2.55 s
+        self.poster, self.poster_frame = self._poster(cv.get("poster"))
         self._check_spans()
         self._check_values()
         self._check_sequences()
         self._check_colours()
         self._check_fonts()
         self._raise_errors()
+
+    def _poster(self, at) -> tuple[float | None, int | None]:
+        """canvas.poster: the time whose frame a video file shows first, and that frame's number; (None, None) when
+        unset. A player, a feed or a page that shows a video before it plays shows its first frame, and a scene that
+        fades in from its background showed an empty one there."""
+        if at is None:
+            return None, None
+        try:
+            t = self.timeline._time(at, "canvas", 0.0)
+        except ValueError as e:
+            self.note("error", "bad-poster", "canvas", f"canvas.poster: {e}",
+                      "use seconds, or a time such as \"title.in+0.5\"")
+            return None, None
+        if not -1e-9 <= t <= self.duration + 1e-9:
+            self.note("error", "bad-poster", "canvas", f"canvas.poster {at!r} comes to {t:.3f}s, outside the "
+                      f"{self.duration:g}s scene", "give a time from 0 to the end of the scene")
+            return None, None
+        # The frame on screen at t, as --from picks it; the scene's end is its last frame.
+        return t, max(0, min(self.frames - 1, math.floor(t * self.fps + 1e-6)))
 
     def note(self, level: str, code: str, layer, message: str, fix: str = ""):
         self.issues.append({"level": level, "code": code, "layer": layer, "message": message, "fix": fix})

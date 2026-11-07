@@ -55,6 +55,11 @@ def test_depth_examples_in_docs_pass_check_with_no_rewrites():
         assert r["ok"] and not r["issues"], r["issues"]
 
 
+def _issues(r: dict) -> list[dict]:
+    """check's issues but blank-first-frame: an example is a few layers, not the opening of a video."""
+    return [i for i in r["issues"] if i["code"] != "blank-first-frame"]
+
+
 def test_model_examples_in_docs_pass_check_with_no_rewrites():
     models = [json.loads(o) for o in _objects(_section("3D MODELS"))]
     assert {m["id"] for m in models} == {"emblem", "title3d", "product", "planet", "chrome"}
@@ -62,7 +67,7 @@ def test_model_examples_in_docs_pass_check_with_no_rewrites():
         if m.get("src"):  # the sample model examples/make_media.py writes
             m["src"] = str(ROOT / "examples" / "media" / m["src"]).replace("\\", "/")
         r = check({"canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 4}, "layers": [m]})
-        assert r["ok"] and not r["issues"], (m["id"], r["issues"])
+        assert r["ok"] and not _issues(r), (m["id"], r["issues"])
 
 
 def test_sound_examples_in_docs_pass_check_with_no_rewrites():
@@ -78,7 +83,7 @@ def test_sound_examples_in_docs_pass_check_with_no_rewrites():
                        {"id": "said", "type": "rect", "at": "vo1:render", "until": "vo1:render.out"},
                        next(o for o in objs if o.get("type") == "captions")]}
     r = check(spec)
-    assert r["ok"] and not r["issues"], r["issues"]
+    assert r["ok"] and not _issues(r), r["issues"]
     spoken = next(o for o in objs if "text" in o)  # needs kine voice first, and says so
     r = check({"canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 2}, "audio": [spoken],
                "layers": [{"id": "go", "type": "rect", "at": "vo1:go", "dur": 1}]})

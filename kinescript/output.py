@@ -65,14 +65,17 @@ def _encoder(path: str, w: int, h: int, fps: float, fmt: str, quality: str, thre
 
 
 def _render_range(args) -> dict:
-    spec, base, start, end, path, fmt, quality, scale, transparent, threads = args
+    spec, base, start, end, path, fmt, quality, scale, transparent, threads, poster = args
     scene = Scene(spec, base)
     if transparent:
         scene.bg = None
     r = Renderer(scene, scale=scale, even=fmt in ("mp4", "webm", "gif"), alpha=fmt not in ("mp4", "gif"))
     yuv = r.yuv and fmt in ("mp4", "gif")
     enc, log = _encoder(path, r.w, r.h, scene.fps, fmt, quality, threads, yuv)
-    stream = r.frames_i420(range(start, end)) if yuv else (r.frame(n) for n in range(start, end))
+    numbers = list(range(start, end))
+    if poster and start == 0 and scene.poster_frame:
+        numbers[0] = scene.poster_frame  # canvas.poster: the file opens on that frame (see render)
+    stream = r.frames_i420(numbers) if yuv else (r.frame(n) for n in numbers)
     t0 = time.perf_counter()
     try:
         for px in stream:
@@ -523,10 +526,14 @@ def _noted(res: dict, notes: list[str]) -> dict:
 
 
 def render(src, out: str, quality: str = "standard", workers: int | None = None, scale: float = 1.0,
-           start: float | None = None, end: float | None = None, transparent: bool = False) -> dict:
+           start: float | None = None, end: float | None = None, transparent: bool = False,
+           poster: bool = True) -> dict:
     """Render a scene to a file. Format from the extension: .mp4, .mov (ProRes 4444 alpha), .webm (VP9 alpha),
     .gif, or a directory / pattern ending in .png for a frame sequence. The result's "notes" say where an argument
-    was changed: a `to` past the end, or more workers than the render can use."""
+    was changed: a `to` past the end, or more workers than the render can use.
+    With canvas.poster set, a video file's first frame is the poster frame, since players, feeds and pages show a
+    video's first frame before it plays; the result's "poster" says which. poster=False keeps every frame in place,
+    as a PNG sequence and a render that starts after 0 s always do."""
     from .render import backend_setting
     if quality not in QUALITY:
         raise ValueError(f"quality must be one of {', '.join(QUALITY)}, got {quality!r}")
@@ -580,7 +587,7 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
         seg_ext = ".mov" if fmt == "mov" else ".webm" if fmt == "webm" else ".mp4"
         bounds = [f0 + n * k // workers for k in range(workers + 1)]
         jobs = [(spec, base, bounds[k], bounds[k + 1], str(tmp / f"seg{k:03d}{seg_ext}"), fmt, quality, scale,
-                 transparent, threads)
+                 transparent, threads, poster)
                 for k in range(workers) if bounds[k + 1] > bounds[k]]
         if len(jobs) == 1:
             audio = _start_audio(scene, *a_args) if mix else None
@@ -628,6 +635,8 @@ def render(src, out: str, quality: str = "standard", workers: int | None = None,
             "seconds": round(n / fps, 3), "wall": round(wall, 2), "fps_rendered": round(n / wall, 1),
             "workers": len(jobs), "size_mb": round(out_p.stat().st_size / 1e6, 2) if out_p.exists() else None,
             "audio": bool(audio)}
+    if poster and f0 == 0 and scene.poster_frame:
+        done["poster"] = {"at": round(scene.poster, 3), "frame": scene.poster_frame}
     return warned(_noted(done, notes))
 
 
@@ -899,15 +908,21 @@ def save_png(px: np.ndarray, path: Path):
 
 
 def frame_at(scene: Scene, at) -> int:
-    """The frame `at` names: seconds, negative seconds from the end, or "end" (the last frame); clamped to the scene."""
+    """The frame `at` names: seconds, negative seconds from the end, "end" (the last frame) or "poster" (the frame
+    canvas.poster names); clamped to the scene."""
     if str(at).strip().lower() == "end":
         return scene.frames - 1
+    if str(at).strip().lower() == "poster":
+        if scene.poster_frame is None:
+            raise ValueError("at \"poster\" needs canvas.poster in the scene, the time of the frame a video opens on "
+                             "(such as \"title.in+0.5\")")
+        return scene.poster_frame
     try:
         t = float(at)
     except (TypeError, ValueError):
         t = math.nan
     if not math.isfinite(t):
-        raise ValueError(f"at must be seconds, negative seconds from the end, or \"end\"; got {at!r}")
+        raise ValueError(f"at must be seconds, negative seconds from the end, \"end\" or \"poster\"; got {at!r}")
     n = int(round((scene.duration + t if t < 0 else t) * scene.fps))
     return max(0, min(scene.frames - 1, n))
 
@@ -915,7 +930,7 @@ def frame_at(scene: Scene, at) -> int:
 def at_note(scene: Scene, at) -> str | None:
     """What frame_at did with a time outside the scene, for the result to say; None for a time inside it.
     still --at 99 and look --at 99 drew the last frame and said nothing."""
-    if str(at).strip().lower() == "end":
+    if str(at).strip().lower() in ("end", "poster"):
         return None
     t = float(at)
     s = scene.duration + t if t < 0 else t

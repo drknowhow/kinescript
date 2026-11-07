@@ -45,7 +45,8 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"},
                                                       "at": {"type": ["number", "string"], "description":
                                                              "seconds; negative counts from the end; \"end\" is "
-                                                             "the last frame"},
+                                                             "the last frame; \"poster\" is the frame "
+                                                             "canvas.poster names"},
                                                       "scale": {"type": "number", "default": 0.5}},
                      "required": ["scene", "at"]}},
     {"name": "kine_probe", "description": "Resolved timeline (every layer's in/out) and, with `at`, every visible "
