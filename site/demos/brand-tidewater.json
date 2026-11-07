@@ -1,10 +1,11 @@
 {
   "canvas": {"w": 1920, "h": 1080, "fps": 30, "poster": 1.2},
   "brand": "brands/tidewater",
+  "variant": "light",
   "layers": [
     {"use": "bug", "id": "bug", "until": "who.in"},
     {"use": "titleCard", "id": "title", "kicker": "Quarterly review", "title": "Tides **rising**",
-     "subtitle": "one scene file, two brands", "at": 0, "dur": 3},
+     "subtitle": "one brand, light and dark", "at": 0, "dur": 3},
     {"use": "barChart", "id": "sales", "data": [["Q1", 42], ["Q2", 58], ["Q3", 71], ["Q4", 64]], "highlight": "Q3",
      "x": "30%", "y": "52%", "w": 820, "h": 460, "at": "title.out", "dur": 4},
     {"use": "pieChart", "id": "mix", "data": [["Boats", 45], ["Gear", 30], ["Tours", 25]], "r": 190, "inner": 0.5,

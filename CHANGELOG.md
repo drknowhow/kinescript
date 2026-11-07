@@ -37,7 +37,7 @@ Brands: define a brand once and every video made with it follows it. The plan an
 - `kine brand wizard` opens a page on `127.0.0.1` for a brand's colours and contrast, type, logos and placements,
   intro and outro, sound, a gallery of the built-ins drawn in the brand, and its raw JSON. It writes through the same
   code as `kine brand` and the new `kine_brand` MCP tool, which can do everything the page does.
-- The site has a Brands section with the same scene rendered in two brands, and the README a Brands section. The
+- The site has a Brands section with the same scene rendered in a brand's light and dark palettes, and the README a Brands section. The
   agent skill in `skills/making-kinescript-videos` has a section on brands.
 
 ## 1.8.0 (2026-11-06)

@@ -63,9 +63,9 @@ DEMO = {
     "transitions": ("examples/transitions.json", 2.2, 0.5),
     "charts": ("examples/charts.json", 4.5, 0.5),
     "brand-tidewater": ("site/demos/brand-tidewater.json", 5.5, 0.5),
-    "brand-kinescript": ("site/demos/brand-kinescript.json", 5.5, 0.5),
+    "brand-tidewater-dark": ("site/demos/brand-tidewater-dark.json", 5.5, 0.5),
 }
-BRANDS = ("site/demos/brand-tidewater.json", "site/demos/brand-kinescript.json")  # the same scene but its brand line
+BRANDS = ("site/demos/brand-tidewater.json", "site/demos/brand-tidewater-dark.json")  # the same scene but its variant
 HERO = ("marketing/hero.json", 3.6, 2 / 3)
 LOOK = "card-flip"          # the contact sheet shown in the agent section
 LISTEN = "voice"            # the contact sheet with the sound under it, in the sound section
@@ -281,7 +281,7 @@ def fragments() -> dict:
 
     one, two = ((ROOT / b).read_text(encoding="utf-8") for b in BRANDS)
     changed = [ln for ln in difflib.ndiff(one.splitlines(), two.splitlines()) if ln[:1] in "+-"]
-    assert len(changed) == 2 and all('"brand"' in ln for ln in changed), "the brand demos differ in more than the brand"
+    assert len(changed) == 2 and all('"variant"' in ln for ln in changed), "the brand demos differ in more than the variant"
     out["diff", "brands"] = diff_block(one, two, 3)
     out["json", "brand-file"] = json_block(DEMOS / "brands" / "tidewater" / "brand.json")
 
