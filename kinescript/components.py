@@ -513,9 +513,24 @@ NUMBER_PARAMS = {"callout": ("r",), "lowerThird": ("size",),
 
 BUILTIN = {"lowerThird": _lower_third, "titleCard": _title_card, "callout": _callout, "focus": _focus,
            "progress": _progress, "kinetic": _kinetic, "barChart": _bar_chart, "lineChart": _line_chart,
-           "pieChart": _pie_chart, "logo": _logo, "bug": _bug, "sting": _sting, "endCard": _end_card}
-NEEDS_SCENE = {"logo", "bug", "sting", "endCard"}  # builders that read the canvas size
+           "pieChart": _pie_chart, "logo": _logo, "bug": _bug, "sting": _sting, "endCard": _end_card,
+           "avatar": lambda p, th, scene: _avatar(p, th, scene)}
+NEEDS_SCENE = {"logo", "bug", "sting", "endCard", "avatar"}  # builders that read the canvas size or files
+PARAMS["avatar"] = ("avatar", "say", "x", "y", "w", "h")
+NUMBER_PARAMS["avatar"] = ("w", "h")
+
+
+def _avatar(p, th, scene):
+    from .avatar import AvatarError, component
+    try:
+        return component(p, th, scene)
+    except AvatarError as e:
+        raise ValueError(f"layer '{p['id']}': {e}") from None
+
+
 COMPONENT_DOCS = {
+    "avatar": "avatar (the folder holding avatar.json), x, y [\"50%\"] (its middle), h or w (its size; its own "
+              "without), say (a sound id, {\"text\": ...} or a list of them; see AVATARS)",
     "lowerThird": "title, subtitle, x [\"6%\"], y [\"78%\"] (top-left of its accent bar), accent, size [54], "
                   "color, subColor, plate (box colour, or false for none)",
     "titleCard": "title, subtitle, kicker (small line above), x, y [\"50%\"] (centre), size [128], accent, color",

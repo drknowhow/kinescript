@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -170,3 +171,114 @@ def test_the_sheet_scene_draws_every_part_without_problems(tmp_path):
     got = check(scene)
     reading = {"tiny-text", "read-time", "safe-area"}  # about video labels, not a still review sheet
     assert got["ok"] and [i for i in got["issues"] if i["level"] != "info" and i["code"] not in reading] == []
+
+
+def _wav(path, seconds=3.0):
+    import wave
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(path), "wb") as f:
+        f.setnchannels(1)
+        f.setsampwidth(2)
+        f.setframerate(8000)
+        f.writeframes(b"\0\0" * int(8000 * seconds))
+
+
+def _talking(tmp_path, say, audio=(), at=0.5):
+    make(tmp_path / "host", voice={"speaker": "am_michael"})
+    return {"canvas": {"w": 320, "h": 180, "fps": 30, "duration": 4}, "audio": list(audio),
+            "layers": [{"id": "host", "use": "avatar", "avatar": "host", "h": 150, "at": at, "say": say}]}
+
+
+def test_say_lines_become_voice_sounds_with_the_avatars_voice(tmp_path):
+    spec = _talking(tmp_path, [{"text": "One"}, {"text": "Two", "speaker": "af_heart"}, "intro"],
+                    audio=[{"id": "intro", "src": "intro.wav"}])
+    got = A.say_sounds(spec, tmp_path)
+    assert spec["layers"][0]["say"][0] == {"text": "One"}  # the scene itself is left as written
+    one, two = got["audio"][1:]
+    assert one == {"id": "host-say1", "role": "voice", "speaker": "am_michael", "text": "One", "at": "host.in"}
+    assert two["speaker"] == "af_heart" and two["at"] == "host-say1.out+0.4"
+    assert got["layers"][0]["say"] == ["host-say1", "host-say2", "intro"]
+
+
+@pytest.mark.parametrize("say, message", [
+    ({"txt": "x"}, "each say is a sound id"),
+    ({"text": "x", "pitch": 2}, "not pitch"),
+    ({"text": "x", "id": "intro"}, "already a sound id"),
+])
+def test_say_mistakes_are_named(tmp_path, say, message):
+    spec = _talking(tmp_path, say, audio=[{"id": "intro", "src": "intro.wav"}])
+    with pytest.raises(ValueError, match=message):
+        A.say_sounds(spec, tmp_path)
+
+
+def _mouth_at(spec, base, t):
+    from kinescript.verify import probe
+    f = base / "s.json"
+    f.write_text(json.dumps(spec))
+    return sorted({i.split("-")[2] for i, v in probe(str(f), t)["visible"].items()
+                   if i.startswith("host-mouth-") and v["alpha"] > 0})
+
+
+def test_the_mouth_follows_the_words_of_a_recorded_sound(tmp_path):
+    _wav(tmp_path / "vo.wav")
+    words = [{"word": "Make", "start": 0.5, "end": 0.85}, {"word": "move", "start": 1.5, "end": 1.9}]
+    spec = _talking(tmp_path, "vo", audio=[{"id": "vo", "src": "vo.wav", "at": 1.0, "words": words}])
+    assert _mouth_at(spec, tmp_path, 0.8) == ["X"]  # before the sound: at rest
+    assert _mouth_at(spec, tmp_path, 1.52) == ["A"]  # the M of "Make", 0.5 s into the sound
+    assert _mouth_at(spec, tmp_path, 1.7) == ["C"]
+    assert _mouth_at(spec, tmp_path, 2.2) == ["X"]  # the pause between the words closes it
+    assert _mouth_at(spec, tmp_path, 3.5) == ["X"]
+
+
+def test_a_line_spoken_by_kine_voice_moves_the_mouth(tmp_path, monkeypatch):
+    from kinescript import voice
+
+    def speak(req):
+        _wav(Path(req["out"]))
+        said = req["text"].split()
+        return {"words": [{"word": w, "start": 0.5 + 0.4 * i, "end": 0.85 + 0.4 * i} for i, w in enumerate(said)],
+                "speaker": req["speaker"], "version": "1"}
+    monkeypatch.delenv("KINE_VOICE_CMD", raising=False)
+    monkeypatch.setattr(voice, "backends", lambda: {"fake": type("E", (), {"load": lambda self: speak})()})
+    spec = _talking(tmp_path, {"text": "Make it move"})
+    (tmp_path / "s.json").write_text(json.dumps(spec))
+    made = voice.generate(str(tmp_path / "s.json"))["voices"]
+    assert made[0]["id"] == "host-say" and made[0]["status"] == "made"
+    words = json.loads((tmp_path / "voice" / "host-say.words.json").read_text())
+    assert words["made"]["speaker"] == "am_michael"  # the avatar's voice
+    assert _mouth_at(spec, tmp_path, 0.5 + 0.52) == ["A"]  # the line starts with the avatar, at 0.5
+
+
+def test_an_avatar_layer_without_a_folder_is_an_error(tmp_path):
+    spec = _talking(tmp_path, "vo", audio=[{"id": "vo", "src": "vo.wav", "words": []}])
+    spec["layers"][0]["avatar"] = "nobody"
+    _wav(tmp_path / "vo.wav")
+    with pytest.raises(Exception, match="layer 'host'.*no avatar.json"):
+        import kinescript as k
+        k.Scene(spec, tmp_path)
+
+
+def test_avatar_frames_are_a_pure_function_of_the_frame_number(tmp_path):
+    import numpy as np
+    import kinescript as k
+    from kinescript.render import Renderer
+    _wav(tmp_path / "vo.wav")
+    words = [{"word": "Make", "start": 0.1, "end": 0.45}, {"word": "move", "start": 0.6, "end": 0.95}]
+    spec = _talking(tmp_path, "vo", audio=[{"id": "vo", "src": "vo.wav", "words": words}], at=0)
+    r = Renderer(k.Scene(spec, tmp_path), backend="cpu")
+    sequential = [r.frame(n).copy() for n in range(0, 30)]
+    shuffled = Renderer(k.Scene(spec, tmp_path), backend="cpu")
+    for n in (23, 4, 17, 9):
+        assert np.array_equal(shuffled.frame(n), sequential[n])
+
+
+def test_each_line_of_a_say_list_moves_the_mouth_in_turn(tmp_path):
+    _wav(tmp_path / "a.wav", 1.0)
+    _wav(tmp_path / "b.wav", 1.0)
+    spec = _talking(tmp_path, ["a", "b"], audio=[
+        {"id": "a", "src": "a.wav", "at": 1.0, "words": [{"word": "ma", "start": 0.2, "end": 0.6}]},
+        {"id": "b", "src": "b.wav", "at": 2.5, "words": [{"word": "fa", "start": 0.2, "end": 0.6}]}])
+    assert _mouth_at(spec, tmp_path, 1.22) == ["A"]
+    assert _mouth_at(spec, tmp_path, 2.0) == ["X"]  # between the lines
+    assert _mouth_at(spec, tmp_path, 2.72) == ["A"]  # the F of "fa" shows its fallback, A
+    assert _mouth_at(spec, tmp_path, 2.9) == ["C"]

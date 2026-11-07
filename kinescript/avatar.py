@@ -521,3 +521,145 @@ def sheet_scene(av: Avatar, width: int = 240, cols: int | None = None) -> tuple[
     scene = {"canvas": {"w": round(cols * cw), "h": round(rows * (ch + label)), "fps": 30, "duration": 0.1,
                         "bg": "#0a0c10"}, "layers": layers_out}
     return scene, [n for n, _ in cells]
+
+
+PRE = 3600.0  # seconds a first line's mouth drawings start before it: before any avatar that says it
+SAY_GAP = 0.4  # seconds between one line of a say list and the next, when the next gives no at
+SAY_KEYS = {"id", "text", "at", "speaker", "backend", "rate", "options", "src", "gain", "volume", "pan", "words"}
+
+
+def _avatar_layers(layers):
+    for L in layers or []:
+        if isinstance(L, dict):
+            if L.get("use") == "avatar":
+                yield L
+            yield from _avatar_layers(L.get("children"))
+
+
+def say_sounds(spec: dict, base) -> dict:
+    """The scene with each avatar's say lines written as voice sounds in "audio", so kine voice speaks them and
+    cues can name them, and each avatar's say as the list of their ids. A line takes its voice from its own keys,
+    then the avatar's voice, then the brand's and the scene's, as any voice does. Starts with the avatar unless it
+    gives an at; each later line starts SAY_GAP after the one before it ends."""
+    avatars = list(_avatar_layers(spec.get("layers")))
+    if not any("say" in L for L in avatars):
+        return spec
+    import copy
+    spec = copy.deepcopy(spec)
+    audio = spec.setdefault("audio", [])
+    taken = {str(a.get("id")) for a in audio if isinstance(a, dict)}
+    for n, L in enumerate(_avatar_layers(spec.get("layers"))):
+        if "say" not in L:
+            continue
+        lid = str(L.get("id") or f"avatar{n + 1}")
+        L.setdefault("id", lid)
+        try:
+            voice = read(Path(base) / str(L.get("avatar", ""))).get("voice") or {}
+        except ValueError:
+            voice = {}  # reported when the layer expands
+        lines = L["say"] if isinstance(L["say"], list) else [L["say"]]
+        ids, prev = [], None
+        for k, line in enumerate(lines):
+            if isinstance(line, str):
+                ids.append(line)
+                prev = line
+                continue
+            if not isinstance(line, dict) or not isinstance(line.get("text"), str):
+                raise ValueError(f"layer '{lid}': each say is a sound id or {{\"text\": \"...\"}}; got {line!r}")
+            extra = set(line) - SAY_KEYS
+            if extra:
+                raise ValueError(f"layer '{lid}': say takes {', '.join(sorted(SAY_KEYS))}; not {', '.join(sorted(extra))}")
+            sid = str(line.get("id") or (f"{lid}-say" if len(lines) == 1 else f"{lid}-say{k + 1}"))
+            if sid in taken:
+                raise ValueError(f"layer '{lid}': say id '{sid}' is already a sound id; give the line its own id")
+            taken.add(sid)
+            at = line.get("at", f"{prev}.out+{SAY_GAP}" if prev else f"{lid}.in")
+            entry = {"id": sid, "role": "voice", **{k2: v for k2, v in voice.items() if k2 not in line},
+                     **{k2: v for k2, v in line.items() if k2 != "id"}, "at": at}
+            audio.append(entry)
+            ids.append(sid)
+            prev = sid
+        L["say"] = ids
+    return spec
+
+
+def _track(scene, sid: str) -> tuple[list[list], float]:
+    """Sound sid's mouth track and where in its file it starts playing (its trim)."""
+    from . import audio as AU
+    from . import voice as V
+    from . import words as W
+    a = next((x for i, x in enumerate(scene.spec.get("audio") or [])
+              if str(x.get("id") or f"audio{i + 1}") == sid), None)
+    if a is None:
+        raise ValueError(f"say names '{sid}', which is not an audio id")
+    trim = a.get("trim") if isinstance(a.get("trim"), list) and a.get("trim") else [0]
+    if isinstance(a.get("words"), list):
+        return M.track(W.read(a["words"]))["mouth"], float(trim[0] or 0)
+    src, words_file = V.paths(sid, a, scene.base) if a.get("text") else (None, None)
+    if words_file is None:
+        src = Path(str(a.get("src", "")))
+        src = src if src.is_absolute() else scene.base / src
+        w = a.get("words")
+        words_file = scene.base / w if isinstance(w, str) else W.default_path(str(src))
+    if words_file.exists():
+        return M.track(*M.stored(words_file))["mouth"], float(trim[0] or 0)
+    if src is not None and Path(src).exists():
+        return M.levels(AU.analyze(str(src))["rms"], AU._WIN)["mouth"], float(trim[0] or 0)
+    return [], 0.0  # a voice not spoken yet: scene load reports voice-missing
+
+
+def _keys(track: list[list], av: Avatar, shape: str, t0: float, pre: float = 0.0) -> list | int:
+    """Opacity keys that show the drawn `shape` while the track says it (from t0 in the file, `pre` seconds into
+    the layer), at rest before and after, held between keys."""
+    rest = 1 if av.shape("X") == shape else 0
+    keys, last = [[0, rest, "hold"]], rest
+    for s, a, _ in track:
+        v = 1 if av.shape(s) == shape else 0
+        if v != last:
+            keys.append([round(pre + max(0.0, a - t0), 4), v, "hold"])
+            last = v
+    if track and last != rest:
+        keys.append([round(pre + max(0.0, track[-1][2] - t0), 4), rest, "hold"])
+    return keys if len(keys) > 1 else rest
+
+
+def _find(G: dict, gid: str) -> dict | None:
+    if G.get("id") == gid:
+        return G
+    for c in G.get("children") or []:
+        if isinstance(c, dict) and (got := _find(c, gid)):
+            return got
+    return None
+
+
+def component(p, theme: dict, scene) -> dict:
+    """{"use": "avatar", "avatar": FOLDER, "x", "y", "h" or "w", "say"}: the avatar as plain layers, centred on
+    x, y at h pixels tall (its own size without h or w), its mouth following the sounds say names."""
+    lid = p["id"]
+    folder = Path(scene.base) / str(p.get("avatar") or "")
+    if not p.get("avatar"):
+        raise ValueError(f"layer '{lid}': an avatar layer needs \"avatar\": the folder holding avatar.json")
+    av = load(folder)
+    w, h = av.size
+    k = (float(p["h"]) / h if p.get("h") is not None else float(p["w"]) / w if p.get("w") is not None else 1.0)
+    body = layers(av, f"{lid}-rig", {}, theme)
+    says = p.get("say") or []
+    says = says if isinstance(says, list) else [says]
+    mouth = av.mouth and _find(body, f"{lid}-rig-{av.mouth.name}")
+    if mouth and says:
+        part, kids = av.mouth, []
+        drawn = [s for s in part.files]
+        for n, sid in enumerate(says):
+            track, t0 = _track(scene, sid)
+            pre = PRE if n == 0 else 0.0  # the first line's drawings start long before it, at rest until it starts
+            for s in drawn:
+                L = _drawing(av, part, s, f"{lid}-rig", {}, True)
+                L.pop("opacity", None)
+                L.update(id=f"{lid}-mouth-{s}-{n + 1}", at=f"{sid}.in-{PRE:g}" if pre else f"{sid}.in",
+                         opacity=_keys(track, av, s, t0, pre))
+                if n + 1 < len(says):
+                    L["until"] = f"{says[n + 1]}.in"
+                kids.append(L)
+        mouth["children"] = kids
+    body.update(x=-w * k / 2, y=-h * k / 2, scale=k)
+    return {"type": "group", "x": p.get("x", "50%"), "y": p.get("y", "50%"), "children": [body]}

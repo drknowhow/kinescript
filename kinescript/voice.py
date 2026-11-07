@@ -119,7 +119,9 @@ def _spec(scene, base) -> tuple[dict, Path]:
         spec, _ = schema.loads(p.read_text(encoding="utf-8-sig"))
         base = p.parent
     from . import brand
-    return brand.apply_audio(schema.normalize(spec)[0], base)[0], base  # the brand's voice defaults, as the scene
+    from . import avatar
+    spec = avatar.say_sounds(schema.normalize(spec)[0], base)  # an avatar's lines, as voices
+    return brand.apply_audio(spec, base)[0], base  # the brand's voice defaults, as the scene
 
 
 def voices(spec: dict) -> list[tuple[str, dict]]:

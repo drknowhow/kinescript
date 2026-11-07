@@ -215,6 +215,11 @@ class Scene:
         spec, report = schema.normalize(spec)
         self.issues: list[dict] = list(notes or []) + report.issues
         self._raise_errors()
+        from . import avatar as avatarlib
+        try:
+            spec = avatarlib.say_sounds(spec, base_dir)  # an avatar's lines are voices, as kine voice reads them
+        except ValueError as e:
+            raise SceneError(str(e)) from e
         branded, problems = brandlib.apply_audio(spec, base_dir)  # the brand's sound defaults, as kine voice reads
         if branded is not spec:
             spec, again = schema.normalize(branded)  # the defaults are checked as if the scene had written them
