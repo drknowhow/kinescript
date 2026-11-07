@@ -2966,13 +2966,24 @@ class Renderer:
         return eff, defaults
 
     # ---- text -----------------------------------------------------------------------------
+    def _brand_faces(self) -> dict[str, list[tuple[str, int, bool]]]:
+        faces = getattr(self, "_faces", None)
+        if faces is None:
+            b = self.s.brand
+            faces = self._faces = {k.lower(): v for k, v in b.fonts().items()} if b else {}
+        return faces
+
     def _typeface(self, family: str | None, weight: int, italic: bool) -> skia.Typeface:
         key = (family, weight, italic)
         tf = self._tf.get(key)
         if tf is None:
             style = skia.FontStyle(int(weight), 5, skia.FontStyle.kItalic_Slant if italic else skia.FontStyle.kUpright_Slant)
             bundled = BUNDLED.get((family or "").lower())
-            if bundled:
+            own = self._brand_faces().get((family or "").lower())
+            if own:  # (path, weight, italic): the nearest weight, the asked slant first
+                path = min(own, key=lambda f: (f[2] != italic, abs(f[1] - int(weight))))[0]
+                tf = skia.Typeface.MakeFromFile(path)
+            elif bundled:
                 best = min(bundled, key=lambda w: abs(w - int(weight)))
                 tf = skia.Typeface.MakeFromFile(str(FONT_DIR / bundled[best]))
             elif family and (family.lower().endswith((".ttf", ".otf", ".ttc"))):

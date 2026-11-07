@@ -174,7 +174,7 @@ SHAPE = {"fill", "stroke", "strokeWidth", "draw", "drawStart", "cap", "join", "d
 ROUGH = {"amount", "length", "seed", "boil"}
 ROUGH_ALIAS = {"roughness": "amount", "jitter": "amount", "wobble": "amount", "segment": "length",
                "size": "length", "rate": "boil", "fps": "boil"}
-TEXT = {"text", "size", "weight", "font", "italic", "fill", "emph", "align", "maxWidth", "lineHeight",
+TEXT = {"text", "textStyle", "size", "weight", "font", "italic", "fill", "emph", "align", "maxWidth", "lineHeight",
         "letterSpacing", "stroke", "strokeWidth", "box", "case", "textCase", "caret", "split",
         "unitX", "unitY", "unitRotate", "unitScale", "unitOpacity", "unitFill", "unitBlur"}
 MEDIA = {"src", "w", "h", "fit", "zoom", "focus", "focusX", "focusY", "radius", "stroke", "strokeWidth", "cap", "join",
@@ -742,7 +742,7 @@ def _motion(raw: dict, key: str, rep: Report, lid):
         rep.add("warning", "ignored-key", lid, f"{key}: order sets who goes first in a stagger, and there is none: "
                 "a group enters child by child only with a stagger", "add \"stagger\": 0.08")
     for n in names:
-        if n and canonical(n) is None:
+        if n and canonical(n) is None and not n.startswith("$"):  # a theme name is checked once it is read
             rep.add("error", "bad-motion", lid, f"{key}: " + unknown("motion", n, PRESETS))
     if isinstance(v, dict):
         _matte(v, "luma" in [canonical(n) for n in names if n], f"{key}: ", rep, lid)
