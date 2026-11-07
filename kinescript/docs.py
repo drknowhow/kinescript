@@ -70,6 +70,10 @@ SCENE (top level)
   brand       "brand": the folder (relative to the scene) holding a brand.json, which gives the
               theme its colours, fonts, text styles, chart colours and logos (see BRANDS).
   variant     which of the brand's palettes to use, such as "light" [the brand's default].
+  intro, outro  true puts the brand's intro before the video and its outro after it, when kine render
+              makes a video file; an object changes the brand's parameters for this video:
+              "outro": {"title": "Part two next week"}. The scene's own times stay as written: check,
+              look, still and probe show the scene alone (probe lists the bookends' lengths). See BRANDS.
   theme       {"accent": "#ff633f"}: then "$accent" anywhere means that value. Over a brand, it
               changes the brand's values, except the parts the brand locks.
   markers     {"drop": 12.5}: named times, usable as "at": "drop". A marker is seconds or a clock
@@ -700,6 +704,13 @@ BRANDS
   bug         the logo the bug component shows all video: {"logo": "mark", "placement": "corner",
               "opacity": 0.85}.
   motion      named motions by dotted name: "enter": "$motion.enter" for {"motion": {"enter": "rise"}}.
+  intro       what "intro": true on a scene plays first: {"tagline": "Since 1952", "logo": "full", "dur": 2,
+              "enter": "pop"}, drawn by the sting component; or {"scene": "intro.json"}, a scene file in
+              the brand folder, rendered at the video's size and frame rate (its own duration, else dur).
+  outro       what "outro": true plays last: {"title": "Thanks for watching", "subtitle": "...", "url":
+              "acme.com", "dur": 3}, drawn by the endCard component, or {"scene": "outro.json"}.
+              Each is rendered as its own segment and joined to the video; its sound (silence when it
+              has none) joins the video's. A frame range, a PNG sequence or an audio file leaves them out.
   lock        parts a scene's theme may not change, such as ["palettes", "fonts"]; check reports
               "brand-locked" for a theme key that would.
   A brand's paths stay inside its folder: an absolute path or one with .. out of it is an error.

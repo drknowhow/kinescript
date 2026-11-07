@@ -528,6 +528,112 @@ def _noted(res: dict, notes: list[str]) -> dict:
 def render(src, out: str, quality: str = "standard", workers: int | None = None, scale: float = 1.0,
            start: float | None = None, end: float | None = None, transparent: bool = False,
            poster: bool = True) -> dict:
+    """Render a scene to a file, with its brand's intro and outro when it asks for them ("intro": true): each is
+    rendered as a segment of its own and joined to the scene's frames (see bookends.py). A frame range, a PNG
+    sequence or an audio file leaves them out, and the result's notes say so."""
+    from . import bookends
+    scene = load(src)
+    try:
+        parts = bookends.wanted(scene.spec)
+        if not parts:
+            return _render_one(scene, out, quality, workers, scale, start, end, transparent, poster)
+        ext = str(out or "").lower()
+        leave = ("a frame range" if start is not None or end is not None else
+                 "a PNG sequence" if ext.endswith(("/", "\\", ".png")) else
+                 "an audio file" if ext.endswith(AUDIO_ONLY) else None)
+        if leave or not ext.endswith(tuple(VIDEO)):
+            res = _render_one(scene, out, quality, workers, scale, start, end, transparent, poster)
+            if leave:
+                res.setdefault("notes", []).append(f"the scene's {' and '.join(parts)} are left out of {leave}")
+            return res
+        segs = bookends.segments(scene)
+        return _render_bookended(scene, segs, out, quality, workers, scale, transparent)
+    finally:
+        scene.close()
+
+
+def _render_bookended(scene: Scene, segs: dict, out: str, quality: str, workers, scale: float,
+                      transparent: bool) -> dict:
+    """The intro, the scene and the outro rendered to segments of one format and size, then joined: the video
+    copied, the sound of each (silence where one has none) mixed end to end."""
+    t0 = time.perf_counter()
+    out_p = out_path(scene, out, VIDEO)
+    fmt = VIDEO[out_p.suffix.lower()]
+    seg_ext = {"mov": ".mov", "webm": ".webm"}.get(fmt, ".mp4")
+    if fmt == "gif":
+        scale = min(scale, GIF_SIDE / max(scene.w, scene.h))
+    tmp = Path(tempfile.mkdtemp(prefix="kine-ends-"))
+    try:
+        order = [("intro", segs.get("intro")), ("main", None), ("outro", segs.get("outro"))]
+        done, notes = [], []
+        for name, seg in order:
+            if name != "main" and seg is None:
+                continue
+            path = tmp / f"{name}{seg_ext}"
+            src = scene if seg is None else Scene(*seg)
+            res = _render_one(src, str(path), "high" if fmt == "gif" else quality, workers, scale, None, None,
+                              transparent, False)  # the file opens on the intro, so no poster frame
+            notes += [f"{name}: {n}" for n in res.get("notes", [])]
+            done.append((name, path, res))
+        frames = sum(r["frames"] for _, _, r in done)
+        listing = tmp / "list.txt"
+        q = "'\\''"  # a quote inside a quoted concat path
+        listing.write_text("".join(f"file '{str(p).replace(chr(39), q)}'\n" for _, p, _ in done), encoding="utf-8")
+        video_in = ["-f", "concat", "-safe", "0", "-i", str(listing)]
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        if fmt == "gif":
+            gfps = gif_rate(frames, scene.fps)
+            _to_gif(video_in, str(out_p), gfps)
+        elif any(r["audio"] for _, _, r in done):
+            final = tmp / f"final{seg_ext}"
+            _join_audio(video_in, [(p, r["audio"], r["seconds"]) for _, p, r in done], fmt, str(final))
+            shutil.move(str(final), str(out_p))
+        else:
+            final = tmp / f"final{seg_ext}"
+            _copy(video_in, str(final))
+            shutil.move(str(final), str(out_p))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    main = next(r for n, _, r in done if n == "main")
+    wall = time.perf_counter() - t0
+    res = {**main, "out": str(out_p), "frames": gif_frames(frames, scene.fps, gfps) if fmt == "gif" else frames,
+           "seconds": round(frames / scene.fps, 3), "wall": round(wall, 2), "fps_rendered": round(frames / wall, 1),
+           "size_mb": round(out_p.stat().st_size / 1e6, 2) if out_p.exists() else None,
+           "audio": any(r["audio"] for _, _, r in done) and fmt != "gif",
+           **{n: {"seconds": r["seconds"], "frames": r["frames"]} for n, _, r in done if n != "main"}}
+    res.pop("poster", None)
+    res.pop("notes", None)
+    if scene.poster_frame and "intro" in segs:
+        notes.append("canvas.poster is not used: the video opens on the intro")
+    return _noted(res, notes)
+
+
+def _join_audio(video_in: list[str], parts: list[tuple[Path, bool, float]], fmt: str, out: str):
+    """The joined video with each part's sound laid end to end, each cut or padded to its part's length."""
+    a_ext = {"mov": ".wav", "webm": ".opus"}.get(fmt, ".m4a")
+    ins, chains = [], []
+    k = 1
+    for i, (path, has, secs) in enumerate(parts):
+        if has:
+            ins += ["-i", str(path)]
+            chains.append(f"[{k}:a]aresample=48000,aformat=channel_layouts=stereo,apad,atrim=0:{secs:.6f}[a{i}]")
+            k += 1
+        else:
+            chains.append(f"anullsrc=r=48000:cl=stereo,atrim=0:{secs:.6f}[a{i}]")
+    graph = (";".join(chains) + ";" + "".join(f"[a{i}]" for i in range(len(parts)))
+             + f"concat=n={len(parts)}:v=0:a=1[a]")
+    total = sum(s for _, _, s in parts)
+    res = subprocess.run([media.FFMPEG, "-y", "-v", "error", *video_in, *ins, "-filter_complex", graph,
+                          "-map", "0:v", "-map", "[a]", "-c:v", "copy", *(_codec(a_ext) or []),
+                          "-t", f"{total:.6f}", out], capture_output=True, text=True, encoding="utf-8",
+                         errors="replace", creationflags=media._NOWIN)
+    if res.returncode:
+        raise RuntimeError(f"joining the intro and outro failed: {res.stderr.strip()[:400]}")
+
+
+def _render_one(src, out: str, quality: str = "standard", workers: int | None = None, scale: float = 1.0,
+                start: float | None = None, end: float | None = None, transparent: bool = False,
+                poster: bool = True) -> dict:
     """Render a scene to a file. Format from the extension: .mp4, .mov (ProRes 4444 alpha), .webm (VP9 alpha),
     .gif, or a directory / pattern ending in .png for a frame sequence. The result's "notes" say where an argument
     was changed: a `to` past the end, or more workers than the render can use.

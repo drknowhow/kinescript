@@ -59,7 +59,8 @@ class SceneError(ValueError):
 
 SHAKE = 8.0  # px a camera shake moves the view, at most, when its amount is not given
 # Parts of a scene that are not layers; an issue there reads "canvas: ...", not "layer 'canvas': ...".
-SECTIONS = ("canvas", "brand", "variant", "markers", "theme", "grade", "motionBlur", "mix", "camera", "light", "lights",
+SECTIONS = ("canvas", "brand", "variant", "intro", "outro", "markers", "theme", "grade", "motionBlur", "mix", "camera",
+            "light", "lights",
             "env", "fog", "components")
 
 

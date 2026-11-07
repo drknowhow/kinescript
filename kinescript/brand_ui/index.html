@@ -353,6 +353,19 @@ function logos() {
       h("button", { onclick: () => { const n = $("#newPlace").value.trim(); if (n) { S.selPlace = n; setv(`placements.${n}`, { anchor: "bottomright", margin: "4%", height: "7%" }); } } }, "Add placement")),
     h("div", { style: "margin-top:10px" }, stage)));
 
+  const ends = [["intro", "Intro", "\"intro\": true on a scene renders this before the video.", [["tagline", "text"], ["dur", "number", "2"]], "sting"],
+    ["outro", "Outro", "\"outro\": true on a scene renders this after the video.", [["title", "text"], ["subtitle", "text"], ["url", "text"], ["dur", "number", "3"]], "endCard"]];
+  for (const [part, title, hint, fields, what] of ends) {
+    const cfg = spec[part] || {};
+    out.push(h("div", { class: "card" }, h("h3", {}, title), h("p", { class: "hint" }, hint,
+      cfg.scene ? ` It plays the brand's own scene ${cfg.scene}.` : ` A scene file in the brand ("scene": "${part}.json") can replace it in Raw JSON.`),
+      h("div", { class: "flex" },
+        h("label", { class: "inline" }, "logo", h("select", { onchange: e => setv(`${part}.logo`, e.target.value || null) }, h("option", { value: "" }, "(full)"),
+          named.map(([n]) => h("option", { value: n, selected: cfg.logo === n }, n)))),
+        fields.map(([k, type, ph]) => h("label", { class: "inline" }, k, h("input", { type, value: cfg[k] ?? "", placeholder: ph || "", style: type === "number" ? "width:70px" : "width:200px",
+          step: type === "number" ? 0.1 : null, onchange: e => { const v = e.target.value.trim(); setv(`${part}.${k}`, v === "" ? null : type === "number" ? +v : v); } })))),
+      h("div", { style: "margin-top:10px" }, img(what))));
+  }
   const bug = spec.bug || {};
   out.push(h("div", { class: "card" }, h("h3", {}, "Bug"),
     h("p", { class: "hint" }, "The small logo that stays on screen for a whole video: {\"use\": \"bug\"}."),

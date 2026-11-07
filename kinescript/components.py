@@ -417,6 +417,77 @@ def _bug(p, th, scene=None):
     return _logo(q, th, scene)
 
 
+def _bookend_logo(p, th, scene, h):
+    """The brand logo centred at the group's origin, or None when the brand has no logos (then the name shows)."""
+    logos = {k: v for k, v in group(th, "logos").items() if isinstance(v, dict)}
+    if not logos and not p.get("src"):
+        return None
+    W = scene.w if scene is not None else 1920
+    q = {"id": f"{p['id']}-logo", "logo": p.get("logo"), "src": p.get("src"), "placement": "center", "h": h,
+         "w": round(W * 0.8, 3)}  # contained in that box, so a wide logo fits a tall frame
+    out = _logo({k: v for k, v in q.items() if v is not None}, th, scene)
+    out.update(id=q["id"], x=0, y=0)
+    return out
+
+
+def _sting(p, th, scene=None):
+    """A brand intro: the logo (or the brand's name) comes in, a tagline follows, both leave before the end.
+    Read from the brand's "intro"; "intro": true on a scene puts it before the video (see BRANDS)."""
+    p = {**{k: v for k, v in group(th, "intro").items() if k not in ("scene", "dur")}, **p}
+    H = scene.h if scene is not None else 1080
+    h = _pct(p.get("h", "22%"), H)
+    enter = p.get("enter", "pop")
+    mark = _bookend_logo(p, th, scene, h)
+    kids = []
+    if mark is not None:
+        kids.append({**mark, "enter": {"name": enter, "dur": 0.7} if isinstance(enter, str) else enter,
+                     "exit": {"name": "fade", "dur": 0.4}})
+        below = h / 2
+    else:
+        name = p.get("name") or th.get("brandName") or ""
+        kids.append({"id": f"{p['id']}-name", "type": "text", "text": name or "Brand", "textStyle": "title",
+                     "fill": th["paper"], "maxWidth": "86%", "enter": {"name": "rise+blur", "dur": 0.7},
+                     "exit": {"name": "fade", "dur": 0.4}})
+        below = H * 0.07
+    if p.get("tagline"):
+        kids.append({"id": f"{p['id']}-tagline", "type": "text", "text": p["tagline"], "textStyle": "caption",
+                     "fill": th["muted"], "y": round(below + H * 0.02 + float((text_style("caption", th) or {})
+                                                                           .get("size", 28)), 3),
+                     "at": 0.35, "enter": "rise",
+                     "exit": {"name": "fade", "dur": 0.3}, "maxWidth": "86%"})
+    return {"type": "group", "x": p.get("x", "50%"), "y": p.get("y", "50%"), "children": kids}
+
+
+def _end_card(p, th, scene=None):
+    """A brand outro: logo, a title, a subtitle and a link line, staggered in, held to the end.
+    Read from the brand's "outro"; "outro": true on a scene puts it after the video (see BRANDS)."""
+    p = {**{k: v for k, v in group(th, "outro").items() if k not in ("scene", "dur")}, **p}
+    H = scene.h if scene is not None else 1080
+    h = _pct(p.get("h", "16%"), H)
+    mark = _bookend_logo(p, th, scene, h)
+    kids, top, bottom = [], 0.0, 0.0
+    if mark is not None:
+        kids.append({**mark, "y": 0, "enter": {"name": "rise", "dur": 0.6}})
+        top, bottom = -h / 2, h / 2 + H * 0.03  # a gap under the logo
+    at = 0.2
+    for key, style, fill in (("title", "heading", th["paper"]), ("subtitle", "body", th["muted"]),
+                             ("url", "label", th["accent"])):
+        if p.get(key):
+            size = float((text_style(style, th) or {}).get("size", 40))
+            y = bottom + size * 0.7 if kids else 0.0
+            if not kids:
+                top = -size * 0.6
+            kids.append({"id": f"{p['id']}-{key}", "type": "text", "text": p[key], "textStyle": style, "fill": fill,
+                         "y": round(y, 3), "at": at, "enter": "rise", "maxWidth": "86%"})
+            bottom = y + size * 0.6
+            at += 0.2
+    if not kids:
+        kids.append({"id": f"{p['id']}-name", "type": "text", "text": th.get("brandName") or "Thanks for watching",
+                     "textStyle": "title", "fill": th["paper"], "enter": "rise", "maxWidth": "86%"})
+    shift = -(top + bottom) / 2  # centre what is there on the frame
+    return {"type": "group", "x": p.get("x", "50%"), "y": p.get("y", f"50%{shift:+.1f}"), "children": kids}
+
+
 # Parameters a builder reads only in some branches (so a single call may not touch them).
 PARAMS = {"lowerThird": ("title", "subtitle", "x", "y", "accent", "size", "plate", "color", "subColor"),
           "titleCard": ("title", "subtitle", "kicker", "size", "accent", "color", "x", "y"),
@@ -430,7 +501,9 @@ PARAMS = {"lowerThird": ("title", "subtitle", "x", "y", "accent", "size", "plate
                         "r", "dots", "values", "format"),
           "pieChart": ("data", "labels", "x", "y", "r", "inner", "grow", "size", "colors", "format"),
           "logo": ("logo", "placement", "src", "dark", "h", "w", "x", "y", "opacity"),
-          "bug": ("logo", "placement", "src", "dark", "h", "w", "x", "y", "opacity")}
+          "bug": ("logo", "placement", "src", "dark", "h", "w", "x", "y", "opacity"),
+          "sting": ("logo", "src", "h", "tagline", "name", "enter", "x", "y"),
+          "endCard": ("logo", "src", "h", "title", "subtitle", "url", "x", "y")}
 
 # Parameters a builder computes with, so text there would fail inside it.
 NUMBER_PARAMS = {"callout": ("r",), "lowerThird": ("size",),
@@ -440,8 +513,8 @@ NUMBER_PARAMS = {"callout": ("r",), "lowerThird": ("size",),
 
 BUILTIN = {"lowerThird": _lower_third, "titleCard": _title_card, "callout": _callout, "focus": _focus,
            "progress": _progress, "kinetic": _kinetic, "barChart": _bar_chart, "lineChart": _line_chart,
-           "pieChart": _pie_chart, "logo": _logo, "bug": _bug}
-NEEDS_SCENE = {"logo", "bug"}  # builders that read the canvas size
+           "pieChart": _pie_chart, "logo": _logo, "bug": _bug, "sting": _sting, "endCard": _end_card}
+NEEDS_SCENE = {"logo", "bug", "sting", "endCard"}  # builders that read the canvas size
 COMPONENT_DOCS = {
     "lowerThird": "title, subtitle, x [\"6%\"], y [\"78%\"] (top-left of its accent bar), accent, size [54], "
                   "color, subColor, plate (box colour, or false for none)",
@@ -463,6 +536,10 @@ COMPONENT_DOCS = {
             "topright|left|center|right|bottomleft|bottom|bottomright inside the safe area), h [\"8%\"] (px or % of "
             "the height), w, x, y, opacity, dark (true takes the logo's onDark file; default: from the background), "
             "src (a file instead of a brand logo)",
+    "sting": "the brand's intro (its \"intro\" part): logo [full, else the first] or the brand's name, tagline, h "
+             "[\"22%\"], enter [pop], x, y [\"50%\"]. \"intro\": true on a scene renders it before the video",
+    "endCard": "the brand's outro (its \"outro\" part): logo, title, subtitle, url, h [\"16%\"], x, y. \"outro\": "
+               "true on a scene renders it after the video",
     "bug": "the brand's bug (its logo [mark], placement and opacity [0.85]) for the whole video unless timed; "
            "takes logo's parameters",
 }

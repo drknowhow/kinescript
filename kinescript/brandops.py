@@ -376,7 +376,7 @@ def sample_scene(folder: Path, variant: str | None = None, w: int = 1280, h: int
 
 
 GALLERY = ("sample", "palette", "type", "titleCard", "lowerThird", "callout", "barChart", "lineChart", "pieChart",
-           "logo", "bug")
+           "logo", "bug", "sting", "endCard")
 _DATA = [["North", 42], ["South", 61], ["East", 35], ["West", 50]]
 
 
@@ -427,6 +427,12 @@ def gallery_scene(folder: Path, what: str, variant: str | None = None) -> dict:
         layers = [{"use": "lineChart", "id": "lc", "data": _DATA, "w": 1300, "h": 640}]
     elif what == "pieChart":
         layers = [{"use": "pieChart", "id": "pc", "data": _DATA, "r": 320}]
+    elif what == "sting":
+        layers = [{"use": "sting", "id": "sting"}]
+    elif what == "endCard":
+        outro = spec.get("outro") if isinstance(spec.get("outro"), dict) else {}
+        sample = {} if any(k in outro for k in ("title", "subtitle", "url")) else             {"title": "Thanks for watching", "subtitle": spec.get("name") or "Your brand"}
+        layers = [{"use": "endCard", "id": "end", **sample}]
     elif not logos:
         layers = [_note("No logos yet: add a logo file, then name it in the brand's logos.")]
     elif what == "logo":
