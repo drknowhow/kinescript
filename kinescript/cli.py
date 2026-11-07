@@ -169,9 +169,11 @@ def main(argv=None) -> int:
     br.add_argument("--port", type=int, default=8766, help="wizard: the port [8766]")
     br.add_argument("--no-browser", action="store_true", help="wizard: do not open a browser")
 
-    av = sub.add_parser("avatar", help="check an avatar folder (its avatar.json and part drawings)")
-    av.add_argument("action", choices=["check"])
-    av.add_argument("folder", help="the folder holding avatar.json")
+    av = sub.add_parser("avatar", help="check an avatar folder (its avatar.json and part drawings), or start one")
+    av.add_argument("action", choices=["check", "new"], help="check: its problems and what it has; new: copy the "
+                                                             "starter avatar into FOLDER to edit")
+    av.add_argument("folder", help="the folder holding avatar.json, or kine:NAME for a built-in avatar")
+    av.add_argument("--from", dest="src", default="kine:host", help="new: the avatar to copy (default kine:host)")
 
     sub.add_parser("mcp", help="run the MCP server on stdio")
     sub.add_parser("doctor", help="report ffmpeg, GPU and font availability")
@@ -252,8 +254,18 @@ def _run(a) -> int:
         _emit(out)
         return OK if out["ok"] else ISSUES
     if a.cmd == "avatar":
-        from .avatar import summary
-        out = summary(a.folder)
+        from .avatar import new, summary, where
+        if a.action == "new":
+            try:
+                out = new(a.folder, a.src)
+            except ValueError as e:
+                out = {"ok": False, "error": str(e)}
+            _emit(out)
+            return OK if out["ok"] else ISSUES
+        try:
+            out = summary(where(a.folder))
+        except ValueError as e:
+            out = {"ok": False, "error": str(e)}
         _emit(out)
         return OK if out["ok"] else ISSUES
     if a.cmd == "mcp":
@@ -290,10 +302,15 @@ def _run(a) -> int:
         out = a.out or _default_out(a.scene, f"_{tag}.png")
         _emit(dict(ok=True, **still(a.scene, at, out, a.scale)))
         return 0
-    if a.cmd == "look" and (Path(a.scene) / "avatar.json").is_file():
-        from .avatar import sheet
-        out = a.out or str(Path(a.scene) / "avatar_sheet.png")
-        _emit(dict(ok=True, **sheet(a.scene, out, a.width // 2, a.cols)))
+    if a.cmd == "look" and (a.scene.startswith("kine:") or (Path(a.scene) / "avatar.json").is_file()):
+        from .avatar import sheet, where
+        try:
+            folder = where(a.scene)
+        except ValueError as e:
+            _emit({"ok": False, "error": str(e)})
+            return ISSUES
+        out = a.out or (f"{a.scene[5:]}_sheet.png" if a.scene.startswith("kine:") else str(folder / "avatar_sheet.png"))
+        _emit(dict(ok=True, **sheet(folder, out, a.width // 2, a.cols)))
         return 0
     if a.cmd == "look":
         from .verify import contact_sheet

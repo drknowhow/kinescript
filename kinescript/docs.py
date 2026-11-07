@@ -753,6 +753,10 @@ AVATARS
   talk. kine avatar check FOLDER checks the folder and lists what it has, and kine look FOLDER
   draws every pose on one sheet: each mouth shape (and what a missing one shows), eyes closed and
   looking aside, each expression, and each gesture where it moves most, with pivots marked.
+  "avatar": "kine:host" is the built-in starter, a plain friendly figure whose colours are palette
+  roles, so it takes the scene's brand; it draws all nine mouth shapes and speaks with Kokoro
+  (af_heart). Its expressions: smile, happy, think, surprise, sad; gestures: nod, shake, tilt,
+  wave, point, shrug. kine avatar new FOLDER copies it as files to redraw.
   Every part file is drawn at the avatar's full size, in place, so pivots are points in the avatar's
   own pixels. Parts draw in the order listed; a part with a parent turns and moves with it.
     {"kinescriptAvatar": 1, "name": "Host", "size": [600, 900],
@@ -973,7 +977,9 @@ COMMANDS
                                   or -o); --width and --cols as for a scene
   kine avatar check FOLDER        an avatar folder's problems (see AVATARS), and for one without
                                   errors its parts, mouth shapes and fallbacks, eyes, expressions
-                                  and gestures
+                                  and gestures; FOLDER may be kine:host, the built-in starter
+  kine avatar new FOLDER          copy the starter avatar (or --from another) into FOLDER as
+                                  avatar.json and svg parts to redraw
   kine probe scene.json --mouth vo1
                                   vo1's mouth track: the shape (X rest, A closed, B teeth, C open,
                                   D wide, E rounded, F puckered, G lip under teeth, H tongue) at

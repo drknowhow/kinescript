@@ -229,6 +229,7 @@ An agent cannot watch a video, so Kinescript gives it things it can read:
 | `kine probe scene.json --curve title.x` | the value and its speed at every frame, where it holds still and its fastest frame |
 | `kine look avatars/host` | every pose of an avatar on one sheet: each mouth shape, blinks, glances, expressions and gestures, with pivots marked |
 | `kine avatar check avatars/host` | an avatar folder's problems, and what it has: parts, mouth shapes and the ones that fall back, eyes, expressions and gestures |
+| `kine avatar new avatars/mine` | a copy of the built-in starter avatar (`"avatar": "kine:host"` in a scene) as svg parts to redraw |
 | `kine probe scene.json --mouth vo1` | the voice's mouth track: which of nine mouth shapes shows when, and whether it came from the backend's phonemes, the spelling of each word, or loudness |
 | `kine still` / `kine render` | a frame, a range (`--from/--to`), a draft (`-q draft --scale 0.5`) or the final file |
 | `kine watch scene.json` | the contact sheet, made again every time the file is saved |
