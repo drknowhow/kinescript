@@ -231,6 +231,7 @@ An agent cannot watch a video, so Kinescript gives it things it can read:
 | `kine watch scene.json` | the contact sheet, made again every time the file is saved |
 | `kine edit scene.json` | a browser page to edit layers, comment on frames, captions and voice, and draw on the frame, for an agent to read (`--port`, `--no-open`) |
 | `kine voice scene.json` | each sound with text spoken into its file, with its word times, skipping what has not changed |
+| `kine brand ...` | the brand library: list, show, init, use, set, add-file, import, check, preview, and the wizard (see [Brands](#brands)) |
 
 `kine check` reports unknown keys and bad values, missing media and out-of-range trims, text off the canvas or
 in the safe margin, overlapping text, contrast under 3:1 against what is actually behind the text, tiny text and
@@ -242,7 +243,7 @@ ceiling. An unknown key names the intended key first. Common names from other to
 errors.
 
 The same tools are available over MCP (`kine mcp`) as `kine_docs`, `kine_check`, `kine_look`, `kine_still`,
-`kine_probe`, `kine_render`, `kine_voice` and `kine_feedback`. They take a scene as a file path or as the JSON object itself, and `kine_look`
+`kine_probe`, `kine_render`, `kine_voice`, `kine_feedback` and `kine_brand`. They take a scene as a file path or as the JSON object itself, and `kine_look`
 and `kine_still` return images inline. `kine_feedback` lists, answers and resolves the review notes kept in
 `<scene>.feedback.json` (`list` returns open notes in time order, marked `stale` when the scene changed after the note).
 
@@ -290,6 +291,43 @@ The agent reads them with the `kine_feedback` MCP tool:
 With `still=true`, `list` and `get` return the frame at the note's time with its point ringed and its strokes drawn in
 yellow, so the agent sees what the person pointed at. The editor draws frames on the CPU, whatever `KINE_BACKEND` says,
 because its server answers on several threads.
+
+## Brands
+
+<p align="center"><img src="https://raw.githubusercontent.com/drknowhow/kinescript/main/site/demos/brand-tidewater.jpg" width="440" alt="The brand demo in the made-up Tidewater brand: teal and coral bar and pie charts on cream"> <img src="https://raw.githubusercontent.com/drknowhow/kinescript/main/site/demos/brand-kinescript.jpg" width="440" alt="The same scene in the Kinescript brand: coral and green charts on near-black"></p>
+
+A brand is a folder with a `brand.json` and its logo, font and sound files. It holds palettes (dark, light or any
+names), fonts, text styles, chart colours, logos and where they go, a logo bug, motion defaults, component styles, an
+intro and outro, sound defaults (voice, music bed, gains, mix) and a colour grade. A scene names it in one line:
+
+```json
+{"canvas": {"w": 1920, "h": 1080}, "brand": "brand", "variant": "light", "intro": true, "outro": true,
+ "layers": [{"use": "titleCard", "title": "Tides **rising**"},
+            {"id": "note", "type": "text", "text": "Q3 was our best quarter", "textStyle": "caption", "fill": "$muted",
+             "x": "50%", "y": "88%"}]}
+```
+
+The built-ins draw in the brand, `$accent`, `$text` and the other palette names work anywhere a colour does, and
+`"textStyle"` gives a text layer the brand's font, size, weight and tracking. The theme resolves as built-in defaults,
+then the brand, then the scene's `theme`, and a part the brand lists in `lock` cannot be changed by a scene.
+`kine check` reports text and chart colours below the contrast they need, logos drawn under their minimum size, and
+locked parts a scene changes. The two pictures above are the same scene file with a different `"brand"` line
+(`site/demos/brand-*.json`).
+
+Brands live in a library, `~/.kinescript/brands` (`KINE_BRANDS` moves it):
+
+- `kine brand init acme` makes one from the default Kinescript brand, and `kine brand use acme` copies it into the
+  project's `brand/` folder. The project keeps that copy until you run `use` again, so a change to the library brand
+  never changes a finished video.
+- `kine brand set acme palettes.dark.accent '"#ff633f"'`, `add-file` and `remove-file` change it. Each write is
+  checked and atomic, and `--rev` refuses it when the brand changed since you read it.
+- `kine brand import acme logos/mark.svg` proposes dark and light palettes and chart colours from a logo's colours,
+  each passing the contrast checks; `--apply` writes them.
+- `kine brand wizard` opens a page on `127.0.0.1` with the palettes and their contrast, type, logos and placements,
+  intro and outro, sound, a gallery of every built-in drawn in the brand, and the raw file.
+
+The wizard, `kine brand` and the `kine_brand` MCP tool make every change through the same code, so an agent can do
+all of it. `kine docs` documents the format under BRANDS.
 
 ## Install
 

@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.9.0 (2026-11-07)
+
+Brands: define a brand once and every video made with it follows it. The plan and its ten steps are in
+`docs/PLAN-1.9-BRAND.md`.
+
+- A brand is a folder, `brand.json` plus its `logos/`, `fonts/` and `audio/`. It holds palettes, fonts, text styles,
+  chart colours, logos with placements and a minimum size, a logo bug, motion defaults, component styles, an intro and
+  outro, sound defaults and a colour grade. A scene uses one with `"brand": "brand"` and optionally `"variant":
+  "light"`. The theme resolves as built-in defaults, then the brand, then the scene's `theme`; a part the brand lists in
+  `lock` cannot be changed by a scene (`brand-locked`). Scenes without a brand render as before.
+- The palette's roles fill the existing theme names, so `$accent`, `$text` and `$surface` work as before, with dotted
+  names for the rest (`$charts.series`, `$motion.enter`). Text and counter layers take `"textStyle": "heading"`. The
+  built-ins (titleCard, lowerThird, callout, the charts and others) draw in the brand's colours, fonts and styles, and
+  brand font files are found by family name. `canvas.bg` defaults to the brand's `$bg`.
+- New built-ins: `logo` and `bug` place the brand's logos, using its light or dark version to suit the background.
+  `sting` and `endCard` draw the intro and outro.
+- `"intro": true` and `"outro": true` on a scene render the brand's intro and outro as their own segments, joined
+  before and after the video without moving the scene's times or sound. Either can be a scene file in the brand
+  folder, and either can play a sound (a sonic logo).
+- Sound defaults by role: a voice takes the brand's speaker, backend and rate unless it names its own, so `kine voice`
+  reports `voice-stale` after the brand's speaker changes. Sounds take their role's gain and fades, the brand's mix
+  sits under the scene's, and `"music": true` plays the brand's music bed under the whole video.
+- A brand's `grade` is every video's default grade; a scene's grade keys go over it unless the brand locks `grade`.
+- `kine check` knows the brand: palette roles that are missing, text and chart colours under the contrast they need,
+  missing brand files and paths that lead out of the brand folder, logos drawn under their minimum size or with
+  another layer inside their clear space. `kine check --brand-strict` also reports colours and fonts that are not the
+  brand's.
+- The brand library, `~/.kinescript/brands` (`KINE_BRANDS` moves it): `kine brand list|show|init|use|set|replace|
+  add-file|remove-file|check|preview|import`. `use` copies a brand into the project's `brand/` and records what it
+  copied, so a finished video keeps its brand until you run `use` again, and it refuses to replace a copy edited in
+  the project without `--force`. Writes are checked, atomic and refused on a stale `--rev`. Uploaded files are
+  checked by content and size.
+- `kine brand import BRAND LOGO` proposes dark and light palettes and chart colours from a logo's colours, each
+  adjusted until it passes the contrast checks; `--apply` writes them.
+- `kine brand wizard` opens a page on `127.0.0.1` for a brand's colours and contrast, type, logos and placements,
+  intro and outro, sound, a gallery of the built-ins drawn in the brand, and its raw JSON. It writes through the same
+  code as `kine brand` and the new `kine_brand` MCP tool, which can do everything the page does.
+- The site has a Brands section with the same scene rendered in two brands, and the README a Brands section. The
+  agent skill in `skills/making-kinescript-videos` has a section on brands.
+
 ## 1.8.0 (2026-11-06)
 
 - `canvas.poster`: the time a rendered video opens on, in seconds or as a cue (`"title.in+0.5"`, a marker, a word).

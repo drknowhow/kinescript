@@ -106,6 +106,38 @@ The CPU torch index avoids a multi-GB CUDA download. The first `kine voice` run 
    (`ffmpeg -vf "select='not(mod(n\,90))',scale=270:-1,tile=8x2"`) whose first
    tile is the poster, and a listen to the voice track.
 
+## Brands
+
+When the person has a brand, or makes several videos that should look alike,
+use a Kinescript brand (1.9.0) instead of copying colours and fonts into
+each scene. `kine docs` has the full format under BRANDS.
+
+- **Find or make one.** `kine brand list` shows the library
+  (`~/.kinescript/brands`). `kine brand init acme` makes one from the default
+  Kinescript brand. `kine brand import acme logos/mark.svg` proposes dark and
+  light palettes from a logo, each passing check's contrast; show the
+  proposal to the person, then rerun the command with `--apply`. Over MCP, the
+  `kine_brand` tool does each of these as an `action`.
+- **Use it in the project.** `kine brand use acme` copies it into `brand/`.
+  The scene says `"brand": "brand"` and, if it needs one, `"variant": "light"`.
+  A later change to the library brand reaches the project only when you run
+  `use` again, so old videos keep rendering the same.
+- **Write scenes in the brand's names, not literals**: `"$accent"`, `"$text"`,
+  `"textStyle": "heading"`, `"enter": "$motion.enter"`. The built-ins
+  (titleCard, lowerThird, charts, logo, bug, sting, endCard) already draw in
+  it. `"intro": true`, `"outro": true` and `"music": true` add the brand's
+  sting, end card and music bed. Voices take the brand's speaker unless a
+  sound names its own.
+- **Change it through the tools**, not by editing `brand.json` by hand:
+  `kine brand set acme palettes.dark.accent '"#ff633f"'`, `add-file`, or
+  `kine brand wizard` for the person. Each write is checked; pass `--rev`
+  (`base_rev`) from your last read so a change made meanwhile is not
+  overwritten.
+- **`kine check` reports brand problems**: `brand-locked` when the scene
+  changes a part the brand locks (remove the override, don't remove the
+  lock), and contrast and logo size issues for the brand's colours and
+  placements.
+
 ## Narration
 
 - **Pace.** Oskar wants narration at 165–180 wpm, energetic, with varied

@@ -1,0 +1,83 @@
+{
+  "kinescriptBrand": 1,
+  "id": "kinescript",
+  "name": "Kinescript",
+  "default": "dark",
+  "palettes": {
+    "dark": {
+      "bg": "#0a0c10",
+      "surface": "#242832",
+      "text": "#f2f0e8",
+      "muted": "#9299a8",
+      "accent": "#ff633f",
+      "accent2": "#b9f45d"
+    },
+    "light": {
+      "bg": "#f2f0e8",
+      "surface": "#e2dfd4",
+      "text": "#0a0c10",
+      "muted": "#5b6272",
+      "accent": "#c8411f",
+      "accent2": "#3d6b12"
+    }
+  },
+  "fonts": {
+    "display": {
+      "family": "Space Grotesk"
+    },
+    "body": {
+      "family": "Space Grotesk"
+    },
+    "mono": {
+      "family": "IBM Plex Mono"
+    }
+  },
+  "charts": {
+    "series": [
+      "accent",
+      "accent2",
+      "text",
+      "muted"
+    ],
+    "highlight": "accent"
+  },
+  "logos": {
+    "clearSpace": 0.25,
+    "minHeight": 32,
+    "full": {
+      "file": "logos/full.svg",
+      "alt": "Kinescript"
+    },
+    "mark": {
+      "file": "logos/mark.svg",
+      "alt": "Kinescript"
+    }
+  },
+  "placements": {
+    "corner": {
+      "anchor": "topright",
+      "margin": "4%",
+      "height": "7%"
+    },
+    "closing": {
+      "anchor": "center",
+      "height": "14%"
+    }
+  },
+  "bug": {
+    "logo": "mark",
+    "placement": "corner",
+    "opacity": 0.85
+  },
+  "motion": {
+    "enter": "rise",
+    "exit": "fade"
+  },
+  "text": {
+    "title": {
+      "size": 120,
+      "weight": 700,
+      "tracking": -3
+    }
+  }
+}

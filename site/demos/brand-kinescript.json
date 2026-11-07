@@ -1,0 +1,18 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "poster": 1.2},
+  "brand": "brands/kinescript",
+  "layers": [
+    {"use": "bug", "id": "bug", "until": "who.in"},
+    {"use": "titleCard", "id": "title", "kicker": "Quarterly review", "title": "Tides **rising**",
+     "subtitle": "one scene file, two brands", "at": 0, "dur": 3},
+    {"use": "barChart", "id": "sales", "data": [["Q1", 42], ["Q2", 58], ["Q3", 71], ["Q4", 64]], "highlight": "Q3",
+     "x": "30%", "y": "52%", "w": 820, "h": 460, "at": "title.out", "dur": 4},
+    {"use": "pieChart", "id": "mix", "data": [["Boats", 45], ["Gear", 30], ["Tours", 25]], "r": 190, "inner": 0.5,
+     "x": "72%", "y": "50%", "at": "title.out+0.3", "until": "sales.out"},
+    {"id": "note", "type": "text", "text": "Q3 was our best quarter", "textStyle": "caption", "fill": "$muted",
+     "x": "50%", "y": "90%", "at": "title.out+1", "until": "sales.out", "enter": "$motion.enter"},
+    {"use": "lowerThird", "id": "who", "title": "Ada Marlow", "subtitle": "Head of Operations",
+     "at": "sales.out+0.2", "dur": 3},
+    {"use": "logo", "id": "end", "placement": "closing", "at": "who.out", "dur": 2, "enter": "pop"}
+  ]
+}
