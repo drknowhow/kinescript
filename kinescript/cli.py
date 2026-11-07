@@ -53,6 +53,11 @@ def _brand_args(a) -> dict:
         if len(rest) != 1:
             raise ValueError("kine brand replace BRAND FILE (a whole brand.json)")
         out["file"] = rest[0]
+    elif act == "add-avatar":
+        if len(rest) != 1:
+            raise ValueError("kine brand add-avatar BRAND NAME [--copy]: the starter as brand:NAME, or with --copy "
+                             "its files in the brand to redraw")
+        out.update(name=rest[0], copy=a.copy)
     elif act == "add-file":
         if len(rest) != 1:
             raise ValueError("kine brand add-file BRAND FILE --kind fonts|logos|audio")
@@ -150,7 +155,8 @@ def main(argv=None) -> int:
 
     br = sub.add_parser("brand", help="make, show, change and use brands (see BRANDS in kine docs)")
     br.add_argument("action", choices=[x.replace("_", "-") for x in ("list", "show", "init", "use", "set", "replace",
-                                                                     "add_file", "remove_file", "check", "preview",
+                                                                     "add_file", "remove_file", "add_avatar",
+                                                                     "check", "preview",
                                                                      "import", "wizard")])
     br.add_argument("brand", nargs="?", help="a library brand id or a brand folder (for init: the new id)")
     br.add_argument("rest", nargs="*", help="set: PATH VALUE (VALUE is JSON, or text); add-file: FILE; replace: FILE; "
@@ -166,6 +172,7 @@ def main(argv=None) -> int:
     br.add_argument("--variant", help="preview: the palette to show")
     br.add_argument("-o", "--out", help="preview: the image to write [<brand>_preview.png]")
     br.add_argument("--apply", action="store_true", help="import: write the proposed palettes to the brand")
+    br.add_argument("--copy", action="store_true", help="add-avatar: copy the starter's files into the brand to redraw")
     br.add_argument("--port", type=int, default=8766, help="wizard: the port [8766]")
     br.add_argument("--no-browser", action="store_true", help="wizard: do not open a browser")
 

@@ -21,7 +21,7 @@ from .localhttp import BadRequest, LocalHandler
 
 PROJECT = "@project"
 ANCHORS = ["topleft", "top", "topright", "left", "center", "right", "bottomleft", "bottom", "bottomright"]
-WRITES = ("init", "use", "set", "replace", "add_file", "remove_file", "import")  # import writes only with apply
+WRITES = ("init", "use", "set", "replace", "add_file", "remove_file", "add_avatar", "import")  # import writes only with apply
 _draw_lock = threading.Lock()  # one Renderer draws at a time
 FILE_TYPES = {".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
               ".webp": "image/webp", ".wav": "audio/wav", ".mp3": "audio/mpeg", ".m4a": "audio/mp4",
@@ -44,7 +44,7 @@ def state(project: Path) -> dict:
             "projectBrand": (copy / B.FILE).is_file(), "gallery": list(ops.GALLERY), "roles": list(B.ROLES),
             "required": list(B.REQUIRED), "fallback": B.FALLBACK, "faces": list(B.FACES),
             "lockable": list(B.LOCKABLE), "anchors": ANCHORS,
-            "audioRoles": list(B.AUDIO_ROLES)}
+            "audioRoles": list(B.AUDIO_ROLES), "idleKeys": ["blink", "breath", "saccade"]}
 
 
 def brand_info(ref: str, project: Path) -> dict:

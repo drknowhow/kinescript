@@ -1,8 +1,10 @@
 """Writes the starter avatar, kine:host, into kinescript/avatars/host/ (avatar.json and parts/*.svg).
 
 A plain, friendly figure drawn in code: a round head with ears and a tuft of hair, two eyes, brows, a mouth in all
-nine shapes, a torso and two arms. Every colour is a palette role (the face and hands are text, the features bg, the
-shirt accent, hair and brows muted), so the host takes any brand's light and dark palettes. Each file draws the
+nine shapes, a torso and two arms. The shirt (accent), the hair, brows and the line around the face and hands (muted)
+are palette roles, so the host takes any brand's light and dark palettes. The face, hands and features keep fixed
+neutral colours: a face drawn in a palette role would turn near-black on a light palette, with white eyes and mouth,
+a look no one should get by accident. kine avatar new copies the host to recolour. Each file draws the
 whole 600 x 900 avatar box, in place, with one element per colour id. Run it after changing the drawing:
 
     python brand/make_host.py
@@ -61,11 +63,15 @@ def mouth(shape: str) -> str:
 
 
 PARTS = {
-    "body.svg": svg(path("skin", rrect(272, 520, 56, 70, 18)),  # the neck
+    "body.svg": svg(path("line", rrect(268, 516, 64, 78, 21)), path("skin", rrect(272, 520, 56, 70, 18)),  # the neck
                     path("shirt", "M190 900 V676 C190 612 228 582 300 582 C372 582 410 612 410 676 V900 Z")),
-    "arm-left.svg": svg(path("shirt", rrect(130, 616, 54, 180, 27)), path("skin", ellipse(157, 812, 28, 28))),
-    "arm-right.svg": svg(path("shirt", rrect(416, 616, 54, 180, 27)), path("skin", ellipse(443, 812, 28, 28))),
-    "head.svg": svg(path("skin", ellipse(300, 400, 150, 150) + " " + ellipse(154, 412, 30, 34) + " " +
+    "arm-left.svg": svg(path("shirt", rrect(130, 616, 54, 180, 27)), path("line", ellipse(157, 812, 32, 32)),
+                        path("skin", ellipse(157, 812, 28, 28))),
+    "arm-right.svg": svg(path("shirt", rrect(416, 616, 54, 180, 27)), path("line", ellipse(443, 812, 32, 32)),
+                         path("skin", ellipse(443, 812, 28, 28))),
+    "head.svg": svg(path("line", ellipse(300, 400, 155, 155) + " " + ellipse(154, 412, 35, 39) + " " +
+                         ellipse(446, 412, 35, 39)),
+                    path("skin", ellipse(300, 400, 150, 150) + " " + ellipse(154, 412, 30, 34) + " " +
                          ellipse(446, 412, 30, 34)),
                     path("hair", "M178 318 C196 238 260 214 312 220 C372 226 418 262 424 318 "
                                  "C392 282 346 268 300 272 C254 276 214 288 178 318 Z")),
@@ -92,8 +98,8 @@ MANIFEST = {
         "armL": {"src": "parts/arm-left.svg", "parent": "body", "pivot": [157, 626]},
         "armR": {"src": "parts/arm-right.svg", "parent": "body", "pivot": [443, 626]},
     },
-    "colors": {"skin": "text", "shirt": "accent", "hair": "muted", "brow": "muted", "feature": "bg", "shine": "text",
-               "mouth": "bg", "teeth": "text", "tongue": "accent"},
+    "colors": {"skin": "#F2E8DC", "line": "muted", "shirt": "accent", "hair": "muted", "brow": "muted",
+               "feature": "#1E2229", "shine": "#FFFFFF", "mouth": "#3A2A2E", "teeth": "#FFFFFF", "tongue": "#E07A6E"},
     "expressions": {
         "smile": {"head": {"rotate": -3}, "brows": {"y": -8}},
         "happy": {"head": {"rotate": -4}, "brows": {"y": -12}, "mouth": "C"},

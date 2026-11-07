@@ -157,3 +157,31 @@ def test_foreign_host_and_bad_bodies(srv):
     code, out = post(port, {"action": "add_file", "ref": "acme", "kind": "logos", "name": "a.svg",
                             "data_base64": "%%%"})
     assert code == 400 and "base64" in out["error"]
+
+
+def test_the_avatars_step_adds_the_starter_or_a_copy_and_draws_it(srv):
+    port, _, lib = srv
+    code, html, _ = req(port, "GET", "/")
+    assert b'data-tab="Avatars"' in html
+    code, out = post(port, {"action": "add_avatar", "ref": "acme", "name": "host"})
+    assert code == 200 and out["brand"]["avatars"] == {"host": {"src": "kine:host"}}
+    code, out = post(port, {"action": "add_avatar", "ref": "acme", "name": "guide", "copy": True})
+    assert code == 200 and out["brand"]["avatars"]["guide"] == {"src": "avatars/guide"} and out["issues"] == []
+    assert (lib / "acme" / "avatars" / "guide" / "parts" / "mouth-X.svg").is_file()
+    code, out = post(port, {"action": "add_avatar", "ref": "acme", "name": "host"})
+    assert code == 400 and "already has an avatar 'host'" in out["error"]
+    code, out = post(port, {"action": "set", "ref": "acme", "path": "avatars.host.voice.speaker", "value": "am_adam"})
+    assert code == 200 and out["brand"]["avatars"]["host"]["voice"] == {"speaker": "am_adam"}
+    code, png, h = req(port, "GET", "/api/gallery?ref=acme&what=avatar:guide&variant=light")
+    assert code == 200 and png[:4] == b"\x89PNG"
+    code, out = jget(port, "/api/gallery?ref=acme&what=avatar:nobody")
+    assert code == 400 and "no avatar 'nobody'" in out["error"]
+
+
+def test_kine_brand_add_avatar(tmp_path, monkeypatch, capsys):
+    from kinescript.cli import main
+    monkeypatch.setenv("KINE_BRANDS", str(tmp_path / "library"))
+    ops.init("acme")
+    assert main(["brand", "add-avatar", "acme", "host", "--copy"]) == 0
+    assert json.loads(capsys.readouterr().out)["brand"]["avatars"] == {"host": {"src": "avatars/host"}}
+    assert main(["brand", "add-avatar", "acme", "Bad Name"]) != 0
