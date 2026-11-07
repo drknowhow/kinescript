@@ -744,6 +744,35 @@ def playing(L, imp, t: float) -> tuple[int, float] | None:
     return i, at % length if spec.get("loop", True) else min(max(at, 0.0), length)
 
 
+FADE = 0.15  # seconds a clip played over the animation ("clips") takes to come in and to go
+
+
+def layered(L, imp, t: float) -> tuple:
+    """The clips the layer plays over its animation at its time t: ((clip, time into it, weight), ...) from its
+    "clips", [{"name", "at", "speed", "weight"}], each played once from at (seconds on the layer's clock; Scene
+    resolves a cue) and faded in and out over FADE. A later clip goes on top of an earlier one."""
+    spec = L.raw.get("clips")
+    if not isinstance(spec, list) or imp.motion is None:
+        return ()
+    out = []
+    for c in spec:
+        i = models.clip_index(imp, c.get("name", 0)) if isinstance(c, dict) else None
+        at = c.get("at", 0) if i is not None else None
+        if not isinstance(at, (int, float)) or isinstance(at, bool):
+            continue
+        length = imp.motion.clips[i][2]
+        speed = float(c.get("speed", 1)) or 1.0
+        span = length / abs(speed)
+        u = t - float(at)
+        if u < 0 or u > span:
+            continue
+        fade = min(FADE, span / 4) if span > 0 else 0.0
+        w = min(1.0, u / fade, (span - u) / fade) if fade > 0 else 1.0
+        into = u * speed if speed > 0 else length + u * speed
+        out.append((i, round(into, 6), round(float(c.get("weight", 1)) * max(0.0, w), 6)))
+    return tuple(out)
+
+
 def morphs(L, imp, t: float, T: float = 0.0) -> dict[str, float]:
     """The weights the layer's "morphs" give the model file's named morph targets at its time t: a number, keys or
     an expression each. Empty when it sets none (kine check reports a name the file does not have)."""
@@ -772,13 +801,14 @@ def model(r, L, g, t: float = 0.0, T: float = 0.0, grow: float = 1.0) -> tuple[m
         fit = _fit(g, size)
         play = playing(L, imp, t)
         shapes = morphs(L, imp, t, T)
-        if play is None and not shapes:
+        over = layered(L, imp, t)
+        if play is None and not shapes and not over:
             meshes.insert(0, _kept(r, ("fit", L.id), fit, lambda: m._replace(P=m.P * fit)))
         else:  # posed at this time: a new mesh, kept while the time into the clip and the morphs hold
             def posed():
-                P, N = models.pose(imp, *(play or (None, 0.0)), shapes)
+                P, N = models.pose(imp, *(play or (None, 0.0)), shapes, over)
                 return m._replace(P=P * fit, N=N)
-            meshes.insert(0, _kept(r, ("fit", L.id), (fit, play, tuple(sorted(shapes.items()))), posed))
+            meshes.insert(0, _kept(r, ("fit", L.id), (fit, play, tuple(sorted(shapes.items())), over), posed))
     elif shape:
         meshes.insert(0, _shape(r, shape, g, L.raw, L.raw.get("detail", "medium"), ("shape", L.id), grow))
     if len(meshes) == 1:
@@ -1341,7 +1371,8 @@ def _topology(r, L, m) -> tuple:
 def _welded(r, L, m) -> tuple:
     hit = r._models.get(("edges", L.id))
     if hit is None or hit[0] is not m.T or hit[1] != len(m.P) or ((L.raw.get("animation") not in (None, False)
-                                                                   or L.raw.get("morphs")) and hit[3] is not m.P):
+                                                                   or L.raw.get("morphs") or L.raw.get("clips"))
+                                                                  and hit[3] is not m.P):
         hit = r._models[("edges", L.id)] = (m.T, len(m.P), mesh.edges(m.P, m.T), m.P)
     return hit[2]
 

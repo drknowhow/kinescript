@@ -515,6 +515,10 @@ DEPTH AND CAMERA (3D)
             target over what the file and the animation give it, on the layer's clock. kine probe
             lists the names (from the mesh's extras.targetNames); a name the file lacks is an error
             (unknown-morph).
+  clips     the file's clips to play once over its animation, each from at (a cue, or seconds on
+            the layer's clock), faded in and out over 0.15 s: [{"name": "Wave", "at": "vo:hello",
+            "speed": 1, "weight": 1}]. Each channel of a clip moves its node that weight of the way
+            from the pose under it, so a wave plays over a walk; a later clip goes on top.
   ground    true or {"opacity": 0.5, "blur": px, "y": px, "from": "above"}: a soft shadow on a level
             floor under the model, as if lit from above, fainter as the model rises. The floor sits at
             the model's lowest point before it turns, or at y in the layer's parent space (canvas px
@@ -834,8 +838,10 @@ AVATARS
   unless mapped. animation is a clip the model plays throughout. size (default [600, 600]) is the
   box the model fits in, which h or w on the layer scales. The mouth moves between shapes in
   0.06 s; morphs that several things set add up, to at most 1. It blinks and breathes like a drawn
-  avatar; gaze, glances and gestures are not for 3D avatars yet. kine check names a morph the model
-  lacks (avatar-morph).
+  avatar. "gestures": {"wave": {"clip": "Wave", "speed": 1}} names the model's clips, played over
+  animation as a layer's clips are; "look": [30, 15] is how many degrees the model turns for a
+  full gaze left or right and up or down (default [25, 12]), in 0.3 s. Glances are not for 3D
+  avatars. kine check names a morph or clip the model lacks (avatar-morph, avatar-gesture).
 
 SOUND
   Top-level "audio" lists the sounds. Each one:

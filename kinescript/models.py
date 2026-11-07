@@ -199,11 +199,14 @@ def morph_names(imp: Imported) -> list[str]:
     return list((imp.about or {}).get("morphs", []))
 
 
-def pose(imp: Imported, clip: int | None, t: float, morphs: dict | None = None) -> tuple[np.ndarray, np.ndarray]:
+def pose(imp: Imported, clip: int | None, t: float, morphs: dict | None = None,
+         over: tuple | list = ()) -> tuple[np.ndarray, np.ndarray]:
     """The mesh's points and normals, as imp.mesh holds them, t seconds into animation `clip` (clamped to it; None
     for the rest pose): its channels set node translations, rotations, scales and morph target weights, skins
     follow their joints, and the triangles are cut as when the file was read, so a vertex moves with the ends of
-    the edge it was cut from. `morphs` sets morph targets by name, over what the clip gives them."""
+    the edge it was cut from. `morphs` sets morph targets by name, over what the clip gives them. `over` is
+    clips played on top, (clip, t, weight) each in turn: each channel of one moves its node's value that share of
+    the way from what is under it (rotations along the sphere), so a gesture fades in over the base clip."""
     mo = imp.motion
     _, start, _, chans = mo.clips[clip] if clip is not None else (None, 0.0, 0.0, [])
     trs = list(mo.trs)
@@ -213,6 +216,26 @@ def pose(imp: Imported, clip: int | None, t: float, morphs: dict | None = None) 
         if path == "weights":
             weights[node] = v
         else:
+            trs[node] = [v if k == path else x for k, x in zip(_PATHS, trs[node])]
+    for oc, ot, ow in over:
+        _, ostart, _, ochans = mo.clips[oc]
+        for node, path, how, times, vals in ochans:
+            v = _sample(times, vals, how, ostart + ot, path == "rotation")
+            if path == "weights":
+                under = weights.get(node)
+                under = np.zeros(len(v)) if under is None else np.r_[under, np.zeros(max(0, len(v) - len(under)))]
+                weights[node] = under[:len(v)] + (v - under[:len(v)]) * ow
+                continue
+            if trs[node] is None:
+                continue
+            i = _PATHS.index(path)
+            a = np.asarray(trs[node][i], float)
+            if path == "rotation":
+                v = np.asarray(v, float) * (1.0 if float(np.dot(a, v)) >= 0 else -1.0)  # the short way round
+                v = a + (v - a) * ow
+                v = v / max(float(np.linalg.norm(v)), 1e-12)
+            else:
+                v = a + (np.asarray(v, float) - a) * ow
             trs[node] = [v if k == path else x for k, x in zip(_PATHS, trs[node])]
     local = [m if x is mo.trs[i] else _trs(*x) for i, (m, x) in enumerate(zip(mo.local, trs))]
     G = _worlds(mo.parent, mo.order, local)
