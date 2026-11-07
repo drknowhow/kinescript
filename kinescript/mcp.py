@@ -27,6 +27,25 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"},
                                                       "brand_strict": {"type": "boolean", "default": False}},
                      "required": ["scene"]}},
+    {"name": "kine_brand", "description": "Brands: one set of colours, fonts, text styles, chart colours and logos "
+     "that scenes share (\"brand\": \"brand\" in a scene; see BRANDS in kine_docs). list: the library "
+     "(~/.kinescript/brands). show: a brand's brand.json, files, issues and rev. init: a new library brand (id) from "
+     "the default or from another. use: copy a brand into project/brand (refuses to replace a copy edited there "
+     "unless force). set: one value by path (\"palettes.dark.accent\"), null removes it; a change that breaks the "
+     "brand is refused. add_file: a font or logo (kind fonts|logos) from a local file, or data_base64 with name; "
+     "then set the brand entry that names it. remove_file: delete fonts/NAME or logos/NAME. check: the brand's "
+     "issues. preview: a still of a sample scene in the brand, written to out. Writes take base_rev (the rev you "
+     "read) and refuse when the brand changed since. brand is a library id or a brand folder.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["list", "show", "init", "use", "set", "add_file", "remove_file",
+                                               "check", "preview"]},
+         "brand": {"type": "string"}, "id": {"type": "string"}, "from": {"type": "string"},
+         "dir": {"type": "string"}, "project": {"type": "string"}, "force": {"type": "boolean"},
+         "path": {"type": "string"}, "value": {}, "base_rev": {"type": "string"},
+         "kind": {"type": "string", "enum": ["fonts", "logos"]}, "file": {"type": "string"},
+         "name": {"type": "string"}, "data_base64": {"type": "string"}, "replace": {"type": "boolean"},
+         "variant": {"type": "string"}, "out": {"type": "string"}},
+         "required": ["action"]}},
     {"name": "kine_look", "description": "Contact sheet: `count` frames in one labelled image. boxes=true outlines each "
      "layer with its id. wire=true draws every model's drawn triangles; depth=true shows each stage's depth image, "
      "nearer brighter. trails=true draws each moving layer's path, a dot a frame, so their spacing shows speed, "
@@ -125,6 +144,13 @@ def call(name: str, args: dict) -> list[dict]:
     if name == "kine_docs":
         from .docs import reference
         return [_text(reference())]
+    if name == "kine_brand":
+        from .brandops import run
+        out = run(_need(args, "action"), args)
+        if args.get("action") == "preview":
+            data = base64.b64encode(Path(args["out"]).read_bytes()).decode()  # the file is the caller's; keep it
+            return [{"type": "image", "mimeType": "image/png", "data": data}, _text(out)]
+        return [_text(out)]
     if name == "kine_check":
         from .scene import SceneError
         from .verify import _result, check
