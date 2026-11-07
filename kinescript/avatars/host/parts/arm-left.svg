@@ -1,4 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="600" height="900" viewBox="0 0 600 900">
   <path id="shirt" d="M157 616 H157 A27 27 0 0 1 184 643 V769 A27 27 0 0 1 157 796 H157 A27 27 0 0 1 130 769 V643 A27 27 0 0 1 157 616 Z" fill="#000"/>
+  <path id="line" d="M125 812 A32 32 0 1 0 189 812 A32 32 0 1 0 125 812 Z" fill="#000"/>
   <path id="skin" d="M129 812 A28 28 0 1 0 185 812 A28 28 0 1 0 129 812 Z" fill="#000"/>
 </svg>

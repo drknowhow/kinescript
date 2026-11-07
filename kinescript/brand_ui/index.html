@@ -85,6 +85,7 @@
       <section data-tab="Type"></section>
       <section data-tab="Logos"></section>
       <section data-tab="Sound"></section>
+      <section data-tab="Avatars"></section>
       <section data-tab="Gallery"></section>
       <section data-tab="Raw JSON"></section>
     </div>
@@ -189,9 +190,36 @@ function render() {
   const vs = $("#variant"); const vars = I.variants || [];
   if (!vars.includes(S.variant)) S.variant = spec.default && vars.includes(spec.default) ? spec.default : vars[0];
   vs.replaceChildren(...vars.map(v => h("option", { value: v, selected: v === S.variant }, v)));
-  const panels = { "Colours": colours, "Type": type, "Logos": logos, "Sound": sound, "Gallery": gallery, "Raw JSON": raw };
+  const panels = { "Colours": colours, "Type": type, "Logos": logos, "Sound": sound, "Avatars": avatars, "Gallery": gallery, "Raw JSON": raw };
   const sec = document.querySelector(`section[data-tab="${S.tab}"]`);
   sec.replaceChildren(...[panels[S.tab]()].flat());
+}
+
+// ---- Avatars
+function avatars() {
+  const avs = S.info.brand.avatars || {};
+  const out = [h("p", { class: "hint" }, 'Characters that talk in the brand\'s videos. A scene uses one as "avatar": "brand:NAME"; '
+    + "its shirt, hair and outline follow the palette shown above. The starter is kine:host; copy it to redraw its svg parts.")];
+  for (const [name, e0] of Object.entries(avs)) {
+    const e = typeof e0 === "string" ? { src: e0 } : e0, idle = e.idle === false ? false : (e.idle || {}), voice = e.voice || {};
+    out.push(h("div", { class: "card" },
+      h("div", { class: "flex" }, h("b", {}, "brand:" + name), h("span", { class: "hint" }, e.src),
+        h("button", { onclick: () => toast(`Remove avatar ${name}? (Its files stay in the brand.)`, false, ["Remove", () => setv(`avatars.${name}`, null)]) }, "Remove")),
+      img("avatar:" + name),
+      h("div", { class: "flex" },
+        h("label", { class: "inline" }, "speaker", h("input", { value: voice.speaker || "", placeholder: "the avatar's own", style: "width:140px",
+          onchange: ev => setv(`avatars.${name}.voice.speaker`, ev.target.value.trim() || null) })),
+        h("label", { class: "inline" }, "backend", h("input", { value: voice.backend || "", placeholder: "kokoro", style: "width:110px",
+          onchange: ev => setv(`avatars.${name}.voice.backend`, ev.target.value.trim() || null) })),
+        ...C.idleKeys.map(k => h("label", { class: "inline" }, h("input", { type: "checkbox", checked: idle !== false && idle[k] !== false,
+          onchange: ev => setv(`avatars.${name}.idle.${k}`, ev.target.checked ? null : false) }), k)))));
+  }
+  const nm = h("input", { placeholder: "host", style: "width:120px" });
+  const add = copy => { const n = nm.value.trim() || "host"; op("add_avatar", { name: n, copy }); };
+  out.push(h("div", { class: "card" }, h("div", { class: "flex" }, h("label", { class: "inline" }, "name", nm),
+    h("button", { class: "primary", onclick: () => add(false) }, "Add the starter"),
+    h("button", { onclick: () => add(true) }, "Add a copy to redraw"))));
+  return out;
 }
 
 const img = (what, extra) => h("img", { class: "preview", alt: what, loading: "lazy",

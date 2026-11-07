@@ -81,15 +81,16 @@
     }
   },
   "colors": {
-    "skin": "text",
+    "skin": "#F2E8DC",
+    "line": "muted",
     "shirt": "accent",
     "hair": "muted",
     "brow": "muted",
-    "feature": "bg",
-    "shine": "text",
-    "mouth": "bg",
-    "teeth": "text",
-    "tongue": "accent"
+    "feature": "#1E2229",
+    "shine": "#FFFFFF",
+    "mouth": "#3A2A2E",
+    "teeth": "#FFFFFF",
+    "tongue": "#E07A6E"
   },
   "expressions": {
     "smile": {

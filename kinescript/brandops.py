@@ -304,7 +304,32 @@ def remove_file(ref, rel: str, base_rev: str | None = None) -> dict:
     return show(folder)
 
 
-ACTIONS = ("list", "show", "init", "use", "set", "replace", "add_file", "remove_file", "check", "preview", "import")
+ACTIONS = ("list", "show", "init", "use", "set", "replace", "add_file", "remove_file", "add_avatar", "check", "preview",
+           "import")
+
+
+def add_avatar(ref, name: str, copy: bool = False, base_rev: str | None = None) -> dict:
+    """Name an avatar in the brand: the starter (kine:host), or with copy the starter's files in avatars/<name> to
+    redraw. A scene then uses it as "avatar": "brand:<name>"."""
+    from . import avatar as A
+    folder = locate(ref)
+    _guard(folder, base_rev)
+    if not isinstance(name, str) or not _ID.fullmatch(name):
+        raise BrandOpError(f"avatar name {name!r}: lower-case letters, digits and -, such as host")
+    spec = B.read(folder)
+    avs = spec.get("avatars") if isinstance(spec.get("avatars"), dict) else {}
+    if name in avs:
+        raise BrandOpError(f"the brand already has an avatar '{name}'; pick another name, or set avatars.{name}")
+    src = "kine:host"
+    if copy:
+        try:
+            A.new(folder / "avatars" / name)
+        except ValueError as e:
+            raise BrandOpError(str(e)) from None
+        src = f"avatars/{name}"
+    spec["avatars"] = {**avs, name: {"src": src}}
+    _write_json(folder / B.FILE, spec)
+    return show(folder)
 
 
 def _need(args: dict, key: str):
@@ -346,6 +371,8 @@ def run(action: str, args: dict) -> dict:
                         bool(args.get("replace")))
     if action == "remove_file":
         return remove_file(_need(args, "brand"), _need(args, "file"), args.get("base_rev"))
+    if action == "add_avatar":
+        return add_avatar(_need(args, "brand"), _need(args, "name"), bool(args.get("copy")), args.get("base_rev"))
     if action == "check":
         issues = B.validate(locate(_need(args, "brand")))
         return {"ok": not _errors(issues), "issues": issues}
@@ -427,10 +454,38 @@ def _note(text: str) -> dict:
             "maxWidth": 1400}
 
 
+def avatar_scene(folder: Path, name: str, variant: str | None = None) -> dict:
+    """A 1920x1080 scene of the brand's avatar `name` in the brand's palette: at rest, talking, blinking, and its
+    first expressions and gestures."""
+    from . import avatar as A
+    try:
+        where, _ = B.avatar(folder, name)
+        av = A.load(where)
+    except ValueError as e:
+        raise BrandOpError(str(e)) from None
+    theme, _ = B.resolve(B.load(folder), variant)
+    poses = [p for p in A.poses(av) if p[0] in ("neutral", "mouth D", "eyes closed")
+             or p[0].startswith(("expression", "gesture"))][:6]
+    w, h = av.size
+    k = 760 / h
+    layers = []
+    for i, (label, pose) in enumerate(poses):
+        g = A.layers(av, f"p{i}", pose, theme)
+        x0 = 30 + i * 310
+        g.update(x=x0 + 155 - w * k / 2, y=90, scale=k)
+        label = label.split(" at ")[0].replace("expression ", "").replace("gesture ", "")
+        layers += [g, {"id": f"p{i}-label", "type": "text", "text": label, "x": x0 + 155, "y": 920, "size": 30,
+                       "fill": "$muted", "textStyle": "label"}]
+    return {"canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 3}, "brand": str(folder.resolve()),
+            **({"variant": variant} if variant else {}), "layers": layers}
+
+
 def gallery_scene(folder: Path, what: str, variant: str | None = None) -> dict:
     """A 1920x1080 scene showing one part of the brand (one of GALLERY), drawn at 2.5 s."""
     if what == "sample":
         return sample_scene(folder, variant)  # 1280x720: gallery_png draws it at the same size as the rest
+    if what.startswith("avatar:"):
+        return avatar_scene(folder, what[7:], variant)
     if what not in GALLERY:
         raise BrandOpError(f"what is {what!r}; it is one of: {', '.join(GALLERY)}")
     from . import components

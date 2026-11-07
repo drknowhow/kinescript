@@ -523,7 +523,8 @@ def test_the_starter_avatar_is_valid_and_draws_every_mouth_shape():
     assert A.starters() == ["host"] and A.validate(folder) == []
     av = A.load(folder)
     assert sorted(av.mouth.files) == sorted("XABCDEFGH") and av.fallbacks == {}
-    assert set(av.spec["colors"].values()) <= set(A.B.ROLES)  # every colour follows the palette
+    roles = {k: v for k, v in av.spec["colors"].items() if v in A.B.ROLES}
+    assert set(roles) == {"line", "shirt", "hair", "brow"}  # these follow the palette; the face keeps its own
     assert av.spec["voice"]["backend"] == "kokoro"
 
 
@@ -537,7 +538,8 @@ def test_the_starter_files_are_what_make_host_draws():
 def test_the_starter_takes_the_palette_it_is_drawn_with():
     av = A.load(A.where("kine:host"))
     light = A.colors(av, {"text": "#101010", "bg": "#fafafa", "accent": "#2255ff", "muted": "#777777"})
-    assert light["skin"] == "#101010" and light["shirt"] == "#2255ff" and light["feature"] == "#fafafa"
+    assert light["shirt"] == "#2255ff" and light["line"] == "#777777"
+    assert light["skin"] == "#F2E8DC" and light["feature"] == "#1E2229"  # never the palette's text and bg
 
 
 def test_a_scene_can_use_the_starter_by_name_with_its_voice(tmp_path):

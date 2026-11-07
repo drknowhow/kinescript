@@ -727,6 +727,8 @@ BRANDS
               "kine:host" is the starter). A scene names one "avatar": "brand:host"; the brand's voice
               goes over the avatar's own, its idle sits between the avatar's and the layer's, and its
               palette colours the avatar's roles. check reports each avatar folder's problems.
+              kine brand add-avatar BRAND NAME names the starter; --copy puts its files in the brand's
+              avatars/NAME to redraw (the wizard's Avatars tab does both and shows each avatar).
   grade       the colour grade every video gets: the scene "grade" keys, such as {"temperature": 0.1,
               "contrast": 1.05}. A scene's own grade keys go over it, unless the brand locks "grade".
   lock        parts a scene's theme may not change, such as ["palettes", "fonts"]; check reports
@@ -758,8 +760,9 @@ AVATARS
   talk. kine avatar check FOLDER checks the folder and lists what it has, and kine look FOLDER
   draws every pose on one sheet: each mouth shape (and what a missing one shows), eyes closed and
   looking aside, each expression, and each gesture where it moves most, with pivots marked.
-  "avatar": "kine:host" is the built-in starter, a plain friendly figure whose colours are palette
-  roles, so it takes the scene's brand; it draws all nine mouth shapes and speaks with Kokoro
+  "avatar": "kine:host" is the built-in starter, a plain friendly figure whose shirt, hair, brows
+  and outline are palette roles, so it takes the scene's brand (its face keeps one light neutral
+  tone); it draws all nine mouth shapes and speaks with Kokoro
   (af_heart). Its expressions: smile, happy, think, surprise, sad; gestures: nod, shake, tilt,
   wave, point, shrug. kine avatar new FOLDER copies it as files to redraw. "brand:NAME" is an
   avatar the scene's brand names (see BRANDS avatars), with the brand's voice for it.
