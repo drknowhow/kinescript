@@ -245,6 +245,7 @@ class Scene:
         self._sounding: list[Layer] = []
         self.logos: dict[str, float] = {}  # logo layer id -> the brand's clear space, as a share of its box
         self.gestures: list[dict] = []  # each avatar gesture on each part it moves: layer, name, part, id, dur
+        self.late: list = []  # fn(scene) run once the timing is solved: a 3D avatar's morphs (avatar3d.bake)
         raw_layers = _subst(copy.deepcopy(spec.get("layers", [])), theme)
         self.bg = _subst(self.bg, theme)
         self._components = user_comps = _subst(copy.deepcopy(spec.get("components", {})), theme)
@@ -293,6 +294,8 @@ class Scene:
         self.is3d = self.camera is not None or bool(self.depth)
         self.frames = max(1, math.floor(self.duration * self.fps + 0.5 + 1e-6))  # half a frame up: 2.45 s and 2.55 s
         self.poster, self.poster_frame = self._poster(cv.get("poster"))
+        for fn in self.late:
+            fn(self)
         self._check_spans()
         self._check_gestures()
         self._check_values()
