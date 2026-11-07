@@ -99,6 +99,17 @@ def starters() -> list[str]:
     return sorted(d.name for d in BUILT_IN.iterdir() if (d / FILE).is_file()) if BUILT_IN.is_dir() else []
 
 
+def locate(name, base: str | Path = ".", brand=None) -> tuple[Path, dict]:
+    """The folder an avatar name means and its brand entry: brand:NAME the scene brand's avatar NAME (with the
+    brand's voice and idle for it), kine:NAME a built-in one, anything else a folder from base."""
+    s = str(name or "")
+    if s.startswith("brand:"):
+        if not isinstance(brand, str) or not brand:
+            raise ValueError(f"'{s}' is a brand's avatar, and the scene names no brand; add \"brand\"")
+        return B.avatar(Path(base) / brand, s[6:])
+    return where(s, base), {}
+
+
 def where(name, base: str | Path = ".") -> Path:
     """The folder an avatar name means: kine:NAME a built-in one, anything else a folder from base."""
     s = str(name or "")
@@ -589,7 +600,8 @@ def say_sounds(spec: dict, base) -> dict:
         lid = str(L.get("id") or f"avatar{n + 1}")
         L.setdefault("id", lid)
         try:
-            voice = read(where(L.get("avatar", ""), base)).get("voice") or {}
+            folder, mark = locate(L.get("avatar", ""), base, spec.get("brand"))
+            voice = {**(read(folder).get("voice") or {}), **(mark.get("voice") or {})}  # the brand's choice wins
         except ValueError:
             voice = {}  # reported when the layer expands
         lines = L["say"] if isinstance(L["say"], list) else [L["say"]]
@@ -856,14 +868,15 @@ QUIET = 0.15  # seconds either side of a gesture's peak, and after a line starts
 HORIZON = 600.0  # seconds of idle events when the scene's duration is not a number
 
 
-def _idle(av: Avatar, p) -> dict:
-    """The idle channels that are on: the avatar's idle, then the layer's, over the defaults; false turns off."""
+def _idle(av: Avatar, p, brand=None) -> dict:
+    """The idle channels that are on: the avatar's idle, then its brand entry's, then the layer's, over the
+    defaults; false turns off."""
     mine = p.get("idle")
     if not (mine is None or mine is False or isinstance(mine, dict) and set(mine) <= set(IDLE)):
         raise ValueError(f"layer '{p['id']}': idle is false, or an object of blink, breath and saccade such as "
                          '{"blink": false}')
     out: dict = dict(IDLE)
-    for src in (av.spec.get("idle", {}), mine or {} if mine is not False else False):
+    for src in (av.spec.get("idle", {}), {} if brand is None else brand, mine or {} if mine is not False else False):
         if src is False:
             out = {k: False for k in out}
         elif isinstance(src, dict):
@@ -945,7 +958,8 @@ def component(p, theme: dict, scene) -> dict:
     lid = p["id"]
     if not p.get("avatar"):
         raise ValueError(f"layer '{lid}': an avatar layer needs \"avatar\": the folder holding avatar.json")
-    av = load(where(p["avatar"], scene.base))
+    folder, mark = locate(p["avatar"], scene.base, scene.spec.get("brand"))
+    av = load(folder)
     w, h = av.size
     k = (float(p["h"]) / h if p.get("h") is not None else float(p["w"]) / w if p.get("w") is not None else 1.0)
     rig, fills = f"{lid}-rig", colors(av, theme)
@@ -963,7 +977,7 @@ def component(p, theme: dict, scene) -> dict:
     if gazes and not eyes:
         raise ValueError(f"layer '{lid}': gaze moves the eyes by their look reach, and no part of the avatar has "
                          "look; give the eyes part \"look\": [x, y] in its avatar.json")
-    idle = _idle(av, p)
+    idle = _idle(av, p, mark.get("idle", {}))
     for e in av.eyes if idle["blink"] else []:
         G = _find(body, f"{rig}-{e.name}")
         if G is not None:
