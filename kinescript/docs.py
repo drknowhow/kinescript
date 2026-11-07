@@ -796,6 +796,12 @@ AVATARS
   scene with a fixed x and y; list them in time order. A gesture plays its keys from at. Two
   gestures that move the same part at the same time are an error (avatar-gesture-overlap), not a
   blend. A gaze target it cannot use is avatar-gaze-target.
+  While nothing tells them otherwise, avatars live: they blink (now and then twice) at gaps from
+  idle.blink, glance about by up to a third of the eyes' look at gaps from idle.saccade, and
+  breathe, swelling by idle.breath every 4 s. The times come from the layer's id and its seed (a
+  number; change it for other times), so every render of a frame is the same. No blink shows as a
+  line starts or at a gesture's peak, and any gaze turns the glances off. The layer's idle
+  overrides the avatar's: "idle": false stops all three, "idle": {"blink": false} one.
   kine check also reports on each sound an avatar says: mouth-approximate (no words, so the mouth
   follows only loudness), mouth-unknown-words (words the spelling rules cannot read),
   avatar-missing-shape (shapes the avatar does not draw, and what shows instead) and mouth-stale

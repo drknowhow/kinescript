@@ -516,7 +516,7 @@ BUILTIN = {"lowerThird": _lower_third, "titleCard": _title_card, "callout": _cal
            "pieChart": _pie_chart, "logo": _logo, "bug": _bug, "sting": _sting, "endCard": _end_card,
            "avatar": lambda p, th, scene: _avatar(p, th, scene)}
 NEEDS_SCENE = {"logo", "bug", "sting", "endCard", "avatar"}  # builders that read the canvas size or files
-PARAMS["avatar"] = ("avatar", "say", "x", "y", "w", "h", "expressions", "gaze", "gestures")
+PARAMS["avatar"] = ("avatar", "say", "x", "y", "w", "h", "expressions", "gaze", "gestures", "idle", "seed")
 NUMBER_PARAMS["avatar"] = ("w", "h")
 
 
@@ -530,7 +530,7 @@ def _avatar(p, th, scene):
 
 COMPONENT_DOCS = {
     "avatar": "avatar (the folder holding avatar.json), x, y [\"50%\"] (its middle), h or w (its size; its own "
-              "without), say (a sound id, {\"text\": ...} or a list of them), expressions, gaze, gestures (see AVATARS)",
+              "without), say (a sound id, {\"text\": ...} or a list of them), expressions, gaze, gestures, idle, seed (see AVATARS)",
     "lowerThird": "title, subtitle, x [\"6%\"], y [\"78%\"] (top-left of its accent bar), accent, size [54], "
                   "color, subColor, plate (box colour, or false for none)",
     "titleCard": "title, subtitle, kicker (small line above), x, y [\"50%\"] (centre), size [128], accent, color",
