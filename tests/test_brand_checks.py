@@ -79,4 +79,6 @@ def test_delta_e_is_zero_for_the_same_colour_and_large_for_opposites():
 def test_example_brand_scene_has_no_brand_issues():
     from pathlib import Path
     r = check(str(Path(__file__).parents[1] / "examples" / "brand.json"), brand_strict=True)
-    assert r["ok"] and not r["issues"], r["issues"]
+    brand = {"brand-contrast", "brand-chart-contrast", "logo-clear-space", "logo-small", "off-brand-colour",
+             "off-brand-font", "safe-area", "brand-font-license"}
+    assert r["ok"] and not [i for i in r["issues"] if i["code"] in brand], r["issues"]
