@@ -17,8 +17,59 @@ THEME = {
     "void": "#0a0c10", "sheet": "#f2f0e8", "track": "#242832", "cue": "#ff633f", "key": "#b9f45d",
     "annotation": "#9299a8",
     "ink": "#0a0c10", "paper": "#f2f0e8", "accent": "#ff633f", "accent2": "#b9f45d", "muted": "#9299a8",
-    "font": "Space Grotesk", "mono": "IBM Plex Mono",
+    "font": "Space Grotesk", "fontDisplay": "Space Grotesk", "mono": "IBM Plex Mono",
 }
+
+# Text styles a layer names with "textStyle"; a brand's "text" part changes them or adds more.
+TEXT_STYLES = {
+    "title": {"font": "display", "size": 128, "weight": 800},
+    "heading": {"font": "display", "size": 72, "weight": 700},
+    "body": {"font": "body", "size": 40, "weight": 400},
+    "caption": {"font": "body", "size": 28, "weight": 500},
+    "label": {"font": "mono", "size": 24, "weight": 500},
+}
+FACES = {"display": "fontDisplay", "body": "font", "mono": "mono"}
+_STYLE_KEYS = {"tracking": "letterSpacing", "letterSpacing": "letterSpacing", "size": "size", "weight": "weight",
+               "case": "case", "italic": "italic", "lineHeight": "lineHeight"}
+
+
+def group(theme: dict, name: str) -> dict:
+    """A brand part (text, charts, components...) as an object, from its "name.key" theme values."""
+    pre = name + "."
+    return {k[len(pre):]: v for k, v in theme.items() if k.startswith(pre)}
+
+
+def text_styles(theme: dict) -> list[str]:
+    return sorted(set(TEXT_STYLES) | set(group(theme, "text")))
+
+
+def text_style(name, theme: dict) -> dict | None:
+    """The text keys style `name` sets (font as a family name), or None when there is no such style."""
+    own = theme.get(f"text.{name}") if isinstance(name, str) else None
+    if not isinstance(own, dict) and name not in TEXT_STYLES:
+        return None
+    out = {}
+    for k, v in {**TEXT_STYLES.get(name, {}), **(own or {})}.items():
+        if k == "font":
+            out["font"] = theme.get(FACES[v], v) if v in FACES else v
+        elif k in _STYLE_KEYS:
+            out[_STYLE_KEYS[k]] = v
+    return out
+
+
+def apply_text_styles(layers, theme: dict) -> None:
+    """Fill each layer's keys from its "textStyle" (keys the layer sets itself win), in groups too."""
+    for L in layers if isinstance(layers, list) else ():
+        if not isinstance(L, dict):
+            continue
+        if "textStyle" in L:
+            st = text_style(L["textStyle"], theme)
+            if st is None:
+                raise ValueError(f"layer '{L.get('id', '?')}': textStyle is {L['textStyle']!r}; the styles are: "
+                                 + ", ".join(text_styles(theme)))
+            for k, v in st.items():
+                L.setdefault(k, v)
+        apply_text_styles(L.get("children") or L.get("layers"), theme)
 
 
 def _lower_third(p, th):
@@ -169,8 +220,10 @@ def _sine_at(f: float) -> float:
 
 
 def _axis(pid: str, w: float, y: float, th) -> dict:
+    axis = th.get("charts.axis") if isinstance(th.get("charts.axis"), dict) else {}
     return {"id": f"{pid}-axis", "type": "line", "points": [[-w / 2, round(y, 3)], [w / 2, round(y, 3)]],
-            "stroke": th["muted"], "strokeWidth": 3, "cap": "butt", "enter": {"name": "draw", "dur": 0.5}}
+            "stroke": _themed(axis.get("color", th["muted"]), th), "strokeWidth": axis.get("width", 3), "cap": "butt",
+            "enter": {"name": "draw", "dur": 0.5}}
 
 
 def _bar_chart(p, th):
@@ -331,6 +384,67 @@ COMPONENT_DOCS = {
 _PASS = ("id", "at", "dur", "until", "enter", "exit", "emphasis", "opacity", "scale", "rotate", "hidden", "z",
          "rotateX", "rotateY", "fixed", "sound")
 
+# The parameters a brand's "components" part may set for each built-in: looks, never layout or timing.
+STYLE_PARAMS = {"lowerThird": ("accent", "plate", "color", "subColor"), "titleCard": ("accent", "color"),
+                "callout": ("accent", "boxColor"), "focus": ("accent",), "progress": ("color",),
+                "kinetic": ("color", "motion"), "barChart": ("color", "accent"), "lineChart": ("color",),
+                "pieChart": ("colors",)}
+# The brand's "charts" entry each chart parameter defaults to.
+CHART_PARAMS = {"barChart": {"color": "color", "accent": "highlight"}, "lineChart": {"color": "highlight"},
+                "pieChart": {"colors": "series"}}
+# Each built-in's text parts (layer id after the instance id, digits dropped) and the text style whose font they take
+# in a brand. A brand's own text style, or "<part>Text" in its components, sets their weight, tracking and case too.
+TEXT_PARTS = {"lowerThird": {"title": "heading", "sub": "body"},
+              "titleCard": {"kicker": "caption", "title": "title", "sub": "body"},
+              "callout": {"label": "body"}, "kinetic": {"w": "title"},
+              "barChart": {"value": "heading", "label": "caption"}, "lineChart": {"value": "heading", "label": "caption"},
+              "pieChart": {"label": "caption"}}
+
+
+def _themed(v, theme: dict):
+    """A brand value with palette role names ("surface") and "$name" read from the theme."""
+    if isinstance(v, str):
+        name = v[1:] if v.startswith("$") else v
+        return theme.get(name, v) if name in theme and (v.startswith("$") or not v.startswith("#")) else v
+    if isinstance(v, list):
+        return [_themed(x, theme) for x in v]
+    return v
+
+
+def _brand_params(name: str, params: dict, theme: dict) -> None:
+    """Fill the built-in's look parameters the instance leaves out from the brand's components and charts parts."""
+    own = theme.get(f"components.{name}") or {}
+    charts = group(theme, "charts")
+    for k in STYLE_PARAMS.get(name, ()):
+        if params.get(k) is not None:
+            continue
+        if k in own:
+            params[k] = _themed(own[k], theme)
+        elif CHART_PARAMS.get(name, {}).get(k) in charts:
+            params[k] = _themed(charts[CHART_PARAMS[name][k]], theme)
+    if name == "lowerThird" and params.get("plate") is None and re.fullmatch(r"#[0-9a-fA-F]{6}", theme["bg"]):
+        params["plate"] = theme["bg"] + "d0"
+
+
+def _brand_text(name: str, out: dict, pid: str, theme: dict) -> None:
+    """Give the built-in's text parts their brand text style: the font always; weight, tracking and case when the
+    brand sets that style or names one for the part."""
+    parts, own = TEXT_PARTS.get(name, {}), theme.get(f"components.{name}") or {}
+    brand_styles = group(theme, "text")
+
+    def walk(kids):
+        for c in kids or []:
+            if c.get("type") in ("text", "counter") and str(c.get("id", "")).startswith(pid + "-"):
+                part = re.sub(r"\d+$", "", c["id"][len(pid) + 1:])
+                chosen = own.get(part + "Text")
+                style = text_style(chosen or parts.get(part), theme)
+                if style:
+                    full = chosen is not None or parts.get(part) in brand_styles
+                    c.update({k: v for k, v in style.items() if k == "font" or (full and k != "size")})
+            walk(c.get("children"))
+
+    walk(out.get("children"))
+
 
 class Params(dict):
     """Component parameters that remember which names the builder asked for, so a parameter
@@ -457,8 +571,13 @@ def expand(raw, user: dict, theme: dict, scene=None):
             if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or not -1e9 < v < 1e9):
                 raise ValueError(f"layer '{params['id']}': {name} {k} is {v!r}; it takes a number. "
                                  f"Its parameters: {COMPONENT_DOCS[name]}")
+        branded = scene is not None and getattr(scene, "brand", None) is not None
+        if branded:
+            _brand_params(name, params, theme)
         try:
             out = BUILTIN[name](params, theme)
+            if branded:
+                _brand_text(name, out, params["id"], theme)
         except (TypeError, AttributeError, KeyError, IndexError, ArithmeticError) as e:  # a parameter of a wrong type
             raise ValueError(f"layer '{params['id']}': component '{name}' cannot use a parameter as given "
                              f"({type(e).__name__}: {e}). Its parameters: {COMPONENT_DOCS[name]}") from e

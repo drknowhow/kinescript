@@ -1,0 +1,33 @@
+{
+  "kinescriptBrand": 1,
+  "id": "tidewater",
+  "name": "Tidewater (a made-up brand for the examples)",
+  "default": "light",
+  "palettes": {
+    "light": {"bg": "#f4f1ea", "surface": "#e3ddd0", "text": "#14303a", "muted": "#5e6f73",
+              "accent": "#e0573a", "accent2": "#1f7a78", "positive": "#1f7a78", "negative": "#b3261e"},
+    "dark": {"bg": "#0f2228", "surface": "#1c3640", "text": "#f4f1ea", "muted": "#9fb1b3",
+             "accent": "#ff7a5c", "accent2": "#5cc8c2", "positive": "#5cc8c2", "negative": "#ff6b61"}
+  },
+  "fonts": {
+    "display": {"family": "IBM Plex Mono"},
+    "body": {"family": "Space Grotesk"},
+    "mono": {"family": "IBM Plex Mono"}
+  },
+  "text": {
+    "title": {"size": 112, "weight": 700, "tracking": -2},
+    "caption": {"case": "upper", "tracking": 3, "weight": 600}
+  },
+  "charts": {
+    "series": ["accent", "accent2", "#d9a441", "muted"],
+    "color": "accent2",
+    "highlight": "accent",
+    "axis": {"color": "muted", "width": 2}
+  },
+  "motion": {"enter": "rise", "exit": "fade"},
+  "components": {
+    "lowerThird": {"plate": "surface", "subColor": "accent2"},
+    "titleCard": {"accent": "accent2"}
+  },
+  "lock": ["palettes"]
+}

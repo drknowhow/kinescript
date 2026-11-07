@@ -27,7 +27,8 @@ STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "emphasis", "chil
           "sksl", "preset", "uniforms", "caret", "case", "italic", "smooth", "closed", "focus", "use",
           "backface", "fixed", "sort", "shape", "detail", "parts", "light", "span", "sound", "voice",
           "fadeIn", "fadeOut", "sequence", "animation", "repeat", "profile", "along", "dash", "rough", "mask",
-          "glow", "outline", "innerShadow", "displace", "frames", "sheet", "fps", "pixelated", "textPath"}
+          "glow", "outline", "innerShadow", "displace", "frames", "sheet", "fps", "pixelated", "textPath",
+          "textStyle"}
 PART_STRUCT = {"shape", "texture", "text", "font", "d", "italic", "profile"}  # a part's keys that never animate
 # Property defaults by name; everything not listed defaults to None.
 DEFAULTS = {"x": 0.0, "y": 0.0, "opacity": 1.0, "scale": 1.0, "scaleX": 1.0, "scaleY": 1.0, "rotate": 0.0,
@@ -235,6 +236,10 @@ class Scene:
         except ValueError as e:
             raise SceneError(str(e)) from e
         raw_layers = [x for l in raw_layers for x in (l if isinstance(l, list) else [l])]
+        try:
+            components.apply_text_styles(raw_layers, theme)
+        except ValueError as e:
+            raise SceneError(str(e)) from e
         self.words = self._read_words()
         self._raise_errors()
         try:
@@ -705,8 +710,9 @@ class Scene:
             return
         import skia
         from .render import BUNDLED, FONT_FALLBACK
+        branded = {f.lower() for f in self.brand.fonts()} if self.brand else set()
         for fam, owner in uses.items():
-            if fam.lower() in BUNDLED:
+            if fam.lower() in BUNDLED or fam.lower() in branded:
                 continue
             if fam.lower().endswith((".ttf", ".otf", ".ttc")):
                 if not Path(self.path(fam)).is_file():

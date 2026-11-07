@@ -258,8 +258,7 @@ def resolve(brand: Brand, variant: str | None = None) -> tuple[dict, dict[str, s
             continue
         if g == "logos":
             part = {k: _logo_paths(brand.folder, v) for k, v in part.items()}
-        put(g, part, g)
-        for k, v in part.items():
+        for k, v in part.items():  # dotted only: "text" alone is the palette role
             put(f"{g}.{k}", v, g)
     if "safeArea" in brand.spec:
         put("safeArea", brand.spec["safeArea"], "safeArea")

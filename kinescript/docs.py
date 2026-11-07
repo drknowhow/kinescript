@@ -203,6 +203,8 @@ LAYER TYPES (defaults in brackets)
             letterSpacing [0], stroke, strokeWidth,
             box {"fill": "#000000b0", "pad": [12, 20], "radius": 10} (a background behind the
             text; pad is [vertical, horizontal]), case (upper|lower),
+            textStyle (title|heading|body|caption|label, or a brand's own: its font, size, weight,
+            letterSpacing and case, under the layer's own keys; see BRANDS),
             split (chars|words|lines: animate each unit, see ENTER AND EXIT),
             caret (true shows a cursor while typing),
             unitX unitY unitRotate unitScale unitOpacity unitBlur unitFill (expressions per unit:
@@ -677,8 +679,20 @@ BRANDS
   fonts       display, body and mono faces, each {"family": "..."}: $font is the body family,
               $fontDisplay the display one, $mono the mono one. A face may list its files, with a
               license: "files": [{"file": "fonts/Acme-Bold.ttf", "weight": 700}], "license": "OFL".
-  text, charts, logos, placements, bug, motion, components: objects whose entries are theme
-              values by dotted name: "$charts.series" is the list above. A logo's file, onDark and
+  text        text styles by name, each with font (display|body|mono, or a family), size, weight,
+              tracking, case, italic, lineHeight; over the built-in title [128, 800], heading
+              [72, 700], body [40, 400], caption [28, 500] and label [24, 500, mono]:
+              {"title": {"size": 110, "tracking": 2}, "quote": {"font": "body", "italic": true}}.
+  charts      series (pieChart colours), color (bars), highlight (the highlighted bar and
+              lineChart's line), axis {"color": "muted", "width": 3}.
+  components  each built-in's look, by name, where the instance leaves it out: lowerThird accent,
+              plate, color, subColor; titleCard accent, color; callout accent, boxColor; focus
+              accent; progress color; kinetic color, motion; barChart color, accent; lineChart
+              color; pieChart colors. A palette role ("surface") means that colour. "<part>Text"
+              names the text style of a part, keeping its size: {"titleCard": {"titleText": "heading"}}.
+              With a brand, built-in titles take the display font and other text the body font.
+  logos, placements, bug, motion: objects whose entries are theme values by dotted name, such as
+              "enter": "$motion.enter" for {"motion": {"enter": "rise"}}. A logo's file, onDark and
               onLight paths read from the brand folder.
   lock        parts a scene's theme may not change, such as ["palettes", "fonts"]; check reports
               "brand-locked" for a theme key that would.
