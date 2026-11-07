@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Checked without watching · Kinescript</title>
+<meta name="description" content="How an agent checks a Kinescript video without watching it: contact sheets with layer boxes and motion trails, kine check's list of problems, kine probe and the MCP tools.">
+<meta name="theme-color" content="#0a0c10">
+<link rel="canonical" href="https://drknowhow.github.io/kinescript/agents.html">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Checked without watching · Kinescript">
+<meta property="og:description" content="How an agent checks a Kinescript video without watching it: contact sheets with layer boxes and motion trails, kine check's list of problems, kine probe and the MCP tools.">
+<meta property="og:url" content="https://drknowhow.github.io/kinescript/agents.html">
+<meta property="og:image" content="https://raw.githubusercontent.com/drknowhow/kinescript/main/docs/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="assets/favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="assets/favicon-180.png">
+<link rel="preload" href="assets/fonts/SpaceGrotesk-Bold.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="feature">
+<a class="skip" href="#main">Skip to content</a>
+<div class="wrap">
+  <header class="top">
+    <a class="home" href="./" aria-label="Kinescript home"><img src="assets/logo-transparent.svg" alt="kinescript" width="834" height="200"></a>
+    <nav aria-label="Pages"><!--build:nav:agents.html--><a href="timing.html">Timing</a><a href="motion.html">2D</a><a href="depth.html">3D</a><a href="sound.html">Sound</a><a href="edits.html">Edits</a><a href="agents.html" aria-current="page">Agents</a><a href="editor.html">Editor</a><a href="brands.html">Brands</a><a href="install.html">Install</a><a class="ext" href="https://github.com/drknowhow/kinescript">GitHub</a><!--/build--></nav>
+  </header>
+
+  <main id="main">
+  <section class="page-head" aria-labelledby="page-title">
+    <h1 id="page-title">Checked without watching.</h1>
+    <p class="sub">An agent cannot watch a video. Each command returns something it can read: one image of many frames, a JSON list of problems, the box of every layer at a given time.</p>
+  </section>
+
+  <div class="page-body">
+
+    <div class="tool">
+      <div class="tool-head">
+        <h2><code>kine look card-flip.json <span class="nb">--boxes</span></code></h2>
+        <p>Frames spread over the scene in one image, each with its time and frame number. With <code>--boxes</code> every layer is outlined and the top-level ones are named.</p>
+      </div>
+      <figure class="sheet">
+        <a href="media/look.jpg"><img src="media/look.jpg" width="1960" height="616" loading="lazy" alt="A contact sheet of eight frames from the card flip demo. Each frame is labelled with its time and frame number, and each layer is outlined in green with its id."></a>
+        <figcaption>The actual output for the <a href="depth.html#card-flip">card flip demo</a>, eight frames. Open the image for full size.</figcaption>
+      </figure>
+    </div>
+
+    <div class="tool">
+      <div class="tool-head">
+        <h2><code>kine look explainer.json <span class="nb">--trails</span></code></h2>
+        <p>Each moving layer's path drawn over the frames, a dot for every frame, so their spacing shows where it eases, overshoots or stops. <code>--onion 3</code> draws the three frames before each one over it, and <code>kine probe --curve title.x</code> gives a key's value and speed at every frame as JSON.</p>
+      </div>
+      <figure class="sheet">
+        <a href="media/trails.jpg"><img src="media/trails.jpg" width="1960" height="616" loading="lazy" alt="A contact sheet of eight frames from the explainer demo, with the path of each moving layer drawn over every frame as a line of coloured dots, one a frame."></a>
+        <figcaption>The actual output for the <a href="motion.html#explainer">explainer demo</a>, eight frames. Open the image for full size.</figcaption>
+      </figure>
+    </div>
+
+    <div class="tool">
+      <div class="tool-head">
+        <h2><code>kine check problems.json</code></h2>
+        <p>Every problem at once, errors first, each with its layer, time range and a fix. Contrast is measured against the pixels actually behind the text. When the scene has sound it mixes and measures it too, and reports a voice cut off or masked by the music, an effect that lands late, and a mix off its loudness target. The command exits with status 1 while there are errors.</p>
+      </div>
+      <div class="cols check-grid">
+        <div class="pane">
+          <div class="pane-head"><a href="demos/problems.json">problems.json</a><span>four problems</span></div>
+          <pre class="code"><code><!--build:json:problems--><span class="ln">{</span><span class="ln">  <span class="k">&quot;canvas&quot;</span>: {<span class="k">&quot;w&quot;</span>: <span class="n">1920</span>, <span class="k">&quot;h&quot;</span>: <span class="n">1080</span>, <span class="k">&quot;fps&quot;</span>: <span class="n">30</span>, <span class="k">&quot;bg&quot;</span>: <span class="s">&quot;#f2f0e8&quot;</span>},</span><span class="ln">  <span class="k">&quot;layers&quot;</span>: [</span><span class="ln">    {<span class="k">&quot;id&quot;</span>: <span class="s">&quot;panel&quot;</span>, <span class="k">&quot;type&quot;</span>: <span class="s">&quot;rect&quot;</span>, <span class="k">&quot;x&quot;</span>: <span class="s">&quot;50%&quot;</span>, <span class="k">&quot;y&quot;</span>: <span class="s">&quot;62%&quot;</span>, <span class="k">&quot;w&quot;</span>: <span class="n">1300</span>, <span class="k">&quot;h&quot;</span>: <span class="n">260</span>, <span class="k">&quot;radius&quot;</span>: <span class="n">20</span>, <span class="k">&quot;fill&quot;</span>: <span class="s">&quot;#ff633f&quot;</span>},</span><span class="ln">    {<span class="k">&quot;id&quot;</span>: <span class="s">&quot;title&quot;</span>, <span class="k">&quot;type&quot;</span>: <span class="s">&quot;text&quot;</span>, <span class="k">&quot;text&quot;</span>: <span class="s">&quot;Quarterly results&quot;</span>, <span class="k">&quot;x&quot;</span>: <span class="s">&quot;50%&quot;</span>, <span class="k">&quot;y&quot;</span>: <span class="s">&quot;6%&quot;</span>, <span class="k">&quot;size&quot;</span>: <span class="n">120</span>,</span><span class="ln">     <span class="k">&quot;fill&quot;</span>: <span class="s">&quot;#0a0c10&quot;</span>, <span class="k">&quot;dur&quot;</span>: <span class="n">4</span>},</span><span class="ln">    {<span class="k">&quot;id&quot;</span>: <span class="s">&quot;label&quot;</span>, <span class="k">&quot;type&quot;</span>: <span class="s">&quot;text&quot;</span>, <span class="k">&quot;text&quot;</span>: <span class="s">&quot;Orders up 18 percent on last year&quot;</span>, <span class="k">&quot;x&quot;</span>: <span class="s">&quot;50%&quot;</span>, <span class="k">&quot;y&quot;</span>: <span class="s">&quot;62%&quot;</span>,</span><span class="ln">     <span class="k">&quot;size&quot;</span>: <span class="n">60</span>, <span class="k">&quot;fill&quot;</span>: <span class="s">&quot;#ff9a80&quot;</span>, <span class="k">&quot;dur&quot;</span>: <span class="n">1.2</span>},</span><span class="ln">    {<span class="k">&quot;id&quot;</span>: <span class="s">&quot;note&quot;</span>, <span class="k">&quot;type&quot;</span>: <span class="s">&quot;text&quot;</span>, <span class="k">&quot;text&quot;</span>: <span class="s">&quot;Source: annual report&quot;</span>, <span class="k">&quot;x&quot;</span>: <span class="s">&quot;50%&quot;</span>, <span class="k">&quot;y&quot;</span>: <span class="s">&quot;88%&quot;</span>, <span class="k">&quot;fontSize&quot;</span>: <span class="n">40</span>,</span><span class="ln">     <span class="k">&quot;fill&quot;</span>: <span class="s">&quot;#4a4f5c&quot;</span>, <span class="k">&quot;dur&quot;</span>: <span class="n">4</span>}</span><span class="ln">  ]</span><span class="ln">}</span><!--/build--></code></pre>
+        </div>
+        <div class="pane">
+          <div class="pane-head"><span>output</span></div>
+          <pre class="code out"><code><!--build:check:problems-->{
+  &quot;ok&quot;: false,
+  &quot;errors&quot;: 1,
+  &quot;warnings&quot;: 2,
+  &quot;issues&quot;: [
+    {
+      &quot;level&quot;: &quot;error&quot;,
+      &quot;code&quot;: &quot;text-offscreen&quot;,
+      &quot;layer&quot;: &quot;title&quot;,
+      &quot;from&quot;: 0.0,
+      &quot;to&quot;: 4.0,
+      &quot;message&quot;: &quot;text box [469.7, -6.0, 1450.3, 135.6] leaves the 1920x1080 canvas&quot;,
+      &quot;fix&quot;: &quot;move it inward, lower size, or set maxWidth&quot;
+    },
+    {
+      &quot;level&quot;: &quot;warning&quot;,
+      &quot;code&quot;: &quot;read-time&quot;,
+      &quot;layer&quot;: &quot;label&quot;,
+      &quot;from&quot;: 0.0,
+      &quot;to&quot;: 1.2,
+      &quot;message&quot;: &quot;7 words on screen for 1.20s; viewers need ~2.5s&quot;,
+      &quot;fix&quot;: &quot;extend dur or cut words&quot;
+    },
+    {
+      &quot;level&quot;: &quot;warning&quot;,
+      &quot;code&quot;: &quot;contrast&quot;,
+      &quot;layer&quot;: &quot;label&quot;,
+      &quot;from&quot;: 0.72,
+      &quot;to&quot;: 0.72,
+      &quot;message&quot;: &quot;contrast against what is behind it is 1.4:1 (want 4.5:1); it overlaps &#x27;panel&#x27;&quot;,
+      &quot;fix&quot;: &quot;move it clear of &#x27;panel&#x27;, or add a box or a shadow&quot;
+    },
+    {
+      &quot;level&quot;: &quot;info&quot;,
+      &quot;code&quot;: &quot;renamed-key&quot;,
+      &quot;layer&quot;: &quot;note&quot;,
+      &quot;message&quot;: &quot;&#x27;fontSize&#x27; read as &#x27;size&#x27;&quot;,
+      &quot;fix&quot;: &quot;write &#x27;size&#x27;&quot;
+    }
+  ],
+  &quot;duration&quot;: 4.0
+}<!--/build--></code></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="tool">
+      <div class="tool-head">
+        <h2><code>kine probe card-flip.json <span class="nb">--at 1.5</span></code></h2>
+        <p>Each layer's start and end, and at a given time, where every visible layer is on screen in pixels. Trimmed here to four layers: the title, the back of the first card, which has turned past halfway, and the text on the second card.</p>
+      </div>
+      <div class="pane">
+        <pre class="code out"><code><!--build:probe:card-flip-->{
+  &quot;at&quot;: 1.5,
+  &quot;visible&quot;: {
+    &quot;title&quot;: {
+      &quot;rect&quot;: [467, 158, 1453, 252],
+      &quot;alpha&quot;: 1.0,
+      &quot;type&quot;: &quot;text&quot;,
+      &quot;scale&quot;: 1.0,
+      &quot;text&quot;: &quot;Change a line. Flip a card.&quot;
+    },
+    &quot;card-1-back&quot;: {
+      &quot;rect&quot;: [235, 464, 657, 762],
+      &quot;alpha&quot;: 1.0,
+      &quot;type&quot;: &quot;group&quot;,
+      &quot;scale&quot;: 0.9
+    },
+    &quot;card-1-new&quot;: {
+      &quot;rect&quot;: [292, 570, 598, 651],
+      &quot;alpha&quot;: 1.0,
+      &quot;type&quot;: &quot;text&quot;,
+      &quot;scale&quot;: 0.9,
+      &quot;text&quot;: &quot;+ \&quot;dur\&quot;: 4.5&quot;
+    },
+    &quot;card-2-old&quot;: {
+      &quot;rect&quot;: [774, 540, 1134, 614],
+      &quot;alpha&quot;: 1.0,
+      &quot;type&quot;: &quot;text&quot;,
+      &quot;scale&quot;: 1.1,
+      &quot;text&quot;: &quot;- \&quot;text\&quot;: \&quot;Q3\&quot;&quot;
+    }
+  }
+}<!--/build--></code></pre>
+      </div>
+    </div>
+
+    <dl class="features">
+      <div><dt>While it is written</dt><dd><code>kine watch scene.json</code> makes the contact sheet again each time the file is saved, so an agent or a person keeps one image open beside the scene.</dd></div>
+      <div><dt>More overlays</dt><dd><code>--onion 3</code> draws the three frames before each one over it, fainter the older they are. <code>--wire</code> draws every model's triangles; <code>--depth</code> shows each 3D stage's depth image. <code>--at 0.5 2 end</code> picks the times instead of even spacing.</dd></div>
+      <div><dt>One key over time</dt><dd><code>kine probe scene.json --curve title.x</code> prints a key's value at every frame and how fast it changes, where it holds still and its fastest frame.</dd></div>
+      <div><dt>Brand rules</dt><dd>In a branded scene <code>kine check</code> also reports text and chart colours below the contrast they need, a logo drawn too small, and a scene overriding a part the brand locks. <code>--brand-strict</code> adds colours and fonts the brand does not have, and text outside its safe area.</dd></div>
+    </dl>
+
+    <div class="tool">
+      <div class="tool-head">
+        <h2>MCP</h2>
+        <p><code>kine mcp</code> serves the same tools to MCP clients over stdio. Tools take a scene as a file path or as the JSON object itself, and the look and still tools return the image inline.</p>
+      </div>
+      <div class="cols">
+        <div class="pane">
+          <div class="pane-head"><span>MCP client config</span></div>
+          <pre class="code out"><code>{
+  "mcpServers": {
+    "kinescript": {"command": "kine", "args": ["mcp"]}
+  }
+}</code></pre>
+        </div>
+        <ul class="tools-list" style="grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);">
+          <li><b>kine_docs</b>the scene reference</li>
+          <li><b>kine_check</b>problems as JSON</li>
+          <li><b>kine_look</b>a contact sheet, as an image</li>
+          <li><b>kine_still</b>one frame, as an image</li>
+          <li><b>kine_probe</b>timeline and layer boxes</li>
+          <li><b>kine_render</b>a draft, a range or the final file</li>
+          <li><b>kine_voice</b>speaks a scene's text and times its words</li>
+          <li><b>kine_feedback</b>reads and answers the notes left in the editor</li>
+          <li><b>kine_brand</b>the brand library, everything the brand wizard does</li>
+        </ul>
+      </div>
+      <p class="note"><code>kine docs</code> prints the whole scene reference, about 400 lines: rules, a complete scene, every layer type with its defaults, and recipes. It is written to fit in a model's context.</p>
+    </div>
+  </div>
+  <nav class="pager" aria-label="Previous and next pages"><!--build:pager:agents.html--><a class="prev" href="edits.html"><span>Previous</span>Edits</a><a class="next" href="editor.html"><span>Next</span>Editor</a><!--/build--></nav>
+  </main>
+
+  <footer>
+    <span class="brand"><img src="assets/mark.svg" alt="" width="200" height="200">Kinescript 1.9.0, MIT licence</span>
+    <nav aria-label="Project links">
+      <a href="https://github.com/drknowhow/kinescript">Source</a>
+      <a href="https://pypi.org/project/kinescript/">PyPI</a>
+      <a href="https://github.com/drknowhow/kinescript/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/drknowhow/kinescript/blob/main/LICENSE">Licence</a>
+    </nav>
+  </footer>
+</div>
+<script src="site.js"></script>
+</body>
+</html>

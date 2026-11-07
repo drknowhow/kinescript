@@ -31,9 +31,41 @@ p code, li code, dd code, figcaption code { font-size: .88em; color: var(--sheet
 /* Header */
 .top { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 26px 0; }
 .top img { height: 30px; width: auto; }
-.top nav { display: flex; gap: 26px; font-size: 16px; font-weight: 500; }
-.top nav a { color: var(--annot); text-decoration: none; }
+.top .home { flex: none; }
+.top nav { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 22px; font-size: 16px; font-weight: 500; }
+.top nav a { color: var(--annot); text-decoration: none; padding: 4px 0; border-bottom: 2px solid transparent; }
 .top nav a:hover { color: var(--sheet); }
+.top nav a[aria-current="page"] { color: var(--sheet); border-bottom-color: var(--cue); }
+.top nav .ext { color: var(--dim); }
+
+/* A feature page: its title and what it is about, then its demos */
+.page-head { padding: 56px 0 0; }
+.page-head h1 { font-size: clamp(44px, 6.6vw, 80px); line-height: 1; letter-spacing: -.035em; margin-bottom: 22px; }
+.page-head .sub { font-size: 20px; line-height: 1.55; margin-bottom: 0; }
+.page-body > .demo:first-child, .page-body > .tool:first-child { padding-top: 64px; }
+.feature .demo-head h2, .feature .tool-head h2 { font-size: 22px; line-height: 1.25; letter-spacing: -.01em; margin: 0; }
+.page-body > .features { margin-top: 56px; }
+.page-body > .cols { margin-top: 64px; }
+
+/* Previous and next feature page */
+.pager { display: flex; justify-content: space-between; gap: 16px; margin-top: 96px; padding-top: 28px;
+  border-top: 1px solid var(--track); }
+.pager a { display: grid; gap: 4px; text-decoration: none; font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
+.pager a span { font: 500 13px/1 var(--mono); color: var(--annot); letter-spacing: 0; }
+.pager a:hover { color: var(--cue); }
+.pager .next { margin-left: auto; text-align: right; }
+
+/* Home: a card per feature page */
+.cards { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(250px, 100%), 1fr));
+  gap: 28px 22px; }
+.cards a { display: grid; gap: 6px; align-content: start; text-decoration: none; height: 100%; }
+.cards img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border: 1px solid var(--track); border-radius: 10px;
+  margin-bottom: 8px; transition: border-color .15s ease-out; }
+.cards .tag { font: 500 12px/1 var(--mono); color: var(--annot); }
+.cards b { font-size: 20px; line-height: 1.25; letter-spacing: -.01em; }
+.cards .blurb { color: var(--body); font-size: 15px; line-height: 1.5; }
+.cards a:hover img { border-color: var(--annot); }
+.cards a:hover b { color: var(--cue); }
 
 /* Type */
 h1, h2, h3 { font-weight: 700; margin: 0; }
@@ -124,7 +156,8 @@ section { padding: 120px 0 0; }
 /* Time is a reference */
 .reference .pane { margin-bottom: 28px; }
 .compare { display: grid; gap: 18px; }
-.compare h3 { font: 500 13px/1 var(--mono); color: var(--annot); letter-spacing: 0; }
+.compare h3, .compare h2 { font: 500 13px/1 var(--mono); color: var(--annot); letter-spacing: 0; }
+.tool .pane + .compare { margin-top: 28px; }
 .compare .score { --sid: 7ch; }
 
 /* Demos */
@@ -153,7 +186,10 @@ section { padding: 120px 0 0; }
 .sheet { margin: 0; }
 .sheet a { display: block; }
 .sheet img { border: 1px solid var(--track); border-radius: 10px; width: 100%; }
-.sheet figcaption { color: var(--annot); font-size: 15px; margin-top: 12px; }
+.sheet figcaption, .rec-cap { color: var(--annot); font-size: 15px; margin-top: 12px; }
+.tool > .player { margin: 0 0 22px; }
+.tool > .player + .demo-grid, .tool > .demo-grid + .note { margin-top: 22px; }
+.tool-head h2 code { color: var(--sheet); }
 .check-grid .pane .code { max-height: 460px; }
 .tools-list { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 32px; }
 .tools-list li { border-top: 1px solid var(--track); padding: 12px 0 14px; font-size: 16px; color: var(--body); }
@@ -187,8 +223,11 @@ footer nav { display: flex; flex-wrap: wrap; gap: 8px 22px; }
   html { font-size: 17px; }
   .top { padding: 18px 0; }
   .top img { height: 24px; }
-  .top nav { gap: 16px; font-size: 15px; }
-  .top nav .opt { display: none; }
+  .top { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .top nav { justify-content: flex-start; gap: 2px 18px; font-size: 15px; }
+  .page-head { padding-top: 28px; }
+  .page-head .sub { font-size: 18px; }
+  .pager a { font-size: 18px; }
   .hero { padding-top: 24px; }
   .hero .player { margin-top: 36px; }
   .lede { font-size: 19px; }
@@ -203,3 +242,27 @@ footer nav { display: flex; flex-wrap: wrap; gap: 8px 22px; }
 @media (prefers-reduced-motion: reduce) {
   * { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
 }
+code.wrap-ok { white-space: normal; }
+.js .screen video { cursor: pointer; }
+.together { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 0 0 16px; font: 500 13px/1.3 var(--mono);
+  color: var(--annot); }
+.together button { font: 500 14px/1 var(--sans); color: var(--void); background: var(--sheet); border: 0; border-radius: 6px;
+  padding: 10px 14px; cursor: pointer; }
+.together button:hover { background: #fff; }
+
+/* The image viewer: a contact sheet or screenshot over the page */
+.viewer { width: min(96vw, 2000px); max-width: none; max-height: 94vh; padding: 0; border: 1px solid var(--track);
+  border-radius: 10px; background: var(--panel); color: var(--sheet); overflow: hidden; }
+.viewer::backdrop { background: rgba(5, 6, 8, .82); }
+.viewer[open] { display: flex; flex-direction: column; }
+.viewer-bar { display: flex; align-items: center; gap: 16px; padding: 10px 14px; border-bottom: 1px solid var(--track);
+  font-size: 14px; color: var(--annot); }
+.viewer-cap { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.viewer-open { color: var(--sheet); font-size: 14px; white-space: nowrap; }
+.viewer-close { font: 500 14px/1 var(--sans); color: var(--sheet); background: none; border: 1px solid var(--track);
+  border-radius: 6px; padding: 8px 12px; cursor: pointer; min-height: 32px; }
+.viewer-close:hover { border-color: var(--annot); }
+.viewer-pic { overflow: auto; min-height: 0; flex: 1; background: #000; }
+.viewer-pic img { display: block; max-width: 100%; max-height: calc(94vh - 56px); margin: 0 auto; cursor: zoom-in; }
+.viewer-pic.full img { max-width: none; max-height: none; cursor: zoom-out; }
+@media (max-width: 640px) { .viewer-cap { display: none; } }

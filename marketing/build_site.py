@@ -18,9 +18,11 @@ demos' videos and posters, so it renders after them. ffmpeg then
 moves the index to the front of each file (`-movflags +faststart`, no re-encode) so browsers start playing
 before the whole file has arrived. Posters are `kine still` frames saved as JPEG.
 
-site/index.html holds marked regions, <!--build:KIND:NAME--> ... <!--/build-->, that this script fills in:
-json (the scene file, highlighted), score (top-level layers from `kine probe`, drawn as bars with a dot for
-each child's start), diff, check and probe (real command output). Text outside the markers is hand-written.
+The site is a page per feature (PAGES). Each page holds marked regions, <!--build:KIND:NAME--> ... <!--/build-->,
+that this script fills in: json (the scene file, highlighted), score (top-level layers from `kine probe`, drawn as
+bars with a dot for each child's start), diff, check and probe (real command output), and the parts every page
+shares, made from PAGES: nav (the header links), pager (previous and next page) and cards (the home page's links).
+Text outside the markers is hand-written.
 """
 from __future__ import annotations
 
@@ -42,6 +44,28 @@ from kinescript.verify import check, probe  # noqa: E402
 SITE = ROOT / "site"
 DEMOS = SITE / "demos"
 MEDIA = SITE / "media"
+# The site's pages, in the order of the header and of the previous/next links: (file, nav label, title on the home
+# page's card, the card's line, the card's picture). Home is first; it has no card.
+PAGES = [
+    ("index.html", "Home", "", "", ""),
+    ("timing.html", "Timing", "Time is a reference",
+     "Layers start on other layers, words and markers, so a change moves everything cued after it.", "demos/cues.jpg"),
+    ("motion.html", "2D", "Paths, masks and morphs",
+     "Motion along paths, masks, morphing shapes, kinetic type, particles and charts.", "demos/kinetic.jpg"),
+    ("depth.html", "3D", "Depth on any layer",
+     "A camera, lit models, extruded text and glTF files, drawn by the same renderer.", "demos/product.jpg"),
+    ("sound.html", "Sound", "A voice from a line of text",
+     "Voice-over spoken from the scene's text, words that cue the picture, and a levelled mix.", "demos/voice.jpg"),
+    ("edits.html", "Edits", "Cuts, transitions and captions",
+     "A cut list of trimmed clips, transitions in one word, and captions timed in the scene.", "demos/edit.jpg"),
+    ("agents.html", "Agents", "Checked without watching",
+     "Contact sheets, a list of problems and every layer's box, for an agent that cannot watch.", "media/look.jpg"),
+    ("editor.html", "Editor", "Review it on the frame",
+     "A browser page where a person points at what is wrong and the agent reads it as notes.", "media/editor.jpg"),
+    ("brands.html", "Brands", "One brand, every video",
+     "Colours, fonts, logos, an intro and outro and sound defaults, defined once.", "demos/brand-tidewater.jpg"),
+    ("install.html", "Install", "", "", ""),
+]
 PAGE = SITE / "index.html"
 
 # name: (scene, poster time in seconds, render scale). Order matters: edit.json cuts other demos' videos.
@@ -62,6 +86,7 @@ DEMO = {
     "motions": ("examples/motions.json", 5.0, 0.5),
     "transitions": ("examples/transitions.json", 2.2, 0.5),
     "charts": ("examples/charts.json", 4.5, 0.5),
+    "cues": ("site/demos/cues.json", 3.6, 0.5),
     "brand-tidewater": ("site/demos/brand-tidewater.json", 5.5, 0.5),
     "brand-tidewater-dark": ("site/demos/brand-tidewater-dark.json", 5.5, 0.5),
 }
@@ -303,27 +328,59 @@ def fragments() -> dict:
     return out
 
 
-MARK = re.compile(r"(<!--build:(\w+):([\w-]+)-->)(.*?)(<!--/build-->)", re.S)
+MARK = re.compile(r"(<!--build:(\w+):([\w.-]+)-->)(.*?)(<!--/build-->)", re.S)
+
+
+def chrome(kind: str, page: str) -> str:
+    """The parts every page shares, made from PAGES: the header links (the page itself marked as current), the
+    links to the previous and next feature pages, and the home page's cards."""
+    if kind == "nav":
+        return "".join(f'<a href="{f}"{" aria-current=\"page\"" if f == page else ""}>{html.escape(label)}</a>'
+                       for f, label, *_ in PAGES[1:]) + '<a class="ext" href="https://github.com/drknowhow/kinescript">GitHub</a>'
+    if kind == "pager":
+        files = [p[0] for p in PAGES[1:]]
+        i = files.index(page)
+        out = []
+        if i > 0:
+            f, label = PAGES[i][:2]
+            out.append(f'<a class="prev" href="{f}"><span>Previous</span>{html.escape(label)}</a>')
+        if i + 1 < len(files):
+            f, label = PAGES[i + 2][:2]
+            out.append(f'<a class="next" href="{f}"><span>Next</span>{html.escape(label)}</a>')
+        return "".join(out)
+    if kind == "cards":
+        cards = []
+        for f, label, title, blurb, image in PAGES[1:]:
+            if not image:
+                continue
+            cards.append(f'<li><a href="{f}"><img src="{image}" alt="" width="960" height="540" loading="lazy" '
+                         f'decoding="async"><span class="tag">{html.escape(label)}</span><b>{html.escape(title)}</b>'
+                         f'<span class="blurb">{html.escape(blurb)}</span></a></li>')
+        return "".join(cards)
+    raise KeyError(kind)
 
 
 def write_page() -> None:
     frags = fragments()
-    page = PAGE.read_text(encoding="utf-8")
     seen = set()
+    for f, *_ in PAGES:
+        path = SITE / f
+        page = path.read_text(encoding="utf-8")
 
-    def fill(m):
-        key = (m.group(2), m.group(3))
-        if key not in frags:
-            print(f"warning: no fragment for {key}")
-            return m.group(0)
-        seen.add(key)
-        return m.group(1) + frags[key] + m.group(5)
+        def fill(m):
+            key = (m.group(2), m.group(3))
+            if key[0] in ("nav", "pager", "cards"):
+                return m.group(1) + chrome(key[0], f) + m.group(5)
+            if key not in frags:
+                print(f"warning: {f}: no fragment for {key}")
+                return m.group(0)
+            seen.add(key)
+            return m.group(1) + frags[key] + m.group(5)
 
-    page = MARK.sub(fill, page)
+        path.write_text(MARK.sub(fill, page), encoding="utf-8")
+        print(f"wrote {path.relative_to(ROOT)}")
     for key in sorted(set(frags) - seen):
-        print(f"note: fragment {key} has no marker in the page")
-    PAGE.write_text(page, encoding="utf-8")
-    print(f"wrote {PAGE.relative_to(ROOT)}")
+        print(f"note: fragment {key} has no marker in any page")
 
 
 def main(argv: list[str]) -> None:

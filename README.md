@@ -195,7 +195,7 @@ A narrated beat with a click on a marked word, over music that ducks under the v
 ```
 
 `kine voice scene.json` speaks it once. The
-[voice demo](https://drknowhow.github.io/kinescript/#sound) on the project site plays the result with sound, next
+[voice demo](https://drknowhow.github.io/kinescript/sound.html) on the project site plays the result with sound, next
 to its scene file. Install the plugin for the voice you want next to Kinescript:
 
 ```bash

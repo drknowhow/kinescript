@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>One brand, every video · Kinescript</title>
+<meta name="description" content="Kinescript brands: palettes, fonts, text styles, chart colours, logos, an intro and outro, sound defaults and a grade, defined once in a folder and used by every video.">
+<meta name="theme-color" content="#0a0c10">
+<link rel="canonical" href="https://drknowhow.github.io/kinescript/brands.html">
+<meta property="og:type" content="website">
+<meta property="og:title" content="One brand, every video · Kinescript">
+<meta property="og:description" content="Kinescript brands: palettes, fonts, text styles, chart colours, logos, an intro and outro, sound defaults and a grade, defined once in a folder and used by every video.">
+<meta property="og:url" content="https://drknowhow.github.io/kinescript/brands.html">
+<meta property="og:image" content="https://raw.githubusercontent.com/drknowhow/kinescript/main/docs/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="assets/favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="assets/favicon-180.png">
+<link rel="preload" href="assets/fonts/SpaceGrotesk-Bold.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="feature">
+<a class="skip" href="#main">Skip to content</a>
+<div class="wrap">
+  <header class="top">
+    <a class="home" href="./" aria-label="Kinescript home"><img src="assets/logo-transparent.svg" alt="kinescript" width="834" height="200"></a>
+    <nav aria-label="Pages"><!--build:nav:brands.html--><a href="timing.html">Timing</a><a href="motion.html">2D</a><a href="depth.html">3D</a><a href="sound.html">Sound</a><a href="edits.html">Edits</a><a href="agents.html">Agents</a><a href="editor.html">Editor</a><a href="brands.html" aria-current="page">Brands</a><a href="install.html">Install</a><a class="ext" href="https://github.com/drknowhow/kinescript">GitHub</a><!--/build--></nav>
+  </header>
+
+  <main id="main">
+  <section class="page-head" aria-labelledby="page-title">
+    <h1 id="page-title">One brand, every video.</h1>
+    <p class="sub">A brand is a folder: <code>brand.json</code> with palettes, fonts, text styles, chart colours, logos and where they go, motion, an intro and outro, sound defaults and a grade, beside its logo, font and sound files. A scene names it in one line, and the built-ins draw in it.</p>
+  </section>
+
+  <div class="page-body">
+
+    <article class="demo" id="brand-demo">
+      <div class="demo-head">
+        <h2>One scene, the brand's light and dark palettes</h2>
+        <p>A title card, a bar chart, a pie chart, a caption, a lower third, a logo bug and a closing logo. Both videos are in the made-up Tidewater brand, its logo included; the two scene files differ in their <code>"variant"</code> line. <code>kine check</code> knows the brand too: it reports text and chart colours below the contrast they need, a logo drawn too small, and a scene changing a part the brand locks.</p>
+      </div>
+      <div class="together"><button type="button" data-play-all>Play both from the start</button><span>The two videos side by side, in step.</span></div>
+      <div class="demo-grid even" data-group>
+        <figure class="player" data-name="brand Tidewater light">
+          <div class="screen"><video src="demos/brand-tidewater.mp4" poster="demos/brand-tidewater.jpg" width="960" height="540" autoplay muted loop playsinline controls preload="metadata" aria-label="The brand demo in the made-up Tidewater brand's light palette: a cream background, teal and coral charts and a wave logo, 12 seconds, no sound"></video></div>
+          <div class="deck"><button type="button" data-play>Pause</button><span class="tc">0.0 s</span></div>
+          <!--build:score:brand-tidewater--><ol class="score" data-dur="12.2" style="--dur:12.2" aria-label="Timeline of brand-tidewater.json, 12.2 s"><li><span class="sid">bug</span><span class="track"><span class="bar" data-in="0" data-out="7.2" title="bug: 0 s to 7.2 s" style="left:0.00%;width:59.02%"></span></span></li><li><span class="sid">title</span><span class="track"><span class="bar" data-in="0" data-out="3" title="title: 0 s to 3 s" style="left:0.00%;width:24.59%"><i style="left:5.00%"></i><i style="left:15.00%"></i><i style="left:20.00%"></i></span></span></li><li><span class="sid">sales</span><span class="track"><span class="bar" data-in="3" data-out="7" title="sales: 3 s to 7 s" style="left:24.59%;width:32.79%"><i style="left:3.00%"></i><i style="left:6.00%"></i><i style="left:9.00%"></i></span></span></li><li><span class="sid">mix</span><span class="track"><span class="bar" data-in="3.3" data-out="7" title="mix: 3.3 s to 7 s" style="left:27.05%;width:30.33%"><i style="left:15.19%"></i><i style="left:21.62%"></i><i style="left:32.43%"></i></span></span></li><li><span class="sid">note</span><span class="track"><span class="bar" data-in="4" data-out="7" title="note: 4 s to 7 s" style="left:32.79%;width:24.59%"></span></span></li><li><span class="sid">who</span><span class="track"><span class="bar" data-in="7.2" data-out="10.2" title="who: 7.2 s to 10.2 s" style="left:59.02%;width:24.59%"><i style="left:4.00%"></i><i style="left:10.00%"></i></span></span></li><li><span class="sid">end</span><span class="track"><span class="bar" data-in="10.2" data-out="12.2" title="end: 10.2 s to 12.2 s" style="left:83.61%;width:16.39%"></span></span></li><li class="ruler" aria-hidden="true"><span class="sid"></span><span class="track"><span class="t0">0 s</span><span class="t1" style="left:100.00%">12.2 s</span></span></li></ol><!--/build-->
+        </figure>
+        <figure class="player" data-name="brand Tidewater dark">
+          <div class="screen"><video src="demos/brand-tidewater-dark.mp4" poster="demos/brand-tidewater-dark.jpg" width="960" height="540" autoplay muted loop playsinline controls preload="metadata" aria-label="The same demo in the Tidewater brand's dark palette: a deep teal background, light teal and coral charts and the light version of the wave logo, 12 seconds, no sound"></video></div>
+          <div class="deck"><button type="button" data-play>Pause</button><span class="tc">0.0 s</span></div>
+          <!--build:score:brand-tidewater-dark--><ol class="score" data-dur="12.2" style="--dur:12.2" aria-label="Timeline of brand-tidewater-dark.json, 12.2 s"><li><span class="sid">bug</span><span class="track"><span class="bar" data-in="0" data-out="7.2" title="bug: 0 s to 7.2 s" style="left:0.00%;width:59.02%"></span></span></li><li><span class="sid">title</span><span class="track"><span class="bar" data-in="0" data-out="3" title="title: 0 s to 3 s" style="left:0.00%;width:24.59%"><i style="left:5.00%"></i><i style="left:15.00%"></i><i style="left:20.00%"></i></span></span></li><li><span class="sid">sales</span><span class="track"><span class="bar" data-in="3" data-out="7" title="sales: 3 s to 7 s" style="left:24.59%;width:32.79%"><i style="left:3.00%"></i><i style="left:6.00%"></i><i style="left:9.00%"></i></span></span></li><li><span class="sid">mix</span><span class="track"><span class="bar" data-in="3.3" data-out="7" title="mix: 3.3 s to 7 s" style="left:27.05%;width:30.33%"><i style="left:15.19%"></i><i style="left:21.62%"></i><i style="left:32.43%"></i></span></span></li><li><span class="sid">note</span><span class="track"><span class="bar" data-in="4" data-out="7" title="note: 4 s to 7 s" style="left:32.79%;width:24.59%"></span></span></li><li><span class="sid">who</span><span class="track"><span class="bar" data-in="7.2" data-out="10.2" title="who: 7.2 s to 10.2 s" style="left:59.02%;width:24.59%"><i style="left:4.00%"></i><i style="left:10.00%"></i></span></span></li><li><span class="sid">end</span><span class="track"><span class="bar" data-in="10.2" data-out="12.2" title="end: 10.2 s to 12.2 s" style="left:83.61%;width:16.39%"></span></span></li><li class="ruler" aria-hidden="true"><span class="sid"></span><span class="track"><span class="t0">0 s</span><span class="t1" style="left:100.00%">12.2 s</span></span></li></ol><!--/build-->
+        </figure>
+      </div>
+      <div class="demo-grid even">
+        <div class="pane">
+          <div class="pane-head"><a href="demos/brand-tidewater-dark.json">brand-tidewater-dark.json</a><span>against brand-tidewater.json</span></div>
+          <pre class="code diff"><code><!--build:diff:brands--><span class="ln"><span class="mark"> </span>{</span><span class="ln"><span class="mark"> </span>  <span class="k">&quot;canvas&quot;</span>: {<span class="k">&quot;w&quot;</span>: <span class="n">1920</span>, <span class="k">&quot;h&quot;</span>: <span class="n">1080</span>, <span class="k">&quot;fps&quot;</span>: <span class="n">30</span>, <span class="k">&quot;poster&quot;</span>: <span class="n">1.2</span>},</span><span class="ln"><span class="mark"> </span>  <span class="k">&quot;brand&quot;</span>: <span class="s">&quot;brands/tidewater&quot;</span>,</span><span class="ln del"><span class="mark">-</span>  <span class="k">&quot;variant&quot;</span>: <span class="s">&quot;light&quot;</span>,</span><span class="ln add"><span class="mark">+</span>  <span class="k">&quot;variant&quot;</span>: <span class="s">&quot;dark&quot;</span>,</span><span class="ln"><span class="mark"> </span>  <span class="k">&quot;layers&quot;</span>: [</span><span class="ln"><span class="mark"> </span>    {<span class="k">&quot;use&quot;</span>: <span class="s">&quot;bug&quot;</span>, <span class="k">&quot;id&quot;</span>: <span class="s">&quot;bug&quot;</span>, <span class="k">&quot;until&quot;</span>: <span class="c">&quot;who.in&quot;</span>},</span><span class="ln"><span class="mark"> </span>    {<span class="k">&quot;use&quot;</span>: <span class="s">&quot;titleCard&quot;</span>, <span class="k">&quot;id&quot;</span>: <span class="s">&quot;title&quot;</span>, <span class="k">&quot;kicker&quot;</span>: <span class="s">&quot;Quarterly review&quot;</span>, <span class="k">&quot;title&quot;</span>: <span class="s">&quot;Tides **rising**&quot;</span>,</span><!--/build--></code></pre>
+        </div>
+        <div class="pane">
+          <div class="pane-head"><a href="demos/brands/tidewater/brand.json">brands/tidewater/brand.json</a><span>the Tidewater brand</span></div>
+          <pre class="code"><code><!--build:json:brand-file--><span class="ln">{</span><span class="ln">  <span class="k">&quot;kinescriptBrand&quot;</span>: <span class="n">1</span>,</span><span class="ln">  <span class="k">&quot;id&quot;</span>: <span class="s">&quot;tidewater&quot;</span>,</span><span class="ln">  <span class="k">&quot;name&quot;</span>: <span class="s">&quot;Tidewater (a made-up brand for the examples)&quot;</span>,</span><span class="ln">  <span class="k">&quot;default&quot;</span>: <span class="s">&quot;light&quot;</span>,</span><span class="ln">  <span class="k">&quot;palettes&quot;</span>: {</span><span class="ln">    <span class="k">&quot;light&quot;</span>: {<span class="k">&quot;bg&quot;</span>: <span class="s">&quot;#f4f1ea&quot;</span>, <span class="k">&quot;surface&quot;</span>: <span class="s">&quot;#e3ddd0&quot;</span>, <span class="k">&quot;text&quot;</span>: <span class="s">&quot;#14303a&quot;</span>, <span class="k">&quot;muted&quot;</span>: <span class="s">&quot;#5e6f73&quot;</span>,</span><span class="ln">              <span class="k">&quot;accent&quot;</span>: <span class="s">&quot;#e0573a&quot;</span>, <span class="k">&quot;accent2&quot;</span>: <span class="s">&quot;#1f7a78&quot;</span>, <span class="k">&quot;positive&quot;</span>: <span class="s">&quot;#1f7a78&quot;</span>, <span class="k">&quot;negative&quot;</span>: <span class="s">&quot;#b3261e&quot;</span>},</span><span class="ln">    <span class="k">&quot;dark&quot;</span>: {<span class="k">&quot;bg&quot;</span>: <span class="s">&quot;#0f2228&quot;</span>, <span class="k">&quot;surface&quot;</span>: <span class="s">&quot;#1c3640&quot;</span>, <span class="k">&quot;text&quot;</span>: <span class="s">&quot;#f4f1ea&quot;</span>, <span class="k">&quot;muted&quot;</span>: <span class="s">&quot;#9fb1b3&quot;</span>,</span><span class="ln">             <span class="k">&quot;accent&quot;</span>: <span class="s">&quot;#ff7a5c&quot;</span>, <span class="k">&quot;accent2&quot;</span>: <span class="s">&quot;#5cc8c2&quot;</span>, <span class="k">&quot;positive&quot;</span>: <span class="s">&quot;#5cc8c2&quot;</span>, <span class="k">&quot;negative&quot;</span>: <span class="s">&quot;#ff6b61&quot;</span>}</span><span class="ln">  },</span><span class="ln">  <span class="k">&quot;fonts&quot;</span>: {</span><span class="ln">    <span class="k">&quot;display&quot;</span>: {<span class="k">&quot;family&quot;</span>: <span class="s">&quot;IBM Plex Mono&quot;</span>},</span><span class="ln">    <span class="k">&quot;body&quot;</span>: {<span class="k">&quot;family&quot;</span>: <span class="s">&quot;Space Grotesk&quot;</span>},</span><span class="ln">    <span class="k">&quot;mono&quot;</span>: {<span class="k">&quot;family&quot;</span>: <span class="s">&quot;IBM Plex Mono&quot;</span>}</span><span class="ln">  },</span><span class="ln">  <span class="k">&quot;text&quot;</span>: {</span><span class="ln">    <span class="k">&quot;title&quot;</span>: {<span class="k">&quot;size&quot;</span>: <span class="n">112</span>, <span class="k">&quot;weight&quot;</span>: <span class="n">700</span>, <span class="k">&quot;tracking&quot;</span>: <span class="n">-2</span>},</span><span class="ln">    <span class="k">&quot;caption&quot;</span>: {<span class="k">&quot;case&quot;</span>: <span class="s">&quot;upper&quot;</span>, <span class="k">&quot;tracking&quot;</span>: <span class="n">3</span>, <span class="k">&quot;weight&quot;</span>: <span class="n">600</span>}</span><span class="ln">  },</span><span class="ln">  <span class="k">&quot;charts&quot;</span>: {</span><span class="ln">    <span class="k">&quot;series&quot;</span>: [<span class="s">&quot;accent&quot;</span>, <span class="s">&quot;accent2&quot;</span>, <span class="s">&quot;#a8741a&quot;</span>, <span class="s">&quot;muted&quot;</span>],</span><span class="ln">    <span class="k">&quot;color&quot;</span>: <span class="s">&quot;accent2&quot;</span>,</span><span class="ln">    <span class="k">&quot;highlight&quot;</span>: <span class="s">&quot;accent&quot;</span>,</span><span class="ln">    <span class="k">&quot;axis&quot;</span>: {<span class="k">&quot;color&quot;</span>: <span class="s">&quot;muted&quot;</span>, <span class="k">&quot;width&quot;</span>: <span class="n">2</span>}</span><span class="ln">  },</span><span class="ln">  <span class="k">&quot;logos&quot;</span>: {</span><span class="ln">    <span class="k">&quot;full&quot;</span>: {<span class="k">&quot;file&quot;</span>: <span class="s">&quot;logos/full.svg&quot;</span>, <span class="k">&quot;onDark&quot;</span>: <span class="s">&quot;logos/full-dark.svg&quot;</span>, <span class="k">&quot;alt&quot;</span>: <span class="s">&quot;Tidewater&quot;</span>},</span><span class="ln">    <span class="k">&quot;mark&quot;</span>: {<span class="k">&quot;file&quot;</span>: <span class="s">&quot;logos/mark.svg&quot;</span>, <span class="k">&quot;onDark&quot;</span>: <span class="s">&quot;logos/mark-dark.svg&quot;</span>, <span class="k">&quot;alt&quot;</span>: <span class="s">&quot;Tidewater&quot;</span>},</span><span class="ln">    <span class="k">&quot;clearSpace&quot;</span>: <span class="n">0.25</span>,</span><span class="ln">    <span class="k">&quot;minHeight&quot;</span>: <span class="n">40</span></span><span class="ln">  },</span><span class="ln">  <span class="k">&quot;placements&quot;</span>: {</span><span class="ln">    <span class="k">&quot;corner&quot;</span>: {<span class="k">&quot;anchor&quot;</span>: <span class="s">&quot;topright&quot;</span>, <span class="k">&quot;margin&quot;</span>: <span class="s">&quot;4%&quot;</span>, <span class="k">&quot;height&quot;</span>: <span class="s">&quot;7%&quot;</span>},</span><span class="ln">    <span class="k">&quot;closing&quot;</span>: {<span class="k">&quot;anchor&quot;</span>: <span class="s">&quot;center&quot;</span>, <span class="k">&quot;height&quot;</span>: <span class="s">&quot;14%&quot;</span>}</span><span class="ln">  },</span><span class="ln">  <span class="k">&quot;bug&quot;</span>: {<span class="k">&quot;logo&quot;</span>: <span class="s">&quot;mark&quot;</span>, <span class="k">&quot;placement&quot;</span>: <span class="s">&quot;corner&quot;</span>, <span class="k">&quot;opacity&quot;</span>: <span class="n">0.9</span>},</span><span class="ln">  <span class="k">&quot;intro&quot;</span>: {<span class="k">&quot;tagline&quot;</span>: <span class="s">&quot;Across the sound since 1952&quot;</span>, <span class="k">&quot;dur&quot;</span>: <span class="n">2</span>},</span><span class="ln">  <span class="k">&quot;outro&quot;</span>: {<span class="k">&quot;title&quot;</span>: <span class="s">&quot;Thanks for riding&quot;</span>, <span class="k">&quot;subtitle&quot;</span>: <span class="s">&quot;Tidewater Ferries&quot;</span>, <span class="k">&quot;url&quot;</span>: <span class="s">&quot;tidewater.example&quot;</span>, <span class="k">&quot;dur&quot;</span>: <span class="n">3</span>},</span><span class="ln">  <span class="k">&quot;motion&quot;</span>: {<span class="k">&quot;enter&quot;</span>: <span class="s">&quot;rise&quot;</span>, <span class="k">&quot;exit&quot;</span>: <span class="s">&quot;fade&quot;</span>},</span><span class="ln">  <span class="k">&quot;components&quot;</span>: {</span><span class="ln">    <span class="k">&quot;lowerThird&quot;</span>: {<span class="k">&quot;plate&quot;</span>: <span class="s">&quot;surface&quot;</span>, <span class="k">&quot;subColor&quot;</span>: <span class="s">&quot;accent2&quot;</span>},</span><span class="ln">    <span class="k">&quot;titleCard&quot;</span>: {<span class="k">&quot;accent&quot;</span>: <span class="s">&quot;accent2&quot;</span>}</span><span class="ln">  },</span><span class="ln">  <span class="k">&quot;lock&quot;</span>: [<span class="s">&quot;palettes&quot;</span>]</span><span class="ln">}</span><!--/build--></code></pre>
+        </div>
+      </div>
+    </article>
+
+    <div class="tool" id="wizard">
+      <div class="tool-head">
+        <h2>The brand editor: <code>kine brand wizard</code></h2>
+        <p>A page on <code>127.0.0.1</code> to see and change a brand: palettes with their contrast, type, logos and placements, intro and outro, sound, a gallery of the built-ins drawn in the brand, and the raw file. Every change is saved at once and checked; the gallery is drawn by the real renderer. <code>kine brand</code> and the <code>kine_brand</code> MCP tool make every change it makes, the same way, so an agent can do all of it too.</p>
+      </div>
+      <figure class="player" data-name="brand editor recording">
+        <div class="screen"><video src="media/brand-wizard.mp4" poster="media/brand-wizard.jpg" width="1600" height="1062" muted loop playsinline controls preload="metadata" aria-label="A recording of the brand editor: the Tidewater accent is changed to a pale yellow, the contrast table marks accent on bg too low and two warnings appear, then a purple that passes is typed in and the gallery shows every built-in in purple. No sound."></video></div>
+        <div class="deck"><button type="button" data-play>Play</button><span class="tc">0.0 s</span></div>
+        <figcaption class="rec-cap">Recorded with Overshoulder driving the editor. A pale yellow accent falls to 1.4:1 against the background and the editor flags it; a purple that passes clears the warnings, and the gallery redraws in it.</figcaption>
+      </figure>
+      <div class="demo-grid even">
+        <figure class="sheet">
+          <a href="media/brand-colours.jpg"><img src="media/brand-colours.jpg" width="1600" height="1000" loading="lazy" alt="The Colours tab: the light palette's eight roles as swatches with hex fields, a contrast table of the pairs a video reads most with each ratio and whether it passes, and the chart series with their ratios."></a>
+          <figcaption>Colours: each palette's roles, the contrast of the pairs a video reads most, and the chart series against the background.</figcaption>
+        </figure>
+        <figure class="sheet">
+          <a href="media/brand-gallery.jpg"><img src="media/brand-gallery.jpg" width="1600" height="1000" loading="lazy" alt="The Gallery tab: a sample frame, the palette, the type styles, a title card, a lower third, a callout and the bar, line and pie charts, all drawn in the Tidewater light palette."></a>
+          <figcaption>Gallery: every built-in drawn in the brand by the renderer, in the palette picked at the top.</figcaption>
+        </figure>
+      </div>
+      <div class="demo-grid even">
+        <figure class="sheet">
+          <a href="media/brand-type.jpg"><img src="media/brand-type.jpg" width="1600" height="1000" loading="lazy" alt="The Type tab: the display, body and mono faces with their families and licence fields, a table of text styles (body, caption, heading, label, title) with font, size, weight, tracking and case, and a sample drawn by the renderer."></a>
+          <figcaption>Type: the three faces, uploaded font files, and the text styles a layer names with <code>"textStyle"</code>.</figcaption>
+        </figure>
+        <figure class="sheet">
+          <a href="media/brand-logos.jpg"><img src="media/brand-logos.jpg" width="1600" height="1000" loading="lazy" alt="The Logos tab: the full logo and the mark, each with a file for light and for dark backgrounds and alt text, clear space and minimum height, and the placements table with a frame to click where a placement goes."></a>
+          <figcaption>Logos: a file for light and dark backgrounds, clear space and minimum size, and placements set by clicking on a frame.</figcaption>
+        </figure>
+      </div>
+      <p class="note">Brands live in a library, <code>~/.kinescript/brands</code>. <code>kine brand use acme</code> (the editor's Use in project) copies one into the project's <code>brand/</code> folder and records what it copied, so a video keeps the brand it was made with until you run it again. It refuses to replace a copy edited in the project unless <code>--force</code>.</p>
+    </div>
+
+    <dl class="features">
+      <div><dt>Text styles</dt><dd>A text layer takes <code>"textStyle": "heading"</code> for the brand's font, size, weight, tracking and case; its own keys still win. Built-in titles take the display face and other text the body face.</dd></div>
+      <div><dt>Intro and outro</dt><dd><code>"intro": true</code> on a scene plays the brand's sting first and <code>"outro": true</code> its end card last, each rendered as its own segment and joined to the video, with a sonic logo if the brand has one.</dd></div>
+      <div><dt>Sound and grade</dt><dd>Per role defaults: the voice backend and speaker, a music bed with its gain and fades, the mix's loudness and ducking. A brand <code>grade</code> gives every video the same colour grade.</dd></div>
+      <div><dt>From a logo</dt><dd><code>kine brand import acme logos/full.svg</code> proposes light and dark palettes and chart series from a logo's colours, each text and accent moved until it passes the contrast check; <code>--apply</code> writes them.</dd></div>
+      <div><dt>Locks</dt><dd><code>"lock": ["palettes", "fonts"]</code> stops a scene's own theme from changing those parts; <code>kine check</code> reports the scene that tries.</dd></div>
+      <div><dt>Checked writes</dt><dd>Each write checks the brand and refuses a change that breaks it, and <code>--rev</code> refuses it when the brand changed since it was read, so a person in the editor and an agent over MCP do not overwrite each other.</dd></div>
+    </dl>
+
+    <div class="tool">
+      <div class="tool-head">
+        <h2><code>kine brand</code></h2>
+        <p>The same operations from the command line and, as <code>kine_brand</code>, over MCP.</p>
+      </div>
+      <ul class="tools-list">
+        <li><b>init acme</b>a new brand, from the Kinescript brand or <code>--from</code> another</li>
+        <li><b>list / show</b>the library, and one brand's resolved values</li>
+        <li><b>use acme</b>copies it into the project's <code>brand/</code></li>
+        <li><b>set acme PATH VALUE</b>changes one value, such as <code>palettes.dark.accent</code></li>
+        <li><b>replace acme FILE</b>replaces <code>brand.json</code>, checked first</li>
+        <li><b>add-file / remove-file</b>fonts, logos and sound files, their contents checked</li>
+        <li><b>check acme</b>the brand's own problems</li>
+        <li><b>preview acme</b>a sample frame in the brand, as an image</li>
+        <li><b>import acme LOGO</b>palettes proposed from a logo</li>
+        <li><b>wizard</b>the brand editor above</li>
+      </ul>
+    </div>
+  </div>
+  <nav class="pager" aria-label="Previous and next pages"><!--build:pager:brands.html--><a class="prev" href="editor.html"><span>Previous</span>Editor</a><a class="next" href="install.html"><span>Next</span>Install</a><!--/build--></nav>
+  </main>
+
+  <footer>
+    <span class="brand"><img src="assets/mark.svg" alt="" width="200" height="200">Kinescript 1.9.0, MIT licence</span>
+    <nav aria-label="Project links">
+      <a href="https://github.com/drknowhow/kinescript">Source</a>
+      <a href="https://pypi.org/project/kinescript/">PyPI</a>
+      <a href="https://github.com/drknowhow/kinescript/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/drknowhow/kinescript/blob/main/LICENSE">Licence</a>
+    </nav>
+  </footer>
+</div>
+<script src="site.js"></script>
+</body>
+</html>
