@@ -669,7 +669,7 @@ BRANDS
                   "light": {"bg": "#f2f0e8", "text": "#0a0c10", "muted": "#5b6272", "accent": "#d9431f"}},
      "fonts": {"display": {"family": "Space Grotesk"}, "body": {"family": "Space Grotesk"},
                "mono": {"family": "IBM Plex Mono"}},
-     "charts": {"series": ["#ff633f", "#b9f45d", "#f2f0e8"]},
+     "charts": {"series": ["accent", "text", "muted"]},
      "lock": ["palettes"]}
   palettes    one or more, each with bg, text and accent, and optionally surface, muted, accent2,
               positive, negative. The scene's variant picks one [default, else the first]. Each role
@@ -832,6 +832,10 @@ COMMANDS
                                   (svg-unsupported), or a video, image
                                   or shader more than half off the canvas for 1 s or more
                                   (media-offscreen).
+                                  With a brand: palette pairs under their contrast
+                                  (brand-contrast), chart colours under 3:1 on the background
+                                  (brand-chart-contrast), a layer inside a logo's clearSpace
+                                  (logo-clear-space), a logo under minHeight (logo-small).
                                   With sound (it is
                                   mixed and measured, see SOUND): a voice cut off (audio-cut), two
                                   voices at once (voice-overlap), music under 10 LU below a voice
@@ -844,6 +848,10 @@ COMMANDS
                                   a .webm whose alpha this ffmpeg cannot read (media-alpha-lost).
                                   info: a name it read for you, e.g. "'color' read as 'fill'",
                                   or an odd canvas size (odd-size).
+                                  --brand-strict also reports colours the brand does not have,
+                                  with the nearest brand colour (off-brand-colour), fonts that
+                                  are not its faces (off-brand-font), and text outside its
+                                  safeArea.
   kine look scene.json --boxes    one PNG of 12 evenly spaced frames; --boxes outlines layers and
                                   labels the top-level ones; -n 16 frames, --at 1 2.5 4 exact
                                   times, read as still reads them (use it to see a transition;

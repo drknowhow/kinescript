@@ -21,8 +21,12 @@ TOOLS = [
      "components, eases. Read once before writing a scene.", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "kine_check", "description": "Lint a scene: load errors, text off canvas or in the safe margin, overlapping "
      "text, low contrast, tiny text, too little reading time, and sound (a voice cut off or under the music, voices "
-     "overlapping, an effect late on its cue, silence, loudness and peaks). Returns issues with time ranges and fixes.",
-     "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"}}, "required": ["scene"]}},
+     "overlapping, an effect late on its cue, silence, loudness and peaks), and a brand's contrast and logo clear "
+     "space. brand_strict=true also reports colours and fonts the brand does not have. Returns issues with time "
+     "ranges and fixes.",
+     "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"},
+                                                      "brand_strict": {"type": "boolean", "default": False}},
+                     "required": ["scene"]}},
     {"name": "kine_look", "description": "Contact sheet: `count` frames in one labelled image. boxes=true outlines each "
      "layer with its id. wire=true draws every model's drawn triangles; depth=true shows each stage's depth image, "
      "nearer brighter. trails=true draws each moving layer's path, a dot a frame, so their spacing shows speed, "
@@ -128,7 +132,7 @@ def call(name: str, args: dict) -> list[dict]:
             sc = _scene(args)
         except SceneError as e:  # the issues, as `kine check` gives them, not a one-line error
             return [_text(_result(e.issues))]
-        return [_text(check(sc))]
+        return [_text(check(sc, brand_strict=bool(args.get("brand_strict"))))]
     if name == "kine_probe":
         from .verify import probe, probe_media
         sc = _need(args, "scene")

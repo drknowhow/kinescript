@@ -390,6 +390,9 @@ def _logo(p, th, scene=None):
     mx, my = _pct(margin, W), _pct(margin, H)
     x = mx + fx * (W - 2 * mx)
     y = my + fy * (H - 2 * my)
+    clear = logos.get("clearSpace")
+    if scene is not None and isinstance(clear, (int, float)) and clear > 0:
+        scene.logos[p["id"]] = float(clear)  # check keeps other layers out of this share of the logo's box
     least = (logos.get("minHeight") if isinstance(logos.get("minHeight"), (int, float)) else 0) * H / 1080
     if scene is not None and h < least:
         scene.note("warning", "logo-small", p["id"], f"the logo is {h:g} px tall; the brand asks for at least "

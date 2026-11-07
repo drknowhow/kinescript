@@ -13,6 +13,7 @@ from pathlib import Path
 import numpy as np
 import skia
 
+from . import brandcheck
 from . import color as C
 from . import listen, media, models, schema, stage
 from .props import HOLD
@@ -645,9 +646,10 @@ def _on_screen(t0: float, t1: float, spans: list[tuple[float, float]], slack: fl
     return t1 - t0
 
 
-def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
+def check(src, step: float = 0.25, safe: float = 0.05, brand_strict: bool = False) -> dict:
     """Lint a scene. Returns {"ok", "errors", "warnings", "issues": [...]} where each issue names
-    the layer, the time range it was seen in, and a suggested fix."""
+    the layer, the time range it was seen in, and a suggested fix. brand_strict also reports colours and fonts the
+    scene's brand does not have, and keeps text inside the brand's safe area."""
     if isinstance(step, bool) or not isinstance(step, (int, float)) or not math.isfinite(step) or step <= 0:
         raise ValueError(f"step must be a number of seconds above 0, got {step!r}")
     try:
@@ -661,6 +663,8 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
         return _result([{"level": "error", "code": "load", "layer": None, "message": f"{type(e).__name__}: {e}",
                           "fix": "a key in the scene probably has the wrong type of value (a list for an object, …)"}])
     scene.check_expressions()
+    if brand_strict and (share := brandcheck.safe_share(scene)) is not None:
+        safe = share
     W, H = scene.w, scene.h
     odd = []
     if W % 2 or H % 2:
@@ -758,6 +762,7 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
             add("warning", "triangle-budget", None, T, f"{r.tris:,} model triangles in one frame; renders slow "
                 f"down past {TRIANGLE_BUDGET:,} (about 70 ms a frame at 100,000 on a GPU)",
                 "use \"detail\": \"low\" or \"medium\", or fewer parts")
+        brandcheck.clear_space(scene, r.boxes, T, add)
         texts = []
         for lid, b in r.boxes.items():
             layer = scene.by_id.get(lid)
@@ -905,6 +910,8 @@ def check(src, step: float = 0.25, safe: float = 0.05) -> dict:
             "a frame on the CPU, which draws every pixel of each particle's square: 5,000 particles 12 px across take "
             "53 ms, 24 px across 197 ms", "render on a GPU; draft with --scale 0.5 (a quarter of the pixels); or use "
             "fewer or smaller particles", until=heavy[-1][0])
+    if brand_strict:
+        brandcheck.strict(scene, add)
     for lid, T, px in strobes(scene, r):
         add("warning", "strobe", lid, T, f"moves {px:.0f} px a frame, fast enough to show as separate copies of "
             "itself instead of one moving thing", "add \"motionBlur\": {\"samples\": 8} to the scene, or slow the move")

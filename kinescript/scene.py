@@ -228,6 +228,7 @@ class Scene:
         self.grade = spec.get("grade") or {}
         self.motion_blur = spec.get("motionBlur") or {}
         self._sounding: list[Layer] = []
+        self.logos: dict[str, float] = {}  # logo layer id -> the brand's clear space, as a share of its box
         raw_layers = _subst(copy.deepcopy(spec.get("layers", [])), theme)
         self.bg = _subst(self.bg, theme)
         self._components = user_comps = _subst(copy.deepcopy(spec.get("components", {})), theme)

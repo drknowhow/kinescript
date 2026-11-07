@@ -196,6 +196,20 @@ def validate(folder: str | Path, spec: dict | None = None) -> list[dict]:
             if part not in LOCKABLE:
                 out.append(_issue("error", "brand-lock", f"lock names '{part}', which cannot be locked",
                                   "lockable: " + ", ".join(LOCKABLE)))
+    out += _contrast(pals)
+    charts = spec.get("charts") if isinstance(spec.get("charts"), dict) else {}
+    series = charts.get("series") if isinstance(charts.get("series"), list) else []
+    for name, pal in pals.items():
+        bg = pal.get("bg") if isinstance(pal, dict) else None
+        for i, c in enumerate(series):
+            while isinstance(c, str) and c in ROLES:  # a role, or the one it falls back to
+                c = pal.get(c) or FALLBACK.get(c, "bg")
+                if c == "bg":
+                    break
+            if C.problem(bg) is None and C.problem(c) is None and (r := _ratio(c, bg)) < 3.0:
+                out.append(_issue("warning", "brand-chart-contrast", f"charts.series[{i}] {c} is {r:.1f}:1 against "
+                                  f"palettes.{name}.bg; chart colours want 3:1 to be told from the background",
+                                  "darken or lighten it, or use another variant for charts"))
     for where, rel, exts in _files(spec):
         try:
             p = inside(folder, rel)
@@ -206,6 +220,30 @@ def validate(folder: str | Path, spec: dict | None = None) -> list[dict]:
             out.append(_issue("error", "brand-file", f"{where} is '{rel}'; it must be one of {', '.join(exts)}"))
         elif not p.is_file():
             out.append(_issue("error", "missing-media", f"{where}: no file at {p}", "add the file, or fix the name"))
+    return out
+
+
+# Pairs a brand promises to draw together, and the contrast each needs (WCAG: 4.5 for text, 3 for large type and
+# graphics).
+PAIRS = (("text", "bg", 4.5), ("text", "surface", 4.5), ("muted", "bg", 3.0), ("accent", "bg", 3.0))
+
+
+def _ratio(a: str, b: str) -> float:
+    return C.contrast(C.luminance(C.parse(a)), C.luminance(C.parse(b)))
+
+
+def _contrast(pals: dict) -> list[dict]:
+    out = []
+    for name, pal in pals.items():
+        if not isinstance(pal, dict):
+            continue
+        for fg, bg, want in PAIRS:
+            a, b = pal.get(fg), pal.get(bg)
+            if a is None or b is None or C.problem(a) or C.problem(b):
+                continue
+            if (r := _ratio(a, b)) < want:
+                out.append(_issue("warning", "brand-contrast", f"palettes.{name}: {fg} {a} on {bg} {b} is {r:.1f}:1; "
+                                  f"{fg} on {bg} wants {want:g}:1", f"darken or lighten {fg} or {bg}"))
     return out
 
 

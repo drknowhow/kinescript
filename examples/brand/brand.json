@@ -19,7 +19,7 @@
     "caption": {"case": "upper", "tracking": 3, "weight": 600}
   },
   "charts": {
-    "series": ["accent", "accent2", "#d9a441", "muted"],
+    "series": ["accent", "accent2", "#a8741a", "muted"],
     "color": "accent2",
     "highlight": "accent",
     "axis": {"color": "muted", "width": 2}
