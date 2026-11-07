@@ -395,3 +395,42 @@ def test_a_moving_avatar_renders_the_same_frames_in_any_order(tmp_path):
     shuffled = Renderer(k.Scene(spec, tmp_path), backend="cpu")
     for n in (23, 4, 17, 9, 12):
         assert np.array_equal(shuffled.frame(n), sequential[n])
+
+
+def _issues(spec, base):
+    import kinescript as k
+    return {i["code"]: i for i in k.Scene(spec, base).issues if i["code"].startswith(("mouth-", "avatar-"))}
+
+
+def test_check_says_when_the_mouth_only_follows_loudness(tmp_path):
+    _wav(tmp_path / "vo.wav")
+    got = _issues(_talking(tmp_path, "vo", audio=[{"id": "vo", "src": "vo.wav"}]), tmp_path)
+    assert got["mouth-approximate"]["level"] == "info" and "only how loud 'vo' is" in got["mouth-approximate"]["message"]
+
+
+def test_check_names_words_the_rules_cannot_read_and_shapes_the_avatar_lacks(tmp_path):
+    _wav(tmp_path / "vo.wav")
+    words = [{"word": "35", "start": 0.1, "end": 0.5}, {"word": "fee", "start": 0.6, "end": 1.0}]
+    got = _issues(_talking(tmp_path, "vo", audio=[{"id": "vo", "src": "vo.wav", "words": words}]), tmp_path)
+    assert "cannot read 1 word of 'vo' (35)" in got["mouth-unknown-words"]["message"]
+    assert "G (1x, shown as A)" in got["avatar-missing-shape"]["message"]  # the F of "fee"
+    assert "mouth-approximate" not in got
+
+
+def test_check_says_a_stored_mouth_track_is_older_than_its_words(tmp_path):
+    from kinescript import mouth as M
+    _wav(tmp_path / "vo.wav")
+    wf = tmp_path / "vo.words.json"
+    wf.write_text(json.dumps([{"word": "Make", "start": 0.1, "end": 0.5}]))
+    M.write(wf)
+    spec = _talking(tmp_path, "vo", audio=[{"id": "vo", "src": "vo.wav", "words": "vo.words.json"}])
+    assert "mouth-stale" not in _issues(spec, tmp_path)
+    wf.write_text(json.dumps([{"word": "Move", "start": 0.1, "end": 0.5}]))
+    assert "vo.mouth.json was made from other words" in _issues(spec, tmp_path)["mouth-stale"]["message"]
+
+
+def test_a_gaze_target_mistake_has_its_own_code(tmp_path):
+    import kinescript as k
+    with pytest.raises(k.SceneError) as e:
+        k.Scene(_moving(tmp_path, gaze=[{"at": 0, "target": "#nobody"}]), tmp_path)
+    assert [i["code"] for i in e.value.issues if i["level"] == "error"] == ["avatar-gaze-target"]

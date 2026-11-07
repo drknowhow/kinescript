@@ -583,8 +583,9 @@ def say_sounds(spec: dict, base) -> dict:
     return spec
 
 
-def _track(scene, sid: str) -> tuple[list[list], float]:
-    """Sound sid's mouth track and where in its file it starts playing (its trim)."""
+def _track(scene, sid: str) -> tuple[dict, float, Path | None]:
+    """Sound sid's mouth track (as mouth.track gives it), where in its file it starts playing (its trim), and the
+    words file it came from, if one."""
     from . import audio as AU
     from . import voice as V
     from . import words as W
@@ -594,7 +595,7 @@ def _track(scene, sid: str) -> tuple[list[list], float]:
         raise ValueError(f"say names '{sid}', which is not an audio id")
     trim = a.get("trim") if isinstance(a.get("trim"), list) and a.get("trim") else [0]
     if isinstance(a.get("words"), list):
-        return M.track(W.read(a["words"]))["mouth"], float(trim[0] or 0)
+        return M.track(W.read(a["words"])), float(trim[0] or 0), None
     src, words_file = V.paths(sid, a, scene.base) if a.get("text") else (None, None)
     if words_file is None:
         src = Path(str(a.get("src", "")))
@@ -602,10 +603,10 @@ def _track(scene, sid: str) -> tuple[list[list], float]:
         w = a.get("words")
         words_file = scene.base / w if isinstance(w, str) else W.default_path(str(src))
     if words_file.exists():
-        return M.track(*M.stored(words_file))["mouth"], float(trim[0] or 0)
+        return M.track(*M.stored(words_file)), float(trim[0] or 0), words_file
     if src is not None and Path(src).exists():
-        return M.levels(AU.analyze(str(src))["rms"], AU._WIN)["mouth"], float(trim[0] or 0)
-    return [], 0.0  # a voice not spoken yet: scene load reports voice-missing
+        return M.levels(AU.analyze(str(src))["rms"], AU._WIN), float(trim[0] or 0), None
+    return {"mouth": [], "source": "none", "unknown": []}, 0.0, None  # not spoken yet: load reports voice-missing
 
 
 def _keys(track: list[list], av: Avatar, shape: str, t0: float, pre: float = 0.0) -> list | int:
@@ -738,6 +739,32 @@ def _ids(spec) -> set[str]:
     return out
 
 
+def _notes(scene, lid: str, sid: str, got: dict, words_file: Path | None, av: Avatar) -> None:
+    """What check says about the mouth a sound gives an avatar: a mouth that only follows loudness, words the
+    spelling rules cannot read, shapes the avatar has no drawing for, and a stored track older than its words."""
+    if got["source"] == "levels":
+        scene.note("info", "mouth-approximate", lid, f"the mouth follows only how loud '{sid}' is, as it has no words",
+                   "give the sound words (a words file or list), or text for kine voice to speak")
+    if got["unknown"]:
+        shown = ", ".join(got["unknown"][:8]) + (" ..." if len(got["unknown"]) > 8 else "")
+        scene.note("warning", "mouth-unknown-words", lid, f"the spelling rules cannot read {len(got['unknown'])} "
+                   f"word{'s' * (len(got['unknown']) != 1)} of '{sid}' ({shown}); the mouth opens to C for them",
+                   "spell them out (\"thirty five\", not 35), or use a voice backend that gives phones, such as kokoro")
+    drawn = av.mouth.files if av.mouth else {}
+    used: dict[str, int] = {}
+    for s_, _, _ in got["mouth"]:
+        if s_ not in drawn:
+            used[s_] = used.get(s_, 0) + 1
+    if used:
+        scene.note("info", "avatar-missing-shape", lid, f"'{sid}' uses mouth shape" + "s" * (len(used) > 1) + " " +
+                   ", ".join(f"{s_} ({n}x, shown as {av.shape(s_)})" for s_, n in sorted(used.items())) +
+                   ", which the avatar does not draw", "draw them in the avatar's mouth shapes for a closer match")
+    if words_file is not None and M.path_for(words_file).exists() and not M.fresh(words_file):
+        scene.note("info", "mouth-stale", lid, f"{M.path_for(words_file).name} was made from other words than "
+                   f"{words_file.name} holds now; the video uses the words, the file is out of date",
+                   "run kine voice, or delete the file")
+
+
 def _mouth(av: Avatar, mouth: dict, says: list, exprs: list, lid: str, fills: dict, scene) -> None:
     """The mouth part's drawings: each line's track shows its shapes, and an expression with a mouth shows that
     shape wherever the mouth would be at rest while it lasts (speech owns the mouth; the latest such expression wins).
@@ -750,7 +777,11 @@ def _mouth(av: Avatar, mouth: dict, says: list, exprs: list, lid: str, fills: di
         return
     kids = []
     for n, sid in enumerate(says or [None]):
-        track, t0 = _track(scene, sid) if sid else ([], 0.0)
+        track, t0 = [], 0.0
+        if sid:
+            got, t0, words_file = _track(scene, sid)
+            track = got["mouth"]
+            _notes(scene, lid, sid, got, words_file, av)
         pre = PRE if n == 0 else 0.0  # the first line's drawings start long before it, at rest until it starts
 
         def draw(s: str, keyed: str, tag: str) -> dict:
@@ -809,7 +840,11 @@ def component(p, theme: dict, scene) -> dict:
                          "look; give the eyes part \"look\": [x, y] in its avatar.json")
     was = (0.0, 0.0)
     for i, g in enumerate(gazes):  # each gaze moves the eyes on from the one before, so the moves add up
-        gx, gy = _gaze(g.get("target", "camera"), p, av, k, scene, f"layer '{lid}': gaze[{i}]")
+        try:
+            gx, gy = _gaze(g.get("target", "camera"), p, av, k, scene, f"gaze[{i}]")
+        except ValueError as e:
+            scene.note("error", "avatar-gaze-target", lid, str(e), "")
+            continue
         at = _early(g.get("at", 0), lid, scene.fps)
         for e in eyes:
             G = _find(body, f"{rig}-{e.name}")

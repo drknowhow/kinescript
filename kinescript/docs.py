@@ -795,7 +795,11 @@ AVATARS
   right, up, down, [gx, gy] (each -1 to 1 of the eyes' look) or "#id", a layer at the top of the
   scene with a fixed x and y; list them in time order. A gesture plays its keys from at. Two
   gestures that move the same part at the same time are an error (avatar-gesture-overlap), not a
-  blend.
+  blend. A gaze target it cannot use is avatar-gaze-target.
+  kine check also reports on each sound an avatar says: mouth-approximate (no words, so the mouth
+  follows only loudness), mouth-unknown-words (words the spelling rules cannot read),
+  avatar-missing-shape (shapes the avatar does not draw, and what shows instead) and mouth-stale
+  (a stored .mouth.json older than its words file; the video uses the words).
 
 SOUND
   Top-level "audio" lists the sounds. Each one:
