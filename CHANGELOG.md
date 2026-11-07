@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.0 (2026-11-06)
 
 - `canvas.poster`: the time a rendered video opens on, in seconds or as a cue (`"title.in+0.5"`, a marker, a word).
   Players, feeds and pages show a video's first frame before it plays, and a scene that fades in from its
