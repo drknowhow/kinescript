@@ -15,7 +15,9 @@ takes {"text", "speaker", "rate", "out"}, writes a WAV to out, and returns {"wor
 "speaker", "version", "seconds"} (seconds, the file's length, is optional). The request also carries "tagged" (the
 text with its tags), "options" (the sound's options, as given) and "base" (the scene's folder, for files the options
 or speaker name). A backend that acts on tags returns "tags": true, anything it could not do in "ignored", and
-words it could not time in "note".
+words it could not time in "note". It may also return "phones", the sounds it said with their times
+([{"ipa": "hɛlO", "start", "end"}] or "arpabet" in place of "ipa"); they are kept in the words file and make the
+mouth track (mouth.py) that kine voice writes beside it.
 A sound picks its backend with "backend"; KINE_VOICE_CMD_<NAME> runs that backend in another Python, and
 KINE_VOICE_CMD runs the default one (or the backend whose module it runs, python -m kinescript_<name>). A command
 reads a JSON list of those requests on stdin and prints the list of results. Scene text never reaches a shell.
@@ -33,6 +35,7 @@ import sys
 import time
 from pathlib import Path
 
+from . import mouth as M
 from . import words as W
 
 GROUP = "kinescript.voice"
@@ -243,6 +246,24 @@ def _speaker(name: str | None):
     return run, key
 
 
+def _phones(got, name: str) -> list[dict] | None:
+    """A backend's timed sounds, checked: [{"ipa" or "arpabet", "start", "end"}] in time order, or None."""
+    if not got:
+        return None
+    out = []
+    for k, p in enumerate(got if isinstance(got, list) else [None]):
+        sound = [x for x in ("ipa", "arpabet") if isinstance(p, dict) and isinstance(p.get(x), str)]
+        try:
+            a, b = float(p["start"]), float(p["end"])
+        except (TypeError, KeyError, ValueError):
+            a = b = None
+        if len(sound) != 1 or a is None or b < a:
+            raise RuntimeError(f"the voice backend {name} returned phones it cannot use at item {k}: {p!r}; each must "
+                               'be {"ipa": ..., "start": s, "end": s} or "arpabet" in place of "ipa"')
+        out.append({sound[0]: p[sound[0]], "start": a, "end": b})
+    return sorted(out, key=lambda p: p["start"])
+
+
 def generate(scene, only=None, force: bool = False, backend: str | None = None, base=None) -> dict:
     """Speak every sound with text whose file is missing or out of date; return what was made and what was fresh."""
     spec, base = _spec(scene, base)
@@ -261,6 +282,8 @@ def generate(scene, only=None, force: bool = False, backend: str | None = None, 
         text, marks = split_marks(a["text"])
         rec = made(words_file)
         if not force and src.exists() and rec and rec.get("hash") == fingerprint(a):
+            if not M.fresh(words_file):  # made before mouth tracks, or by hand: no need to speak it again
+                M.write(words_file)
             out.append({"id": sid, "src": str(a.get("src") or default_src(sid)), "status": "fresh"})
             continue
         src.parent.mkdir(parents=True, exist_ok=True)
@@ -283,8 +306,10 @@ def generate(scene, only=None, force: bool = False, backend: str | None = None, 
             W.read(said)  # the ids are valid and unique before the file is written
             rec = {"hash": fingerprint(a), "backend": name, "version": res.get("version"),
                    "speaker": res.get("speaker") or a.get("speaker")}
-            words_file.write_text(json.dumps({"words": said, "made": rec}, indent=1, ensure_ascii=False),
-                                  encoding="utf-8")
+            phones = _phones(res.get("phones"), name)
+            body = {"words": said, **({"phones": phones} if phones else {}), "made": rec}
+            words_file.write_text(json.dumps(body, indent=1, ensure_ascii=False), encoding="utf-8")
+            M.write(words_file)
             secs = res.get("seconds") or (said[-1]["end"] if said else 0.0)
             item = {"id": sid, "src": str(a.get("src") or default_src(sid)), "status": "made", "words": len(said),
                     "seconds": round(float(secs), 2), "took": round(took, 2)}

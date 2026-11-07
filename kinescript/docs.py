@@ -910,6 +910,12 @@ COMMANDS
                                   clocks, and its speed a second (signed; a distance for position,
                                   x and y as a point, or a colour), where it holds still and its
                                   fastest frame. An enter, exit or along moves a layer as well.
+  kine probe scene.json --mouth vo1
+                                  vo1's mouth track: the shape (X rest, A closed, B teeth, C open,
+                                  D wide, E rounded, F puckered, G lip under teeth, H tongue) at
+                                  each time, and whether it came from the backend's phonemes, the
+                                  spelling of each word (approximate), or loudness alone. kine voice
+                                  writes it beside the words file (vo1.mouth.json).
   kine probe clip.mp4             a media file's kind (video, audio or image), duration, w and h as
                                   shown (after rotation), fps, audio, alpha and rotation; a note
                                   when it lists a video stream with no frames in it. A model file
