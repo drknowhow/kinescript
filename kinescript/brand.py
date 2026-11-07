@@ -25,7 +25,8 @@ FACES = ("display", "body", "mono")
 GROUPS = ("text", "charts", "logos", "placements", "bug", "motion", "components", "intro", "outro", "audio")
 BOOKENDS = {"intro": ("sting", 2.0), "outro": ("endCard", 3.0)}  # the built-in that draws each, its default dur
 PARTS = {"kinescriptBrand", "id", "name", "description", "palettes", "default", "fonts", "safeArea", "lock", "grade",
-         *GROUPS}
+         "avatars", *GROUPS}
+AVATAR_KEYS = ("src", "voice", "idle")  # a brand avatar: its folder (or kine:NAME) and the brand's voice and idle
 LOCKABLE = ("palettes", "fonts", *(g for g in GROUPS if g != "audio"), "safeArea", "grade")
 LOGO_FILES = ("file", "onDark", "onLight")
 FONT_EXTS = (".ttf", ".otf", ".ttc")
@@ -103,7 +104,38 @@ def _files(spec: dict) -> list[tuple[str, str, tuple]]:
     aud = spec.get("audio") if isinstance(spec.get("audio"), dict) else {}
     if isinstance(aud.get("music"), dict) and "src" in aud["music"]:
         out.append(("audio.music.src", aud["music"]["src"], AUDIO_EXTS))
+    for name, src in _avatar_srcs(spec).items():
+        if not src.startswith("kine:"):
+            out.append((f"avatars.{name}.src", f"{src.rstrip('/')}/avatar.json", (".json",)))
     return out
+
+
+def _avatar_srcs(spec: dict) -> dict[str, str]:
+    """Each brand avatar's src: a folder in the brand, or kine:NAME."""
+    avs = spec.get("avatars") if isinstance(spec.get("avatars"), dict) else {}
+    out = {}
+    for name, e in avs.items():
+        src = e if isinstance(e, str) else e.get("src") if isinstance(e, dict) else None
+        if isinstance(src, str) and src:
+            out[name] = src
+    return out
+
+
+def avatar(folder: str | Path, name: str) -> tuple[Path, dict]:
+    """The brand avatar `name`: the folder holding its avatar.json, and its entry (with the brand's voice and idle
+    for it). ValueError when the brand has no such avatar."""
+    from . import avatar as A
+    folder = Path(folder)
+    avs = read(folder).get("avatars")
+    avs = avs if isinstance(avs, dict) else {}
+    if name not in avs:
+        raise ValueError(f"the brand in {folder} has no avatar '{name}'; its avatars: " + (", ".join(avs) or "none") +
+                         " (add one under \"avatars\" in brand.json)")
+    e = avs[name] if isinstance(avs[name], dict) else {"src": avs[name]}
+    src = e.get("src")
+    if not isinstance(src, str) or not src:
+        raise ValueError(f"avatars.{name} needs src: a folder in the brand, or kine:host")
+    return (A.where(src) if src.startswith("kine:") else inside(folder, src)), e
 
 
 def read(folder: str | Path) -> dict:
@@ -259,6 +291,7 @@ def validate(folder: str | Path, spec: dict | None = None) -> list[dict]:
                 out.append(_issue("warning", "brand-chart-contrast", f"charts.series[{i}] {c} is {r:.1f}:1 against "
                                   f"palettes.{name}.bg; chart colours want 3:1 to be told from the background",
                                   "darken or lighten it, or use another variant for charts"))
+    out += _check_avatars(folder, spec)
     for where, rel, exts in _files(spec):
         try:
             p = inside(folder, rel)
@@ -269,6 +302,43 @@ def validate(folder: str | Path, spec: dict | None = None) -> list[dict]:
             out.append(_issue("error", "brand-file", f"{where} is '{rel}'; it must be one of {', '.join(exts)}"))
         elif not p.is_file():
             out.append(_issue("error", "missing-media", f"{where}: no file at {p}", "add the file, or fix the name"))
+    return out
+
+
+def _check_avatars(folder: Path, spec: dict) -> list[dict]:
+    """Problems with the brand's avatars: their entries, and the errors of each avatar folder that exists (a
+    missing one is reported with the brand's other files)."""
+    from . import avatar as A
+    avs = spec.get("avatars")
+    if avs is None:
+        return []
+    if not isinstance(avs, dict):
+        return [_issue("error", "brand-avatar", "avatars must be an object of names, such as "
+                                                '{"host": {"src": "avatars/host"}}')]
+    out = []
+    for name, e in avs.items():
+        e = {"src": e} if isinstance(e, str) else e
+        if not isinstance(e, dict) or not isinstance(e.get("src"), str) or not e["src"]:
+            out.append(_issue("error", "brand-avatar", f"avatars.{name} needs src: a folder in the brand, or kine:host"))
+            continue
+        for k in sorted(set(e) - set(AVATAR_KEYS)):
+            out.append(_issue("warning", "brand-key", f"avatars.{name}.{k} is not a key a brand avatar takes",
+                              "known: " + ", ".join(AVATAR_KEYS)))
+        v = e.get("voice", {})
+        if not isinstance(v, dict) or set(v) - set(VOICE_KEYS):
+            out.append(_issue("error", "brand-avatar", f"avatars.{name}.voice takes " + ", ".join(VOICE_KEYS)))
+        idle = e.get("idle", {})
+        if not (idle is False or isinstance(idle, dict) and set(idle) <= set(A.IDLE)):
+            out.append(_issue("error", "brand-avatar", f"avatars.{name}.idle is false, or an object of "
+                                                       "blink, breath and saccade"))
+        try:
+            where = A.where(e["src"]) if e["src"].startswith("kine:") else inside(folder, e["src"])
+        except ValueError as err:
+            out.append(_issue("error", "brand-avatar", f"avatars.{name}: {err}"))
+            continue
+        if (where / A.FILE).is_file():
+            out += [_issue("error", "brand-avatar", f"avatars.{name}: {i['message']}", i["fix"])
+                    for i in A.validate(where) if i["level"] == "error"]
     return out
 
 

@@ -722,6 +722,11 @@ BRANDS
               where it leaves them out, and a voice with text its speaker, backend, rate and options;
               kine voice reads the same, so a changed brand speaker shows as voice-stale. The scene's
               mix goes over the brand's. Sound files live in the brand's audio/ folder.
+  avatars     the brand's characters: {"host": {"src": "avatars/host", "voice": {"speaker":
+              "am_michael"}, "idle": {"saccade": false}}} ("src" alone may be the whole entry, and
+              "kine:host" is the starter). A scene names one "avatar": "brand:host"; the brand's voice
+              goes over the avatar's own, its idle sits between the avatar's and the layer's, and its
+              palette colours the avatar's roles. check reports each avatar folder's problems.
   grade       the colour grade every video gets: the scene "grade" keys, such as {"temperature": 0.1,
               "contrast": 1.05}. A scene's own grade keys go over it, unless the brand locks "grade".
   lock        parts a scene's theme may not change, such as ["palettes", "fonts"]; check reports
@@ -756,7 +761,8 @@ AVATARS
   "avatar": "kine:host" is the built-in starter, a plain friendly figure whose colours are palette
   roles, so it takes the scene's brand; it draws all nine mouth shapes and speaks with Kokoro
   (af_heart). Its expressions: smile, happy, think, surprise, sad; gestures: nod, shake, tilt,
-  wave, point, shrug. kine avatar new FOLDER copies it as files to redraw.
+  wave, point, shrug. kine avatar new FOLDER copies it as files to redraw. "brand:NAME" is an
+  avatar the scene's brand names (see BRANDS avatars), with the brand's voice for it.
   Every part file is drawn at the avatar's full size, in place, so pivots are points in the avatar's
   own pixels. Parts draw in the order listed; a part with a parent turns and moves with it.
     {"kinescriptAvatar": 1, "name": "Host", "size": [600, 900],

@@ -560,3 +560,69 @@ def test_kine_avatar_new_copies_the_starter_to_edit(tmp_path, capsys):
     assert "already holds an avatar" in capsys.readouterr().out
     assert main(["avatar", "check", "kine:host"]) == 0
     assert main(["look", "kine:host", "-o", str(tmp_path / "host.png")]) == 0 and (tmp_path / "host.png").exists()
+
+
+def _branded(tmp_path, avatars, **layer):
+    from test_brand import make_brand
+    folder = make_brand(tmp_path / "brand", avatars=avatars)
+    host = {"id": "host", "use": "avatar", "avatar": "brand:host", "h": 160, **layer}
+    return folder, {"canvas": {"w": 320, "h": 180, "fps": 30, "duration": 2}, "brand": "brand", "layers": [host]}
+
+
+def test_a_brand_names_its_avatar_with_the_brands_voice_and_palette(tmp_path):
+    import kinescript as k
+    folder, spec = _branded(tmp_path, {"host": {"src": "kine:host", "voice": {"speaker": "am_michael"}}},
+                            say={"text": "Hi"})
+    assert A.say_sounds(spec, tmp_path)["audio"][0]["speaker"] == "am_michael"  # the brand's over the avatar's
+    spec["layers"][0].pop("say")
+    s = k.Scene(spec, tmp_path)
+    fills = {str(L.raw.get("fill")).lower() for i, L in s.by_id.items() if i.startswith("host-rig-body-art")}
+    assert "#00a3e0" in fills  # the shirt takes the brand's accent
+    from kinescript import brand as Bl
+    assert Bl.validate(folder) == []
+
+
+def test_a_brand_avatar_folder_lives_in_the_brand_and_is_checked(tmp_path):
+    import kinescript as k
+    from kinescript import brand as Bl
+    folder, spec = _branded(tmp_path, {"host": "avatars/host"})
+    assert "avatars.host.src: no file at" in " ".join(i["message"] for i in Bl.validate(folder))
+    make(folder / "avatars" / "host")
+    assert Bl.validate(folder) == []
+    k.Scene(spec, tmp_path)
+    make(folder / "avatars" / "host", size=[0, 0])
+    assert any(i["code"] == "brand-avatar" and "size" in i["message"] for i in Bl.validate(folder))
+
+
+def test_a_brand_avatars_idle_sits_between_the_avatars_and_the_layers(tmp_path):
+    import kinescript as k
+    _, spec = _branded(tmp_path, {"host": {"src": "kine:host", "idle": {"saccade": False}}})
+    assert "host-glance-eyes" not in k.Scene(spec, tmp_path).by_id
+    spec["layers"][0]["idle"] = {"saccade": [1, 2]}
+    assert "host-glance-eyes" in k.Scene(spec, tmp_path).by_id
+
+
+@pytest.mark.parametrize("avatars, name, message", [
+    ({"host": "kine:host"}, "brand:guest", "has no avatar 'guest'; its avatars: host"),
+    ({"host": {"src": "kine:host", "voice": {"pitch": 2}}}, None, "avatars.host.voice takes"),
+    ({"host": {"voice": {}}}, None, "avatars.host needs src"),
+    ({"host": "../outside"}, None, "leads out of the brand folder"),
+])
+def test_brand_avatar_mistakes_are_named(tmp_path, avatars, name, message):
+    import kinescript as k
+    from kinescript import brand as Bl
+    folder, spec = _branded(tmp_path, avatars)
+    if name:
+        spec["layers"][0]["avatar"] = name
+        with pytest.raises(Exception, match=message):
+            k.Scene(spec, tmp_path)
+    else:
+        assert message in " ".join(i["message"] for i in Bl.validate(folder))
+
+
+def test_a_brand_avatar_in_a_scene_without_a_brand_is_named(tmp_path):
+    import kinescript as k
+    _, spec = _branded(tmp_path, {"host": "kine:host"})
+    spec.pop("brand")
+    with pytest.raises(Exception, match="'brand:host' is a brand's avatar, and the scene names no brand"):
+        k.Scene(spec, tmp_path)
