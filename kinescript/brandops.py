@@ -470,9 +470,8 @@ def avatar_scene(folder: Path, name: str, variant: str | None = None) -> dict:
     k = 760 / h
     layers = []
     for i, (label, pose) in enumerate(poses):
-        g = A.layers(av, f"p{i}", pose, theme)
         x0 = 30 + i * 310
-        g.update(x=x0 + 155 - w * k / 2, y=90, scale=k)
+        g = A.placed(av, f"p{i}", pose, theme, x0 + 155 - w * k / 2, 90, k)
         label = label.split(" at ")[0].replace("expression ", "").replace("gesture ", "")
         layers += [g, {"id": f"p{i}-label", "type": "text", "text": label, "x": x0 + 155, "y": 920, "size": 30,
                        "fill": "$muted", "textStyle": "label"}]

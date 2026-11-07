@@ -824,6 +824,18 @@ AVATARS
   follows only loudness), mouth-unknown-words (words the spelling rules cannot read),
   avatar-missing-shape (shapes the avatar does not draw, and what shows instead) and mouth-stale
   (a stored .mouth.json older than its words file; the video uses the words).
+  A 3D avatar is a glTF file in place of parts. Its mouth shapes, blink and expressions are morph
+  target weights by name (kine probe FILE lists them under morphs):
+    {"kinescriptAvatar": 1, "name": "Ada", "model": {"src": "ada.glb", "animation": "Idle"},
+     "mouth": {"A": {"mouthClose": 1}, "C": {"jawOpen": 0.4}, "D": {"jawOpen": 0.9}},
+     "blink": {"eyeBlinkLeft": 1, "eyeBlinkRight": 1},
+     "expressions": {"smile": {"morphs": {"mouthSmileLeft": 0.8, "mouthSmileRight": 0.8}}}}
+  mouth maps A, C and D at least (the others fall back as above); X, at rest, is every morph at 0
+  unless mapped. animation is a clip the model plays throughout. size (default [600, 600]) is the
+  box the model fits in, which h or w on the layer scales. The mouth moves between shapes in
+  0.06 s; morphs that several things set add up, to at most 1. It blinks and breathes like a drawn
+  avatar; gaze, glances and gestures are not for 3D avatars yet. kine check names a morph the model
+  lacks (avatar-morph).
 
 SOUND
   Top-level "audio" lists the sounds. Each one:

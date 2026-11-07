@@ -32,6 +32,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import avatar3d as A3
 from . import brand as B
 from . import color as C
 from . import mouth as M
@@ -39,7 +40,7 @@ from . import mouth as M
 VERSION = 1
 FILE = "avatar.json"
 TOP = {"kinescriptAvatar", "name", "description", "size", "parts", "colors", "expressions", "gestures", "idle",
-       "voice", "mouthMode"}
+       "voice", "mouthMode", "model", "mouth", "blink"}  # model, mouth and blink: a 3D avatar (avatar3d)
 PART_KEYS = {"src", "states", "shapes", "parent", "pivot", "look"}
 POSE_KEYS = ("x", "y", "rotate", "scale", "opacity")  # what an expression or gesture may change on a part
 IDLE_KEYS = {"blink", "breath", "saccade"}
@@ -73,6 +74,7 @@ class Avatar:
     parts: dict[str, Part]
     mode: str = "swap"
     fallbacks: dict[str, str] = field(default_factory=dict)  # mouth shape -> the drawn shape it shows
+    model: Path | None = None  # a 3D avatar's glTF file (avatar3d); it has no parts
 
     @property
     def mouth(self) -> Part | None:
@@ -84,6 +86,8 @@ class Avatar:
 
     def shape(self, s: str) -> str:
         """The drawn mouth shape that shows for shape s."""
+        if self.model is not None:
+            return s if s in (self.spec.get("mouth") or {}) else self.fallbacks.get(s, "X")
         return s if self.mouth and s in self.mouth.files else self.fallbacks.get(s, "X")
 
 
@@ -128,7 +132,8 @@ def new(folder: str | Path, src: str = "kine:host") -> dict:
     if (dest / FILE).exists():
         raise ValueError(f"{dest} already holds an avatar; pick a new folder")
     load(origin)
-    files = [f for f in origin.rglob("*") if f.is_file() and f.suffix.lower() in (".json", *EXTS)]
+    files = [f for f in origin.rglob("*") if f.is_file() and f.suffix.lower() in (".json", ".glb", ".gltf", ".bin",
+                                                                                   *EXTS)]
     for f in files:
         to = dest / f.relative_to(origin)
         to.parent.mkdir(parents=True, exist_ok=True)
@@ -159,15 +164,16 @@ def _point(v) -> bool:
     return isinstance(v, (list, tuple)) and len(v) == 2 and all(_num(x) for x in v)
 
 
-def _file(folder: Path, rel, where: str, out: list) -> Path | None:
+def _file(folder: Path, rel, where: str, out: list, exts: tuple = EXTS) -> Path | None:
     try:
         p = B.inside(folder, rel)
     except ValueError as e:
         out.append(_issue("error", "avatar-file", f"{where}: {str(e).replace('brand folder', 'avatar folder')}"))
         return None
-    if p.suffix.lower() not in EXTS:
-        out.append(_issue("error", "avatar-file", f"{where}: '{rel}' is not {', '.join(EXTS)}",
-                          "draw parts as .svg (or .png and .webp for pictures)"))
+    if p.suffix.lower() not in exts:
+        out.append(_issue("error", "avatar-file", f"{where}: '{rel}' is not {', '.join(exts)}",
+                          "draw parts as .svg (or .png and .webp for pictures)" if exts == EXTS else
+                          "export the model as .glb"))
         return None
     if not p.is_file():
         out.append(_issue("error", "avatar-file", f"{where}: '{rel}' is not in the avatar folder"))
@@ -327,17 +333,24 @@ def _check(folder: Path, spec: dict | None) -> tuple[list[dict], dict, dict, dic
         if not str(k).startswith(("_", "//")):
             out.append(_issue("warning", "avatar-key", f"{FILE} has an unknown key '{k}'",
                               "known keys: " + ", ".join(sorted(TOP))))
-    size = spec.get("size")
+    three = A3.is_model(spec)
+    size = spec.get("size", [600, 600] if three else None)
     if not _point(size) or min(size) <= 0:
         out.append(_issue("error", "avatar-size", "size must be [w, h], the avatar's own size in pixels",
-                          "the size every part file is drawn at, such as [600, 900]"))
-    parts = _parts(folder, spec, out)
-    falls = _fallbacks(parts, spec, out) if parts else {}
+                          "the size every part file is drawn at, such as [600, 900]" if not three else
+                          "the box the model is fitted in, such as [600, 600] (the default)"))
+    if three:
+        more, _, falls = A3.check(folder, spec, _file)
+        out += more
+        parts: dict = {}
+    else:
+        parts = _parts(folder, spec, out)
+        falls = _fallbacks(parts, spec, out) if parts else {}
     for name, v in (spec.get("colors") or {}).items():
         if not isinstance(v, str) or (v not in B.ROLES and not C.is_color(v)):
             out.append(_issue("error", "avatar-color", f"colors.{name} is {v!r}, neither a colour nor a palette role",
                               "palette roles: " + ", ".join(B.ROLES)))
-    for kind, keyed in (("expressions", False), ("gestures", True)):
+    for kind, keyed in () if three else (("expressions", False), ("gestures", True)):
         group = spec.get(kind) or {}
         if not isinstance(group, dict):
             out.append(_issue("error", f"avatar-{kind[:-1]}", f"{kind} must be an object of named poses"))
@@ -387,15 +400,21 @@ def load(folder: str | Path) -> Avatar:
     issues, spec, parts, falls = _check(folder, None)
     if any(i["level"] == "error" for i in issues):
         raise AvatarError(folder, issues)
-    return Avatar(folder, spec, (float(spec["size"][0]), float(spec["size"][1])), parts,
-                  spec.get("mouthMode", "swap"), falls)
+    size = spec.get("size", [600, 600])
+    model = B.inside(folder, spec["model"]["src"]) if A3.is_model(spec) else None
+    return Avatar(folder, spec, (float(size[0]), float(size[1])), parts, spec.get("mouthMode", "swap"), falls, model)
 
 
 def summary(folder: str | Path) -> dict:
     """What kine avatar check prints: the issues, and for an avatar without errors what it has."""
     issues = validate(folder)
     out = {"ok": not any(i["level"] == "error" for i in issues), "issues": issues}
-    if out["ok"]:
+    if out["ok"] and A3.is_model(read(folder)):
+        av = load(folder)
+        out.update(name=av.spec.get("name"), size=list(av.size), model=av.spec["model"]["src"], morphs=A3.used(av),
+                   shapes=sorted(av.spec.get("mouth") or {}), fallbacks=av.fallbacks,
+                   blink=bool(av.spec.get("blink")), expressions=list(av.spec.get("expressions") or {}))
+    elif out["ok"]:
         av = load(folder)
         out.update(name=av.spec.get("name"), size=list(av.size), parts=list(av.parts),
                    mouth=av.mouth.name if av.mouth else None,
@@ -447,11 +466,21 @@ def _drawing(av: Avatar, part: Part, key: str, lid: str, fills: dict, shown: boo
     return {**L, "type": "image"}
 
 
+def placed(av: Avatar, lid: str, pose: dict, theme: dict | None, x: float, y: float, k: float) -> dict:
+    """The avatar in one still pose with its top left at x, y, k times its own size. A 3D avatar's model layer is
+    sized, not scaled: a group's scale does not reach the model it holds."""
+    g = A3.still(av, lid, pose, k) if av.model is not None else layers(av, lid, pose, theme)
+    g.update(x=x, y=y, **({} if av.model is not None else {"scale": k}))
+    return g
+
+
 def layers(av: Avatar, lid: str, pose: dict | None = None, theme: dict | None = None) -> dict:
     """The avatar in one still pose as a group of plain layers, its (0, 0) at the avatar's top left.
     pose: {"parts": {name: {x, y, rotate, scale, opacity}}, "mouth": shape, "eyes": state, "look": [gx, gy]}, with
     look from -1 to 1 of each eye part's look reach. Each part is a group at its pivot, so it turns about it."""
     pose = pose or {}
+    if av.model is not None:
+        return A3.still(av, lid, pose)
     fills = colors(av, theme)
     shape = av.shape(pose.get("mouth", "X"))
     look = pose.get("look") or [0, 0]
@@ -513,6 +542,8 @@ def sample(keys: list, t: float) -> float:
 def poses(av: Avatar) -> list[tuple[str, dict]]:
     """Every pose worth looking at once: neutral, each mouth shape, eyes closed and looking, each expression and
     each gesture at its peak."""
+    if av.model is not None:
+        return A3.poses(av)
     out = [("neutral", {})]
     if av.mouth:
         out += [(f"mouth {s}" + (f" (as {av.shape(s)})" if av.shape(s) != s else ""), {"mouth": s})
@@ -550,8 +581,7 @@ def sheet_scene(av: Avatar, width: int = 240, cols: int | None = None) -> tuple[
     layers_out = []
     for i, (name, pose) in enumerate(cells):
         x0, y0 = (i % cols) * cw, (i // cols) * (ch + label)
-        g = layers(av, f"c{i}", pose)
-        g.update(x=x0, y=y0, scale=k)
+        g = placed(av, f"c{i}", pose, None, x0, y0, k)
         layers_out += [{"id": f"c{i}-cell", "type": "rect", "anchor": "topleft", "x": x0 + 2, "y": y0 + 2,
                         "w": cw - 4, "h": ch - 4, "radius": 6, "fill": "#1b1f27"}, g,
                        {"id": f"c{i}-label", "type": "text", "text": name, "x": x0 + cw / 2, "y": y0 + ch + label / 2,
@@ -797,7 +827,7 @@ def _notes(scene, lid: str, sid: str, got: dict, words_file: Path | None, av: Av
         scene.note("warning", "mouth-unknown-words", lid, f"the spelling rules cannot read {len(got['unknown'])} "
                    f"word{'s' * (len(got['unknown']) != 1)} of '{sid}' ({shown}); the mouth opens to C for them",
                    "spell them out (\"thirty five\", not 35), or use a voice backend that gives phones, such as kokoro")
-    drawn = av.mouth.files if av.mouth else {}
+    drawn = {"X": {}, **(av.spec.get("mouth") or {})} if av.model is not None else av.mouth.files if av.mouth else {}
     used: dict[str, int] = {}
     for s_, _, _ in got["mouth"]:
         if s_ not in drawn:
@@ -805,7 +835,9 @@ def _notes(scene, lid: str, sid: str, got: dict, words_file: Path | None, av: Av
     if used:
         scene.note("info", "avatar-missing-shape", lid, f"'{sid}' uses mouth shape" + "s" * (len(used) > 1) + " " +
                    ", ".join(f"{s_} ({n}x, shown as {av.shape(s_)})" for s_, n in sorted(used.items())) +
-                   ", which the avatar does not draw", "draw them in the avatar's mouth shapes for a closer match")
+                   ", which the avatar does not " + ("map" if av.model is not None else "draw"),
+                   "map them in the avatar's mouth for a closer match" if av.model is not None else
+                   "draw them in the avatar's mouth shapes for a closer match")
     if words_file is not None and M.path_for(words_file).exists() and not M.fresh(words_file):
         scene.note("info", "mouth-stale", lid, f"{M.path_for(words_file).name} was made from other words than "
                    f"{words_file.name} holds now; the video uses the words, the file is out of date",
@@ -900,17 +932,25 @@ def _art(G: dict, av: Avatar, rig: str) -> set[str]:
     return {str(c.get("id")) for c in G.get("children") or [] if c.get("id") not in parts}
 
 
+def _blink_times(lid: str, idle: dict, scene) -> list[float]:
+    """When each blink starts, in seconds from the avatar's start: seeded gaps between idle.blink's shortest and
+    longest, now and then two blinks close together."""
+    lo, hi = idle["blink"]
+    rng, end, out = _rng(lid, idle["seed"], "blink"), _horizon(scene), []
+    t = rng.uniform(lo / 2, hi)
+    while t < end:
+        out += [t, t + BLINK + 0.1] if rng.random() < 0.12 else [t]
+        t += BLINK + rng.uniform(lo, hi)
+    return out
+
+
 def _blinks(G: dict, eye: Part, av: Avatar, lid: str, says: list, gests: list, idle: dict, scene) -> None:
     """Blinks at seeded times between idle.blink's shortest and longest gap (now and then twice), as opacity keys
     that swap the open and closed drawings. No blink shows near a gesture's peak or as a line starts: there an
     open copy shows instead, in groups timed by those cues (cues cannot be read inside keys)."""
-    lo, hi = idle["blink"]
-    rng, end, keys = _rng(lid, idle["seed"], "blink"), _horizon(scene), [[0, 0, "hold"]]
-    t = rng.uniform(lo / 2, hi)
-    while t < end:
-        for b in ([t, t + BLINK + 0.1] if rng.random() < 0.12 else [t]):
-            keys += [[round(b, 4), 1, "hold"], [round(b + BLINK, 4), 0, "hold"]]
-        t += BLINK + rng.uniform(lo, hi)
+    keys = [[0, 0, "hold"]]
+    for b in _blink_times(lid, idle, scene):
+        keys += [[round(b, 4), 1, "hold"], [round(b + BLINK, 4), 0, "hold"]]
     rig = f"{lid}-rig"
     by = {c.get("id"): c for c in G["children"]}
     shut, wide = by.get(f"{rig}-{eye.name}-closed"), by.get(f"{rig}-{eye.name}-open")
@@ -962,9 +1002,13 @@ def component(p, theme: dict, scene) -> dict:
     av = load(folder)
     w, h = av.size
     k = (float(p["h"]) / h if p.get("h") is not None else float(p["w"]) / w if p.get("w") is not None else 1.0)
+    exprs = _entries(p, "expressions", av.spec.get("expressions") or {})
+    if av.model is not None:
+        says = p.get("say") or []
+        return A3.component(av, p, scene, says if isinstance(says, list) else [says], exprs,
+                            _idle(av, p, mark.get("idle", {})), k)
     rig, fills = f"{lid}-rig", colors(av, theme)
     body = layers(av, rig, {}, theme)
-    exprs = _entries(p, "expressions", av.spec.get("expressions") or {})
     gazes = _entries(p, "gaze", None)
     gests = _entries(p, "gestures", av.spec.get("gestures") or {})
     says = p.get("say") or []
