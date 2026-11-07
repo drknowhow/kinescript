@@ -691,9 +691,15 @@ BRANDS
               color; pieChart colors. A palette role ("surface") means that colour. "<part>Text"
               names the text style of a part, keeping its size: {"titleCard": {"titleText": "heading"}}.
               With a brand, built-in titles take the display font and other text the body font.
-  logos, placements, bug, motion: objects whose entries are theme values by dotted name, such as
-              "enter": "$motion.enter" for {"motion": {"enter": "rise"}}. A logo's file, onDark and
-              onLight paths read from the brand folder.
+  logos       named logos, each {"file": "logos/full.svg", "onDark": "logos/full-dark.svg",
+              "alt": "Acme"} (.svg, .png, .jpg or .webp, read from the brand folder), and minHeight
+              (px at 1080p; a logo drawn smaller warns logo-small). Draw one with the logo component.
+  placements  where logos go: {"corner": {"anchor": "topright", "margin": "4%", "height": "7%"}}.
+              Without one, a logo's placement may be a corner or edge (bottomright, top...), inside
+              the brand's safeArea [5%] at 8% of the height.
+  bug         the logo the bug component shows all video: {"logo": "mark", "placement": "corner",
+              "opacity": 0.85}.
+  motion      named motions by dotted name: "enter": "$motion.enter" for {"motion": {"enter": "rise"}}.
   lock        parts a scene's theme may not change, such as ["palettes", "fonts"]; check reports
               "brand-locked" for a theme key that would.
   A brand's paths stay inside its folder: an absolute path or one with .. out of it is an error.

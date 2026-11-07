@@ -24,6 +24,17 @@
     "highlight": "accent",
     "axis": {"color": "muted", "width": 2}
   },
+  "logos": {
+    "full": {"file": "logos/full.svg", "onDark": "logos/full-dark.svg", "alt": "Tidewater"},
+    "mark": {"file": "logos/mark.svg", "onDark": "logos/mark-dark.svg", "alt": "Tidewater"},
+    "clearSpace": 0.25,
+    "minHeight": 40
+  },
+  "placements": {
+    "corner": {"anchor": "topright", "margin": "4%", "height": "7%"},
+    "closing": {"anchor": "center", "height": "14%"}
+  },
+  "bug": {"logo": "mark", "placement": "corner", "opacity": 0.9},
   "motion": {"enter": "rise", "exit": "fade"},
   "components": {
     "lowerThird": {"plate": "surface", "subColor": "accent2"},
