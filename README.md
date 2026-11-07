@@ -294,7 +294,7 @@ because its server answers on several threads.
 
 ## Brands
 
-<p align="center"><img src="https://raw.githubusercontent.com/drknowhow/kinescript/main/site/demos/brand-tidewater.jpg" width="440" alt="The brand demo in the made-up Tidewater brand: teal and coral bar and pie charts on cream"> <img src="https://raw.githubusercontent.com/drknowhow/kinescript/main/site/demos/brand-kinescript.jpg" width="440" alt="The same scene in the Kinescript brand: coral and green charts on near-black"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/drknowhow/kinescript/main/site/demos/brand-tidewater.jpg" width="440" alt="The brand demo in the made-up Tidewater brand's light palette: teal and coral bar and pie charts on cream"> <img src="https://raw.githubusercontent.com/drknowhow/kinescript/main/site/demos/brand-tidewater-dark.jpg" width="440" alt="The same scene in the brand's dark palette: light teal and coral charts on deep teal"></p>
 
 A brand is a folder with a `brand.json` and its logo, font and sound files. It holds palettes (dark, light or any
 names), fonts, text styles, chart colours, logos and where they go, a logo bug, motion defaults, component styles, an
@@ -311,8 +311,8 @@ The built-ins draw in the brand, `$accent`, `$text` and the other palette names 
 `"textStyle"` gives a text layer the brand's font, size, weight and tracking. The theme resolves as built-in defaults,
 then the brand, then the scene's `theme`, and a part the brand lists in `lock` cannot be changed by a scene.
 `kine check` reports text and chart colours below the contrast they need, logos drawn under their minimum size, and
-locked parts a scene changes. The two pictures above are the same scene file with a different `"brand"` line
-(`site/demos/brand-*.json`).
+locked parts a scene changes. The two pictures above are the same scene file in the brand's light and dark
+palettes; only its `"variant"` line differs (`site/demos/brand-tidewater*.json`).
 
 Brands live in a library, `~/.kinescript/brands` (`KINE_BRANDS` moves it):
 
