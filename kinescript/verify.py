@@ -415,6 +415,45 @@ def probe(src, at: float | None = None) -> dict:
     return out
 
 
+def mouth(src, sid: str) -> dict:
+    """The mouth track of sound `sid`: from its words file (and the phones the backend gave) when there is one,
+    else from its loudness, with whether the file kine voice wrote beside the words is up to date."""
+    from . import audio as A
+    from . import mouth as M
+    from . import voice as V
+    from . import words as W
+    spec, base = V._spec(src, None)
+    sounds = {str(a.get("id") or f"audio{i + 1}"): a for i, a in enumerate(spec.get("audio") or []) if isinstance(a, dict)}
+    if sid not in sounds:
+        raise ValueError(f"no sound has id {sid}; sounds: {', '.join(sounds) or 'none'}")
+    a = sounds[sid]
+    if isinstance(a.get("text"), str):
+        sound, words_file = V.paths(sid, a, base)
+    else:
+        sound = Path(str(a.get("src", "")))
+        sound = sound if sound.is_absolute() else base / sound
+        w = a.get("words")
+        words_file = (base / w if not Path(w).is_absolute() else Path(w)) if isinstance(w, str) else W.default_path(str(sound))
+    out = {"ok": True, "id": sid}
+    if isinstance(a.get("words"), list):
+        got = M.track(W.read(a["words"]))
+    elif words_file.exists():
+        got = M.track(*M.stored(words_file))
+        out["file"] = str(M.path_for(words_file))
+        out["fresh"] = M.fresh(words_file)
+    elif sound.exists():
+        got = M.levels(A.analyze(str(sound))["rms"], A._WIN)
+        out["note"] = "no word times: the mouth opens with the loudness and cannot tell one sound from another"
+    else:
+        raise ValueError(f"'{sid}' has no words and no sound file yet; run kine voice" if a.get("text") else
+                         f"'{sid}' has no sound file at {sound}")
+    counts = {s: sum(1 for x in got["mouth"] if x[0] == s) for s in M.SHAPES}
+    out.update(source=got["source"], shapes={s: n for s, n in counts.items() if n}, mouth=got["mouth"])
+    if got["unknown"]:
+        out["unknown"] = got["unknown"]
+    return out
+
+
 def _drawn_at(L, T: float) -> float | None:
     """The scene time layer L is drawn at when the scene is at T, through the clocks of the groups it is in, as the
     renderer finds it; None where it or a group it is in is not shown then."""

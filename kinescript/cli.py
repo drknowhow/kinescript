@@ -124,6 +124,8 @@ def main(argv=None) -> int:
     when.add_argument("--at", type=float)
     when.add_argument("--curve", metavar="ID.KEY", help="a layer's key at every frame and how fast it changes, where "
                       "it holds still and its fastest frame, such as title.x")
+    when.add_argument("--mouth", metavar="SOUND", help="a voice's mouth track: which mouth shape shows when, and where "
+                      "its timing came from")
 
     v = sub.add_parser("voice", help="speak each sound's text into its file and time its words (only the ones "
                                      "whose text changed, unless --force)")
@@ -297,6 +299,10 @@ def _run(a) -> int:
         from .verify import probe, probe_media
         if Path(a.scene).suffix.lower() != ".json" and Path(a.scene).exists():
             _emit(probe_media(a.scene))
+            return 0
+        if a.mouth:
+            from .verify import mouth
+            _emit(mouth(a.scene, a.mouth))
             return 0
         if a.curve:
             from .verify import curve
