@@ -676,14 +676,14 @@ def _entries(p, kind: str, names: dict | None) -> list[dict]:
     return got
 
 
-def _wrap(G: dict, gid: str, at: str, props: dict, only: set[str] | None = None) -> None:
+def _wrap(G: dict, gid: str, at: str | None, props: dict, only: set[str] | None = None) -> None:
     """Put G's children (or only those with ids in `only`) in a group that starts at `at` and carries props, so its
     keys add to the part's own: a group at (0, 0) moves, turns and scales what it holds about the part's pivot."""
     kids = G.get("children") or []
     inner = [c for c in kids if only is None or c.get("id") in only]
     if not inner:
         return
-    W = {"id": gid, "type": "group", "at": at, **props, "children": inner}
+    W = {"id": gid, "type": "group", **({"at": at} if at is not None else {}), **props, "children": inner}
     first = kids.index(inner[0])
     G["children"] = [c for c in kids[:first] if c not in inner] + [W] + [c for c in kids[first:] if c not in inner]
 
@@ -770,6 +770,8 @@ def _mouth(av: Avatar, mouth: dict, says: list, exprs: list, lid: str, fills: di
     shape wherever the mouth would be at rest while it lasts (speech owns the mouth; the latest such expression wins).
     Every keyed layer starts early and holds its first key (see PRE), as cues cannot be read inside keys."""
     part, rig, rest = av.mouth, f"{lid}-rig", av.shape("X")
+    if part is None:
+        return
     biased = [(i, e, av.shape(av.spec["expressions"][e["name"]]["mouth"])) for i, e in enumerate(exprs)
               if "mouth" in av.spec["expressions"][e["name"]] and (e.get("weight", 1) or 0) > 0]
     biased = [b for b in biased if b[2] != rest]
@@ -812,6 +814,95 @@ def _mouth(av: Avatar, mouth: dict, says: list, exprs: list, lid: str, fills: di
     mouth["children"] = kids
 
 
+IDLE_VERSION = 1  # change it when the event table changes, as it changes every video's blinks
+IDLE = {"blink": [2.5, 5.0], "breath": 0.012, "saccade": [0.8, 2.5]}
+BLINK = 0.12  # seconds the eyes are closed in a blink
+QUIET = 0.15  # seconds either side of a gesture's peak, and after a line starts, that no blink lands in
+HORIZON = 600.0  # seconds of idle events when the scene's duration is not a number
+
+
+def _idle(av: Avatar, p) -> dict:
+    """The idle channels that are on: the avatar's idle, then the layer's, over the defaults; false turns off."""
+    mine = p.get("idle")
+    if not (mine is None or mine is False or isinstance(mine, dict) and set(mine) <= set(IDLE)):
+        raise ValueError(f"layer '{p['id']}': idle is false, or an object of blink, breath and saccade such as "
+                         '{"blink": false}')
+    out: dict = dict(IDLE)
+    for src in (av.spec.get("idle", {}), mine or {} if mine is not False else False):
+        if src is False:
+            out = {k: False for k in out}
+        elif isinstance(src, dict):
+            out.update(src)
+    return {**out, "seed": p.get("seed", 0)}
+
+
+def _rng(lid: str, seed, channel: str):
+    import random
+    return random.Random(f"kinescript-idle-{IDLE_VERSION}:{lid}:{seed}:{channel}")
+
+
+def _horizon(scene) -> float:
+    d = (scene.spec.get("canvas") or {}).get("duration")
+    return float(d) + 1 if _num(d) else HORIZON
+
+
+def _art(G: dict, av: Avatar, rig: str) -> set[str]:
+    """The ids of a part group's own drawings (or what wraps them): its children that are not other parts."""
+    parts = {f"{rig}-{n}" for n in av.parts}
+    return {str(c.get("id")) for c in G.get("children") or [] if c.get("id") not in parts}
+
+
+def _blinks(G: dict, eye: Part, av: Avatar, lid: str, says: list, gests: list, idle: dict, scene) -> None:
+    """Blinks at seeded times between idle.blink's shortest and longest gap (now and then twice), as opacity keys
+    that swap the open and closed drawings. No blink shows near a gesture's peak or as a line starts: there an
+    open copy shows instead, in groups timed by those cues (cues cannot be read inside keys)."""
+    lo, hi = idle["blink"]
+    rng, end, keys = _rng(lid, idle["seed"], "blink"), _horizon(scene), [[0, 0, "hold"]]
+    t = rng.uniform(lo / 2, hi)
+    while t < end:
+        for b in ([t, t + BLINK + 0.1] if rng.random() < 0.12 else [t]):
+            keys += [[round(b, 4), 1, "hold"], [round(b + BLINK, 4), 0, "hold"]]
+        t += BLINK + rng.uniform(lo, hi)
+    rig = f"{lid}-rig"
+    by = {c.get("id"): c for c in G["children"]}
+    shut, wide = by.get(f"{rig}-{eye.name}-closed"), by.get(f"{rig}-{eye.name}-open")
+    if shut is None or wide is None:
+        return
+    start = f"{lid}.in"  # keys count from the avatar's start, whatever early group may come to hold them
+    shut.update(opacity=keys, at=start)
+    wide.update(opacity=[[a, 1 - v, e] for a, v, e in keys], at=start)
+    quiet = [(f"{sid}.in", 0.0, QUIET) for sid in says]
+    quiet += [(g.get("at", 0), peak(av.spec["gestures"][g["name"]]) - QUIET, peak(av.spec["gestures"][g["name"]]) + QUIET)
+              for g in gests]
+    slot = [shut]
+    for i, (at, a, b) in enumerate(quiet):
+        on = [[0, 0, "hold"], [round(PRE + a - BLINK, 4), 1, "hold"], [round(PRE + b, 4), 0, "hold"]]
+        cue = _early(at, lid, scene.fps)
+        copy_ = {**wide, "id": f"{wide['id']}-quiet{i + 1}", "opacity": keys}
+        slot = [{"id": f"{lid}-blink{i + 1}-{eye.name}", "type": "group", "at": cue,
+                 "opacity": [[x, 1 - v, e] for x, v, e in on], "children": slot},
+                {"id": f"{lid}-quiet{i + 1}-{eye.name}", "type": "group", "at": cue, "opacity": on,
+                 "children": [copy_]}]
+    if len(slot) > 1:
+        at = G["children"].index(shut)
+        G["children"] = G["children"][:at] + slot + G["children"][at + 1:]
+
+
+def _glances(eye: Part, idle: dict, lid: str, scene) -> dict:
+    """Small seeded glances of the eyes and back, between idle.saccade's shortest and longest gap."""
+    lo, hi = idle["saccade"]
+    rng, end = _rng(lid, idle["seed"], "saccade"), _horizon(scene)
+    xs, ys, t = [[0, 0.0]], [[0, 0.0]], rng.uniform(lo, hi)
+    while t < end:
+        a, r = rng.uniform(0, math.tau), rng.uniform(0.15, 0.35)
+        hold = rng.uniform(0.25, 0.7)
+        for ks, v in ((xs, math.cos(a) * r * eye.look[0]), (ys, math.sin(a) * r * eye.look[1])):
+            ks += [[round(t, 4), ks[-1][1]], [round(t + 0.05, 4), round(v, 3)], [round(t + 0.05 + hold, 4), round(v, 3)],
+                   [round(t + 0.1 + hold, 4), 0.0]]
+        t += 0.1 + hold + rng.uniform(lo, hi)
+    return {"x": xs, "y": ys}
+
+
 def component(p, theme: dict, scene) -> dict:
     """{"use": "avatar", "avatar": FOLDER, "x", "y", "h" or "w", "say", "expressions", "gaze", "gestures"}: the
     avatar as plain layers, centred on x, y at h pixels tall (its own size without h or w), its mouth following the
@@ -838,6 +929,11 @@ def component(p, theme: dict, scene) -> dict:
     if gazes and not eyes:
         raise ValueError(f"layer '{lid}': gaze moves the eyes by their look reach, and no part of the avatar has "
                          "look; give the eyes part \"look\": [x, y] in its avatar.json")
+    idle = _idle(av, p)
+    for e in av.eyes if idle["blink"] else []:
+        G = _find(body, f"{rig}-{e.name}")
+        if G is not None:
+            _blinks(G, e, av, lid, says, gests, idle, scene)
     was = (0.0, 0.0)
     for i, g in enumerate(gazes):  # each gaze moves the eyes on from the one before, so the moves add up
         try:
@@ -852,8 +948,7 @@ def component(p, theme: dict, scene) -> dict:
             if G is None or (dx, dy) == (0, 0):
                 continue
             props = {a: [[0, 0], [PRE, 0], [PRE + MOVE, round(d, 4)]] for a, d in (("x", dx), ("y", dy)) if d}
-            _wrap(G, f"{lid}-gaze{i + 1}-{e.name}", at, props, {f"{rig}-{e.name}-{s}" for s in e.files} |
-                  {f"{lid}-gaze{j}-{e.name}" for j in range(1, i + 1)})
+            _wrap(G, f"{lid}-gaze{i + 1}-{e.name}", at, props, _art(G, av, rig))
         was = (gx, gy)
 
     for i, e in enumerate(exprs):
@@ -887,5 +982,17 @@ def component(p, theme: dict, scene) -> dict:
             if spans is not None:
                 spans.append({"layer": lid, "name": g["name"], "part": pname, "id": gid, "dur": float(pose["dur"])})
 
+    if idle["saccade"] and not gazes:  # an explicit gaze overrides the idle one
+        for e in eyes:
+            G = _find(body, f"{rig}-{e.name}")
+            if G is not None:
+                _wrap(G, f"{lid}-glance-{e.name}", f"{lid}.in", _glances(e, idle, lid, scene), _art(G, av, rig))
+    if idle["breath"]:
+        period = 4.0  # seconds a breath takes
+        for name, q in av.parts.items():
+            G = _find(body, f"{rig}-{name}") if q.parent is None else None
+            if G is not None:
+                _wrap(G, f"{lid}-breath-{name}", f"{lid}.in",
+                      {"scale": f"=1+{idle['breath']:g}*(0.5-0.5*cos(tau*t/{period:g}))"})
     body.update(x=-w * k / 2, y=-h * k / 2, scale=k)
     return {"type": "group", "x": p.get("x", "50%"), "y": p.get("y", "50%"), "children": [body]}

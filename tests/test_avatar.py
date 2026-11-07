@@ -287,7 +287,7 @@ def test_each_line_of_a_say_list_moves_the_mouth_in_turn(tmp_path):
 def _moving(tmp_path, **over):
     make(tmp_path / "host", gestures={"nod": {"dur": 0.5, "head": {"rotate": [[0, 0], [0.2, 6], [0.5, 0]]}},
                                       "tilt": {"dur": 1.0, "head": {"rotate": [[0, 0], [0.5, -8], [1.0, 0]]}}})
-    host = {"id": "host", "use": "avatar", "avatar": "host", "h": 150, "at": 0.5, **over}
+    host = {"id": "host", "use": "avatar", "avatar": "host", "h": 150, "at": 0.5, "idle": False, **over}
     return {"canvas": {"w": 320, "h": 180, "fps": 30, "duration": 4}, "layers": [host]}
 
 
@@ -434,3 +434,85 @@ def test_a_gaze_target_mistake_has_its_own_code(tmp_path):
     with pytest.raises(k.SceneError) as e:
         k.Scene(_moving(tmp_path, gaze=[{"at": 0, "target": "#nobody"}]), tmp_path)
     assert [i["code"] for i in e.value.issues if i["level"] == "error"] == ["avatar-gaze-target"]
+
+
+def _living(tmp_path, dur=12, **over):
+    spec = _moving(tmp_path, at=0, **over)
+    spec["layers"][0].pop("idle") if "idle" not in over else None
+    spec["canvas"]["duration"] = dur
+    return spec
+
+
+def _blink_times(spec, base):
+    import kinescript as k
+    keys = k.Scene(spec, base).by_id["host-rig-eyes-closed"].raw["opacity"]
+    return [t for t, v, _ in keys if v == 1]
+
+
+def test_the_avatar_blinks_at_seeded_times_within_its_gaps(tmp_path):
+    spec = _living(tmp_path)
+    times = _blink_times(spec, tmp_path)
+    assert 2 <= len(times) <= 8 and times == _blink_times(spec, tmp_path)
+    assert all(b - a >= 2.5 or b - a < 0.3 for a, b in zip(times, times[1:]))  # a gap, or a double blink
+    assert _blink_times(_living(tmp_path, seed=7), tmp_path) != times
+    b = times[0]
+    assert _at(spec, tmp_path, b + 0.05, "host-rig-eyes-closed") and not _at(spec, tmp_path, b + 0.05, "host-rig-eyes-open")
+    assert _at(spec, tmp_path, b + 0.2, "host-rig-eyes-open")
+
+
+def test_no_blink_shows_as_a_line_starts_or_at_a_gesture_peak(tmp_path):
+    b = _blink_times(_living(tmp_path), tmp_path)[0]
+    _wav(tmp_path / "vo.wav", 1.0)
+    spec = _living(tmp_path, say="vo", gestures=[{"name": "nod", "at": round(b - 0.2, 3)}])  # its peak at b
+    spec["audio"] = [{"id": "vo", "src": "vo.wav", "at": round(b - 0.05, 3), "words": []}]
+    assert _blink_times(spec, tmp_path)[0] == b  # the same blink, kept from showing
+    assert not _at(spec, tmp_path, b + 0.05, "host-rig-eyes-closed")
+    assert _at(spec, tmp_path, b + 0.05, "host-rig-eyes-open-quiet1") or _at(spec, tmp_path, b + 0.05,
+                                                                             "host-rig-eyes-open-quiet2")
+
+
+def test_breath_swells_the_body_and_idle_false_keeps_it_still(tmp_path):
+    y = lambda spec, t: _at(spec, tmp_path, t, "host-rig-head-art")["rect"][1]
+    spec = _living(tmp_path, gaze=[{"at": 0, "target": "camera"}])
+    assert y(spec, 2.0) < y(spec, 0.0)  # half a breath in, the head is higher
+    still = _living(tmp_path, idle={"breath": False})
+    assert y(still, 2.0) == y(still, 0.0)
+
+
+def test_eyes_glance_when_idle_and_explicit_gaze_stops_it(tmp_path):
+    import kinescript as k
+    assert "host-glance-eyes" in k.Scene(_living(tmp_path), tmp_path).by_id
+    assert "host-glance-eyes" not in k.Scene(_living(tmp_path, gaze=[{"at": 0, "target": "left"}]), tmp_path).by_id
+    spec = _living(tmp_path)
+    make(tmp_path / "host", idle=False)
+    s = k.Scene(spec, tmp_path)
+    assert "host-glance-eyes" not in s.by_id and "host-breath-body" not in s.by_id
+    assert not isinstance(s.by_id["host-rig-eyes-closed"].raw.get("opacity"), list)
+
+
+def test_a_wrong_idle_on_the_layer_is_named(tmp_path):
+    import kinescript as k
+    with pytest.raises(Exception, match="idle is false, or an object of blink, breath and saccade"):
+        k.Scene(_living(tmp_path, idle={"yawn": True}), tmp_path)
+
+
+def test_a_living_avatar_renders_the_same_frames_in_any_order_and_any_chunk(tmp_path):
+    import numpy as np
+    import kinescript as k
+    from kinescript.render import Renderer
+    spec = _living(tmp_path, dur=6)
+    frames = [n * 6 for n in range(30)]
+    sequential = Renderer(k.Scene(spec, tmp_path), backend="cpu")
+    want = {n: sequential.frame(n).copy() for n in frames}
+    assert any(not np.array_equal(want[0], v) for v in want.values())
+    for chunk in (frames[15:][::-1], frames[:15][::3]):  # fresh renderers, as parallel chunks start
+        r = Renderer(k.Scene(spec, tmp_path), backend="cpu")
+        for n in chunk:
+            assert np.array_equal(r.frame(n), want[n])
+
+
+def test_blinks_keep_their_times_inside_an_expression_on_the_head(tmp_path):
+    spec = _living(tmp_path, expressions=[{"name": "smile", "at": 0}])
+    b = _blink_times(spec, tmp_path)[0]
+    assert _at(spec, tmp_path, b + 0.05, "host-rig-eyes-closed")
+    assert not _at(spec, tmp_path, b - 0.3, "host-rig-eyes-closed")
