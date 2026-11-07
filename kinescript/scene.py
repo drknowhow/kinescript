@@ -244,6 +244,7 @@ class Scene:
         self.motion_blur = spec.get("motionBlur") or {}
         self._sounding: list[Layer] = []
         self.logos: dict[str, float] = {}  # logo layer id -> the brand's clear space, as a share of its box
+        self.gestures: list[dict] = []  # each avatar gesture on each part it moves: layer, name, part, id, dur
         raw_layers = _subst(copy.deepcopy(spec.get("layers", [])), theme)
         self.bg = _subst(self.bg, theme)
         self._components = user_comps = _subst(copy.deepcopy(spec.get("components", {})), theme)
@@ -293,6 +294,7 @@ class Scene:
         self.frames = max(1, math.floor(self.duration * self.fps + 0.5 + 1e-6))  # half a frame up: 2.45 s and 2.55 s
         self.poster, self.poster_frame = self._poster(cv.get("poster"))
         self._check_spans()
+        self._check_gestures()
         self._check_values()
         self._check_sequences()
         self._check_colours()
@@ -630,6 +632,21 @@ class Scene:
                       "draw itself", "move the model out of that group, or name another group")
         else:
             self.surfaces.add(gid)
+
+    def _check_gestures(self):
+        """Two gestures of one avatar that move the same part at the same time: an error, not a blend."""
+        from .avatar import PRE
+        seen: dict[tuple[str, str], list[tuple[float, float, str]]] = {}
+        for g in self.gestures:
+            t0 = self.by_id[g["id"]].t_in + PRE
+            t1, name = t0 + g["dur"], g["name"]
+            for a0, a1, other in seen.get((g["layer"], g["part"]), []):
+                if t0 < a1 - 1e-6 and a0 < t1 - 1e-6:
+                    self.note("error", "avatar-gesture-overlap", g["layer"],
+                              f"gestures '{other}' ({a0:.2f}s to {a1:.2f}s) and '{name}' ({t0:.2f}s to {t1:.2f}s) "
+                              f"both move '{g['part']}' at once",
+                              "start one after the other ends; gestures that move one part do not blend")
+            seen.setdefault((g["layer"], g["part"]), []).append((t0, t1, name))
 
     def _check_spans(self):
         """Warn about a layer that is never on screen because its time falls wholly outside the scene (or its group),

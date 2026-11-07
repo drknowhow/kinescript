@@ -282,3 +282,116 @@ def test_each_line_of_a_say_list_moves_the_mouth_in_turn(tmp_path):
     assert _mouth_at(spec, tmp_path, 2.0) == ["X"]  # between the lines
     assert _mouth_at(spec, tmp_path, 2.72) == ["A"]  # the F of "fa" shows its fallback, A
     assert _mouth_at(spec, tmp_path, 2.9) == ["C"]
+
+
+def _moving(tmp_path, **over):
+    make(tmp_path / "host", gestures={"nod": {"dur": 0.5, "head": {"rotate": [[0, 0], [0.2, 6], [0.5, 0]]}},
+                                      "tilt": {"dur": 1.0, "head": {"rotate": [[0, 0], [0.5, -8], [1.0, 0]]}}})
+    host = {"id": "host", "use": "avatar", "avatar": "host", "h": 150, "at": 0.5, **over}
+    return {"canvas": {"w": 320, "h": 180, "fps": 30, "duration": 4}, "layers": [host]}
+
+
+def _at(spec, base, t, lid):
+    from kinescript.verify import probe
+    f = base / "s.json"
+    f.write_text(json.dumps(spec))
+    return probe(str(f), t)["visible"].get(lid)
+
+
+def _turn(spec, base, t):
+    """How far the head's art is turned at t, from the width of its box (a turned box is wider)."""
+    r = _at(spec, base, t, "host-rig-head-art")["rect"]
+    return round(r[2] - r[0], 1)
+
+
+def test_an_expression_comes_on_at_its_time_and_goes_after_its_dur(tmp_path):
+    spec = _moving(tmp_path, expressions=[{"name": "smile", "at": 1, "dur": 1}])
+    still = _turn(spec, tmp_path, 1.2)
+    assert _turn(spec, tmp_path, 1.45) == still  # it starts 1 s after the avatar, at 1.5
+    assert _turn(spec, tmp_path, 2.0) > still
+    assert _turn(spec, tmp_path, 2.6) == still
+    assert _mouth_at(spec, tmp_path, 2.0) == ["C"]  # the smile's mouth, while nothing is said
+    assert _mouth_at(spec, tmp_path, 2.6) == ["X"]
+
+
+def test_half_an_expression_turns_half_as_far(tmp_path):
+    full = _moving(tmp_path, expressions=[{"name": "smile", "at": 0}])
+    half = _moving(tmp_path, expressions=[{"name": "smile", "at": 0, "weight": 0.5}])
+    still = _turn(_moving(tmp_path), tmp_path, 2)
+    a, b = _turn(full, tmp_path, 2) - still, _turn(half, tmp_path, 2) - still
+    assert a > 0 and b == pytest.approx(a / 2, abs=0.3)
+
+
+def test_speech_owns_the_mouth_while_an_expression_shows_its_mouth_at_rest(tmp_path):
+    _wav(tmp_path / "vo.wav")
+    words = [{"word": "Make", "start": 0.5, "end": 0.85}, {"word": "move", "start": 1.5, "end": 1.9}]
+    spec = _moving(tmp_path, say="vo", expressions=[{"name": "smile", "at": "vo.in", "dur": 3}])
+    spec["audio"] = [{"id": "vo", "src": "vo.wav", "at": 1.0, "words": words}]
+    assert _mouth_at(spec, tmp_path, 0.8) == ["X"]
+    assert _mouth_at(spec, tmp_path, 1.2) == ["C"]  # the smile, before the first word
+    assert _mouth_at(spec, tmp_path, 1.52) == ["A"]  # the M of "Make": speech wins
+    assert _mouth_at(spec, tmp_path, 2.2) == ["C"]  # the pause between words rests on the smile
+
+
+def test_a_gesture_plays_its_keys_from_its_cue(tmp_path):
+    spec = _moving(tmp_path, gestures=[{"name": "nod", "at": "host.in+2"}])
+    still = _turn(spec, tmp_path, 2.4)
+    assert _turn(spec, tmp_path, 2.7) > still  # its peak, 0.2 s into it
+    assert _turn(spec, tmp_path, 3.1) == still
+
+
+def test_two_gestures_on_one_part_at_once_are_an_error(tmp_path):
+    import kinescript as k
+    spec = _moving(tmp_path, gestures=[{"name": "tilt", "at": 1}, {"name": "nod", "at": 1.5}])
+    with pytest.raises(Exception, match=r"gestures 'tilt' \(1.50s to 2.50s\) and 'nod' .* both move 'head'"):
+        k.Scene(spec, tmp_path)
+    spec = _moving(tmp_path, gestures=[{"name": "tilt", "at": 1}, {"name": "nod", "at": 2}])
+    k.Scene(spec, tmp_path)  # one after the other
+
+
+def test_gaze_moves_the_eyes_by_their_reach_and_back(tmp_path):
+    spec = _moving(tmp_path, gaze=[{"at": 0.5, "target": "right"}, {"at": 2.5, "target": "camera"}])
+    x = lambda t: _at(spec, tmp_path, t, "host-rig-eyes-open-1")["pos"][0]
+    ahead = x(0.9)
+    assert x(1.3) == pytest.approx(ahead + 6 * 0.5)  # look reach 6, at half size
+    assert x(3.3) == pytest.approx(ahead)
+
+
+def test_gaze_at_a_layer_looks_its_way(tmp_path):
+    spec = _moving(tmp_path, x=100, gaze=[{"at": 0, "target": "#chart"}])
+    spec["layers"].append({"id": "chart", "type": "rect", "x": 300, "y": 20, "w": 10, "h": 10})
+    from kinescript import avatar as A2
+    import kinescript as k
+    gx, gy = A2._gaze("#chart", spec["layers"][0], A.load(tmp_path / "host"), 0.5, k.Scene(spec, tmp_path), "")
+    assert gx > 0.9 and gy < 0  # right and up: the head's pivot is at y 95, the chart at 20
+    x = _at(spec, tmp_path, 1.0, "host-rig-eyes-open-1")["pos"][0]
+    assert x == pytest.approx(_at(_moving(tmp_path, x=100), tmp_path, 1.0, "host-rig-eyes-open-1")["pos"][0] + 3 * gx, abs=0.1)
+
+
+@pytest.mark.parametrize("over, message", [
+    ({"gestures": [{"name": "wave", "at": 1}]}, "names gesture 'wave', which the avatar does not have. Its gestures: "
+                                                "nod, tilt"),
+    ({"expressions": [{"name": "smile", "when": 1}]}, r"expressions\[0\] takes at, dur, name, weight; not when"),
+    ({"expressions": [{"name": "smile", "dur": 0}]}, "dur is 0; it takes a number above 0"),
+    ({"gaze": [{"at": 0, "target": "sky"}]}, "target is 'sky'"),
+    ({"gaze": [{"at": 0, "target": "#nobody"}]}, "no layer at the top of the scene has id 'nobody'"),
+    ({"gestures": "nod"}, r"gestures\[0\] must be an object"),
+])
+def test_motion_mistakes_are_named(tmp_path, over, message):
+    import kinescript as k
+    with pytest.raises(Exception, match=message):
+        k.Scene(_moving(tmp_path, **over), tmp_path)
+
+
+def test_a_moving_avatar_renders_the_same_frames_in_any_order(tmp_path):
+    import numpy as np
+    import kinescript as k
+    from kinescript.render import Renderer
+    spec = _moving(tmp_path, at=0, expressions=[{"name": "smile", "at": 0.2, "dur": 0.4}],
+                   gaze=[{"at": 0.1, "target": "left"}], gestures=[{"name": "nod", "at": 0.3}])
+    r = Renderer(k.Scene(spec, tmp_path), backend="cpu")
+    sequential = [r.frame(n).copy() for n in range(0, 30)]
+    assert not np.array_equal(sequential[0], sequential[12])
+    shuffled = Renderer(k.Scene(spec, tmp_path), backend="cpu")
+    for n in (23, 4, 17, 9, 12):
+        assert np.array_equal(shuffled.frame(n), sequential[n])
