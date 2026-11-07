@@ -75,6 +75,8 @@ def main(argv=None) -> int:
     ck = sub.add_parser("check", help="lint layout, timing, contrast, reading time and sound; prints JSON")
     ck.add_argument("scene")
     ck.add_argument("--step", type=float, default=0.25)
+    ck.add_argument("--brand-strict", action="store_true", help="also report colours and fonts the scene's brand "
+                    "does not have, and text outside the brand's safe area")
 
     pr = sub.add_parser("probe", help="resolved timeline and layer boxes at --at; or, for a media file, "
                                       "its duration, size, fps and audio")
@@ -219,7 +221,7 @@ def _run(a) -> int:
         return 0
     if a.cmd == "check":
         from .verify import check
-        res = check(a.scene, a.step)
+        res = check(a.scene, a.step, brand_strict=a.brand_strict)
         _emit(res)
         return OK if res["ok"] else ISSUES
     if a.cmd == "probe":
