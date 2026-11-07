@@ -27,6 +27,34 @@ def _emit(obj):
     sys.stdout.write(json.dumps(obj, indent=2, ensure_ascii=False) + "\n")
 
 
+def _brand_args(a) -> dict:
+    """kine brand's arguments as the dict brandops.run and kine_brand take."""
+    act, rest = a.action, a.rest
+    out = {"brand": a.brand, "project": a.project, "force": a.force, "base_rev": a.rev, "variant": a.variant}
+    if act == "init":
+        out.update(id=a.brand, dir=a.dir, **{"from": a.source})
+    elif act == "set":
+        if len(rest) != 2:
+            raise ValueError("kine brand set BRAND PATH VALUE, such as: kine brand set acme palettes.dark.accent "
+                             "'\"#ff633f\"'")
+        try:
+            value = json.loads(rest[1])
+        except json.JSONDecodeError:
+            value = rest[1]  # plain text, such as a colour without JSON quotes
+        out.update(path=rest[0], value=value)
+    elif act == "add-file":
+        if len(rest) != 1:
+            raise ValueError("kine brand add-file BRAND FILE --kind fonts|logos")
+        out.update(file=rest[0], kind=a.kind, name=a.name, replace=a.replace)
+    elif act == "remove-file":
+        if len(rest) != 1:
+            raise ValueError("kine brand remove-file BRAND fonts/NAME")
+        out["file"] = rest[0]
+    elif act == "preview":
+        out["out"] = a.out or f"{Path(str(a.brand)).name}_preview.png"
+    return out
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="kine", description="Kinescript: motion graphics and video edits as data.")
     ap.add_argument("--version", action="version", version=f"kinescript {__version__}")
@@ -106,6 +134,23 @@ def main(argv=None) -> int:
     ed.add_argument("--port", type=int, default=8765, help="0 picks a free port")
     ed.add_argument("--no-open", action="store_true", help="do not open the browser")
 
+    br = sub.add_parser("brand", help="make, show, change and use brands (see BRANDS in kine docs)")
+    br.add_argument("action", choices=[x.replace("_", "-") for x in ("list", "show", "init", "use", "set",
+                                                                     "add_file", "remove_file", "check", "preview")])
+    br.add_argument("brand", nargs="?", help="a library brand id or a brand folder (for init: the new id)")
+    br.add_argument("rest", nargs="*", help="set: PATH VALUE (VALUE is JSON, or text); add-file: FILE; "
+                                           "remove-file: fonts/NAME or logos/NAME")
+    br.add_argument("--project", default=".", help="use: the folder that gets brand/ [.]")
+    br.add_argument("--from", dest="source", help="init: copy this brand instead of the default")
+    br.add_argument("--dir", help="init: make it in this folder instead of the library")
+    br.add_argument("--kind", choices=("fonts", "logos"), help="add-file: where it goes")
+    br.add_argument("--name", help="add-file: the file name in the brand [the file's own]")
+    br.add_argument("--rev", help="refuse the change if the brand's rev is no longer this")
+    br.add_argument("--force", action="store_true", help="use: replace a copy edited in the project")
+    br.add_argument("--replace", action="store_true", help="add-file: overwrite a file of the same name")
+    br.add_argument("--variant", help="preview: the palette to show")
+    br.add_argument("-o", "--out", help="preview: the image to write [<brand>_preview.png]")
+
     sub.add_parser("mcp", help="run the MCP server on stdio")
     sub.add_parser("doctor", help="report ffmpeg, GPU and font availability")
 
@@ -175,6 +220,11 @@ def _run(a) -> int:
         from .editor import serve
         serve(a.scene, a.port, not a.no_open)
         return 0
+    if a.cmd == "brand":
+        from .brandops import run
+        out = {"ok": True, **run(a.action.replace("-", "_"), _brand_args(a))}
+        _emit(out)
+        return OK if out["ok"] else ISSUES
     if a.cmd == "mcp":
         from .mcp import serve
         serve()

@@ -703,6 +703,12 @@ BRANDS
   lock        parts a scene's theme may not change, such as ["palettes", "fonts"]; check reports
               "brand-locked" for a theme key that would.
   A brand's paths stay inside its folder: an absolute path or one with .. out of it is an error.
+  The library: brands live in ~/.kinescript/brands/<id> (KINE_BRANDS moves it). kine brand init acme
+  makes one from the default Kinescript brand; kine brand use acme copies it into the project's
+  brand/ and records what it copied, so a scene keeps the brand it was made with until you run use
+  again (use refuses to replace a copy edited in the project, unless --force). Change a brand with
+  kine brand set and add-file (or kine_brand); each write checks the brand and refuses a change
+  that breaks it, and --rev (base_rev) refuses it when the brand changed since you read it.
 
 COMPONENTS  {"use": "<name>", "id": "...", "at": ..., "dur": ..., ...parameters}
   Built in (parameters):
@@ -920,6 +926,11 @@ COMMANDS
                                   Rendering never speaks.
   kine watch scene.json           re-makes the contact sheet on every save
   kine edit scene.json            browser page: scrub, pin notes on frames; an agent reads them with kine_feedback
+  kine brand list|show|init|use|set|add-file|remove-file|check|preview [BRAND] ...
+                                  the brand library (see BRANDS); BRAND is an id or a folder.
+                                  set BRAND PATH VALUE (VALUE is JSON: '"#ff633f"', null removes);
+                                  add-file BRAND FILE --kind fonts|logos; remove-file BRAND logos/x.svg;
+                                  use BRAND [--project .] [--force]; preview BRAND [-o p.png] [--variant]
   kine doctor                     checks ffmpeg and ffprobe, the GPU and fonts; exits 1 when
                                   ffmpeg or ffprobe is missing, and says how to install it
   kine mcp                        the same tools for MCP clients
