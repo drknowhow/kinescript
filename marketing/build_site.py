@@ -62,7 +62,10 @@ DEMO = {
     "motions": ("examples/motions.json", 5.0, 0.5),
     "transitions": ("examples/transitions.json", 2.2, 0.5),
     "charts": ("examples/charts.json", 4.5, 0.5),
+    "brand-tidewater": ("site/demos/brand-tidewater.json", 5.5, 0.5),
+    "brand-kinescript": ("site/demos/brand-kinescript.json", 5.5, 0.5),
 }
+BRANDS = ("site/demos/brand-tidewater.json", "site/demos/brand-kinescript.json")  # the same scene but its brand line
 HERO = ("marketing/hero.json", 3.6, 2 / 3)
 LOOK = "card-flip"          # the contact sheet shown in the agent section
 LISTEN = "voice"            # the contact sheet with the sound under it, in the sound section
@@ -197,9 +200,9 @@ def json_block(path: Path) -> str:
     return "".join(f'<span class="ln">{highlight(l, state) or " "}</span>' for l in lines)
 
 
-def diff_block(before: str, after: str) -> str:
+def diff_block(before: str, after: str, context: int = 100) -> str:
     rows, state = [], {}
-    for line in difflib.unified_diff(before.rstrip("\n").split("\n"), after.rstrip("\n").split("\n"), n=100,
+    for line in difflib.unified_diff(before.rstrip("\n").split("\n"), after.rstrip("\n").split("\n"), n=context,
                                      lineterm=""):
         if line.startswith(("---", "+++", "@@")):
             continue
@@ -275,6 +278,12 @@ def fragments() -> dict:
     axis = max(sb["canvas"]["duration"], sa["canvas"]["duration"])
     out["score", "cues-before"] = score_block(sb, "Timeline before the change", axis)
     out["score", "cues-after"] = score_block(sa, "Timeline after the change", axis)
+
+    one, two = ((ROOT / b).read_text(encoding="utf-8") for b in BRANDS)
+    changed = [ln for ln in difflib.ndiff(one.splitlines(), two.splitlines()) if ln[:1] in "+-"]
+    assert len(changed) == 2 and all('"brand"' in ln for ln in changed), "the brand demos differ in more than the brand"
+    out["diff", "brands"] = diff_block(one, two, 3)
+    out["json", "brand-file"] = json_block(DEMOS / "brands" / "tidewater" / "brand.json")
 
     out["json", "problems"] = json_block(ROOT / CHECK)
     res = check(str(ROOT / CHECK))

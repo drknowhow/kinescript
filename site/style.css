@@ -136,6 +136,8 @@ section { padding: 120px 0 0; }
 .demo-grid .pane { position: relative; min-height: 340px; }
 .demo-grid .pane .code { position: absolute; inset: 41px 0 0 0; }
 .demo.tall .demo-grid { grid-template-columns: 340px minmax(0, 1fr); }
+.demo-grid.even { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.demo-grid + .demo-grid { margin-top: 22px; }
 
 /* 3D features */
 .features { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 48px; margin: 0 0 8px; }
@@ -173,7 +175,7 @@ footer img { height: 26px; width: 26px; }
 footer nav { display: flex; flex-wrap: wrap; gap: 8px 22px; }
 
 @media (max-width: 960px) {
-  .hero-text, .cols, .demo-grid, .demo.tall .demo-grid { grid-template-columns: minmax(0, 1fr); }
+  .hero-text, .cols, .demo-grid, .demo.tall .demo-grid, .demo-grid.even { grid-template-columns: minmax(0, 1fr); }
   .demo.tall .player { max-width: 340px; }
   .demo-grid .pane { min-height: 0; }
   .demo-grid .pane .code { position: static; max-height: 360px; }
