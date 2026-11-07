@@ -23,6 +23,9 @@ from . import mouth as M
 KEYS = {"src", "animation"}  # what "model" takes
 BLEND = 0.06  # seconds the mouth takes to move from one shape to the next
 CLOSE = 0.04  # seconds the lids take to close (and open) around a blink's BLINK seconds shut
+LOOK = (25.0, 12.0)  # degrees the model turns for a full gaze aside and up or down, unless "look" says
+TURN = 0.3  # seconds a turn to a new gaze takes
+GESTURE_KEYS = {"clip", "speed"}
 
 
 def is_model(spec: dict) -> bool:
@@ -64,7 +67,7 @@ def check(folder: Path, spec: dict, file) -> tuple[list[dict], Path | None, dict
         out.append(_issue("error", "avatar-model", "an avatar has parts (2D) or a model (3D), not both",
                           "drop parts, or drop model"))
     src = file(folder, mo["src"], "model.src", out, (".glb", ".gltf"))
-    names = None
+    names, imp = None, None
     if src is not None:
         try:
             imp = models.load(str(src))
@@ -74,6 +77,7 @@ def check(folder: Path, spec: dict, file) -> tuple[list[dict], Path | None, dict
                 out.append(_issue("error", "avatar-model", f"model.animation {clip!r} is not in {src.name}",
                                   "its animations: " + (", ".join(models.clip_names(imp)) or "none")))
         except (ValueError, OSError) as e:
+            imp = None
             out.append(_issue("error", "avatar-model", f"model.src: {e}"))
     mouth = spec.get("mouth")
     falls: dict = {}
@@ -104,8 +108,22 @@ def check(folder: Path, spec: dict, file) -> tuple[list[dict], Path | None, dict
                                                             '{"morphs": {"name": weight}}'))
         else:
             _weights(f"expression '{name}'.morphs", e["morphs"], names, out)
-    if spec.get("gestures"):
-        out.append(_issue("error", "avatar-gesture", "a 3D avatar does not take gestures yet", "drop gestures"))
+    gests = spec.get("gestures") or {}
+    if not isinstance(gests, dict):
+        out.append(_issue("error", "avatar-gesture", "gestures must be an object of named clips"))
+        gests = {}
+    for name, g in gests.items():
+        if not isinstance(g, dict) or not isinstance(g.get("clip"), (str, int)) or set(g) - GESTURE_KEYS:
+            out.append(_issue("error", "avatar-gesture", f"gesture '{name}' of a 3D avatar is "
+                                                         '{"clip": "Wave"}, a clip of the model, with speed'))
+        elif imp is not None and models.clip_index(imp, g["clip"]) is None:
+            out.append(_issue("error", "avatar-gesture", f"gesture '{name}': {g['clip']!r} is not a clip of "
+                              f"{src.name}", "its animations: " + (", ".join(models.clip_names(imp)) or "none")))
+    look = spec.get("look")
+    if look is not None and not (isinstance(look, list) and len(look) == 2 and all(
+            isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v <= 90 for v in look)):
+        out.append(_issue("error", "avatar-look", "look is [degrees aside, degrees up or down] the model turns for "
+                                                  "a full gaze, each 0 to 90, such as [25, 12]"))
     return out, src, falls
 
 
@@ -147,7 +165,18 @@ def still(av, lid: str, pose: dict, k: float = 1.0) -> dict:
     m.update(pose.get("morphs") or {})
     L = layer(av, f"{lid}-model", w, h, m)
     L.update(x=w / 2, y=h / 2)
+    if pose.get("clip"):
+        name, at = pose["clip"]
+        L["animation"] = {"name": name, "start": at, "speed": 0}
+    if pose.get("look"):
+        L.update(_turn(av, *pose["look"]))
     return {"id": lid, "type": "group", "children": [L]}
+
+
+def _turn(av, gx: float, gy: float) -> dict:
+    """The model's rotateY and rotateX that look at [gx, gy]."""
+    look = av.spec.get("look") or LOOK
+    return {"rotateY": round(gx * look[0], 4), "rotateX": round(-gy * look[1], 4)}
 
 
 def poses(av) -> list[tuple[str, dict]]:
@@ -157,7 +186,14 @@ def poses(av) -> list[tuple[str, dict]]:
                 for s in M.SHAPES]
     if av.spec.get("blink"):
         out.append(("eyes closed", {"eyes": "closed"}))
+    out += [("look left", {"look": [-1, 0]}), ("look right", {"look": [1, 0]})]
     out += [(f"expression {n}", {"morphs": e["morphs"]}) for n, e in (av.spec.get("expressions") or {}).items()]
+    from . import models
+    imp = models.load(str(av.model))
+    for n, g in (av.spec.get("gestures") or {}).items():
+        i = models.clip_index(imp, g["clip"])
+        t = round(imp.motion.clips[i][2] / 2, 3)
+        out.append((f"gesture {n} at {t:g}s", {"clip": (g["clip"], t)}))
     return out
 
 
@@ -166,10 +202,19 @@ def component(av, p: dict, scene, say: list, exprs: list, idle: dict, k: float) 
     the bake that sets its morphs once the scene's timing is solved."""
     from . import avatar as A
     lid = p["id"]
-    if p.get("gaze") or p.get("gestures"):
-        raise ValueError(f"layer '{lid}': a 3D avatar does not take gaze or gestures yet")
     w, h = av.size
     model = layer(av, f"{lid}-model", w * k, h * k)
+    gests = A._entries(p, "gestures", av.spec.get("gestures") or {})
+    if gests:
+        model["clips"] = [{"name": av.spec["gestures"][g["name"]]["clip"], "at": g.get("at", 0),
+                           **({"speed": av.spec["gestures"][g["name"]]["speed"]}
+                              if "speed" in av.spec["gestures"][g["name"]] else {})} for g in gests]
+    gazes = []
+    for i, g in enumerate(A._entries(p, "gaze", None)):
+        try:
+            gazes.append((g.get("at", 0), *A._gaze(g.get("target", "camera"), p, av, k, scene, f"gaze[{i}]")))
+        except ValueError as e:
+            scene.note("error", "avatar-gaze-target", lid, str(e), "")
     tracks = []
     for sid in say:
         got, t0, words_file = A._track(scene, sid)
@@ -178,7 +223,7 @@ def component(av, p: dict, scene, say: list, exprs: list, idle: dict, k: float) 
     blinks = A._blink_times(lid, idle, scene) if idle["blink"] and av.spec.get("blink") else []
     late = getattr(scene, "late", None)
     if late is not None:
-        late.append(lambda s: bake(s, av, lid, model["id"], tracks, exprs, blinks))
+        late.append(lambda s: bake(s, av, lid, model["id"], tracks, exprs, blinks, gazes))
     body = model
     if idle["breath"]:
         body = {"id": f"{lid}-breath", "type": "group", "at": f"{lid}.in",
@@ -231,7 +276,19 @@ def _lids(T: float, blinks: list) -> float:
     return max(0.0, min(1.0, 1 - (T - b - BLINK) / CLOSE))
 
 
-def bake(scene, av, lid: str, mid: str, tracks: list, exprs: list, blinks: list) -> None:
+def _gazing(T: float, turns: list) -> tuple[float, float]:
+    """Where the avatar looks at scene time T: each gaze eased in over TURN from where the one before left it."""
+    gx = gy = 0.0
+    for at, x, y in turns:
+        if T <= at:
+            break
+        f = min(1.0, (T - at) / TURN)
+        f = f * f * (3 - 2 * f)
+        gx, gy = gx + (x - gx) * f, gy + (y - gy) * f
+    return gx, gy
+
+
+def bake(scene, av, lid: str, mid: str, tracks: list, exprs: list, blinks: list, gazes: list = ()) -> None:
     """Set the model layer's morphs: the mouth, blinks and expressions summed (at most 1) at every frame of the
     layer, as keys on its clock that change only where they must."""
     from .avatar import QUIET, RAMP
@@ -245,6 +302,7 @@ def bake(scene, av, lid: str, mid: str, tracks: list, exprs: list, blinks: list)
         ex = [(scene.timeline._time(e.get("at", 0), lid, base), e.get("dur"), float(e.get("weight", 1)),
                av.spec["expressions"][e["name"]]["morphs"]) for e in exprs]
         lines = [scene.timeline._time(f"{sid}.in", lid, 0.0) for sid, _, _ in tracks]
+        turns = sorted((scene.timeline._time(at, lid, base), gx, gy) for at, gx, gy in gazes)
     except ValueError as e:
         scene.note("error", "avatar-time", lid, str(e), "")
         return
@@ -256,7 +314,9 @@ def bake(scene, av, lid: str, mid: str, tracks: list, exprs: list, blinks: list)
     fps, names = scene.fps, used(av)
     end = L.t_out if L.t_out is not None else scene.duration
     f0, f1 = round(L.t_in * fps), round(min(end, scene.duration) * fps)
-    keys: dict[str, list] = {n: [] for n in names}
+    keys: dict[str, list] = {"w_" + n: [] for n in names}
+    if turns:
+        keys.update(rotateY=[], rotateX=[])
     for f in range(f0, f1 + 1):
         T = f / fps
         v = dict.fromkeys(names, 0.0)
@@ -269,8 +329,12 @@ def bake(scene, av, lid: str, mid: str, tracks: list, exprs: list, blinks: list)
             env = _envelope(T, at, dur, min(RAMP, dur / 2) if dur else RAMP)
             for n, w in m.items():
                 v[n] += env * wt * w
+        t = round(T - L.t_in, 6)
         for n in names:
-            keys[n].append([round(T - L.t_in, 6), round(min(1.0, max(0.0, v[n])), 4), "linear"])
+            keys["w_" + n].append([t, round(min(1.0, max(0.0, v[n])), 4), "linear"])
+        if turns:
+            for a, d in _turn(av, *_gazing(T, turns)).items():
+                keys[a].append([t, d, "linear"])
     for n, ks in keys.items():
         kept = [ks[0]] if ks else [[0, 0.0]]
         for p, a, b in zip(ks, ks[1:], ks[2:]):  # drop a key on the line between its neighbours (frames are evenly
@@ -278,5 +342,6 @@ def bake(scene, av, lid: str, mid: str, tracks: list, exprs: list, blinks: list)
                 kept.append(a)
         if len(ks) > 1:
             kept.append(ks[-1])
-        L.raw["morphs"][n] = kept
-        L.props["w_" + n] = compile_prop("w_" + n, kept if len(kept) > 1 else kept[0][1], L.ctx or scene.ctx)
+        if n.startswith("w_"):
+            L.raw["morphs"][n[2:]] = kept
+        L.props[n] = compile_prop(n, kept if len(kept) > 1 else kept[0][1], L.ctx or scene.ctx)

@@ -26,7 +26,7 @@ STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "emphasis", "chil
           "allowOffscreen", "style", "audio", "shadow", "box", "fx", "fill", "stroke", "emph", "active",
           "sksl", "preset", "uniforms", "caret", "case", "italic", "smooth", "closed", "focus", "use",
           "backface", "fixed", "sort", "shape", "detail", "parts", "light", "span", "sound", "voice",
-          "fadeIn", "fadeOut", "sequence", "animation", "morphs", "repeat", "profile", "along", "dash", "rough", "mask",
+          "fadeIn", "fadeOut", "sequence", "animation", "morphs", "clips", "repeat", "profile", "along", "dash", "rough", "mask",
           "glow", "outline", "innerShadow", "displace", "frames", "sheet", "fps", "pixelated", "textPath",
           "textStyle"}
 PART_STRUCT = {"shape", "texture", "text", "font", "d", "italic", "profile"}  # a part's keys that never animate
@@ -294,6 +294,7 @@ class Scene:
         self.is3d = self.camera is not None or bool(self.depth)
         self.frames = max(1, math.floor(self.duration * self.fps + 0.5 + 1e-6))  # half a frame up: 2.45 s and 2.55 s
         self.poster, self.poster_frame = self._poster(cv.get("poster"))
+        self._resolve_clips()
         for fn in self.late:
             fn(self)
         self._check_spans()
@@ -452,6 +453,13 @@ class Scene:
                                      else "which has no animations"),
                                   f"did you mean {close!r}?" if close else
                                   "name one of them, or its number from 0" if clips else "drop animation")
+                    for ci, c in enumerate(layer.raw.get("clips") or []):
+                        cn = c.get("name") if isinstance(c, dict) else None
+                        if models.clip_index(imp, cn) is None:
+                            clips = models.clip_names(imp)
+                            self.note("error", "unknown-animation", layer.id, f"clips[{ci}] {cn!r} is not in {name}, "
+                                      + (f"whose animations are {', '.join(map(repr, clips))}" if clips
+                                         else "which has no animations"), "name one of them")
                     shapes = layer.raw.get("morphs")
                     if isinstance(shapes, dict) and shapes:
                         have = models.morph_names(imp)
@@ -646,6 +654,22 @@ class Scene:
                       "draw itself", "move the model out of that group, or name another group")
         else:
             self.surfaces.add(gid)
+
+    def _resolve_clips(self):
+        """A model layer's clips at a cue: the seconds on the layer's clock that cue is."""
+        for L in self.by_id.values():
+            clips = L.raw.get("clips")
+            if L.type != "model" or not isinstance(clips, list):
+                continue
+            out = []
+            for c in clips:
+                if isinstance(c, dict) and isinstance(c.get("at"), str):
+                    try:
+                        c = {**c, "at": round(self.timeline._time(c["at"], L.id, L.t_in) - L.t_in, 6)}
+                    except ValueError as e:
+                        self.note("error", "bad-time", L.id, f"clips: {e}", "")
+                out.append(c)
+            L.raw = {**L.raw, "clips": out}
 
     def _check_gestures(self):
         """Two gestures of one avatar that move the same part at the same time: an error, not a blend."""

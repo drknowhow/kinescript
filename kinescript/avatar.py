@@ -40,7 +40,7 @@ from . import mouth as M
 VERSION = 1
 FILE = "avatar.json"
 TOP = {"kinescriptAvatar", "name", "description", "size", "parts", "colors", "expressions", "gestures", "idle",
-       "voice", "mouthMode", "model", "mouth", "blink"}  # model, mouth and blink: a 3D avatar (avatar3d)
+       "voice", "mouthMode", "model", "mouth", "blink", "look"}  # model, mouth and blink: a 3D avatar (avatar3d)
 PART_KEYS = {"src", "states", "shapes", "parent", "pivot", "look"}
 POSE_KEYS = ("x", "y", "rotate", "scale", "opacity")  # what an expression or gesture may change on a part
 IDLE_KEYS = {"blink", "breath", "saccade"}
@@ -413,7 +413,8 @@ def summary(folder: str | Path) -> dict:
         av = load(folder)
         out.update(name=av.spec.get("name"), size=list(av.size), model=av.spec["model"]["src"], morphs=A3.used(av),
                    shapes=sorted(av.spec.get("mouth") or {}), fallbacks=av.fallbacks,
-                   blink=bool(av.spec.get("blink")), expressions=list(av.spec.get("expressions") or {}))
+                   blink=bool(av.spec.get("blink")), expressions=list(av.spec.get("expressions") or {}),
+                   gestures=list(av.spec.get("gestures") or {}))
     elif out["ok"]:
         av = load(folder)
         out.update(name=av.spec.get("name"), size=list(av.size), parts=list(av.parts),

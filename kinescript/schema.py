@@ -198,7 +198,8 @@ TYPES: dict[str, set[str]] = {
     "model": PART - {"x", "y", "z", "rotateX", "rotateY", "rotate", "scale"} | {"detail", "parts", "explode",
                                                                               "draw", "light", "lights", "env",
                                                                               "src", "ground", "edges",
-                                                                              "animation", "morphs", "repeat"},
+                                                                              "animation", "morphs", "clips",
+                                                                              "repeat"},
     "particles": PT.OWN | {"text", "font", "weight", "src", "w", "h", "r"},
     "svg": {"src", "w", "h", "parts", "clip", "speed", "loop", "timeRemap", "repeat"},
 }
@@ -320,7 +321,7 @@ REQUIRED = {"text": ("text",), "image": ("src", "frames", "sheet"), "video": ("s
 # Keys whose value is an object of their own: never a tween, even with a "from" key (a light's direction).
 OBJECTS = {"light", "lights", "env", "ground", "shadow", "shadows", "box", "fx", "uniforms", "sound", "enter", "exit",
            "emphasis",
-           "parts", "transition", "texture", "edges", "animation", "morphs", "repeat", "along", "rough", "mask",
+           "parts", "transition", "texture", "edges", "animation", "morphs", "clips", "repeat", "along", "rough", "mask",
            "glow", "outline", "innerShadow", "displace", "textPath"}
 # Props that cannot be below 0, and the least each may be.
 AT_LEAST = {"radius": 0, "r": 0, "sides": 3, "blur": 0, "unitBlur": 0, "strokeWidth": 0, "size": 0, "corner": 0,
@@ -1386,6 +1387,11 @@ def _structure(raw: dict, t: str, rep: Report, lid):
     for k, v in (u or {}).items() if isinstance(u, dict) else ():
         if isinstance(v, str) and not v.startswith(("=", "$")):  # text in a uniform is a colour
             _colour(v, f"uniforms {k}", rep, lid)
+    cl = raw.get("clips")
+    if cl is not None and not (isinstance(cl, list) and all(isinstance(c, dict) and "name" in c and
+                                                             set(c) <= {"name", "at", "speed", "weight"} for c in cl)):
+        rep.add("error", "bad-value", lid, f"clips is {_show(cl)}; it is a list of the model file's clips to play "
+                "over its animation, like [{\"name\": \"Wave\", \"at\": \"vo:hello\"}] (name, at, speed, weight)")
     mo = raw.get("morphs")
     if mo is not None and not isinstance(mo, dict):
         rep.add("error", "bad-value", lid, f"morphs is {_show(mo)}; it is an object of the model file's morph "
