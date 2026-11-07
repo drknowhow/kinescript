@@ -45,6 +45,14 @@ def words_from_tokens(tokens, offset: float = 0.0) -> list[dict]:
     return timed
 
 
+def phones_from_tokens(tokens, offset: float = 0.0) -> list[dict]:
+    """Kokoro's tokens -> [{"ipa", "start", "end"}]: the sounds of each timed word, as misaki wrote them, for the
+    mouth track kine voice makes. Punctuation and untimed tokens are left out."""
+    return [{"ipa": tok.phonemes, "start": round(tok.start_ts + offset, 4), "end": round(tok.end_ts + offset, 4)}
+            for tok in tokens if re.search(r"\w", tok.text) and getattr(tok, "phonemes", None)
+            and tok.start_ts is not None and tok.end_ts is not None and tok.end_ts > tok.start_ts]
+
+
 def _device() -> str:
     """cuda when this torch was built for the GPU (a GPU newer than the build fails at the first sound), else cpu.
     KOKORO_DEVICE picks one."""
@@ -76,16 +84,18 @@ def _version() -> str:
 
 def synth(req: dict) -> dict:
     """Speak req["text"] with req["speaker"] (a Kokoro voice, af_heart unless named; its first letter is the
-    language) at req["rate"] (1 = normal) into the WAV req["out"]. Word times come for English voices only."""
+    language) at req["rate"] (1 = normal) into the WAV req["out"]. Word times and the sounds of each word (phones)
+    come for English voices only."""
     import numpy as np
     speaker = req.get("speaker") or SPEAKER
     pipe = _pipe(speaker[0])
-    chunks, words, at = [], [], 0
+    chunks, words, phones, at = [], [], [], 0
     for r in pipe(req["text"], voice=speaker, speed=float(req.get("rate") or 1)):
         if r.audio is None:
             continue
         audio = r.audio.numpy() if hasattr(r.audio, "numpy") else np.asarray(r.audio)
         words += words_from_tokens(r.tokens or [], at / RATE)  # a chunk's times start at that chunk
+        phones += phones_from_tokens(r.tokens or [], at / RATE)
         chunks.append(audio)
         at += len(audio)
     audio = np.concatenate(chunks) if chunks else np.zeros(0, dtype=np.float32)
@@ -94,4 +104,5 @@ def synth(req: dict) -> dict:
         f.setsampwidth(2)
         f.setframerate(RATE)
         f.writeframes((np.clip(audio, -1, 1) * 32767).astype("<i2").tobytes())
-    return {"words": words, "speaker": speaker, "version": _version(), "seconds": round(at / RATE, 3)}
+    return {"words": words, "phones": phones, "speaker": speaker, "version": _version(),
+            "seconds": round(at / RATE, 3)}
