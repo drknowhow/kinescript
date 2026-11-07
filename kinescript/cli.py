@@ -168,6 +168,10 @@ def main(argv=None) -> int:
     br.add_argument("--port", type=int, default=8766, help="wizard: the port [8766]")
     br.add_argument("--no-browser", action="store_true", help="wizard: do not open a browser")
 
+    av = sub.add_parser("avatar", help="check an avatar folder (its avatar.json and part drawings)")
+    av.add_argument("action", choices=["check"])
+    av.add_argument("folder", help="the folder holding avatar.json")
+
     sub.add_parser("mcp", help="run the MCP server on stdio")
     sub.add_parser("doctor", help="report ffmpeg, GPU and font availability")
 
@@ -244,6 +248,11 @@ def _run(a) -> int:
     if a.cmd == "brand":
         from .brandops import run
         out = {"ok": True, **run(a.action.replace("-", "_"), _brand_args(a))}
+        _emit(out)
+        return OK if out["ok"] else ISSUES
+    if a.cmd == "avatar":
+        from .avatar import summary
+        out = summary(a.folder)
         _emit(out)
         return OK if out["ok"] else ISSUES
     if a.cmd == "mcp":
