@@ -240,8 +240,38 @@ function colours() {
   out.push(h("div", { class: "card" }, h("h3", {}, "Add a palette"),
     h("div", { class: "flex" }, h("input", { type: "text", id: "newPal", placeholder: "name, such as light" }),
       h("button", { onclick: () => { const n = $("#newPal").value.trim(); if (n) setv(`palettes.${n}`, { ...(pals[S.variant] || Object.values(pals)[0] || { bg: "#0a0c10", text: "#f2f0e8", accent: "#ff633f" }) }); } }, "Add, copying the current one"))));
+  out.push(importCard());
   out.push(h("div", { class: "card" }, h("h3", {}, "In a video"), img("palette")));
   return out;
+}
+
+// Palettes proposed from a logo in the brand: shown first, written only on Apply.
+function importCard() {
+  const logos = S.info.files.filter(f => f.startsWith("logos/"));
+  const card = h("div", { class: "card" }, h("h3", {}, "Import from a logo"));
+  if (!logos.length) return (card.append(h("p", { class: "hint" }, "Add a logo on the Logos tab, then propose palettes from its colours.")), card);
+  const P = S.proposal && S.proposal.ref === S.ref ? S.proposal : null;
+  const pick = h("select", { id: "impLogo" }, logos.map(x => h("option", { value: x, selected: P && P.logo === x }, x)));
+  card.append(h("p", { class: "hint" }, "Reads the logo's colours and proposes a dark and a light palette whose text and accents pass the contrast checks. Nothing changes until you apply it; Apply replaces the palettes and the chart series."),
+    h("div", { class: "flex" }, pick, h("button", { onclick: async () => {
+      try {
+        const out = await api("/api/op", { action: "import", ref: S.ref, logo: pick.value });
+        S.proposal = { ref: S.ref, logo: pick.value, ...out.proposal }; render();
+      } catch (e) { toast(e.message); }
+    } }, "Propose palettes")));
+  if (!P) return card;
+  card.append(h("p", { class: "hint" }, "In the logo: "), h("div", { class: "flex" }, P.colours.map(c => h("span", { class: "flex", style: "gap:4px" },
+    h("span", { class: "pair", style: `background:${c.hex};width:34px` }), h("span", {}, `${c.hex} · ${Math.round(c.share * 100)}%`)))));
+  for (const [name, pal] of Object.entries(P.palettes)) {
+    card.append(h("p", { class: "hint", style: "margin-top:10px" }, `Proposed "${name}"`),
+      h("div", { class: "flex" }, Object.entries(pal).map(([r, v]) => h("span", { class: "flex", style: "gap:4px" },
+        h("span", { class: "pair", style: `background:${v};width:34px` }), h("span", {}, `${r} ${v}`)))));
+  }
+  if (P.notes.length) card.append(h("ul", { class: "hint" }, P.notes.map(n => h("li", {}, n))));
+  card.append(h("div", { class: "flex", style: "margin-top:10px" },
+    h("button", { onclick: async () => { const l = P.logo; S.proposal = null; await op("import", { logo: l, apply: true }); } }, "Apply"),
+    h("button", { class: "small", onclick: () => { S.proposal = null; render(); } }, "Discard")));
+  return card;
 }
 
 // ---- Type

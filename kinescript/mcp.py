@@ -34,17 +34,19 @@ TOOLS = [
      "unless force). set: one value by path (\"palettes.dark.accent\"), null removes it; a change that breaks the "
      "brand is refused. replace: write the whole brand.json (spec) at once, refused the same way. add_file: a font, logo or sound (kind fonts|logos|audio) from a local file, or data_base64 with name; "
      "then set the brand entry that names it. remove_file: delete fonts/NAME or logos/NAME. check: the brand's "
-     "issues. preview: a still of a sample scene in the brand, written to out. Writes take base_rev (the rev you "
+     "issues. import: palettes (dark and light, each readable as check asks) and chart series proposed from a logo, "
+     "logo a file in the brand (logos/mark.svg) or file a path; apply writes them, replacing the palettes. preview: a still of a sample scene in the brand, written to out. Writes take base_rev (the rev you "
      "read) and refuse when the brand changed since. brand is a library id or a brand folder.",
      "inputSchema": {"type": "object", "properties": {
-         "action": {"type": "string", "enum": ["list", "show", "init", "use", "set", "replace", "add_file", "remove_file",
+         "action": {"type": "string", "enum": ["list", "show", "init", "use", "set", "replace", "import", "add_file", "remove_file",
                                                "check", "preview"]},
          "brand": {"type": "string"}, "id": {"type": "string"}, "from": {"type": "string"},
          "dir": {"type": "string"}, "project": {"type": "string"}, "force": {"type": "boolean"},
          "path": {"type": "string"}, "value": {}, "spec": {"type": "object"}, "base_rev": {"type": "string"},
          "kind": {"type": "string", "enum": ["fonts", "logos", "audio"]}, "file": {"type": "string"},
          "name": {"type": "string"}, "data_base64": {"type": "string"}, "replace": {"type": "boolean"},
-         "variant": {"type": "string"}, "out": {"type": "string"}},
+         "variant": {"type": "string"}, "out": {"type": "string"}, "logo": {"type": "string"},
+         "apply": {"type": "boolean"}},
          "required": ["action"]}},
     {"name": "kine_look", "description": "Contact sheet: `count` frames in one labelled image. boxes=true outlines each "
      "layer with its id. wire=true draws every model's drawn triangles; depth=true shows each stage's depth image, "

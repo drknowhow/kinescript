@@ -24,8 +24,9 @@ FACES = ("display", "body", "mono")
 # Parts whose entries become "$part.name" theme values (and "$part" for the whole object).
 GROUPS = ("text", "charts", "logos", "placements", "bug", "motion", "components", "intro", "outro", "audio")
 BOOKENDS = {"intro": ("sting", 2.0), "outro": ("endCard", 3.0)}  # the built-in that draws each, its default dur
-PARTS = {"kinescriptBrand", "id", "name", "description", "palettes", "default", "fonts", "safeArea", "lock", *GROUPS}
-LOCKABLE = ("palettes", "fonts", *(g for g in GROUPS if g != "audio"), "safeArea")
+PARTS = {"kinescriptBrand", "id", "name", "description", "palettes", "default", "fonts", "safeArea", "lock", "grade",
+         *GROUPS}
+LOCKABLE = ("palettes", "fonts", *(g for g in GROUPS if g != "audio"), "safeArea", "grade")
 LOGO_FILES = ("file", "onDark", "onLight")
 FONT_EXTS = (".ttf", ".otf", ".ttc")
 AUDIO_EXTS = (".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus")
@@ -207,6 +208,18 @@ def validate(folder: str | Path, spec: dict | None = None) -> list[dict]:
         dur = spec.get(part, {}).get("dur") if isinstance(spec.get(part), dict) else None
         if dur is not None and (isinstance(dur, bool) or not isinstance(dur, (int, float)) or not 0 < dur <= 60):
             out.append(_issue("error", "brand-key", f"{part}.dur is {dur!r}; it is seconds, above 0 and at most 60"))
+    grade = spec.get("grade")
+    if grade is not None:
+        from .schema import GRADE
+        if not isinstance(grade, dict):
+            out.append(_issue("error", "brand-key", "grade must be an object like a scene's grade"))
+        else:
+            for k, v in grade.items():
+                if k not in GRADE:
+                    out.append(_issue("warning", "brand-key", f"grade.{k} is not a grade key",
+                                      "grade keys: " + ", ".join(sorted(GRADE))))
+                elif isinstance(v, bool) or not isinstance(v, (int, float)):
+                    out.append(_issue("error", "brand-key", f"grade.{k} is {v!r}; it is a number"))
     aud = spec.get("audio")
     if isinstance(aud, dict):
         for k, v in aud.items():
@@ -342,7 +355,8 @@ def resolve(brand: Brand, variant: str | None = None) -> tuple[dict, dict[str, s
 
 
 def apply_audio(spec: dict, base) -> tuple[dict, list[str]]:
-    """The scene with its brand's sound defaults in: each sound in "audio" takes its role's defaults for the keys
+    """The scene with its brand's defaults in. The brand's grade sits under the scene's grade (a key the scene
+    sets wins). Sound: each sound in "audio" takes its role's defaults for the keys
     it leaves out (a voice with text also its speaker, backend, rate and options), "music": true adds the brand's
     music bed under the whole video, and the brand's mix sits under the scene's. Returns the new spec and problems.
     The scene and kine voice both read sounds through this, so a voice is spoken with what the scene will check."""
@@ -357,6 +371,9 @@ def apply_audio(spec: dict, base) -> tuple[dict, list[str]]:
         return spec, []  # the scene reports the brand itself
     aud = bspec.get("audio") if isinstance(bspec.get("audio"), dict) else {}
     out, problems = dict(spec), []
+    if isinstance(bspec.get("grade"), dict) and bspec["grade"]:
+        mine = spec.get("grade") if isinstance(spec.get("grade"), dict) else {}
+        out["grade"] = {**bspec["grade"], **mine}
     sounds = [dict(a) if isinstance(a, dict) else a for a in spec.get("audio") or []]
     for a in sounds:
         if not isinstance(a, dict):
