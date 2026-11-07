@@ -67,7 +67,11 @@ SCENE (top level)
               check warns "blank-first-frame" when frame 0 shows nothing and poster is unset.
               kine still --at poster saves it as an image, for a page's <video poster>.
   layers      the list of layers.
-  theme       {"accent": "#ff633f"}: then "$accent" anywhere means that value.
+  brand       "brand": the folder (relative to the scene) holding a brand.json, which gives the
+              theme its colours, fonts, text styles, chart colours and logos (see BRANDS).
+  variant     which of the brand's palettes to use, such as "light" [the brand's default].
+  theme       {"accent": "#ff633f"}: then "$accent" anywhere means that value. Over a brand, it
+              changes the brand's values, except the parts the brand locks.
   markers     {"drop": 12.5}: named times, usable as "at": "drop". A marker is seconds or a clock
               ("45f", "0:12.5"); it has no .in or .out. If a marker and a layer share a name, "drop"
               reads the marker (check warns), "drop.out" the layer.
@@ -653,6 +657,32 @@ EASES  {eases}, spring, spring(stiffness, damping), bezier(x1, y1, x2, y2), step
   in* starts slow, out* ends slow (the most natural for entrances), inOut* does both.
   spring(stiffness, damping, mass) takes numbers above 0 [170, 26, 1]; bezier takes four numbers
   with x1 and x2 from 0 to 1, as in CSS; steps takes a whole number, 1 or more.
+
+BRANDS
+  A brand is a folder that many scenes share: brand.json, with its fonts/ and logos/ beside it.
+  A scene names it with "brand": "brand" (the folder, relative to the scene). A brand.json:
+    {"kinescriptBrand": 1, "id": "acme", "name": "Acme", "default": "dark",
+     "palettes": {"dark": {"bg": "#0a0c10", "surface": "#242832", "text": "#f2f0e8", "muted": "#9299a8",
+                           "accent": "#ff633f", "accent2": "#b9f45d"},
+                  "light": {"bg": "#f2f0e8", "text": "#0a0c10", "muted": "#5b6272", "accent": "#d9431f"}},
+     "fonts": {"display": {"family": "Space Grotesk"}, "body": {"family": "Space Grotesk"},
+               "mono": {"family": "IBM Plex Mono"}},
+     "charts": {"series": ["#ff633f", "#b9f45d", "#f2f0e8"]},
+     "lock": ["palettes"]}
+  palettes    one or more, each with bg, text and accent, and optionally surface, muted, accent2,
+              positive, negative. The scene's variant picks one [default, else the first]. Each role
+              is a theme value ("$accent", "$text", "$surface"), and the older names follow them:
+              $paper and $sheet are text, $ink and $void are bg, $muted, $track (surface), $cue
+              (accent), $key (accent2). canvas.bg defaults to "$bg".
+  fonts       display, body and mono faces, each {"family": "..."}: $font is the body family,
+              $fontDisplay the display one, $mono the mono one. A face may list its files, with a
+              license: "files": [{"file": "fonts/Acme-Bold.ttf", "weight": 700}], "license": "OFL".
+  text, charts, logos, placements, bug, motion, components: objects whose entries are theme
+              values by dotted name: "$charts.series" is the list above. A logo's file, onDark and
+              onLight paths read from the brand folder.
+  lock        parts a scene's theme may not change, such as ["palettes", "fonts"]; check reports
+              "brand-locked" for a theme key that would.
+  A brand's paths stay inside its folder: an absolute path or one with .. out of it is an error.
 
 COMPONENTS  {"use": "<name>", "id": "...", "at": ..., "dur": ..., ...parameters}
   Built in (parameters):
