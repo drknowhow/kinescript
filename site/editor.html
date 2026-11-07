@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review it on the frame · Kinescript</title>
+<meta name="description" content="kine edit opens a Kinescript scene in the browser: select and move layers on the frame, comment on frames, words and sounds, and the agent reads the notes over MCP.">
+<meta name="theme-color" content="#0a0c10">
+<link rel="canonical" href="https://drknowhow.github.io/kinescript/editor.html">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Review it on the frame · Kinescript">
+<meta property="og:description" content="kine edit opens a Kinescript scene in the browser: select and move layers on the frame, comment on frames, words and sounds, and the agent reads the notes over MCP.">
+<meta property="og:url" content="https://drknowhow.github.io/kinescript/editor.html">
+<meta property="og:image" content="https://raw.githubusercontent.com/drknowhow/kinescript/main/docs/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="assets/favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="assets/favicon-180.png">
+<link rel="preload" href="assets/fonts/SpaceGrotesk-Bold.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="feature">
+<a class="skip" href="#main">Skip to content</a>
+<div class="wrap">
+  <header class="top">
+    <a class="home" href="./" aria-label="Kinescript home"><img src="assets/logo-transparent.svg" alt="kinescript" width="834" height="200"></a>
+    <nav aria-label="Pages"><!--build:nav:editor.html--><a href="timing.html">Timing</a><a href="motion.html">2D</a><a href="depth.html">3D</a><a href="sound.html">Sound</a><a href="edits.html">Edits</a><a href="agents.html">Agents</a><a href="editor.html" aria-current="page">Editor</a><a href="brands.html">Brands</a><a href="install.html">Install</a><a class="ext" href="https://github.com/drknowhow/kinescript">GitHub</a><!--/build--></nav>
+  </header>
+
+  <main id="main">
+  <section class="page-head" aria-labelledby="page-title">
+    <h1 id="page-title">Review it on the frame.</h1>
+    <p class="sub">An agent can check a scene, but a person still has to say what looks wrong. <code>kine edit</code> opens the scene in the browser, and what they point at comes back to the agent as notes.</p>
+  </section>
+
+  <div class="page-body">
+
+    <div class="tool">
+      <div class="tool-head">
+        <h2><code>kine edit scene.json</code></h2>
+        <p>Click a layer on the frame to select it, or drag it to move it. A sidebar shows its values and a note field, and the frame outlines what the sidebar applies to. Under the clip each layer and sound has a lane, colour-coded by kind, with an eye that hides a layer in the preview only. Click a word of the voice or a caption to comment on it, play a sound on its own, or draw on the frame.</p>
+      </div>
+      <figure class="player" data-name="editor recording">
+        <div class="screen"><video src="media/editor-edit.mp4" poster="media/editor-edit.jpg" width="1600" height="1062" muted loop playsinline controls preload="metadata" aria-label="A recording of kine edit on the narrated example: the Render title is clicked on the frame and its size changed from 180 to 140, a note is left on it, then the word sound in the voice-over lane is clicked and given a comment. No sound."></video></div>
+        <div class="deck"><button type="button" data-play>Play</button><span class="tc">0.0 s</span></div>
+        <figcaption class="rec-cap">Recorded with Overshoulder driving the editor. The title's size goes from 180 to 140: the scene file is saved and the change is logged as a note. A note on the layer and a comment on one spoken word join it in the list on the left, for the agent to read with <code>kine_feedback</code>.</figcaption>
+      </figure>
+      <figure class="sheet">
+        <a href="media/editor.jpg"><img src="media/editor.jpg" width="1600" height="1000" loading="lazy" alt="The kine edit page showing the narrated example. The word Check is selected on the frame and outlined, its text, size and fill are in a sidebar on the right, and under the clip there is a coloured lane for each layer, the voice with its words, the music and a sound effect."></a>
+        <figcaption>The narrated example with the word <code>check</code> selected. The strip under the clip is the scene's layers and sounds at the playhead; the yellow lane is the selected layer. Open the image for full size.</figcaption>
+      </figure>
+      <figure class="sheet">
+        <a href="media/editor-shapes.jpg"><img src="media/editor-shapes.jpg" width="1600" height="1000" loading="lazy" alt="The kine edit page showing the explainer example, with a dashed route between two boxes selected and outlined on the frame."></a>
+        <figcaption>The explainer demo with its route selected. Shapes, text, groups and captions can all be picked on the frame.</figcaption>
+      </figure>
+    </div>
+
+    <div class="tool">
+      <div class="tool-head">
+        <h2><code>kine_feedback</code></h2>
+        <p>Notes are kept in <code>scene.feedback.json</code> beside the scene, each with a time and, when there is one, a point, layer, sound, word or drawn strokes. A note is marked <code>stale</code> once the scene changes. An agent lists the open ones, replies, and resolves them over MCP; with <code>still</code> set it gets the frame with the point ringed and the strokes drawn on it.</p>
+      </div>
+      <div class="pane">
+        <div class="pane-head"><span>scene.feedback.json, one note</span></div>
+        <pre class="code out"><code>{"id": "n1", "t": 1.7, "kind": "pin", "status": "open",
+ "text": "Too heavy next to the caption; try 140.",
+ "x": 0.47, "y": 0.4, "layer": "check",
+ "scene": "42955e2cf790", "created": 1793666638, "replies": []}</code></pre>
+      </div>
+      <p class="note">The editor serves on <code>127.0.0.1</code> only and draws frames on the CPU. It changes plain numbers and text in the scene file in one save, and refuses when the file changed under it, when the scene has comments, or when the result would not load.</p>
+    </div>
+  </div>
+  <nav class="pager" aria-label="Previous and next pages"><!--build:pager:editor.html--><a class="prev" href="agents.html"><span>Previous</span>Agents</a><a class="next" href="brands.html"><span>Next</span>Brands</a><!--/build--></nav>
+  </main>
+
+  <footer>
+    <span class="brand"><img src="assets/mark.svg" alt="" width="200" height="200">Kinescript 1.9.0, MIT licence</span>
+    <nav aria-label="Project links">
+      <a href="https://github.com/drknowhow/kinescript">Source</a>
+      <a href="https://pypi.org/project/kinescript/">PyPI</a>
+      <a href="https://github.com/drknowhow/kinescript/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/drknowhow/kinescript/blob/main/LICENSE">Licence</a>
+    </nav>
+  </footer>
+</div>
+<script src="site.js"></script>
+</body>
+</html>

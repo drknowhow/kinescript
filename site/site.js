@@ -42,7 +42,9 @@
     v.addEventListener("pause", function () { window.cancelAnimationFrame(raf); paint(); label(); });
     v.addEventListener("seeked", paint);
     v.addEventListener("loadedmetadata", paint);
-    if (play) play.addEventListener("click", function () { if (v.paused) v.play(); else v.pause(); });
+    function toggle() { if (v.paused) v.play(); else v.pause(); }
+    if (play) play.addEventListener("click", toggle);
+    v.addEventListener("click", toggle);  // the picture itself plays and pauses
     if (sound) sound.addEventListener("click", function () {
       v.muted = !v.muted;
       sound.textContent = v.muted ? "Sound on" : "Sound off";
@@ -59,5 +61,68 @@
     });
     label();
     paint();
+  });
+
+  // Contact sheets and screenshots open in a dialog over the page instead of leaving it. The picture fits the window;
+  // clicking it shows it at full size, scrolled. Esc, the close button or a click outside it closes the dialog.
+  var sheets = document.querySelectorAll(".sheet a[href]");
+  if (sheets.length && window.HTMLDialogElement) {
+    var dlg = document.createElement("dialog");
+    dlg.className = "viewer";
+    dlg.setAttribute("aria-label", "Image");
+    dlg.innerHTML = '<div class="viewer-bar"><span class="viewer-cap"></span><span class="viewer-hint">Tap the picture for full size</span><a class="viewer-open" target="_blank" rel="noopener">Open file</a>' +
+      '<button type="button" class="viewer-close" aria-label="Close">Close</button></div>' +
+      '<div class="viewer-pic"><img alt=""></div>';
+    document.body.appendChild(dlg);
+    var pic = dlg.querySelector(".viewer-pic"), big = pic.querySelector("img");
+    dlg.querySelector(".viewer-close").addEventListener("click", function () { dlg.close(); });
+    dlg.addEventListener("click", function (e) { if (e.target === dlg) dlg.close(); });
+    big.addEventListener("click", function () {
+      var full = pic.classList.toggle("full");
+      big.title = full ? "Click to fit the window" : "Click for full size";
+    });
+    dlg.addEventListener("close", function () { big.removeAttribute("src"); });
+    Array.prototype.forEach.call(sheets, function (a) {
+      a.addEventListener("click", function (e) {
+        if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;  // a new tab, as asked
+        e.preventDefault();
+        var img = a.querySelector("img"), cap = a.closest("figure") && a.closest("figure").querySelector("figcaption");
+        pic.classList.remove("full");
+        big.src = a.getAttribute("href");
+        big.alt = img ? img.alt : "";
+        big.title = "Click for full size";
+        dlg.querySelector(".viewer-cap").textContent = cap ? cap.textContent.replace(/\s*Open the image for full size\.?\s*$/, "") : "";
+        dlg.querySelector(".viewer-open").href = a.getAttribute("href");
+        dlg.showModal();
+      });
+    });
+  }
+
+  // A group of videos played together from the start ([data-play-all] before a [data-group]): all restart and play
+  // in step, and the button pauses them all. It names what it will do next.
+  Array.prototype.forEach.call(document.querySelectorAll("[data-play-all]"), function (btn) {
+    var group = btn.parentNode.nextElementSibling;
+    if (!group || !group.hasAttribute("data-group")) return;
+    var vids = Array.prototype.slice.call(group.querySelectorAll("video"));
+    var synced = false;  // started together by this button, and neither paused since
+    function playing() { return vids.some(function (v) { return !v.paused; }); }
+    function label() { btn.textContent = synced && playing() ? "Pause both" : "Play both from the start"; }
+    btn.addEventListener("click", function () {
+      if (synced && playing()) {
+        synced = false;
+        vids.forEach(function (v) { v.pause(); });
+      } else {
+        // seek both to the start without pausing them: a pause would arrive later and end the sync
+        vids.forEach(function (v) { v.currentTime = 0; });
+        vids.forEach(function (v) { if (v.paused) v.play(); });
+        synced = true;
+      }
+      label();
+    });
+    vids.forEach(function (v) {
+      v.addEventListener("play", label);
+      v.addEventListener("pause", function () { synced = false; label(); });
+    });
+    label();
   });
 })();
