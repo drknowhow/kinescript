@@ -227,6 +227,7 @@ An agent cannot watch a video, so Kinescript gives it things it can read:
 | `kine look scene.json --audio` | the same frames with the sound under them: a lane per role and the mix, the duck and issues, plus each sound's measured loudness |
 | `kine probe scene.json --at 3.2` | resolved in/out of every layer and each visible layer's screen box and anchor |
 | `kine probe scene.json --curve title.x` | the value and its speed at every frame, where it holds still and its fastest frame |
+| `kine avatar check avatars/host` | an avatar folder's problems, and what it has: parts, mouth shapes and the ones that fall back, eyes, expressions and gestures |
 | `kine probe scene.json --mouth vo1` | the voice's mouth track: which of nine mouth shapes shows when, and whether it came from the backend's phonemes, the spelling of each word, or loudness |
 | `kine still` / `kine render` | a frame, a range (`--from/--to`), a draft (`-q draft --scale 0.5`) or the final file |
 | `kine watch scene.json` | the contact sheet, made again every time the file is saved |

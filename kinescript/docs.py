@@ -748,6 +748,31 @@ COMPONENTS  {"use": "<name>", "id": "...", "at": ..., "dur": ..., ...parameters}
   params holds the defaults; a parameter given as null takes its default. A {{placeholder}}
   ({{ label }} with spaces works too) with no value and no default is an error that names it.
 
+AVATARS
+  An avatar is a character drawn once as parts, in a folder with an avatar.json. Scenes cannot use
+  one yet; kine avatar check FOLDER checks the folder and lists what it has.
+  Every part file is drawn at the avatar's full size, in place, so pivots are points in the avatar's
+  own pixels. Parts draw in the order listed; a part with a parent turns and moves with it.
+    {"kinescriptAvatar": 1, "name": "Host", "size": [600, 900],
+     "parts": {"body": {"src": "parts/body.svg", "pivot": [300, 700]},
+               "head": {"src": "parts/head.svg", "parent": "body", "pivot": [300, 380]},
+               "eyes": {"parent": "head", "look": [14, 8],
+                        "states": {"open": "parts/eyes-open.svg", "closed": "parts/eyes-closed.svg"}},
+               "mouth": {"parent": "head", "shapes": {"X": "parts/mouth-X.svg", "A": "parts/mouth-A.svg",
+                         "C": "parts/mouth-C.svg", "D": "parts/mouth-D.svg"}}},
+     "colors": {"skin": "#e8c4a0", "shirt": "accent"},
+     "expressions": {"smile": {"head": {"rotate": -3}, "mouth": "C"}},
+     "gestures": {"nod": {"dur": 0.5, "head": {"rotate": [[0, 0], [0.2, 6], [0.5, 0]]}}},
+     "idle": {"blink": [2.5, 5], "breath": 0.012, "saccade": [0.8, 2.5]},
+     "voice": {"backend": "kokoro", "speaker": "am_michael"}}
+  A part has one of src, states (named drawings: open shows by default, closed is the blink; look
+  is how far eyes move to look aside) or shapes (the mouth, by the letters of kine probe --mouth:
+  X, A, C and D at least; B falls back to C, E and F to D, G to A, H to C). Files are .svg, .png or
+  .webp inside the folder. colors gives each name a colour or palette role, for svg pieces with
+  that id. An expression sets x, y, rotate, scale or opacity on parts, and may hold a mouth shape;
+  a gesture keys them over its dur. idle: false stops blinks, breath and glances. voice takes
+  speaker, backend, rate and options, as a sound does.
+
 SOUND
   Top-level "audio" lists the sounds. Each one:
     {"id": "vo1", "role": "voice", "src": "vo1.wav", "at": 0.5}
@@ -910,6 +935,9 @@ COMMANDS
                                   clocks, and its speed a second (signed; a distance for position,
                                   x and y as a point, or a colour), where it holds still and its
                                   fastest frame. An enter, exit or along moves a layer as well.
+  kine avatar check FOLDER        an avatar folder's problems (see AVATARS), and for one without
+                                  errors its parts, mouth shapes and fallbacks, eyes, expressions
+                                  and gestures
   kine probe scene.json --mouth vo1
                                   vo1's mouth track: the shape (X rest, A closed, B teeth, C open,
                                   D wide, E rounded, F puckered, G lip under teeth, H tongue) at
