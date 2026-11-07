@@ -30,8 +30,8 @@ from .timing import KEYWORDS, LIMIT, finite as _finite_secs, parse_clock, show
 # Keys that are always allowed and ignored: notes to self.
 COMMENT = {"note", "notes", "comment", "comments", "description", "name"}
 
-TOP = {"canvas", "theme", "markers", "grade", "motionBlur", "audio", "components", "layers", "meta", "version",
-       "$schema", "camera", "light", "lights", "env", "fog", "mix"}
+TOP = {"canvas", "brand", "variant", "theme", "markers", "grade", "motionBlur", "audio", "components", "layers", "meta",
+       "version", "$schema", "camera", "light", "lights", "env", "fog", "mix"}
 TOP_ALIAS = {"layer": "layers", "elements": "layers", "objects": "layers", "items": "layers", "scene": "layers",
              "children": "layers", "tracks": "layers", "motion_blur": "motionBlur", "colorGrade": "grade",
              "music": "audio", "sound": "audio", "marker": "markers"}
@@ -2442,6 +2442,10 @@ def normalize(spec) -> tuple[dict, Report]:
             rep.add("error", "bad-marker", "markers", f"markers.{name} is {_show(v)}; a marker is one time: seconds "
                     "like 2.5, \"45f\" or \"0:02.5\"", "to start something when a layer ends, cue it from the layer: "
                     "\"at\": \"title.out\"")
+    for k, example in (("brand", "\"brand\" (the folder holding brand.json)"), ("variant", "\"light\"")):
+        if spec.get(k) is not None and not isinstance(spec[k], str):
+            rep.add("error", "bad-value", k, f"{k} is {_show(spec[k])}; write it as text like {example}")
+            spec.pop(k)
     theme = spec.get("theme") if isinstance(spec.get("theme"), dict) else {}
     for k in ("paper", "accent", "ink", "muted"):  # the colours the renderer and components draw with
         if theme.get(k) is not None:

@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 from typing import Any, Callable
 
+from . import brand as brandlib
 from . import color as C
 from . import components, media, models, schema, svgpath
 from . import presets as P
@@ -57,8 +58,8 @@ class SceneError(ValueError):
 
 SHAKE = 8.0  # px a camera shake moves the view, at most, when its amount is not given
 # Parts of a scene that are not layers; an issue there reads "canvas: ...", not "layer 'canvas': ...".
-SECTIONS = ("canvas", "markers", "theme", "grade", "motionBlur", "mix", "camera", "light", "lights", "env", "fog",
-            "components")
+SECTIONS = ("canvas", "brand", "variant", "markers", "theme", "grade", "motionBlur", "mix", "camera", "light", "lights",
+            "env", "fog", "components")
 
 
 def _where(owner, message: str) -> str:
@@ -219,9 +220,9 @@ class Scene:
         self.h = int(cv.get("h", cv.get("height", 1080)))
         self.fps = float(cv.get("fps", 30))
         self.ctx = Ctx(self.w, self.h, self.fps)
-        theme = dict(components.THEME, **spec.get("theme", {}))
+        theme = {**components.THEME, **self._brand_theme(spec), **spec.get("theme", {})}
         self.theme = theme
-        self.bg = cv.get("bg", "#0a0c10")
+        self.bg = cv.get("bg", "$bg" if self.brand else "#0a0c10")
         self.markers = spec.get("markers", {})
         self.grade = spec.get("grade") or {}
         self.motion_blur = spec.get("motionBlur") or {}
@@ -295,6 +296,33 @@ class Scene:
             return None, None
         # The frame on screen at t, as --from picks it; the scene's end is its last frame.
         return t, max(0, min(self.frames - 1, math.floor(t * self.fps + 1e-6)))
+
+    def _brand_theme(self, spec: dict) -> dict:
+        """The theme values of the scene's brand (none without one), as self.brand. A scene theme key that a part
+        the brand locks would set is an error; brand load errors are scene errors."""
+        self.brand = None
+        name, variant = spec.get("brand"), spec.get("variant")
+        if not name:
+            if variant is not None:
+                self.note("warning", "brand-variant", "brand", f"variant is '{variant}', but the scene names no brand",
+                          "add \"brand\": \"brand\" (the folder holding brand.json), or remove variant")
+            return {}
+        try:
+            self.brand = brandlib.load(self.base / name)
+            values, owner = brandlib.resolve(self.brand, variant)
+        except brandlib.BrandError as e:
+            self.issues += e.issues
+            self._raise_errors()
+        except ValueError as e:
+            self.note("error", "brand-variant", "brand", str(e), "set variant to one of the brand's palettes")
+            self._raise_errors()
+        self.issues += self.brand.issues
+        for k in spec.get("theme") or {}:
+            if owner.get(k) in self.brand.lock:
+                self.note("error", "brand-locked", "theme", f"theme.{k} changes the brand's {owner[k]}, which the "
+                          "brand locks", f"remove theme.{k}, or take '{owner[k]}' out of the brand's lock")
+        self._raise_errors()
+        return values
 
     def note(self, level: str, code: str, layer, message: str, fix: str = ""):
         self.issues.append({"level": level, "code": code, "layer": layer, "message": message, "fix": fix})
