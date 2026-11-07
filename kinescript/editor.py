@@ -13,20 +13,16 @@ import re
 import tempfile
 import threading
 import webbrowser
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from . import feedback
+from .localhttp import LOCAL_HOSTS, MAX_BODY, BadRequest, LocalHandler  # noqa: F401 (kept importable here)
+from .localhttp import host_name as _host_name  # noqa: F401
 
-MAX_BODY = 1 << 20
-LOCAL_HOSTS = {"localhost", "127.0.0.1", "[::1]"}
 _draw_lock = threading.Lock()  # one Renderer draws at a time
-
-
-class BadRequest(ValueError):
-    pass
 
 
 def _num(q: dict, key: str, default=None, lo=-math.inf, hi=math.inf) -> float:
@@ -42,12 +38,6 @@ def _num(q: dict, key: str, default=None, lo=-math.inf, hi=math.inf) -> float:
     if not math.isfinite(v):
         raise BadRequest(f"{key} must be a number")
     return min(max(v, lo), hi)
-
-
-def _host_name(header: str) -> str:
-    if header.startswith("["):
-        return header.split("]")[0] + "]"
-    return header.rsplit(":", 1)[0] if ":" in header else header
 
 
 COMMON = ("at", "dur")
@@ -287,42 +277,12 @@ def _mentions(raw, name: str) -> bool:
 
 
 def make_handler(path: Path):
-    class Handler(BaseHTTPRequestHandler):
+    class Handler(LocalHandler):
         server_version = "kine-edit"
+        client_errors = (BadRequest, feedback.FeedbackError)
 
-        def log_message(self, *a):
-            pass
-
-        def _send(self, code: int, body: bytes, ctype: str, extra: dict | None = None):
-            self.send_response(code)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            for k, v in (extra or {}).items():
-                self.send_header(k, v)
-            self.end_headers()
-            self.wfile.write(body)
-
-        def _json(self, obj, code: int = 200):
-            self._send(code, json.dumps(obj, ensure_ascii=False).encode(), "application/json")
-
-        def _guard(self, fn):
-            if _host_name(self.headers.get("Host") or "") not in LOCAL_HOSTS:  # blocks DNS rebinding
-                return self._json({"error": "bad host"}, 403)
-            try:
-                fn()
-            except (BadRequest, feedback.FeedbackError) as e:
-                self._json({"error": str(e)}, 400)
-            except FileNotFoundError:
-                self._json({"error": f"{path.name} is gone"}, 404)
-            except Exception as e:  # the scene may be mid-edit; the page shows the message
-                self._json({"error": f"{type(e).__name__}: {e}"}, 500)
-
-        def do_GET(self):
-            self._guard(self._get)
-
-        def do_POST(self):
-            self._guard(self._post)
+        def _gone(self, e):
+            return f"{path.name} is gone"
 
         def _get(self):
             u = urlparse(self.path)
@@ -383,19 +343,7 @@ def make_handler(path: Path):
         def _post(self):
             if urlparse(self.path).path not in ("/notes", "/prop"):
                 return self._json({"error": "not found"}, 404)
-            n = int(self.headers.get("Content-Length") or 0)
-            if not 0 < n <= MAX_BODY:
-                self.close_connection = True
-                raise BadRequest("body is empty or too large")
-            data = self.rfile.read(n)  # read before refusing, so the client is not reset mid-send
-            if "application/json" not in (self.headers.get("Content-Type") or ""):
-                raise BadRequest("send application/json")
-            try:
-                body = json.loads(data)
-            except json.JSONDecodeError:
-                raise BadRequest("body is not valid JSON") from None
-            if not isinstance(body, dict):
-                raise BadRequest("body must be an object")
+            body = self._body()
             action = "prop" if urlparse(self.path).path == "/prop" else body.get("action", "add")
             if action == "prop":
                 changes = body.get("changes") or {body.get("key"): body.get("value")}

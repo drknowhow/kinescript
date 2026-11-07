@@ -42,6 +42,10 @@ def _brand_args(a) -> dict:
         except json.JSONDecodeError:
             value = rest[1]  # plain text, such as a colour without JSON quotes
         out.update(path=rest[0], value=value)
+    elif act == "replace":
+        if len(rest) != 1:
+            raise ValueError("kine brand replace BRAND FILE (a whole brand.json)")
+        out["file"] = rest[0]
     elif act == "add-file":
         if len(rest) != 1:
             raise ValueError("kine brand add-file BRAND FILE --kind fonts|logos")
@@ -135,10 +139,11 @@ def main(argv=None) -> int:
     ed.add_argument("--no-open", action="store_true", help="do not open the browser")
 
     br = sub.add_parser("brand", help="make, show, change and use brands (see BRANDS in kine docs)")
-    br.add_argument("action", choices=[x.replace("_", "-") for x in ("list", "show", "init", "use", "set",
-                                                                     "add_file", "remove_file", "check", "preview")])
+    br.add_argument("action", choices=[x.replace("_", "-") for x in ("list", "show", "init", "use", "set", "replace",
+                                                                     "add_file", "remove_file", "check", "preview",
+                                                                     "wizard")])
     br.add_argument("brand", nargs="?", help="a library brand id or a brand folder (for init: the new id)")
-    br.add_argument("rest", nargs="*", help="set: PATH VALUE (VALUE is JSON, or text); add-file: FILE; "
+    br.add_argument("rest", nargs="*", help="set: PATH VALUE (VALUE is JSON, or text); add-file: FILE; replace: FILE; "
                                            "remove-file: fonts/NAME or logos/NAME")
     br.add_argument("--project", default=".", help="use: the folder that gets brand/ [.]")
     br.add_argument("--from", dest="source", help="init: copy this brand instead of the default")
@@ -150,6 +155,8 @@ def main(argv=None) -> int:
     br.add_argument("--replace", action="store_true", help="add-file: overwrite a file of the same name")
     br.add_argument("--variant", help="preview: the palette to show")
     br.add_argument("-o", "--out", help="preview: the image to write [<brand>_preview.png]")
+    br.add_argument("--port", type=int, default=8766, help="wizard: the port [8766]")
+    br.add_argument("--no-browser", action="store_true", help="wizard: do not open a browser")
 
     sub.add_parser("mcp", help="run the MCP server on stdio")
     sub.add_parser("doctor", help="report ffmpeg, GPU and font availability")
@@ -220,6 +227,10 @@ def _run(a) -> int:
         from .editor import serve
         serve(a.scene, a.port, not a.no_open)
         return 0
+    if a.cmd == "brand" and a.action == "wizard":
+        from .brand_server import serve as serve_brand
+        serve_brand(a.brand, a.project, a.port, not a.no_browser)
+        return OK
     if a.cmd == "brand":
         from .brandops import run
         out = {"ok": True, **run(a.action.replace("-", "_"), _brand_args(a))}

@@ -64,8 +64,9 @@ dev = [
 kine = "kinescript.cli:main"
 
 [tool.setuptools]
-packages = ["kinescript", "kinescript.fonts", "kinescript.editor_ui"]  # fonts/ and editor_ui/ are data-only packages
+packages = ["kinescript", "kinescript.fonts", "kinescript.editor_ui", "kinescript.brand_ui"]  # data-only: fonts, *_ui
 
 [tool.setuptools.package-data]
 "kinescript.fonts" = ["*.ttf", "*.txt"]
 "kinescript.editor_ui" = ["*.html"]
+"kinescript.brand_ui" = ["*.html"]
