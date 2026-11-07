@@ -749,8 +749,8 @@ COMPONENTS  {"use": "<name>", "id": "...", "at": ..., "dur": ..., ...parameters}
   ({{ label }} with spaces works too) with no value and no default is an error that names it.
 
 AVATARS
-  An avatar is a character drawn once as parts, in a folder with an avatar.json. Scenes cannot use
-  one yet; kine avatar check FOLDER checks the folder and lists what it has, and kine look FOLDER
+  An avatar is a character drawn once as parts, in a folder with an avatar.json, that a scene makes
+  talk. kine avatar check FOLDER checks the folder and lists what it has, and kine look FOLDER
   draws every pose on one sheet: each mouth shape (and what a missing one shows), eyes closed and
   looking aside, each expression, and each gesture where it moves most, with pivots marked.
   Every part file is drawn at the avatar's full size, in place, so pivots are points in the avatar's
@@ -774,6 +774,16 @@ AVATARS
   that id. An expression sets x, y, rotate, scale or opacity on parts, and may hold a mouth shape;
   a gesture keys them over its dur. idle: false stops blinks, breath and glances. voice takes
   speaker, backend, rate and options, as a sound does.
+  In a scene, a layer {"use": "avatar"} draws it, centred on x, y (default "50%"), h (or w) pixels
+  tall, and say makes it talk:
+    {"id": "host", "use": "avatar", "avatar": "avatars/host", "x": "30%", "y": "60%", "h": 600,
+     "at": 0.5, "say": {"text": "Write the scene. Check it. Render it."}}
+  say is a line ({"text": ...}, with a sound's id, at, speaker, backend, rate, options, gain, volume
+  and pan), the id of a sound in "audio" (recorded speech too), or a list of them. A line becomes
+  the voice sound <id>-say (<id>-say1, -say2 ... in a list) that kine voice speaks, with the
+  avatar's voice where the line sets none; it starts with the avatar and each next line 0.4 s after
+  the one before, unless it gives at. Cue from it like any voice: "at": "host-say:render". The
+  mouth follows the line's mouth track (see kine probe --mouth) and rests between lines.
 
 SOUND
   Top-level "audio" lists the sounds. Each one:
