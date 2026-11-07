@@ -784,6 +784,18 @@ AVATARS
   avatar's voice where the line sets none; it starts with the avatar and each next line 0.4 s after
   the one before, unless it gives at. Cue from it like any voice: "at": "host-say:render". The
   mouth follows the line's mouth track (see kine probe --mouth) and rests between lines.
+  expressions, gaze and gestures time the rest, each a list; at is a cue or seconds from the
+  avatar's start:
+    "expressions": [{"name": "smile", "at": "host-say.in", "dur": 2, "weight": 1}],
+    "gaze": [{"at": 0, "target": "camera"}, {"at": "host-say:chart", "target": "#chart"}],
+    "gestures": [{"name": "nod", "at": "host-say:render"}]
+  An expression comes on over 0.2 s and goes after dur (with no dur it stays); weight scales its
+  offsets, which add to the parts' own and to other expressions'. Its mouth shape shows where the
+  mouth would rest: speech owns the mouth. gaze moves the eyes in 0.12 s to camera (ahead), left,
+  right, up, down, [gx, gy] (each -1 to 1 of the eyes' look) or "#id", a layer at the top of the
+  scene with a fixed x and y; list them in time order. A gesture plays its keys from at. Two
+  gestures that move the same part at the same time are an error (avatar-gesture-overlap), not a
+  blend.
 
 SOUND
   Top-level "audio" lists the sounds. Each one:

@@ -632,9 +632,159 @@ def _find(G: dict, gid: str) -> dict | None:
     return None
 
 
+RAMP = 0.2  # seconds an expression takes to come on and to go
+MOVE = 0.12  # seconds the eyes take to move to a new gaze
+GAZE = {"camera": (0, 0), "ahead": (0, 0), "left": (-1, 0), "right": (1, 0), "up": (0, -1), "down": (0, 1)}
+ENTRY_KEYS = {"expressions": {"name", "at", "dur", "weight"}, "gaze": {"at", "target"},
+              "gestures": {"name", "at"}}
+
+
+def _early(at, lid: str, fps: float) -> str:
+    """A cue PRE seconds before `at`, for a layer whose keys are shifted by PRE so that, starting that early, it
+    shows its first key until `at`. A number (or clock) counts from the avatar's start, as at does in a group;
+    written as a cue on the avatar, so it means the same however deep the layer is."""
+    from .timing import parse_clock
+    t = at if isinstance(at, (int, float)) and not isinstance(at, bool) else (
+        parse_clock(at, fps) if isinstance(at, str) else None)
+    if t is not None:
+        return f"{lid}.in{'+' if t >= 0 else '-'}{abs(t):g} - {PRE:g}"
+    if not isinstance(at, str):
+        raise ValueError(f"cannot read the time {at!r}")
+    return f"{at} - {PRE:g}"  # the spaces end an id, which may hold a '-'
+
+
+def _entries(p, kind: str, names: dict | None) -> list[dict]:
+    lid, got = p["id"], p.get(kind) or []
+    got = got if isinstance(got, list) else [got]
+    for i, e in enumerate(got):
+        where = f"layer '{lid}': {kind}[{i}]"
+        if not isinstance(e, dict):
+            raise ValueError(f"{where} must be an object such as " + {
+                "expressions": '{"name": "smile", "at": "s1.in", "dur": 1}', "gaze": '{"at": 0, "target": "camera"}',
+                "gestures": '{"name": "nod", "at": "s1.in+0.5"}'}[kind])
+        extra = set(e) - ENTRY_KEYS[kind]
+        if extra:
+            raise ValueError(f"{where} takes {', '.join(sorted(ENTRY_KEYS[kind]))}; not {', '.join(sorted(extra))}")
+        if names is not None and e.get("name") not in names:
+            raise ValueError(f"{where} names {kind[:-1]} {e.get('name')!r}, which the avatar does not have. Its "
+                             f"{kind}: {', '.join(names) or 'none'}")
+        for k in ("dur", "weight"):
+            v = e.get(k)
+            if v is not None and (not _num(v) or v < 0 or k == "dur" and v == 0):
+                raise ValueError(f"{where}: {k} is {v!r}; it takes a number above 0")
+    return got
+
+
+def _wrap(G: dict, gid: str, at: str, props: dict, only: set[str] | None = None) -> None:
+    """Put G's children (or only those with ids in `only`) in a group that starts at `at` and carries props, so its
+    keys add to the part's own: a group at (0, 0) moves, turns and scales what it holds about the part's pivot."""
+    kids = G.get("children") or []
+    inner = [c for c in kids if only is None or c.get("id") in only]
+    if not inner:
+        return
+    W = {"id": gid, "type": "group", "at": at, **props, "children": inner}
+    first = kids.index(inner[0])
+    G["children"] = [c for c in kids[:first] if c not in inner] + [W] + [c for c in kids[first:] if c not in inner]
+
+
+def _gaze(target, p, av: Avatar, k: float, scene, where: str) -> tuple[float, float]:
+    """A gaze target as [gx, gy], each -1 to 1 of the eyes' reach."""
+    if isinstance(target, str) and target in GAZE:
+        return GAZE[target]
+    if _point(target):
+        return max(-1.0, min(1.0, float(target[0]))), max(-1.0, min(1.0, float(target[1])))
+    if not (isinstance(target, str) and target.startswith("#")):
+        raise ValueError(f"{where}: target is {target!r}; give {', '.join(GAZE)}, [gx, gy] from -1 to 1, or "
+                         "\"#id\" of a layer")
+    from . import props as P
+    top = {str(L.get("id")): L for L in scene.spec.get("layers") or [] if isinstance(L, dict)}
+    tid = target[1:]
+
+    def at(L, what):
+        xy = [P.length(L.get(a, d), a, scene.ctx) for a, d in (("x", "50%" if what == "avatar" else 0),
+                                                               ("y", "50%" if what == "avatar" else 0))]
+        if not all(_num(v) for v in xy):
+            raise ValueError(f"{where}: the {what} needs a fixed x and y to look at '{tid}'; give the target as "
+                             "[gx, gy] instead")
+        return [float(v) for v in xy]
+    if tid not in top:
+        raise ValueError(f"{where}: no layer at the top of the scene has id '{tid}'" +
+                         ("; it is inside a group, so give the target as [gx, gy]" if tid in _ids(scene.spec) else
+                          ". Layers: " + ", ".join(top)))
+    if p["id"] not in top:
+        raise ValueError(f"{where}: the avatar is inside a group, so it cannot look at '{tid}'; give [gx, gy]")
+    tx, ty = at(top[tid], "target")
+    ax, ay = at(p, "avatar")
+    q, eye = (av.eyes or [None])[0], (av.size[0] / 2, av.size[1] / 2)
+    while q is not None:  # where the eyes are: the nearest pivot the avatar sets, from the eyes up
+        if "pivot" in av.spec["parts"][q.name]:
+            eye = q.pivot
+            break
+        q = av.parts.get(q.parent) if q.parent else None
+    dx, dy = tx - (ax + (eye[0] - av.size[0] / 2) * k), ty - (ay + (eye[1] - av.size[1] / 2) * k)
+    d = math.hypot(dx, dy)
+    return (0.0, 0.0) if d < 1 else (dx / d, dy / d)
+
+
+def _ids(spec) -> set[str]:
+    out: set[str] = set()
+
+    def walk(ls):
+        for L in ls or []:
+            if isinstance(L, dict):
+                out.add(str(L.get("id")))
+                walk(L.get("children"))
+    walk(spec.get("layers"))
+    return out
+
+
+def _mouth(av: Avatar, mouth: dict, says: list, exprs: list, lid: str, fills: dict, scene) -> None:
+    """The mouth part's drawings: each line's track shows its shapes, and an expression with a mouth shows that
+    shape wherever the mouth would be at rest while it lasts (speech owns the mouth; the latest such expression wins).
+    Every keyed layer starts early and holds its first key (see PRE), as cues cannot be read inside keys."""
+    part, rig, rest = av.mouth, f"{lid}-rig", av.shape("X")
+    biased = [(i, e, av.shape(av.spec["expressions"][e["name"]]["mouth"])) for i, e in enumerate(exprs)
+              if "mouth" in av.spec["expressions"][e["name"]] and (e.get("weight", 1) or 0) > 0]
+    biased = [b for b in biased if b[2] != rest]
+    if not says and not biased:
+        return
+    kids = []
+    for n, sid in enumerate(says or [None]):
+        track, t0 = _track(scene, sid) if sid else ([], 0.0)
+        pre = PRE if n == 0 else 0.0  # the first line's drawings start long before it, at rest until it starts
+
+        def draw(s: str, keyed: str, tag: str) -> dict:
+            L = _drawing(av, part, s, rig, fills, True)
+            L.pop("opacity", None)
+            L.update(id=f"{lid}-mouth-{tag}-{n + 1}", opacity=_keys(track, av, keyed, t0, pre))
+            if sid:
+                L["at"] = f"{sid}.in - {PRE:g}" if pre else f"{sid}.in"
+                if n + 1 < len(says):
+                    L["until"] = f"{says[n + 1]}.in"
+            return L
+        for s in part.files:
+            L = draw(s, s, s)
+            if s != rest or not biased:
+                if sid or L["opacity"] != 0:
+                    kids.append(L)
+                continue
+            slot = [L]
+            for i, e, shape in biased:  # rest shows where no biasing expression is on, each one's shape where it is
+                at = _early(e.get("at", 0), lid, scene.fps)
+                on = [[0, 0, "hold"], [PRE, 1, "hold"]] + ([[PRE + e["dur"], 0, "hold"]] if e.get("dur") else [])
+                off = [[t, 1 - v, ease] for t, v, ease in on]
+                slot = [{"id": f"{lid}-mouth-rest{i + 1}-{n + 1}", "type": "group", "at": at, "opacity": off,
+                         "children": slot},
+                        {"id": f"{lid}-mouth-expr{i + 1}-{n + 1}", "type": "group", "at": at, "opacity": on,
+                         "children": [draw(shape, rest, f"{shape}-expr{i + 1}")]}]
+            kids += slot
+    mouth["children"] = kids
+
+
 def component(p, theme: dict, scene) -> dict:
-    """{"use": "avatar", "avatar": FOLDER, "x", "y", "h" or "w", "say"}: the avatar as plain layers, centred on
-    x, y at h pixels tall (its own size without h or w), its mouth following the sounds say names."""
+    """{"use": "avatar", "avatar": FOLDER, "x", "y", "h" or "w", "say", "expressions", "gaze", "gestures"}: the
+    avatar as plain layers, centred on x, y at h pixels tall (its own size without h or w), its mouth following the
+    sounds say names, with the expressions, gaze and gestures given at their times."""
     lid = p["id"]
     folder = Path(scene.base) / str(p.get("avatar") or "")
     if not p.get("avatar"):
@@ -642,24 +792,65 @@ def component(p, theme: dict, scene) -> dict:
     av = load(folder)
     w, h = av.size
     k = (float(p["h"]) / h if p.get("h") is not None else float(p["w"]) / w if p.get("w") is not None else 1.0)
-    body = layers(av, f"{lid}-rig", {}, theme)
+    rig, fills = f"{lid}-rig", colors(av, theme)
+    body = layers(av, rig, {}, theme)
+    exprs = _entries(p, "expressions", av.spec.get("expressions") or {})
+    gazes = _entries(p, "gaze", None)
+    gests = _entries(p, "gestures", av.spec.get("gestures") or {})
     says = p.get("say") or []
     says = says if isinstance(says, list) else [says]
-    mouth = av.mouth and _find(body, f"{lid}-rig-{av.mouth.name}")
-    if mouth and says:
-        part, kids = av.mouth, []
-        drawn = [s for s in part.files]
-        for n, sid in enumerate(says):
-            track, t0 = _track(scene, sid)
-            pre = PRE if n == 0 else 0.0  # the first line's drawings start long before it, at rest until it starts
-            for s in drawn:
-                L = _drawing(av, part, s, f"{lid}-rig", {}, True)
-                L.pop("opacity", None)
-                L.update(id=f"{lid}-mouth-{s}-{n + 1}", at=f"{sid}.in-{PRE:g}" if pre else f"{sid}.in",
-                         opacity=_keys(track, av, s, t0, pre))
-                if n + 1 < len(says):
-                    L["until"] = f"{says[n + 1]}.in"
-                kids.append(L)
-        mouth["children"] = kids
+    mouth = av.mouth and _find(body, f"{rig}-{av.mouth.name}")
+    if mouth:
+        _mouth(av, mouth, says, exprs, lid, fills, scene)
+
+    eyes = [q for q in av.parts.values() if q.kind == "states" and q.look != (0.0, 0.0)]
+    if gazes and not eyes:
+        raise ValueError(f"layer '{lid}': gaze moves the eyes by their look reach, and no part of the avatar has "
+                         "look; give the eyes part \"look\": [x, y] in its avatar.json")
+    was = (0.0, 0.0)
+    for i, g in enumerate(gazes):  # each gaze moves the eyes on from the one before, so the moves add up
+        gx, gy = _gaze(g.get("target", "camera"), p, av, k, scene, f"layer '{lid}': gaze[{i}]")
+        at = _early(g.get("at", 0), lid, scene.fps)
+        for e in eyes:
+            G = _find(body, f"{rig}-{e.name}")
+            dx, dy = (gx - was[0]) * e.look[0], (gy - was[1]) * e.look[1]
+            if G is None or (dx, dy) == (0, 0):
+                continue
+            props = {a: [[0, 0], [PRE, 0], [PRE + MOVE, round(d, 4)]] for a, d in (("x", dx), ("y", dy)) if d}
+            _wrap(G, f"{lid}-gaze{i + 1}-{e.name}", at, props, {f"{rig}-{e.name}-{s}" for s in e.files} |
+                  {f"{lid}-gaze{j}-{e.name}" for j in range(1, i + 1)})
+        was = (gx, gy)
+
+    for i, e in enumerate(exprs):
+        pose, wt, dur = av.spec["expressions"][e["name"]], float(e.get("weight", 1)), e.get("dur")
+        r = min(RAMP, dur / 2) if dur else RAMP
+        at = _early(e.get("at", 0), lid, scene.fps)
+        for pname, change in pose.items():
+            G = _find(body, f"{rig}-{pname}") if pname != "mouth" else None
+            if G is None:
+                continue
+            props = {}
+            for a, v in change.items():
+                base = 1.0 if a in ("scale", "opacity") else 0.0
+                to = round(base + wt * (v - base), 4)
+                keys = [[0, base], [PRE, base], [PRE + r, to]]
+                if dur:
+                    keys += ([[PRE + dur - r, to]] if dur > 2 * r else []) + [[PRE + dur, base]]
+                props[a] = keys
+            _wrap(G, f"{lid}-expr{i + 1}-{pname}", at, props)
+
+    spans = getattr(scene, "gestures", None)
+    for i, g in enumerate(gests):
+        pose = av.spec["gestures"][g["name"]]
+        at = _early(g.get("at", 0), lid, scene.fps)
+        for pname, change in pose.items():
+            G = _find(body, f"{rig}-{pname}") if pname != "dur" else None
+            if G is None:
+                continue
+            gid = f"{lid}-gesture{i + 1}-{pname}"
+            _wrap(G, gid, at, {a: [[0, ks[0][1]]] + [[PRE + t, v] for t, v in ks] for a, ks in change.items()})
+            if spans is not None:
+                spans.append({"layer": lid, "name": g["name"], "part": pname, "id": gid, "dur": float(pose["dur"])})
+
     body.update(x=-w * k / 2, y=-h * k / 2, scale=k)
     return {"type": "group", "x": p.get("x", "50%"), "y": p.get("y", "50%"), "children": [body]}
