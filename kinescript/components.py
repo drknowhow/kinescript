@@ -10,6 +10,7 @@ import math
 import re
 from pathlib import Path
 
+from . import color as C
 from .props import FIELD
 
 THEME = {
@@ -341,6 +342,78 @@ def _pie_chart(p, th):
             "h": 2 * r, "children": kids}
 
 
+# Where a logo goes when the brand names no such placement: a corner or edge, inside the safe area.
+PLACES = ("topleft", "top", "topright", "left", "center", "right", "bottomleft", "bottom", "bottomright")
+
+
+def _pct(v, whole: float) -> float:
+    """px from a number or "6%" of `whole`."""
+    if isinstance(v, str) and v.strip().endswith("%"):
+        return float(v.strip()[:-1]) / 100 * whole
+    return float(v)
+
+
+def _logo(p, th, scene=None):
+    """A brand logo as an image layer, at one of the brand's placements or a corner: {"use": "logo", "logo": "mark",
+    "placement": "bottomright"}. On a dark background it takes the logo's onDark file when it has one."""
+    W, H = (scene.w, scene.h) if scene is not None else (1920, 1080)
+    logos = group(th, "logos")
+    entries = {k: v for k, v in logos.items() if isinstance(v, dict)}
+    name = p.get("logo") or ("full" if "full" in entries else next(iter(entries), None))
+    if p.get("src"):
+        src = p["src"]
+    elif name in entries:
+        e = entries[name]
+        dark = p.get("dark")
+        if dark is None:
+            dark = C.luminance(C.parse(th.get("bg", th["void"]))) < 0.18
+        src = e.get("onDark" if dark else "onLight") or e["file"]
+    else:
+        raise ValueError(f"layer '{p['id']}': logo is {name!r}, but " + (
+            f"the brand's logos are: {', '.join(entries)}" if entries else
+            "the scene's brand has no logos (add \"logos\": {\"full\": {\"file\": \"logos/full.svg\"}} to "
+            "brand.json), and no src is given"))
+    places = group(th, "placements")
+    where = p.get("placement", "bottomright")
+    if where in places and isinstance(places[where], dict):
+        place = places[where]
+    elif where in PLACES:
+        place = {"anchor": where}
+    else:
+        raise ValueError(f"layer '{p['id']}': placement is {where!r}; use one of the brand's placements "
+                         f"({', '.join(places) or 'none'}) or a corner or edge: {', '.join(PLACES)}")
+    anchor = place.get("anchor", "bottomright")
+    margin = place.get("margin", th.get("safeArea", "5%"))
+    h = round(_pct(p.get("h", place.get("height", "8%")), H), 3)
+    fx = 0.5 if anchor in ("top", "bottom", "center") else 1.0 if anchor.endswith("right") else 0.0
+    fy = 0.5 if anchor in ("left", "right", "center") else 1.0 if anchor.startswith("bottom") else 0.0
+    mx, my = _pct(margin, W), _pct(margin, H)
+    x = mx + fx * (W - 2 * mx)
+    y = my + fy * (H - 2 * my)
+    least = (logos.get("minHeight") if isinstance(logos.get("minHeight"), (int, float)) else 0) * H / 1080
+    if scene is not None and h < least:
+        scene.note("warning", "logo-small", p["id"], f"the logo is {h:g} px tall; the brand asks for at least "
+                   f"{least:g} px at this size", f"set h to {least:g} or more, or a bigger placement height")
+    out = {"type": "image", "src": src, "h": h, "fit": "contain", "anchor": anchor,
+           "x": round(p.get("x", x), 3) if isinstance(p.get("x", x), (int, float)) else p["x"],
+           "y": round(p.get("y", y), 3) if isinstance(p.get("y", y), (int, float)) else p["y"]}
+    if p.get("w") is not None:
+        out["w"] = _pct(p["w"], W)
+    if p.get("opacity", place.get("opacity")) is not None:
+        out["opacity"] = p.get("opacity", place.get("opacity"))
+    return out
+
+
+def _bug(p, th, scene=None):
+    """The brand's bug: its logo at its placement and opacity for the whole video, unless timed."""
+    bug = group(th, "bug")
+    q = Params({**{k: bug[k] for k in ("logo", "placement", "opacity", "h") if k in bug},
+                **{k: v for k, v in p.items() if v is not None}})
+    q.setdefault("logo", "mark" if "mark" in group(th, "logos") else None)
+    q.setdefault("opacity", 0.85)
+    return _logo(q, th, scene)
+
+
 # Parameters a builder reads only in some branches (so a single call may not touch them).
 PARAMS = {"lowerThird": ("title", "subtitle", "x", "y", "accent", "size", "plate", "color", "subColor"),
           "titleCard": ("title", "subtitle", "kicker", "size", "accent", "color", "x", "y"),
@@ -352,7 +425,9 @@ PARAMS = {"lowerThird": ("title", "subtitle", "x", "y", "accent", "size", "plate
                        "color", "colors", "highlight", "accent", "values", "format"),
           "lineChart": ("data", "labels", "x", "y", "w", "h", "min", "max", "grow", "size", "color", "strokeWidth",
                         "r", "dots", "values", "format"),
-          "pieChart": ("data", "labels", "x", "y", "r", "inner", "grow", "size", "colors", "format")}
+          "pieChart": ("data", "labels", "x", "y", "r", "inner", "grow", "size", "colors", "format"),
+          "logo": ("logo", "placement", "src", "dark", "h", "w", "x", "y", "opacity"),
+          "bug": ("logo", "placement", "src", "dark", "h", "w", "x", "y", "opacity")}
 
 # Parameters a builder computes with, so text there would fail inside it.
 NUMBER_PARAMS = {"callout": ("r",), "lowerThird": ("size",),
@@ -362,7 +437,8 @@ NUMBER_PARAMS = {"callout": ("r",), "lowerThird": ("size",),
 
 BUILTIN = {"lowerThird": _lower_third, "titleCard": _title_card, "callout": _callout, "focus": _focus,
            "progress": _progress, "kinetic": _kinetic, "barChart": _bar_chart, "lineChart": _line_chart,
-           "pieChart": _pie_chart}
+           "pieChart": _pie_chart, "logo": _logo, "bug": _bug}
+NEEDS_SCENE = {"logo", "bug"}  # builders that read the canvas size
 COMPONENT_DOCS = {
     "lowerThird": "title, subtitle, x [\"6%\"], y [\"78%\"] (top-left of its accent bar), accent, size [54], "
                   "color, subColor, plate (box colour, or false for none)",
@@ -380,6 +456,12 @@ COMPONENT_DOCS = {
                  "values [true], format [\"{:,.0f}\"], size [30]",
     "pieChart": "data (as barChart's), labels, x, y [\"50%\"] (centre), r [240], inner [0] (0..0.95: a hole for a "
                 "doughnut), grow [1.2] (seconds to sweep round), colors, format [\"{:.0f}%\"], size [30]",
+    "logo": "logo [full] (a name in the brand's logos), placement [bottomright] (a brand placement, or topleft|top|"
+            "topright|left|center|right|bottomleft|bottom|bottomright inside the safe area), h [\"8%\"] (px or % of "
+            "the height), w, x, y, opacity, dark (true takes the logo's onDark file; default: from the background), "
+            "src (a file instead of a brand logo)",
+    "bug": "the brand's bug (its logo [mark], placement and opacity [0.85]) for the whole video unless timed; "
+           "takes logo's parameters",
 }
 _PASS = ("id", "at", "dur", "until", "enter", "exit", "emphasis", "opacity", "scale", "rotate", "hidden", "z",
          "rotateX", "rotateY", "fixed", "sound")
@@ -575,7 +657,7 @@ def expand(raw, user: dict, theme: dict, scene=None):
         if branded:
             _brand_params(name, params, theme)
         try:
-            out = BUILTIN[name](params, theme)
+            out = BUILTIN[name](params, theme, scene) if name in NEEDS_SCENE else BUILTIN[name](params, theme)
             if branded:
                 _brand_text(name, out, params["id"], theme)
         except (TypeError, AttributeError, KeyError, IndexError, ArithmeticError) as e:  # a parameter of a wrong type

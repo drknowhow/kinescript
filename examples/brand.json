@@ -2,6 +2,7 @@
   "canvas": {"w": 1920, "h": 1080, "fps": 30, "poster": 1.2},
   "brand": "brand",
   "layers": [
+    {"use": "bug", "id": "bug", "until": "who.in"},
     {"use": "titleCard", "id": "title", "kicker": "Quarterly review", "title": "Tides **rising**",
      "subtitle": "styled by brand/brand.json", "at": 0, "dur": 3},
     {"use": "barChart", "id": "sales", "data": [["Q1", 42], ["Q2", 58], ["Q3", 71], ["Q4", 64]], "highlight": "Q3",
@@ -11,6 +12,7 @@
     {"id": "note", "type": "text", "text": "Q3 was our best quarter", "textStyle": "caption", "fill": "$muted",
      "x": "50%", "y": "90%", "at": "title.out+1", "until": "sales.out", "enter": "$motion.enter"},
     {"use": "lowerThird", "id": "who", "title": "Ada Marlow", "subtitle": "Head of Operations",
-     "at": "sales.out+0.2", "dur": 3}
+     "at": "sales.out+0.2", "dur": 3},
+    {"use": "logo", "id": "end", "placement": "closing", "at": "who.out", "dur": 2, "enter": "pop"}
   ]
 }
