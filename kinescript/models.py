@@ -51,6 +51,7 @@ class Place(NamedTuple):
     node: int | None  # the node it hangs from (None in a file without nodes)
     skin: int | None
     w0: np.ndarray  # morph target weights when no animation sets them
+    names: tuple = ()  # each morph target's name (the mesh's extras.targetNames), "" for an unnamed one
 
 
 class Motion(NamedTuple):
@@ -193,12 +194,18 @@ def clip_index(imp: Imported, name) -> int | None:
     return low.index(s) if low.count(s) == 1 else None
 
 
-def pose(imp: Imported, clip: int, t: float) -> tuple[np.ndarray, np.ndarray]:
-    """The mesh's points and normals, as imp.mesh holds them, t seconds into animation `clip` (clamped to it):
-    its channels set node translations, rotations, scales and morph target weights, skins follow their joints, and
-    the triangles are cut as when the file was read, so a vertex moves with the ends of the edge it was cut from."""
+def morph_names(imp: Imported) -> list[str]:
+    """The named morph targets of a model file, each once, in the order the file first gives them."""
+    return list((imp.about or {}).get("morphs", []))
+
+
+def pose(imp: Imported, clip: int | None, t: float, morphs: dict | None = None) -> tuple[np.ndarray, np.ndarray]:
+    """The mesh's points and normals, as imp.mesh holds them, t seconds into animation `clip` (clamped to it; None
+    for the rest pose): its channels set node translations, rotations, scales and morph target weights, skins
+    follow their joints, and the triangles are cut as when the file was read, so a vertex moves with the ends of
+    the edge it was cut from. `morphs` sets morph targets by name, over what the clip gives them."""
     mo = imp.motion
-    _, start, _, chans = mo.clips[clip]
+    _, start, _, chans = mo.clips[clip] if clip is not None else (None, 0.0, 0.0, [])
     trs = list(mo.trs)
     weights: dict = {}
     for node, path, how, times, vals in chans:
@@ -216,6 +223,11 @@ def pose(imp: Imported, clip: int, t: float) -> tuple[np.ndarray, np.ndarray]:
         if pc.node in weights:
             v = weights[pc.node][:len(w)]
             w = np.r_[v, w[len(v):]]
+        if morphs and any(n in morphs for n in pc.names):
+            w = np.array(w, float)
+            for j, n in enumerate(pc.names):
+                if n in morphs:
+                    w[j] = morphs[n]
         got.append(_place(pc, np.eye(4) if pc.node is None else G[pc.node],
                           None if pc.skin is None else bones[pc.skin], w))
     P = np.concatenate([p for p, _ in got]) * (1.0, -1.0, 1.0)
@@ -510,7 +522,7 @@ def _gltf(p: Path) -> tuple[list, list]:
                if "inverseBindMatrices" in sk else np.tile(np.eye(4), (len(J), 1, 1)))
         skins.append((J, ibm[:len(J)]))
     bones = [np.stack([rest[j] for j in J]) @ ibm if J else None for J, ibm in skins]
-    pieces, places, sets_read, crowded, most = [], [], set(), 0, 0
+    pieces, places, sets_read, crowded, most, named = [], [], set(), 0, 0, {}
 
     def emit(mi: int, world: np.ndarray, node: int | None):
         nonlocal crowded, most
@@ -561,6 +573,11 @@ def _gltf(p: Path) -> tuple[list, list]:
                 if "NORMAL" in at:
                     dN = np.stack([accessor(t["NORMAL"])[:, :3] if "NORMAL" in t else np.zeros((len(P), 3))
                                    for t in targets])
+            given_names = (meshes[mi].get("extras") or {}).get("targetNames")
+            given_names = given_names if isinstance(given_names, list) else []
+            names = tuple(str(n) if isinstance(n, str) else "" for n in given_names[:len(targets)])
+            names += ("",) * (len(targets) - len(names))
+            named.update((n, None) for n in names if n)
             w0 = np.zeros(len(targets))
             given = list(nd.get("weights", meshes[mi].get("weights", [])))[:len(targets)]
             w0[:len(given)] = given
@@ -572,7 +589,7 @@ def _gltf(p: Path) -> tuple[list, list]:
                 U = U @ moves[mat][:, :2].T + moves[mat][:, 2]
             N = attr("NORMAL")[:, :3] if "NORMAL" in at else None
             double = bool(mat >= 0 and doc["materials"][mat].get("doubleSided"))
-            pc = Place(P, N, dP, dN, joints, weights, T, double, node, skin, w0)
+            pc = Place(P, N, dP, dN, joints, weights, T, double, node, skin, w0, names)
             places.append(pc)
             P, N = _place(pc, world, None if skin is None else bones[skin], w0)
             if pc.N is None:  # each triangle its own three vertices, with its face's normal
@@ -621,9 +638,9 @@ def _gltf(p: Path) -> tuple[list, list]:
     about = {"animations": [{"name": n or str(i), "duration": round(d, 3)} for i, (n, _, d, _) in enumerate(clips)],
              "skins": [{"name": sk.get("name") or str(i), "joints": len(skins[i][0])}
                        for i, sk in enumerate(doc.get("skins", []))],
-             "morphTargets": most, "uvSets": sorted(sets_read), "crowded": crowded}
+             "morphTargets": most, "morphs": list(named), "uvSets": sorted(sets_read), "crowded": crowded}
     rig = None
-    if clips:
+    if clips or named:  # a file with named morph targets poses for a layer's morphs, with or without a clip
         rig = dict(parent=parent, order=order, local=local, skins=skins,
                    trs=[None if "matrix" in nd else _rest(nd) for nd in nodes], places=places, clips=clips)
     return pieces, mats, rig, about

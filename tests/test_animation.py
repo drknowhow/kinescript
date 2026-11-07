@@ -344,3 +344,42 @@ def test_animation_keys_are_read_the_way_agents_write_them(tmp_path):
                        {"id": "u", "type": "model", "shape": "cube", "animation": {"name": "rise"}}]))
     assert t.by_id["t"].raw.get("enter") == {"name": "fade"}  # elsewhere it is still the entrance
     assert t.by_id["u"].raw.get("enter") == {"name": "rise"}  # and on a model with no file
+
+
+def _faces(tmp_path):
+    """A plane whose right edge a morph target "lift" brings 10 toward the viewer and "wide" moves 10 right."""
+    plane = mesh.placed(mesh.unit("plane"), (20, 20, 1))
+    lift, wide = np.zeros_like(plane.P), np.zeros_like(plane.P)
+    lift[plane.P[:, 0] > 0, 2] = 10
+    wide[plane.P[:, 0] > 0, 0] = 10
+    g = Gltf()
+    m = g.mesh(plane, targets=[{"POSITION": g.add(lift * (1, -1, 1))}, {"POSITION": g.add(wide * (1, -1, 1))}])
+    g.doc["meshes"][m]["extras"] = {"targetNames": ["lift", "wide"]}
+    g.node(mesh=m)
+    return g.save(tmp_path / "faces.gltf")
+
+
+def test_morph_targets_are_set_by_name_with_or_without_a_clip(tmp_path):
+    src = _faces(tmp_path)
+    imp = models.load(src)
+    assert models.morph_names(imp) == ["lift", "wide"] and probe_media(src)["morphs"] == ["lift", "wide"]
+    assert np.ptp(models.pose(imp, None, 0, {"lift": 0.5})[0][:, 2]) == pytest.approx(5, abs=1e-4)
+    base = {"id": "m", "type": "model", "src": src, "x": 160, "y": 90, "w": 100}
+
+    def width(T, **kw):
+        return _shot(scene([dict(base, **kw)]), T).boxes["m"]["rect"][2]
+
+    rest = width(0.5)
+    assert width(0.5, morphs={"wide": 1}) == pytest.approx(rest + 50, abs=2)  # 20 units wide to 30, 5 px a unit
+    keyed = {"wide": [[0, 0], [1, 1]]}
+    assert rest < width(0.5, morphs=keyed) < width(1.0, morphs=keyed)
+    assert width(0.5, morphs={"wide": "=0"}) == pytest.approx(rest, abs=0.5)
+
+
+def test_check_names_a_morph_the_file_lacks(tmp_path):
+    src = _faces(tmp_path)
+    r = check(scene([{"id": "m", "type": "model", "src": src, "morphs": {"lfit": 1}}]))
+    hit = [i for i in r["issues"] if i["code"] == "unknown-morph"]
+    assert not r["ok"] and hit and "'lift', 'wide'" in hit[0]["message"] and "'lift'" in hit[0]["fix"], r["issues"]
+    r = check(scene([{"id": "m", "type": "model", "src": src, "morphs": 1}]))
+    assert any(i["code"] == "bad-value" and "morphs" in i["message"] for i in r["issues"]), r["issues"]
