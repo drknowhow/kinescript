@@ -750,7 +750,9 @@ COMPONENTS  {"use": "<name>", "id": "...", "at": ..., "dur": ..., ...parameters}
 
 AVATARS
   An avatar is a character drawn once as parts, in a folder with an avatar.json. Scenes cannot use
-  one yet; kine avatar check FOLDER checks the folder and lists what it has.
+  one yet; kine avatar check FOLDER checks the folder and lists what it has, and kine look FOLDER
+  draws every pose on one sheet: each mouth shape (and what a missing one shows), eyes closed and
+  looking aside, each expression, and each gesture where it moves most, with pivots marked.
   Every part file is drawn at the avatar's full size, in place, so pivots are points in the avatar's
   own pixels. Parts draw in the order listed; a part with a parent turns and moves with it.
     {"kinescriptAvatar": 1, "name": "Host", "size": [600, 900],
@@ -935,6 +937,8 @@ COMMANDS
                                   clocks, and its speed a second (signed; a distance for position,
                                   x and y as a point, or a colour), where it holds still and its
                                   fastest frame. An enter, exit or along moves a layer as well.
+  kine look FOLDER                an avatar folder's poses on one sheet (FOLDER/avatar_sheet.png,
+                                  or -o); --width and --cols as for a scene
   kine avatar check FOLDER        an avatar folder's problems (see AVATARS), and for one without
                                   errors its parts, mouth shapes and fallbacks, eyes, expressions
                                   and gestures

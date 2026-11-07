@@ -93,7 +93,8 @@ def main(argv=None) -> int:
     s.add_argument("-o", "--out")
     s.add_argument("--scale", type=float, default=1.0)
 
-    lk = sub.add_parser("look", help="contact sheet: many frames in one image, for review")
+    lk = sub.add_parser("look", help="contact sheet: many frames in one image, for review; for an avatar folder, "
+                                     "every pose")
     lk.add_argument("scene")
     lk.add_argument("-n", "--count", type=int, default=12)
     lk.add_argument("--cols", type=int)
@@ -288,6 +289,11 @@ def _run(a) -> int:
         tag = at.lower() if at.lower() in ("end", "poster") else f"end{at}s" if at.startswith("-") else f"{at}s"
         out = a.out or _default_out(a.scene, f"_{tag}.png")
         _emit(dict(ok=True, **still(a.scene, at, out, a.scale)))
+        return 0
+    if a.cmd == "look" and (Path(a.scene) / "avatar.json").is_file():
+        from .avatar import sheet
+        out = a.out or str(Path(a.scene) / "avatar_sheet.png")
+        _emit(dict(ok=True, **sheet(a.scene, out, a.width // 2, a.cols)))
         return 0
     if a.cmd == "look":
         from .verify import contact_sheet

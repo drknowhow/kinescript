@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -356,3 +357,167 @@ def summary(folder: str | Path) -> dict:
                    eyes=[p.name for p in av.eyes], expressions=list(av.spec.get("expressions") or {}),
                    gestures=list(av.spec.get("gestures") or {}))
     return out
+
+
+_ID = re.compile(r"""\bid\s*=\s*["']([^"']+)["']""")
+
+
+def svg_ids(path: Path) -> set[str]:
+    """The ids in an svg file, the pieces colors can fill."""
+    try:
+        return set(_ID.findall(path.read_text(encoding="utf-8", errors="replace")))
+    except OSError:
+        return set()
+
+
+def colors(av: Avatar, theme: dict | None = None) -> dict[str, str]:
+    """The avatar's colours with palette roles read from `theme` (a scene's theme values; the built-in theme
+    without one)."""
+    from .components import THEME
+    theme = {**THEME, **(theme or {})}
+    alias = {}
+    for name, role in B.ALIASES.items():
+        alias.setdefault(role, name)
+    out = {}
+    for name, v in (av.spec.get("colors") or {}).items():
+        while v in B.ROLES and v not in theme and v not in alias:
+            v = B.FALLBACK.get(v, "accent")
+        out[name] = theme.get(v) or theme.get(alias.get(v, ""), v)
+    return out
+
+
+def _drawing(av: Avatar, part: Part, key: str, lid: str, fills: dict, shown: bool, shift=(0.0, 0.0)) -> dict:
+    """One drawing of a part, placed so the avatar's own (0, 0) is at its part group's pivot."""
+    path = part.files[key]
+    w, h = av.size
+    L = {"id": f"{lid}-{part.name}" + (f"-{key}" if key else "-art"), "src": path.as_posix(),
+         "x": w / 2 - part.pivot[0] + shift[0], "y": h / 2 - part.pivot[1] + shift[1], "w": w, "h": h}
+    if not shown:
+        L["opacity"] = 0
+    if path.suffix.lower() == ".svg":
+        ids = svg_ids(path)
+        paint = {n: {"fill": c} for n, c in fills.items() if n in ids}
+        return {**L, "type": "svg", **({"parts": paint} if paint else {})}
+    return {**L, "type": "image"}
+
+
+def layers(av: Avatar, lid: str, pose: dict | None = None, theme: dict | None = None) -> dict:
+    """The avatar in one still pose as a group of plain layers, its (0, 0) at the avatar's top left.
+    pose: {"parts": {name: {x, y, rotate, scale, opacity}}, "mouth": shape, "eyes": state, "look": [gx, gy]}, with
+    look from -1 to 1 of each eye part's look reach. Each part is a group at its pivot, so it turns about it."""
+    pose = pose or {}
+    fills = colors(av, theme)
+    shape = av.shape(pose.get("mouth", "X"))
+    look = pose.get("look") or [0, 0]
+    kids: dict[str | None, list[str]] = {}
+    for name, p in av.parts.items():
+        kids.setdefault(p.parent, []).append(name)
+
+    def build(name: str) -> dict:
+        p = av.parts[name]
+        par = av.parts[p.parent].pivot if p.parent else (0.0, 0.0)
+        change = (pose.get("parts") or {}).get(name, {})
+        G = {"id": f"{lid}-{name}", "type": "group", "x": p.pivot[0] - par[0] + change.get("x", 0),
+             "y": p.pivot[1] - par[1] + change.get("y", 0)}
+        for k in ("rotate", "scale", "opacity"):
+            if k in change:
+                G[k] = change[k]
+        if p.kind == "src":
+            art = [_drawing(av, p, "", lid, fills, True)]
+        elif p.kind == "shapes":
+            art = [_drawing(av, p, k, lid, fills, k == shape) for k in p.files]
+        else:
+            state = pose.get("eyes", "open") if p in av.eyes else "open"
+            state = state if state in p.files else "open"
+            shift = (look[0] * p.look[0], look[1] * p.look[1])
+            art = [_drawing(av, p, k, lid, fills, k == state, shift) for k in p.files]
+        own = list(av.parts).index(name)  # children listed before the part draw behind it
+        behind = [build(c) for c in kids.get(name, []) if list(av.parts).index(c) < own]
+        front = [build(c) for c in kids.get(name, []) if list(av.parts).index(c) > own]
+        G["children"] = behind + art + front
+        return G
+
+    return {"id": lid, "type": "group", "children": [build(n) for n in kids.get(None, [])]}
+
+
+def peak(gesture: dict) -> float:
+    """The time in a gesture where its keys are furthest from where they start: the frame that shows it."""
+    best, at = -1.0, 0.0
+    for name, keys in gesture.items():
+        if name == "dur" or not isinstance(keys, dict):
+            continue
+        for ks in keys.values():
+            for t, v in ks:
+                d = abs(v - ks[0][1])
+                if d > best:
+                    best, at = d, t
+    return at
+
+
+def sample(keys: list, t: float) -> float:
+    """Keys [[time, value], ...] at time t, straight between keys and held past the ends."""
+    if t <= keys[0][0]:
+        return keys[0][1]
+    for (t0, v0), (t1, v1) in zip(keys, keys[1:]):
+        if t <= t1:
+            return v0 + (v1 - v0) * ((t - t0) / (t1 - t0) if t1 > t0 else 1)
+    return keys[-1][1]
+
+
+def poses(av: Avatar) -> list[tuple[str, dict]]:
+    """Every pose worth looking at once: neutral, each mouth shape, eyes closed and looking, each expression and
+    each gesture at its peak."""
+    out = [("neutral", {})]
+    if av.mouth:
+        out += [(f"mouth {s}" + (f" (as {av.shape(s)})" if av.shape(s) != s else ""), {"mouth": s})
+                for s in M.SHAPES]
+    if av.eyes:
+        out.append(("eyes closed", {"eyes": "closed"}))
+    if any(p.look != (0.0, 0.0) for p in av.eyes):
+        out += [("look left", {"look": [-1, 0]}), ("look right", {"look": [1, 0]})]
+    for name, e in (av.spec.get("expressions") or {}).items():
+        parts = {k: v for k, v in e.items() if k != "mouth"}
+        out.append((f"expression {name}", {"parts": parts, **({"mouth": e["mouth"]} if "mouth" in e else {})}))
+    for name, g in (av.spec.get("gestures") or {}).items():
+        t = peak(g)
+        parts = {p: {k: sample(ks, t) for k, ks in keys.items()} for p, keys in g.items() if p != "dur"}
+        out.append((f"gesture {name} at {t:g}s", {"parts": parts}))
+    return out
+
+
+def sheet(folder: str | Path, out: str, width: int = 240, cols: int | None = None) -> dict:
+    """A contact sheet of the avatar's poses (see poses), each labelled, with pivots marked on the neutral one."""
+    from .output import still
+    scene, names = sheet_scene(load(folder), width, cols)
+    got = still(scene, 0, out)
+    return {"out": got["out"], "poses": names, "w": got["w"], "h": got["h"]}
+
+
+def sheet_scene(av: Avatar, width: int = 240, cols: int | None = None) -> tuple[dict, list[str]]:
+    """The scene sheet draws, and the names of its poses in order."""
+    cells = poses(av)
+    cols = cols or min(6, len(cells))
+    w, h = av.size
+    k = width / w
+    cw, ch, label = width, h * k, 34
+    rows = math.ceil(len(cells) / cols)
+    layers_out = []
+    for i, (name, pose) in enumerate(cells):
+        x0, y0 = (i % cols) * cw, (i // cols) * (ch + label)
+        g = layers(av, f"c{i}", pose)
+        g.update(x=x0, y=y0, scale=k)
+        layers_out += [{"id": f"c{i}-cell", "type": "rect", "anchor": "topleft", "x": x0 + 2, "y": y0 + 2,
+                        "w": cw - 4, "h": ch - 4, "radius": 6, "fill": "#1b1f27"}, g,
+                       {"id": f"c{i}-label", "type": "text", "text": name, "x": x0 + cw / 2, "y": y0 + ch + label / 2,
+                        "size": 18, "fill": "#e8e2d0", "weight": 500}]
+    for name, p in av.parts.items():  # the pivots the avatar sets, in its own pixels, on the neutral pose
+        if "pivot" not in av.spec["parts"][name]:
+            continue
+        layers_out += [{"id": f"pivot-{name}", "type": "circle", "x": p.pivot[0] * k, "y": p.pivot[1] * k, "r": 4,
+                        "fill": "#ff633f", "stroke": "#0a0c10", "strokeWidth": 1.5},
+                       {"id": f"pivot-{name}-name", "type": "text", "text": name, "x": p.pivot[0] * k + 7,
+                        "y": p.pivot[1] * k, "anchor": "left", "size": 13, "fill": "#f2f0e8", "weight": 600,
+                        "box": {"fill": "#0a0c10c0", "pad": [2, 5], "radius": 4}}]
+    scene = {"canvas": {"w": round(cols * cw), "h": round(rows * (ch + label)), "fps": 30, "duration": 0.1,
+                        "bg": "#0a0c10"}, "layers": layers_out}
+    return scene, [n for n, _ in cells]

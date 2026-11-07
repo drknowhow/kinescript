@@ -117,3 +117,56 @@ def test_kine_avatar_check_prints_what_the_avatar_has(tmp_path, capsys):
     (tmp_path / "avatar.json").write_text("{}")
     assert main(["avatar", "check", str(tmp_path)]) == 1
     assert "avatar-version" in [i["code"] for i in json.loads(capsys.readouterr().out)["issues"]]
+
+
+def test_a_pose_becomes_groups_that_turn_about_each_pivot(tmp_path):
+    av = A.load(make(tmp_path))
+    g = A.layers(av, "a", {"parts": {"head": {"rotate": 6}}, "mouth": "F", "eyes": "closed", "look": [1, 0]})
+    body = g["children"][0]
+    assert (body["id"], body["x"], body["y"]) == ("a-body", 100, 280)
+    art, head = body["children"]
+    assert art["type"] == "svg" and (art["x"], art["y"]) == (0, -130)  # the drawing's middle, from the pivot
+    assert art["parts"] == {"shirt": {"fill": "#ff633f"}}  # the accent role, from the built-in theme
+    assert (head["x"], head["y"], head["rotate"]) == (0, -120, 6)
+    eyes, mouth = head["children"][1:]
+    assert [L.get("opacity", 1) for L in eyes["children"]] == [0, 1]  # closed
+    assert eyes["children"][1]["x"] == 100 + 6  # no pivot, so at the middle; looking right by its whole reach
+    assert [L["id"] for L in mouth["children"] if L.get("opacity", 1)] == ["a-mouth-D"]  # F falls back to D
+
+
+def test_parts_listed_before_their_parent_draw_behind_it(tmp_path):
+    make(tmp_path)
+    spec = json.loads((tmp_path / "avatar.json").read_text())
+    spec["parts"] = {"arm": {"src": "parts/head.svg", "parent": "body", "pivot": [60, 180]}, **spec["parts"]}
+    (tmp_path / "avatar.json").write_text(json.dumps(spec))
+    body = A.layers(A.load(tmp_path), "a")["children"][0]
+    assert [c["id"] for c in body["children"]] == ["a-arm", "a-body-art", "a-head"]
+
+
+def test_a_brand_palette_fills_the_role_colours(tmp_path):
+    av = A.load(make(tmp_path))
+    assert A.colors(av, {"accent": "#123456"}) == {"skin": "#e8c4a0", "shirt": "#123456"}
+
+
+def test_gesture_peak_and_sampling():
+    nod = {"dur": 0.5, "head": {"rotate": [[0, 0], [0.2, 6], [0.5, 0]]}}
+    assert A.peak(nod) == 0.2
+    assert A.sample(nod["head"]["rotate"], 0.35) == pytest.approx(3) and A.sample([[0, 1], [1, 2]], 5) == 2
+
+
+def test_kine_look_on_an_avatar_folder_draws_every_pose(tmp_path, capsys):
+    from kinescript.cli import main
+    make(tmp_path)
+    assert main(["look", str(tmp_path), "--width", "200"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["poses"][:3] == ["neutral", "mouth X", "mouth A"] and "mouth F (as D)" in out["poses"]
+    assert out["poses"][-2:] == ["expression smile", "gesture nod at 0.2s"]
+    assert (tmp_path / "avatar_sheet.png").stat().st_size > 1000 and out["w"] == 600
+
+
+def test_the_sheet_scene_draws_every_part_without_problems(tmp_path):
+    from kinescript.verify import check
+    scene, _ = A.sheet_scene(A.load(make(tmp_path)), 200, 3)
+    got = check(scene)
+    reading = {"tiny-text", "read-time", "safe-area"}  # about video labels, not a still review sheet
+    assert got["ok"] and [i for i in got["issues"] if i["level"] != "info" and i["code"] not in reading] == []
