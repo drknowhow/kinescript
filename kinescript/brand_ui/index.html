@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kinescript brands</title>
+<style>
+  :root { --bg:#0e1117; --card:#171b24; --line:#2a303c; --fg:#e8eaf0; --dim:#9299a8; --accent:#ff633f; --ok:#6ee7a8; --err:#ff8a80; --warn:#ffd400; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:13px/1.4 system-ui, sans-serif; height:100vh; display:flex; flex-direction:column; }
+  header { padding:8px 14px; display:flex; gap:12px; align-items:center; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header .name { font-weight:700; font-size:15px; } header .meta { color:var(--dim); font-size:12px; }
+  header .grow { flex:1; }
+  #app { flex:1; min-height:0; display:grid; grid-template-columns:220px minmax(0,1fr); }
+  @media (max-width:760px) { #app { grid-template-columns:minmax(0,1fr); overflow:auto; } #rail { border-right:0 !important; border-bottom:1px solid var(--line); max-height:30vh; } }
+  #rail { border-right:1px solid var(--line); overflow:auto; padding:8px 0; }
+  #rail h2 { margin:12px 14px 4px; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--dim); font-weight:600; }
+  .row { display:flex; align-items:center; gap:8px; padding:5px 14px; cursor:pointer; }
+  .row:hover { background:var(--card); } .row.sel { background:var(--card); box-shadow:inset 3px 0 var(--accent); }
+  .row .sw { display:flex; gap:2px; } .row .sw i { width:9px; height:14px; border-radius:2px; display:block; border:1px solid #0004; }
+  .row .id { font-weight:600; } .row .sub { color:var(--dim); font-size:11px; margin-left:auto; }
+  #libPath { overflow-wrap:anywhere; }
+  .railbtns { display:flex; gap:6px; padding:8px 14px; flex-wrap:wrap; }
+  main { overflow:auto; min-width:0; }
+  nav { display:flex; gap:2px; padding:8px 14px 0; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:2; flex-wrap:wrap; }
+  nav button { background:none; border-radius:5px 5px 0 0; color:var(--dim); padding:6px 12px; }
+  nav button.on { background:var(--card); color:var(--fg); box-shadow:inset 0 -2px var(--accent); }
+  section { padding:14px; display:none; } section.on { display:block; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:12px; }
+  .card h3 { margin:0 0 8px; font-size:13px; display:flex; gap:8px; align-items:center; } .card h3 .grow { flex:1; }
+  .hint { color:var(--dim); font-size:12px; margin:0 0 8px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:10px; }
+  .role { display:flex; gap:8px; align-items:center; }
+  .role .chip { width:44px; height:32px; border-radius:6px; border:1px solid var(--line); flex:none; position:relative; overflow:hidden; }
+  .role .chip input { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; }
+  .role .nm { font-weight:600; } .role .fb { color:var(--dim); font-size:11px; }
+  input[type=text], input[type=number], select, textarea { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:4px 6px; font:inherit; }
+  input[type=text].hex { width:86px; font-family:ui-monospace, monospace; }
+  textarea { width:100%; min-height:420px; font:12px/1.45 ui-monospace, monospace; }
+  button { background:var(--line); color:var(--fg); border:0; padding:5px 11px; border-radius:5px; cursor:pointer; font:inherit; }
+  button:hover { background:#3a4252; } button.primary { background:var(--accent); color:#111; font-weight:600; } button.small { padding:2px 7px; font-size:12px; }
+  button:disabled { opacity:.5; cursor:default; }
+  table { border-collapse:collapse; width:100%; } th, td { text-align:left; padding:4px 6px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  th { color:var(--dim); font-weight:500; font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
+  td input[type=text], td input[type=number], td select { width:100%; min-width:50px; }
+  .ok { color:var(--ok); } .bad { color:var(--err); } .warnc { color:var(--warn); } .dimc { color:var(--dim); }
+  .pair { display:inline-flex; align-items:center; justify-content:center; width:64px; height:30px; border-radius:5px; font-weight:700; border:1px solid var(--line); }
+  img.preview { width:100%; display:block; border-radius:6px; border:1px solid var(--line); background:#000; aspect-ratio:16/9; object-fit:contain; }
+  .gallery { display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:12px; }
+  .gallery figure { margin:0; } .gallery figcaption { color:var(--dim); font-size:12px; margin-top:4px; }
+  .logo-thumb { width:120px; height:64px; border-radius:6px; border:1px solid var(--line); display:flex; align-items:center; justify-content:center; padding:6px; flex:none; }
+  .logo-thumb img { max-width:100%; max-height:100%; } .logo-thumb.light { background:#f2f0e8; } .logo-thumb.dark { background:#0a0c10; }
+  .stage { position:relative; cursor:crosshair; } .stage .tip { position:absolute; left:8px; top:8px; background:#000a; padding:2px 8px; border-radius:4px; font-size:12px; pointer-events:none; }
+  .issues li { margin:3px 0; } .issues .lvl { font-weight:700; margin-right:6px; }
+  #toast { position:fixed; right:16px; bottom:16px; max-width:min(520px, calc(100vw - 32px)); background:var(--card); border:1px solid var(--err); border-radius:8px; padding:10px 14px; display:none; z-index:9; }
+  #toast.okm { border-color:var(--ok); }
+  .flex { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .tag { font-size:11px; padding:1px 7px; border-radius:999px; background:var(--line); }
+  .tag.changed { background:#5a3a14; } .tag.project-only { background:#14405a; } .tag.library-only { background:#4a1f1f; } .tag.locked { background:var(--accent); color:#111; }
+  .empty { color:var(--dim); padding:30px; text-align:center; }
+  label.inline { display:inline-flex; gap:5px; align-items:center; margin-right:10px; }
+</style>
+</head>
+<body>
+<header>
+  <span class="name" id="hName">Kinescript brands</span>
+  <span class="meta" id="hMeta"></span>
+  <span class="grow"></span>
+  <label class="inline dimc">Palette <select id="variant"></select></label>
+  <span id="hIssues"></span>
+  <button id="useBtn" class="primary" title="Copy this brand into the project's brand/ folder">Use in project</button>
+</header>
+<div id="app">
+  <aside id="rail">
+    <h2>Project</h2><div id="projRow"></div>
+    <h2>Library</h2><div id="libRows"></div>
+    <div class="railbtns"><input type="text" id="newId" placeholder="new id, such as acme" style="width:100%">
+      <button id="newBtn" title="A new brand from the Kinescript brand">New brand</button><button id="dupBtn" title="A copy of the brand you are looking at">Duplicate</button></div>
+    <p class="hint" style="padding:0 14px" id="libPath"></p>
+  </aside>
+  <main>
+    <nav id="tabs"></nav>
+    <div id="panels">
+      <section data-tab="Colours"></section>
+      <section data-tab="Type"></section>
+      <section data-tab="Logos"></section>
+      <section data-tab="Gallery"></section>
+      <section data-tab="Raw JSON"></section>
+    </div>
+    <div class="empty" id="none" style="display:none">No brand yet. Make one with "New brand": it starts from the Kinescript brand.</div>
+  </main>
+</div>
+<div id="toast"></div>
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const S = { info: null, ref: null, variant: null, tab: "Colours", selPlace: null };
+let C = {};  // constants from /api/state
+
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (k === "class") el.className = v;
+    else if (k === "style") el.style.cssText = v;
+    else if (k in el && k !== "list") el[k] = v;
+    else el.setAttribute(k, v);
+  }
+  for (const c of kids.flat()) if (c != null && c !== false) el.append(c instanceof Node ? c : String(c));
+  return el;
+}
+
+function toast(msg, ok, action) {
+  const t = $("#toast"); t.replaceChildren(h("div", {}, msg)); t.className = ok ? "okm" : ""; t.style.display = "block";
+  if (action) t.append(h("div", { class: "flex", style: "margin-top:8px" }, h("button", { class: "primary", onclick: () => { t.style.display = "none"; action[1](); } }, action[0]),
+    h("button", { onclick: () => t.style.display = "none" }, "Cancel")));
+  clearTimeout(toast.t); if (!action) toast.t = setTimeout(() => t.style.display = "none", ok ? 2200 : 7000);
+}
+
+async function api(path, body) {
+  const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+  const j = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+  if (!r.ok || j.error) throw new Error(j.error || `HTTP ${r.status}`);
+  return j;
+}
+
+// Every change: one brandops write with the rev this page last read. A refusal is shown and the brand reloaded.
+async function op(action, args) {
+  try {
+    const out = await api("/api/op", { action, ref: S.ref, base_rev: S.info && S.info.rev, ...args });
+    await refresh(out.ref || S.ref);
+    toast("Saved", true);
+    return out;
+  } catch (e) {
+    toast(e.message);
+    await refresh(S.ref).catch(() => {});
+  }
+}
+const setv = (path, value) => op("set", { path, value });
+
+async function refresh(ref) {
+  const st = await api("/api/state");
+  C = st;
+  $("#libPath").textContent = "Library: " + st.library;
+  S.ref = ref || S.ref || st.start || (st.projectBrand ? "@project" : st.brands[0] && st.brands[0].id) || null;
+  S.info = S.ref ? await api("/api/brand?ref=" + encodeURIComponent(S.ref)).catch(e => { toast(e.message); return null; }) : null;
+  rail(st);
+  render();
+}
+
+function swatches(spec) {
+  const pal = spec && spec.palettes && (spec.palettes[spec.default] || Object.values(spec.palettes)[0]) || {};
+  return h("span", { class: "sw" }, ["bg", "text", "accent", "accent2"].filter(r => pal[r]).map(r => h("i", { style: `background:${pal[r]}` })));
+}
+
+function rail(st) {
+  const pr = $("#projRow"); pr.replaceChildren();
+  if (st.projectBrand) {
+    pr.append(h("div", { class: "row" + (S.ref === "@project" ? " sel" : ""), onclick: () => refresh("@project") },
+      h("span", { class: "id" }, "brand/"), h("span", { class: "sub" }, "this project")));
+  } else pr.append(h("p", { class: "hint", style: "padding:0 14px" }, "No brand/ here yet. Pick a library brand and press Use in project."));
+  const lr = $("#libRows"); lr.replaceChildren();
+  for (const b of st.brands) {
+    lr.append(h("div", { class: "row" + (S.ref === b.id ? " sel" : ""), onclick: () => refresh(b.id) },
+      h("span", { class: "id" }, b.id), h("span", { class: "sub" }, b.error ? "unreadable" : (b.variants || []).join(" · "))));
+  }
+  if (!st.brands.length) lr.append(h("p", { class: "hint", style: "padding:0 14px" }, "The library is empty."));
+}
+
+function render() {
+  const I = S.info, has = !!I;
+  $("#none").style.display = has ? "none" : "block";
+  $("#panels").style.display = $("#tabs").style.display = has ? "" : "none";
+  $("#useBtn").disabled = !has || S.ref === "@project";
+  $("#dupBtn").disabled = !has;
+  const tabs = $("#tabs"); tabs.replaceChildren(...[...document.querySelectorAll("section")].map(s =>
+    h("button", { class: s.dataset.tab === S.tab ? "on" : "", onclick: () => { S.tab = s.dataset.tab; render(); } }, s.dataset.tab)));
+  document.querySelectorAll("section").forEach(s => s.classList.toggle("on", s.dataset.tab === S.tab));
+  if (!has) { $("#hName").textContent = "Kinescript brands"; $("#hMeta").textContent = ""; $("#hIssues").replaceChildren(); return; }
+  const spec = I.brand;
+  $("#hName").textContent = spec.name || spec.id || S.ref;
+  $("#hMeta").textContent = (S.ref === "@project" ? "project copy" : "library: " + S.ref) + " · rev " + I.rev.slice(0, 8)
+    + (I.edited ? " · edited in the project" : "");
+  const errs = I.issues.filter(i => i.level === "error").length, warns = I.issues.length - errs;
+  $("#hIssues").replaceChildren(h("span", { class: errs ? "bad" : warns ? "warnc" : "ok", style: "cursor:pointer",
+    onclick: () => { S.tab = "Raw JSON"; render(); } }, errs ? `${errs} error(s)` : warns ? `${warns} warning(s)` : "no issues"));
+  const vs = $("#variant"); const vars = I.variants || [];
+  if (!vars.includes(S.variant)) S.variant = spec.default && vars.includes(spec.default) ? spec.default : vars[0];
+  vs.replaceChildren(...vars.map(v => h("option", { value: v, selected: v === S.variant }, v)));
+  const panels = { "Colours": colours, "Type": type, "Logos": logos, "Gallery": gallery, "Raw JSON": raw };
+  const sec = document.querySelector(`section[data-tab="${S.tab}"]`);
+  sec.replaceChildren(...[panels[S.tab]()].flat());
+}
+
+const img = (what, extra) => h("img", { class: "preview", alt: what, loading: "lazy",
+  src: `/api/gallery?ref=${encodeURIComponent(S.ref)}&what=${what}&variant=${encodeURIComponent(S.variant || "")}&r=${S.info.rev.slice(0, 8)}`, ...extra });
+
+// ---- Colours
+function colours() {
+  const spec = S.info.brand, pals = spec.palettes || {}, out = [];
+  for (const [name, pal] of Object.entries(pals)) {
+    const con = (S.info.contrast || {})[name] || { pairs: [], series: [] };
+    const resolved = r => { let k = r; while (!(k in pal) && C.fallback[k]) k = C.fallback[k]; return pal[k]; };
+    const roles = C.roles.map(r => {
+      const own = r in pal, v = resolved(r) || "#000000";
+      return h("div", { class: "role" },
+        h("span", { class: "chip", style: `background:${v}` },
+          h("input", { type: "color", value: /^#[0-9a-f]{6}$/i.test(v) ? v : "#000000", title: `pick ${r}`,
+            onchange: e => setv(`palettes.${name}.${r}`, e.target.value) })),
+        h("div", {}, h("div", { class: "nm" }, r, C.required.includes(r) ? "" : h("span", { class: "fb" }, own ? "" : `  = ${C.fallback[r]}`)),
+          h("input", { type: "text", class: "hex", value: own ? pal[r] : "", placeholder: own ? "" : "unset",
+            onchange: e => setv(`palettes.${name}.${r}`, e.target.value.trim() || null) })));
+    });
+    const pairs = con.pairs.filter(p => p.needs);
+    const extra = con.pairs.filter(p => !p.needs && ["bg"].includes(p.bg) && ["accent2", "positive", "negative"].includes(p.fg));
+    const pairRow = p => h("tr", {},
+      h("td", {}, h("span", { class: "pair", style: `background:${resolved(p.bg)};color:${resolved(p.fg)}` }, "Aa")),
+      h("td", {}, `${p.fg} on ${p.bg}`), h("td", {}, p.ratio.toFixed(2) + ":1"),
+      h("td", {}, p.needs ? `${p.needs}:1` : "—"),
+      h("td", { class: p.ok === false ? "bad" : p.ok ? "ok" : "dimc" }, p.ok === false ? "too low" : p.ok ? "passes" : ""));
+    out.push(h("div", { class: "card" },
+      h("h3", {}, `Palette "${name}"`, spec.default === name ? h("span", { class: "tag" }, "default") : null, h("span", { class: "grow" }),
+        spec.default !== name ? h("button", { class: "small", onclick: () => setv("default", name) }, "Make default") : null,
+        Object.keys(pals).length > 1 ? h("button", { class: "small", onclick: () => setv(`palettes.${name}`, null) }, "Remove") : null),
+      h("div", { class: "grid" }, roles),
+      h("h3", { style: "margin-top:14px" }, "Contrast"),
+      h("p", { class: "hint" }, "The pairs a video reads most. Text needs 4.5:1, large or graphic marks 3:1 (WCAG). kine check warns below these."),
+      h("table", {}, h("tr", {}, ["", "pair", "ratio", "needs", ""].map(x => h("th", {}, x))), pairs.map(pairRow), extra.map(pairRow)),
+      h("h3", { style: "margin-top:14px" }, "Chart series"),
+      h("p", { class: "hint" }, "pieChart's colours in order (role names or #hex), each needs 3:1 against bg. Shared by every palette."),
+      h("div", { class: "flex" }, con.series.map(s => h("span", { class: "flex", style: "gap:4px" },
+        h("span", { class: "pair", style: `background:${s.value};width:34px` }), h("span", {}, s.color),
+        h("span", { class: s.ok ? "ok" : "bad" }, s.ratio.toFixed(1) + ":1")))),
+      h("div", { class: "flex", style: "margin-top:8px" },
+        h("input", { type: "text", style: "flex:1", value: ((spec.charts || {}).series || []).join(", "),
+          onchange: e => setv("charts.series", e.target.value.split(",").map(x => x.trim()).filter(Boolean)) }))));
+  }
+  out.push(h("div", { class: "card" }, h("h3", {}, "Add a palette"),
+    h("div", { class: "flex" }, h("input", { type: "text", id: "newPal", placeholder: "name, such as light" }),
+      h("button", { onclick: () => { const n = $("#newPal").value.trim(); if (n) setv(`palettes.${n}`, { ...(pals[S.variant] || Object.values(pals)[0] || { bg: "#0a0c10", text: "#f2f0e8", accent: "#ff633f" }) }); } }, "Add, copying the current one"))));
+  out.push(h("div", { class: "card" }, h("h3", {}, "In a video"), img("palette")));
+  return out;
+}
+
+// ---- Type
+function type() {
+  const spec = S.info.brand, fonts = spec.fonts || {}, out = [];
+  const fontFiles = S.info.files.filter(f => f.startsWith("fonts/"));
+  const faces = C.faces.map(face => {
+    const f = fonts[face] || {};
+    return h("tr", {},
+      h("td", {}, h("b", {}, face)),
+      h("td", {}, h("input", { type: "text", value: f.family || "", placeholder: "family", onchange: e => setv(`fonts.${face}.family`, e.target.value.trim() || null) })),
+      h("td", {}, h("input", { type: "text", value: f.license || "", placeholder: "OFL, or your licence", onchange: e => setv(`fonts.${face}.license`, e.target.value.trim() || null) })),
+      h("td", {}, (f.files || []).map((x, i) => h("div", { class: "flex" }, h("span", {}, `${x.file} · ${x.weight || 400}${x.italic ? " italic" : ""}`),
+        h("button", { class: "small", onclick: () => setv(`fonts.${face}.files`, (f.files || []).filter((_, j) => j !== i)) }, "×"))),
+        fontFiles.length ? h("div", { class: "flex", style: "margin-top:4px" },
+          h("select", { id: `ff-${face}` }, fontFiles.map(x => h("option", { value: x }, x))),
+          h("input", { type: "number", id: `fw-${face}`, value: 400, step: 100, min: 100, max: 900, style: "width:70px" }),
+          h("label", { class: "inline" }, h("input", { type: "checkbox", id: `fi-${face}` }), "italic"),
+          h("button", { class: "small", onclick: () => setv(`fonts.${face}.files`, [...(f.files || []),
+            { file: $(`#ff-${face}`).value, weight: +$(`#fw-${face}`).value, ...($(`#fi-${face}`).checked ? { italic: true } : {}) }]) }, "Add file")) : null));
+  });
+  out.push(h("div", { class: "card" }, h("h3", {}, "Faces"),
+    h("p", { class: "hint" }, "A family installed on this computer, or font files you upload here and add to a face (by weight)."),
+    h("table", {}, h("tr", {}, ["face", "family", "license", "files"].map(x => h("th", {}, x))), faces),
+    h("div", { class: "flex", style: "margin-top:10px" }, h("span", { class: "dimc" }, "Upload .ttf, .otf or .ttc:"), upload("fonts", ".ttf,.otf,.ttc")),
+    fileList(fontFiles)));
+  const own = spec.text || {}, fields = ["font", "size", "weight", "tracking", "case", "italic", "lineHeight"];
+  const styles = Object.entries(S.info.textStyles || {});
+  out.push(h("div", { class: "card" }, h("h3", {}, "Text styles"),
+    h("p", { class: "hint" }, "A text layer takes \"textStyle\": \"heading\". Blank fields come from the built-in style; values set here are the brand's."),
+    h("table", {}, h("tr", {}, ["style", ...fields, ""].map(x => h("th", {}, x))),
+      styles.map(([n, st]) => h("tr", {}, h("td", {}, h("b", {}, n)), fields.map(k => {
+        const mine = (own[n] || {})[k], path = `text.${n}.${k}`;
+        if (k === "font") return h("td", {}, h("select", { onchange: e => setv(path, e.target.value || null) },
+          h("option", { value: "" }, `(${st.font || "body"})`), [...C.faces].map(f => h("option", { value: f, selected: mine === f }, f))));
+        if (k === "case") return h("td", {}, h("select", { onchange: e => setv(path, e.target.value || null) },
+          h("option", { value: "" }, `(${st.case || "none"})`), ["upper", "lower", "title", "none"].map(f => h("option", { value: f, selected: mine === f }, f))));
+        if (k === "italic") return h("td", {}, h("input", { type: "checkbox", checked: !!(mine ?? st.italic), onchange: e => setv(path, e.target.checked || null) }));
+        return h("td", {}, h("input", { type: "number", value: mine ?? "", placeholder: st[k] ?? "", step: k === "lineHeight" ? 0.05 : 1,
+          onchange: e => setv(path, e.target.value === "" ? null : +e.target.value) }));
+      }), h("td", {}, own[n] ? h("button", { class: "small", title: "back to the built-in", onclick: () => setv(`text.${n}`, null) }, "reset") : null)))),
+    h("div", { class: "flex", style: "margin-top:8px" }, h("input", { type: "text", id: "newStyle", placeholder: "new style, such as quote" }),
+      h("button", { onclick: () => { const n = $("#newStyle").value.trim(); if (n) setv(`text.${n}`, { font: "body", size: 48 }); } }, "Add style"))));
+  out.push(h("div", { class: "card" }, h("h3", {}, "Drawn by the renderer"), img("type")));
+  return out;
+}
+
+function upload(kind, accept) {
+  return h("input", { type: "file", accept, onchange: async e => {
+    const f = e.target.files[0]; if (!f) return;
+    const buf = new Uint8Array(await f.arrayBuffer()); let bin = "";
+    for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+    const exists = S.info.files.includes(`${kind}/${f.name}`);
+    await op("add_file", { kind, name: f.name, data_base64: btoa(bin), replace: exists });
+  } });
+}
+
+function fileList(files) {
+  if (!files.length) return null;
+  return h("div", { style: "margin-top:8px" }, h("div", { class: "dimc" }, "Files in the brand"),
+    files.map(f => h("div", { class: "flex" }, h("span", {}, f), h("button", { class: "small", onclick: () => op("remove_file", { file: f }) }, "delete"))));
+}
+
+// ---- Logos
+function logos() {
+  const spec = S.info.brand, L = spec.logos || {}, out = [];
+  const logoFiles = S.info.files.filter(f => f.startsWith("logos/"));
+  const named = Object.entries(L).filter(([, v]) => v && typeof v === "object" && !Array.isArray(v));
+  const fileSel = (path, cur, blank) => h("select", { onchange: e => setv(path, e.target.value || null) },
+    h("option", { value: "" }, blank), logoFiles.map(f => h("option", { value: f, selected: f === cur }, f)));
+  const thumb = (file, cls) => h("div", { class: "logo-thumb " + cls }, file ? h("img", { alt: file, src: `/api/file?ref=${encodeURIComponent(S.ref)}&path=${encodeURIComponent(file)}&r=${S.info.rev.slice(0, 8)}` }) : h("span", { class: "dimc" }, "none"));
+  out.push(h("div", { class: "card" }, h("h3", {}, "Logos"),
+    h("p", { class: "hint" }, "Each logo has a file for light backgrounds and, optionally, one for dark (onDark). The logo component picks by the background."),
+    named.length ? h("table", {}, h("tr", {}, ["name", "on light", "on dark", "alt", ""].map(x => h("th", {}, x))),
+      named.map(([n, v]) => h("tr", {}, h("td", {}, h("b", {}, n)),
+        h("td", {}, h("div", { class: "flex" }, thumb(v.file, "light"), fileSel(`logos.${n}.file`, v.file, "choose"))),
+        h("td", {}, h("div", { class: "flex" }, thumb(v.onDark || v.file, "dark"), fileSel(`logos.${n}.onDark`, v.onDark, "same file"))),
+        h("td", {}, h("input", { type: "text", value: v.alt || "", onchange: e => setv(`logos.${n}.alt`, e.target.value.trim() || null) })),
+        h("td", {}, h("button", { class: "small", onclick: () => setv(`logos.${n}`, null) }, "remove"))))) : h("p", { class: "hint" }, "No logos yet. Upload a file, then add a logo that uses it."),
+    h("div", { class: "flex", style: "margin-top:10px" }, h("span", { class: "dimc" }, "Upload .svg, .png, .jpg or .webp:"), upload("logos", ".svg,.png,.jpg,.jpeg,.webp")),
+    logoFiles.length ? h("div", { class: "flex", style: "margin-top:8px" },
+      h("input", { type: "text", id: "newLogo", placeholder: "name, such as full or mark" }),
+      h("select", { id: "newLogoFile" }, logoFiles.map(f => h("option", { value: f }, f))),
+      h("button", { onclick: () => { const n = $("#newLogo").value.trim(); if (n) setv(`logos.${n}`, { file: $("#newLogoFile").value }); } }, "Add logo")) : null,
+    h("div", { class: "flex", style: "margin-top:10px" },
+      h("label", { class: "inline" }, "clear space", h("input", { type: "number", step: 0.05, min: 0, max: 2, value: L.clearSpace ?? "", placeholder: "0.25", style: "width:80px",
+        onchange: e => setv("logos.clearSpace", e.target.value === "" ? null : +e.target.value) }), h("span", { class: "dimc" }, "of the logo's box")),
+      h("label", { class: "inline" }, "min height", h("input", { type: "number", step: 1, min: 0, value: L.minHeight ?? "", style: "width:80px",
+        onchange: e => setv("logos.minHeight", e.target.value === "" ? null : +e.target.value) }), h("span", { class: "dimc" }, "px at 1080p"))),
+    fileList(logoFiles)));
+
+  const P = spec.placements || {}, names = Object.keys(P);
+  if (!names.includes(S.selPlace)) S.selPlace = names[0] || null;
+  const stage = h("div", { class: "stage", onclick: e => {
+    if (!S.selPlace) return;
+    const r = e.currentTarget.getBoundingClientRect(), fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
+    const col = fx < 1 / 3 ? 0 : fx < 2 / 3 ? 1 : 2, row = fy < 1 / 3 ? 0 : fy < 2 / 3 ? 1 : 2;
+    setv(`placements.${S.selPlace}.anchor`, C.anchors[row * 3 + col]);
+  } }, img("logo"), h("span", { class: "tip" }, S.selPlace ? `Click to move "${S.selPlace}" to that part of the frame` : "Add a placement to place it here"));
+  out.push(h("div", { class: "card" }, h("h3", {}, "Placements"),
+    h("p", { class: "hint" }, "Where a logo goes: {\"use\": \"logo\", \"placement\": \"corner\"}. Margin and height are px or % of the frame."),
+    names.length ? h("table", {}, h("tr", {}, ["", "name", "anchor", "margin", "height", ""].map(x => h("th", {}, x))),
+      names.map(n => h("tr", {}, h("td", {}, h("input", { type: "radio", name: "selp", checked: n === S.selPlace, onchange: () => { S.selPlace = n; render(); } })),
+        h("td", {}, h("b", {}, n)),
+        h("td", {}, h("select", { onchange: e => setv(`placements.${n}.anchor`, e.target.value) }, C.anchors.map(a => h("option", { value: a, selected: a === (P[n].anchor || "bottomright") }, a)))),
+        ["margin", "height"].map(k => h("td", {}, h("input", { type: "text", value: P[n][k] ?? "", placeholder: k === "margin" ? "safe area" : "8%",
+          onchange: e => { const v = e.target.value.trim(); setv(`placements.${n}.${k}`, v === "" ? null : (isNaN(+v) ? v : +v)); } }))),
+        h("td", {}, h("button", { class: "small", onclick: () => setv(`placements.${n}`, null) }, "remove"))))) : null,
+    h("div", { class: "flex", style: "margin-top:8px" }, h("input", { type: "text", id: "newPlace", placeholder: "name, such as corner" }),
+      h("button", { onclick: () => { const n = $("#newPlace").value.trim(); if (n) { S.selPlace = n; setv(`placements.${n}`, { anchor: "bottomright", margin: "4%", height: "7%" }); } } }, "Add placement")),
+    h("div", { style: "margin-top:10px" }, stage)));
+
+  const bug = spec.bug || {};
+  out.push(h("div", { class: "card" }, h("h3", {}, "Bug"),
+    h("p", { class: "hint" }, "The small logo that stays on screen for a whole video: {\"use\": \"bug\"}."),
+    h("div", { class: "flex" },
+      h("label", { class: "inline" }, "logo", h("select", { onchange: e => setv("bug.logo", e.target.value || null) }, h("option", { value: "" }, "(mark)"),
+        named.map(([n]) => h("option", { value: n, selected: bug.logo === n }, n)))),
+      h("label", { class: "inline" }, "placement", h("select", { onchange: e => setv("bug.placement", e.target.value || null) }, h("option", { value: "" }, "(bottomright)"),
+        [...names, ...C.anchors].map(n => h("option", { value: n, selected: bug.placement === n }, n)))),
+      h("label", { class: "inline" }, "opacity", h("input", { type: "number", step: 0.05, min: 0, max: 1, value: bug.opacity ?? "", placeholder: "0.85", style: "width:80px",
+        onchange: e => setv("bug.opacity", e.target.value === "" ? null : +e.target.value) }))),
+    h("div", { style: "margin-top:10px" }, img("bug"))));
+  return out;
+}
+
+// ---- Gallery
+function gallery() {
+  return [h("p", { class: "hint" }, `Each built-in in this brand's "${S.variant}" palette, drawn by the renderer.`),
+    h("div", { class: "gallery" }, C.gallery.map(w => h("figure", {}, img(w), h("figcaption", {}, w))))];
+}
+
+// ---- Raw JSON
+function raw() {
+  const I = S.info, out = [];
+  const ta = h("textarea", { spellcheck: false, value: JSON.stringify(I.brand, null, 2) });
+  out.push(h("div", { class: "card" }, h("h3", {}, "brand.json", h("span", { class: "grow" }),
+    h("button", { class: "primary", onclick: () => { let spec; try { spec = JSON.parse(ta.value); } catch (e) { return toast("Not valid JSON: " + e.message); } op("replace", { spec }); } }, "Save"),
+    h("button", { onclick: () => render() }, "Revert")),
+    h("p", { class: "hint" }, `${I.path} · rev ${I.rev}`), ta));
+  out.push(h("div", { class: "card" }, h("h3", {}, "Issues"),
+    I.issues.length ? h("ul", { class: "issues" }, I.issues.map(i => h("li", {}, h("span", { class: "lvl " + (i.level === "error" ? "bad" : "warnc") }, i.level),
+      h("code", {}, i.code), " ", i.message, i.fix ? h("div", { class: "dimc" }, i.fix) : null))) : h("p", { class: "ok" }, "No issues.")));
+  const lock = I.brand.lock || [];
+  out.push(h("div", { class: "card" }, h("h3", {}, "Locks"),
+    h("p", { class: "hint" }, "A locked part cannot be changed by a scene's theme; kine check reports brand-locked."),
+    h("div", {}, C.lockable.map(k => h("label", { class: "inline" }, h("input", { type: "checkbox", checked: lock.includes(k),
+      onchange: e => setv("lock", e.target.checked ? [...lock, k] : lock.filter(x => x !== k).length ? lock.filter(x => x !== k) : null) }), k)))));
+  if (I.compare) {
+    const cmp = I.compare;
+    out.push(h("div", { class: "card" }, h("h3", {}, "This copy and the library"),
+      h("p", { class: "hint" }, `Copied from ${cmp.library}. ${I.edited ? "Edited here since it was copied: Use in project from the library would refuse unless forced." : "Not edited here since it was copied."}`),
+      h("table", {}, h("tr", {}, ["part", "", ""].map(x => h("th", {}, x))),
+        Object.entries(cmp.parts).map(([k, v]) => h("tr", {}, h("td", {}, k),
+          h("td", {}, h("span", { class: "tag " + v }, v === "same" ? "inherited" : v === "changed" ? "overridden" : v)),
+          h("td", {}, cmp.locked.includes(k) ? h("span", { class: "tag locked" }, "locked") : null))))));
+  }
+  return out;
+}
+
+// ---- header and library actions
+$("#variant").onchange = e => { S.variant = e.target.value; render(); };
+async function use(force) {
+  const ref = S.ref;
+  try { await api("/api/op", { action: "use", ref, force }); }
+  catch (e) {
+    if (!force && /changes made in this project/.test(e.message)) return toast(e.message, false, ["Replace the project's copy", () => { S.ref = ref; use(true); }]);
+    return toast(e.message);
+  }
+  await refresh("@project"); toast("Copied into brand/", true);
+}
+$("#useBtn").onclick = () => use(false);
+async function create(from) {
+  const id = $("#newId").value.trim();
+  if (!id) { $("#newId").focus(); return toast("Type an id for the brand first"); }
+  try { await api("/api/op", { action: "init", id, from: from || undefined }); $("#newId").value = ""; await refresh(id); toast("Made " + id, true); }
+  catch (e) { toast(e.message); }
+}
+$("#newBtn").onclick = () => create(null);
+$("#dupBtn").onclick = () => create(S.ref);
+refresh().catch(e => toast(e.message));
+</script>
+</body>
+</html>

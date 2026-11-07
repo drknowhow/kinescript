@@ -196,6 +196,20 @@ def set_value(ref, path: str, value, base_rev: str | None = None) -> dict:
     return show(folder)
 
 
+def replace(ref, spec: dict, base_rev: str | None = None) -> dict:
+    """Write a whole brand.json at once (the wizard's raw editor). Refuses one that adds errors, as set_value does."""
+    folder = locate(ref)
+    _guard(folder, base_rev)
+    if not isinstance(spec, dict):
+        raise BrandOpError("the brand must be a JSON object")
+    before = {(i["code"], i["message"]) for i in _errors(B.validate(folder))}
+    after = [i for i in _errors(B.validate(folder, spec)) if (i["code"], i["message"]) not in before]
+    if after:
+        raise BrandOpError("; ".join(i["message"] for i in after))
+    _write_json(folder / B.FILE, spec)
+    return show(folder)
+
+
 def _sniff(kind: str, name: str, data: bytes) -> None:
     ext = Path(name).suffix.lower()
     exts, cap = KINDS[kind]
@@ -284,7 +298,7 @@ def remove_file(ref, rel: str, base_rev: str | None = None) -> dict:
     return show(folder)
 
 
-ACTIONS = ("list", "show", "init", "use", "set", "add_file", "remove_file", "check", "preview")
+ACTIONS = ("list", "show", "init", "use", "set", "replace", "add_file", "remove_file", "check", "preview")
 
 
 def _need(args: dict, key: str):
@@ -308,6 +322,13 @@ def run(action: str, args: dict) -> dict:
         if "value" not in args:
             raise BrandOpError("'value' is needed (null removes the entry)")
         return set_value(_need(args, "brand"), _need(args, "path"), args["value"], args.get("base_rev"))
+    if action == "replace":
+        spec = args.get("spec")
+        if spec is None and args.get("file"):
+            spec = json.loads(Path(args["file"]).read_text(encoding="utf-8"))
+        if spec is None:
+            raise BrandOpError("'spec' (the whole brand.json) is needed")
+        return replace(_need(args, "brand"), spec, args.get("base_rev"))
     if action == "add_file":
         import base64
         src = args.get("file")
@@ -331,12 +352,12 @@ def sample_scene(folder: Path, variant: str | None = None, w: int = 1280, h: int
     """A short scene that shows the brand's palette, text styles, a chart, a lower third and its logos."""
     spec = B.read(folder)
     entries = [k for k, v in (spec.get("logos") or {}).items() if isinstance(v, dict)]
+    name = str(spec.get("name") or spec.get("id") or "Brand")
     swatches = [{"id": f"sw-{r}", "type": "rect", "x": 80 + i * 120, "y": 90, "w": 100, "h": 60, "anchor": "topleft",
                  "radius": 8, "fill": f"${r}", "stroke": "$muted", "strokeWidth": 1}
                 for i, r in enumerate(("bg", "surface", "text", "muted", "accent", "accent2"))]
     layers = swatches + [
-        {"id": "title", "type": "text", "text": spec.get("name") or spec.get("id") or "Brand", "textStyle": "title",
-         "size": 64, "x": 80, "y": 200, "anchor": "topleft", "align": "left", "fill": "$text", "maxWidth": 640},
+        {"id": "title", "type": "text", "text": name, "textStyle": "title", "size": max(28, min(64, 900 // len(name))), "x": 80, "y": 200, "anchor": "topleft", "align": "left", "fill": "$text", "maxWidth": 640},
         {"id": "body", "type": "text", "text": "Body text in the brand's body face.", "textStyle": "body", "size": 28,
          "x": 80, "y": 300, "anchor": "topleft", "align": "left", "fill": "$text"},
         {"id": "caption", "type": "text", "text": "Caption style", "textStyle": "caption", "size": 20, "x": 80,
@@ -352,6 +373,147 @@ def sample_scene(folder: Path, variant: str | None = None, w: int = 1280, h: int
     if variant:
         out["variant"] = variant
     return out
+
+
+GALLERY = ("sample", "palette", "type", "titleCard", "lowerThird", "callout", "barChart", "lineChart", "pieChart",
+           "logo", "bug")
+_DATA = [["North", 42], ["South", 61], ["East", 35], ["West", 50]]
+
+
+def _note(text: str) -> dict:
+    return {"id": "note", "type": "text", "text": text, "size": 40, "x": 960, "y": 540, "fill": "$muted",
+            "maxWidth": 1400}
+
+
+def gallery_scene(folder: Path, what: str, variant: str | None = None) -> dict:
+    """A 1920x1080 scene showing one part of the brand (one of GALLERY), drawn at 2.5 s."""
+    if what == "sample":
+        return sample_scene(folder, variant)  # 1280x720: gallery_png draws it at the same size as the rest
+    if what not in GALLERY:
+        raise BrandOpError(f"what is {what!r}; it is one of: {', '.join(GALLERY)}")
+    from . import components
+    spec = B.read(folder)
+    logos = [k for k, v in (spec.get("logos") or {}).items() if isinstance(v, dict)]
+    if what == "palette":
+        roles = B.ROLES
+        layers = []
+        for i, r in enumerate(roles):
+            x, y = 160 + (i % 4) * 420, 200 + (i // 4) * 400
+            layers += [{"id": f"sw-{r}", "type": "rect", "x": x, "y": y, "w": 360, "h": 220, "anchor": "topleft",
+                        "radius": 16, "fill": f"${r}", "stroke": "$muted", "strokeWidth": 2},
+                       {"id": f"lb-{r}", "type": "text", "text": r, "textStyle": "label", "size": 40, "x": x, "y": y + 250,
+                        "anchor": "topleft", "align": "left", "fill": "$text"}]
+    elif what == "type":
+        theme, _ = B.resolve(B.load(folder), variant)
+        layers, y = [], 70
+        styles = {n: components.text_style(n, theme) for n in components.text_styles(theme)}
+        for name, st in sorted(styles.items(), key=lambda kv: -float(kv[1].get("size", 40))):
+            size = min(float(st.get("size", 40)), 120)
+            layers.append({"id": f"ts-{name}", "type": "text", "text": f"{name}: Brand in motion", "textStyle": name,
+                           "size": size, "x": 120, "y": y, "anchor": "topleft", "align": "left", "fill": "$text",
+                           "maxWidth": 1680})
+            y += size * 1.35 + 24
+    elif what == "titleCard":
+        layers = [{"use": "titleCard", "id": "tc", "kicker": "Chapter one", "title": "A brand title",
+                   "subtitle": "And the line under it"}]
+    elif what == "lowerThird":
+        layers = [{"use": "lowerThird", "id": "lt", "title": "Name Surname", "subtitle": "Role, Company"}]
+    elif what == "callout":
+        layers = [{"id": "dot", "type": "circle", "x": 760, "y": 540, "r": 24, "fill": "$surface"},
+                  {"use": "callout", "id": "co", "x": 760, "y": 540, "label": "A callout"}]
+    elif what == "barChart":
+        layers = [{"use": "barChart", "id": "bc", "data": _DATA, "highlight": "South", "w": 1300, "h": 640}]
+    elif what == "lineChart":
+        layers = [{"use": "lineChart", "id": "lc", "data": _DATA, "w": 1300, "h": 640}]
+    elif what == "pieChart":
+        layers = [{"use": "pieChart", "id": "pc", "data": _DATA, "r": 320}]
+    elif not logos:
+        layers = [_note("No logos yet: add a logo file, then name it in the brand's logos.")]
+    elif what == "logo":
+        places = list(spec.get("placements") or {}) or ["bottomright"]
+        layers = [{"use": "logo", "id": f"logo-{p}", "logo": "full" if "full" in logos else logos[0], "placement": p}
+                  for p in places]
+    else:
+        layers = [_note("The bug stays on screen for the whole video."), {"use": "bug", "id": "bug"}]
+    out = {"canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 3}, "brand": str(folder.resolve()),
+           "layers": layers}
+    if variant:
+        out["variant"] = variant
+    return out
+
+
+def gallery_png(ref, what: str, variant: str | None = None, scale: float = 0.5) -> bytes:
+    """gallery_scene drawn to PNG bytes."""
+    from .output import still
+    folder = locate(ref)
+    _guard(folder, None)
+    fd, tmp = tempfile.mkstemp(suffix=".png", prefix="kine_brand_")
+    os.close(fd)
+    try:
+        still(gallery_scene(folder, what, variant), 1.5 if what == "sample" else 2.5, tmp,
+              scale * 1.5 if what == "sample" else scale)
+        return Path(tmp).read_bytes()
+    finally:
+        Path(tmp).unlink(missing_ok=True)
+
+
+def contrast(ref) -> dict:
+    """For each palette: every role against bg and surface, with the ratio a declared pair needs; and the chart
+    series against bg (3:1)."""
+    folder = locate(ref)
+    spec = B.read(folder)
+    need = {(a, b): r for a, b, r in B.PAIRS}
+    out = {}
+    for name, pal in (spec.get("palettes") or {}).items():
+        if not isinstance(pal, dict):
+            continue
+
+        def col(role, pal=pal):
+            seen = role
+            while seen not in pal and seen in B.FALLBACK:
+                seen = B.FALLBACK[seen]
+            return pal.get(seen)
+        pairs = []
+        for fg in B.ROLES:
+            for bg in ("bg", "surface"):
+                a, b = col(fg), col(bg)
+                if fg == bg or not (isinstance(a, str) and isinstance(b, str)):
+                    continue
+                try:
+                    ratio = round(B._ratio(a, b), 2)
+                except ValueError:
+                    continue
+                req = need.get((fg, bg))
+                pairs.append({"fg": fg, "bg": bg, "ratio": ratio, "needs": req,
+                              "ok": None if req is None else ratio >= req})
+        series = []
+        for c in (spec.get("charts") or {}).get("series") or []:
+            v = col(c) if isinstance(c, str) and not c.startswith("#") else c
+            try:
+                ratio = round(B._ratio(v, col("bg")), 2)
+            except (ValueError, TypeError, AttributeError):
+                continue
+            series.append({"color": c, "value": v, "ratio": ratio, "ok": ratio >= 3.0})
+        out[name] = {"pairs": pairs, "series": series}
+    return out
+
+
+def compare(ref) -> dict | None:
+    """For a project copy: each top-level part as the library has it or not (same|changed|project-only|
+    library-only), and which parts the brand locks. None when it is not a copy or the library brand is gone."""
+    folder = locate(ref)
+    src = folder / SOURCE
+    if not src.is_file():
+        return None
+    lib = Path(json.loads(src.read_text(encoding="utf-8")).get("from") or "")
+    if not (lib / B.FILE).is_file():
+        return None
+    mine, theirs = B.read(folder), B.read(lib)
+    parts = {}
+    for k in sorted(set(mine) | set(theirs)):
+        parts[k] = ("project-only" if k not in theirs else "library-only" if k not in mine
+                    else "same" if mine[k] == theirs[k] else "changed")
+    return {"library": str(lib), "libraryRev": _rev(lib), "parts": parts, "locked": list(mine.get("lock") or [])}
 
 
 def preview(ref, out: str | Path, variant: str | None = None, at: float = 1.5) -> dict:

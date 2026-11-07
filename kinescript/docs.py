@@ -931,6 +931,11 @@ COMMANDS
                                   set BRAND PATH VALUE (VALUE is JSON: '"#ff633f"', null removes);
                                   add-file BRAND FILE --kind fonts|logos; remove-file BRAND logos/x.svg;
                                   use BRAND [--project .] [--force]; preview BRAND [-o p.png] [--variant]
+                                  replace BRAND FILE writes a whole brand.json at once.
+  kine brand wizard [BRAND]       browser page to see and change brands: colours with contrast, type,
+                                  logos and placements, a gallery of the built-ins drawn in the brand,
+                                  the raw brand.json, and the project's copy against the library's.
+                                  It makes the same changes kine brand and kine_brand make.
   kine doctor                     checks ffmpeg and ffprobe, the GPU and fonts; exits 1 when
                                   ffmpeg or ffprobe is missing, and says how to install it
   kine mcp                        the same tools for MCP clients
