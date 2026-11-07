@@ -124,3 +124,15 @@ def test_probe_mouth_reports_the_track_and_whether_its_file_is_current(speak, tm
     assert got["mouth"] == json.loads((tmp_path / "voice" / "vo1.mouth.json").read_text(encoding="utf-8"))["mouth"]
     with pytest.raises(ValueError, match="no sound has id vo2; sounds: vo1"):
         mouth(str(f), "vo2")
+
+
+def test_kokoro_tokens_give_each_timed_word_its_sounds(monkeypatch):
+    from pathlib import Path
+    from types import SimpleNamespace as T
+    monkeypatch.syspath_prepend(str(Path(__file__).parents[1] / "plugins" / "kinescript-kokoro"))
+    from kinescript_kokoro import phones_from_tokens
+    toks = [T(text="Make", phonemes="mˈAk", start_ts=0.3, end_ts=0.6),
+            T(text=".", phonemes=".", start_ts=0.6, end_ts=0.7), T(text="in", phonemes="ɪn", start_ts=None, end_ts=None)]
+    phones = phones_from_tokens(toks, offset=10)
+    assert phones == [{"ipa": "mˈAk", "start": 10.3, "end": 10.6}]
+    assert [s for s, _, _ in M.track([], phones)["mouth"]] == ["X", "A", "C", "B"]
