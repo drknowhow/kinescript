@@ -722,6 +722,8 @@ BRANDS
               where it leaves them out, and a voice with text its speaker, backend, rate and options;
               kine voice reads the same, so a changed brand speaker shows as voice-stale. The scene's
               mix goes over the brand's. Sound files live in the brand's audio/ folder.
+  grade       the colour grade every video gets: the scene "grade" keys, such as {"temperature": 0.1,
+              "contrast": 1.05}. A scene's own grade keys go over it, unless the brand locks "grade".
   lock        parts a scene's theme may not change, such as ["palettes", "fonts"]; check reports
               "brand-locked" for a theme key that would.
   A brand's paths stay inside its folder: an absolute path or one with .. out of it is an error.
@@ -731,6 +733,8 @@ BRANDS
   again (use refuses to replace a copy edited in the project, unless --force). Change a brand with
   kine brand set and add-file (or kine_brand); each write checks the brand and refuses a change
   that breaks it, and --rev (base_rev) refuses it when the brand changed since you read it.
+  kine brand import acme logos/full.svg proposes dark and light palettes and chart series from a
+  logo's colours (each text and accent moved until it passes check's contrast); --apply writes them.
 
 COMPONENTS  {"use": "<name>", "id": "...", "at": ..., "dur": ..., ...parameters}
   Built in (parameters):
@@ -956,6 +960,7 @@ COMMANDS
                                   add-file BRAND FILE --kind fonts|logos|audio; remove-file BRAND logos/x.svg;
                                   use BRAND [--project .] [--force]; preview BRAND [-o p.png] [--variant]
                                   replace BRAND FILE writes a whole brand.json at once.
+                                  import BRAND LOGO [--apply]: palettes proposed from a logo.
   kine brand wizard [BRAND]       browser page to see and change brands: colours with contrast, type,
                                   logos and placements, a gallery of the built-ins drawn in the brand,
                                   the raw brand.json, and the project's copy against the library's.

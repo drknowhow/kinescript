@@ -42,6 +42,13 @@ def _brand_args(a) -> dict:
         except json.JSONDecodeError:
             value = rest[1]  # plain text, such as a colour without JSON quotes
         out.update(path=rest[0], value=value)
+    elif act == "import":
+        if len(rest) != 1:
+            raise ValueError("kine brand import BRAND LOGO [--apply]: LOGO is a file, or one in the brand "
+                             "(logos/mark.svg)")
+        from .brandops import locate
+        in_brand = not Path(rest[0]).is_absolute() and (locate(a.brand) / rest[0]).is_file()
+        out.update({"logo" if in_brand else "file": rest[0]}, apply=a.apply)
     elif act == "replace":
         if len(rest) != 1:
             raise ValueError("kine brand replace BRAND FILE (a whole brand.json)")
@@ -141,7 +148,7 @@ def main(argv=None) -> int:
     br = sub.add_parser("brand", help="make, show, change and use brands (see BRANDS in kine docs)")
     br.add_argument("action", choices=[x.replace("_", "-") for x in ("list", "show", "init", "use", "set", "replace",
                                                                      "add_file", "remove_file", "check", "preview",
-                                                                     "wizard")])
+                                                                     "import", "wizard")])
     br.add_argument("brand", nargs="?", help="a library brand id or a brand folder (for init: the new id)")
     br.add_argument("rest", nargs="*", help="set: PATH VALUE (VALUE is JSON, or text); add-file: FILE; replace: FILE; "
                                            "remove-file: fonts/NAME or logos/NAME")
@@ -155,6 +162,7 @@ def main(argv=None) -> int:
     br.add_argument("--replace", action="store_true", help="add-file: overwrite a file of the same name")
     br.add_argument("--variant", help="preview: the palette to show")
     br.add_argument("-o", "--out", help="preview: the image to write [<brand>_preview.png]")
+    br.add_argument("--apply", action="store_true", help="import: write the proposed palettes to the brand")
     br.add_argument("--port", type=int, default=8766, help="wizard: the port [8766]")
     br.add_argument("--no-browser", action="store_true", help="wizard: do not open a browser")
 

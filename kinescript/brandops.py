@@ -304,7 +304,7 @@ def remove_file(ref, rel: str, base_rev: str | None = None) -> dict:
     return show(folder)
 
 
-ACTIONS = ("list", "show", "init", "use", "set", "replace", "add_file", "remove_file", "check", "preview")
+ACTIONS = ("list", "show", "init", "use", "set", "replace", "add_file", "remove_file", "check", "preview", "import")
 
 
 def _need(args: dict, key: str):
@@ -351,7 +351,43 @@ def run(action: str, args: dict) -> dict:
         return {"ok": not _errors(issues), "issues": issues}
     if action == "preview":
         return preview(_need(args, "brand"), _need(args, "out"), args.get("variant"))
+    if action == "import":
+        return import_palette(_need(args, "brand"), args.get("logo"), args.get("file"), bool(args.get("apply")),
+                              args.get("base_rev"))
     raise BrandOpError(f"action is {action!r}; it is one of: {', '.join(ACTIONS)}")
+
+
+def import_palette(ref, logo: str | None = None, file: str | None = None, apply: bool = False,
+                   base_rev: str | None = None) -> dict:
+    """Palettes proposed from a logo: `logo` a file in the brand (logos/mark.svg), or `file` a path. With apply, they
+    (and the chart series) are written to the brand, replacing its palettes; otherwise nothing changes."""
+    from . import palette
+    folder = locate(ref)
+    _guard(folder, base_rev)
+    if logo:
+        try:
+            src = B.inside(folder, logo)
+        except ValueError as e:
+            raise BrandOpError(str(e)) from None
+    elif file:
+        src = Path(file)
+    else:
+        raise BrandOpError("name the logo: 'logo' for a file in the brand (logos/mark.svg), or 'file' for a path")
+    try:
+        found = palette.propose(palette.logo_colours(src), B.read(folder).get("name"))
+    except ValueError as e:
+        raise BrandOpError(str(e)) from None
+    if not apply:
+        return {"proposal": found, "applied": False}
+    spec = B.read(folder)
+    spec["palettes"] = found["palettes"]
+    if spec.get("default") not in found["palettes"]:
+        spec["default"] = "dark"
+    spec.setdefault("charts", {})
+    if isinstance(spec["charts"], dict):
+        spec["charts"]["series"] = found["charts"]["series"]
+    out = replace(folder, spec)
+    return {**out, "proposal": found, "applied": True}
 
 
 def sample_scene(folder: Path, variant: str | None = None, w: int = 1280, h: int = 720) -> dict:

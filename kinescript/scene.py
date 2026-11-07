@@ -333,6 +333,12 @@ class Scene:
             self.note("error", "brand-variant", "brand", str(e), "set variant to one of the brand's palettes")
             self._raise_errors()
         self.issues += self.brand.issues
+        bgrade = self.brand.spec.get("grade") if isinstance(self.brand.spec.get("grade"), dict) else {}
+        if "grade" in self.brand.lock:  # spec's grade already holds the brand's; a key it changes or adds is the scene's
+            for k, v in (spec.get("grade") or {}).items():
+                if bgrade.get(k, object()) != v:
+                    self.note("error", "brand-locked", "grade", f"grade.{k} changes the brand's grade, which the brand "
+                              "locks", f"remove grade.{k}, or take 'grade' out of the brand's lock")
         for k in spec.get("theme") or {}:
             if owner.get(k) in self.brand.lock:
                 self.note("error", "brand-locked", "theme", f"theme.{k} changes the brand's {owner[k]}, which the "
