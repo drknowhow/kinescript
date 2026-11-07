@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="900" viewBox="0 0 600 900">
+  <path id="mouth" d="M262 484 A38 32 0 1 0 338 484 A38 32 0 1 0 262 484 Z" fill="#000"/>
+  <path id="teeth" d="M280 452 H320 A4 4 0 0 1 324 456 V457 A4 4 0 0 1 320 461 H280 A4 4 0 0 1 276 457 V456 A4 4 0 0 1 280 452 Z" fill="#000"/>
+  <path id="tongue" d="M278 504 A22 10 0 1 0 322 504 A22 10 0 1 0 278 504 Z" fill="#000"/>
+</svg>

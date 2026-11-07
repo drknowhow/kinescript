@@ -516,3 +516,47 @@ def test_blinks_keep_their_times_inside_an_expression_on_the_head(tmp_path):
     b = _blink_times(spec, tmp_path)[0]
     assert _at(spec, tmp_path, b + 0.05, "host-rig-eyes-closed")
     assert not _at(spec, tmp_path, b - 0.3, "host-rig-eyes-closed")
+
+
+def test_the_starter_avatar_is_valid_and_draws_every_mouth_shape():
+    folder = A.where("kine:host")
+    assert A.starters() == ["host"] and A.validate(folder) == []
+    av = A.load(folder)
+    assert sorted(av.mouth.files) == sorted("XABCDEFGH") and av.fallbacks == {}
+    assert set(av.spec["colors"].values()) <= set(A.B.ROLES)  # every colour follows the palette
+    assert av.spec["voice"]["backend"] == "kokoro"
+
+
+def test_the_starter_files_are_what_make_host_draws():
+    import runpy
+    made = runpy.run_path(str(Path(__file__).parents[1] / "brand" / "make_host.py"))["files"]()
+    for rel, text in made.items():
+        assert (A.BUILT_IN / "host" / rel).read_text(encoding="utf-8") == text, f"run python brand/make_host.py ({rel})"
+
+
+def test_the_starter_takes_the_palette_it_is_drawn_with():
+    av = A.load(A.where("kine:host"))
+    light = A.colors(av, {"text": "#101010", "bg": "#fafafa", "accent": "#2255ff", "muted": "#777777"})
+    assert light["skin"] == "#101010" and light["shirt"] == "#2255ff" and light["feature"] == "#fafafa"
+
+
+def test_a_scene_can_use_the_starter_by_name_with_its_voice(tmp_path):
+    import kinescript as k
+    spec = {"canvas": {"w": 320, "h": 180, "fps": 30, "duration": 2},
+            "layers": [{"id": "host", "use": "avatar", "avatar": "kine:host", "h": 160, "say": {"text": "Hi"}}]}
+    assert A.say_sounds(spec, tmp_path)["audio"][0]["speaker"] == "af_heart"
+    spec["layers"][0].pop("say")
+    k.Scene(spec, tmp_path)
+    spec["layers"][0]["avatar"] = "kine:nobody"
+    with pytest.raises(Exception, match="no built-in avatar 'kine:nobody'; built in: kine:host"):
+        k.Scene(spec, tmp_path)
+
+
+def test_kine_avatar_new_copies_the_starter_to_edit(tmp_path, capsys):
+    from kinescript.cli import main
+    assert main(["avatar", "new", str(tmp_path / "mine")]) == 0
+    assert A.validate(tmp_path / "mine") == [] and (tmp_path / "mine" / "parts" / "mouth-H.svg").exists()
+    assert main(["avatar", "new", str(tmp_path / "mine")]) != 0
+    assert "already holds an avatar" in capsys.readouterr().out
+    assert main(["avatar", "check", "kine:host"]) == 0
+    assert main(["look", "kine:host", "-o", str(tmp_path / "host.png")]) == 0 and (tmp_path / "host.png").exists()

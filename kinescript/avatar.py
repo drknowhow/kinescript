@@ -91,6 +91,41 @@ def _issue(level: str, code: str, message: str, fix: str = "") -> dict:
     return {"level": level, "code": code, "layer": "avatar", "message": message, "fix": fix}
 
 
+BUILT_IN = Path(__file__).parent / "avatars"  # kine:NAME avatars, drawn by brand/make_host.py
+
+
+def starters() -> list[str]:
+    """The names of the built-in avatars, as kine:NAME names them."""
+    return sorted(d.name for d in BUILT_IN.iterdir() if (d / FILE).is_file()) if BUILT_IN.is_dir() else []
+
+
+def where(name, base: str | Path = ".") -> Path:
+    """The folder an avatar name means: kine:NAME a built-in one, anything else a folder from base."""
+    s = str(name or "")
+    if s.startswith("kine:"):
+        if s[5:] not in starters():
+            raise ValueError(f"there is no built-in avatar '{s}'; built in: " + ", ".join(f"kine:{n}" for n in starters()))
+        return BUILT_IN / s[5:]
+    return Path(base) / s
+
+
+def new(folder: str | Path, src: str = "kine:host") -> dict:
+    """Copy an avatar (the starter unless src names another) into `folder` as files to edit. Refuses a folder that
+    already holds an avatar."""
+    import shutil
+    dest, origin = Path(folder), where(src)
+    if (dest / FILE).exists():
+        raise ValueError(f"{dest} already holds an avatar; pick a new folder")
+    load(origin)
+    files = [f for f in origin.rglob("*") if f.is_file() and f.suffix.lower() in (".json", *EXTS)]
+    for f in files:
+        to = dest / f.relative_to(origin)
+        to.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(f, to)
+    return {"ok": True, "out": str(dest), "from": src, "files": len(files),
+            "next": f"edit {dest / 'parts'}, then kine avatar check {dest} and kine look {dest}"}
+
+
 def read(folder: str | Path) -> dict:
     """avatar.json in `folder` as a dict. ValueError when it is missing or not a JSON object."""
     p = Path(folder) / FILE
@@ -554,7 +589,7 @@ def say_sounds(spec: dict, base) -> dict:
         lid = str(L.get("id") or f"avatar{n + 1}")
         L.setdefault("id", lid)
         try:
-            voice = read(Path(base) / str(L.get("avatar", ""))).get("voice") or {}
+            voice = read(where(L.get("avatar", ""), base)).get("voice") or {}
         except ValueError:
             voice = {}  # reported when the layer expands
         lines = L["say"] if isinstance(L["say"], list) else [L["say"]]
@@ -908,10 +943,9 @@ def component(p, theme: dict, scene) -> dict:
     avatar as plain layers, centred on x, y at h pixels tall (its own size without h or w), its mouth following the
     sounds say names, with the expressions, gaze and gestures given at their times."""
     lid = p["id"]
-    folder = Path(scene.base) / str(p.get("avatar") or "")
     if not p.get("avatar"):
         raise ValueError(f"layer '{lid}': an avatar layer needs \"avatar\": the folder holding avatar.json")
-    av = load(folder)
+    av = load(where(p["avatar"], scene.base))
     w, h = av.size
     k = (float(p["h"]) / h if p.get("h") is not None else float(p["w"]) / w if p.get("w") is not None else 1.0)
     rig, fills = f"{lid}-rig", colors(av, theme)
@@ -978,7 +1012,8 @@ def component(p, theme: dict, scene) -> dict:
             if G is None:
                 continue
             gid = f"{lid}-gesture{i + 1}-{pname}"
-            _wrap(G, gid, at, {a: [[0, ks[0][1]]] + [[PRE + t, v] for t, v in ks] for a, ks in change.items()})
+            _wrap(G, gid, at, {a: {"keys": [[0, ks[0][1]]] + [[PRE + t, v] for t, v in ks], "smooth": True}
+                               for a, ks in change.items()})  # through each key, as a hand moves
             if spans is not None:
                 spans.append({"layer": lid, "name": g["name"], "part": pname, "id": gid, "dur": float(pose["dur"])})
 

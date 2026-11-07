@@ -1,0 +1,398 @@
+{
+  "kinescriptAvatar": 1,
+  "name": "Host",
+  "description": "Kinescript's starter avatar: a plain, friendly figure whose colours follow the palette.",
+  "size": [
+    600,
+    900
+  ],
+  "parts": {
+    "body": {
+      "src": "parts/body.svg",
+      "pivot": [
+        300,
+        900
+      ]
+    },
+    "head": {
+      "src": "parts/head.svg",
+      "parent": "body",
+      "pivot": [
+        300,
+        548
+      ]
+    },
+    "brows": {
+      "src": "parts/brows.svg",
+      "parent": "head",
+      "pivot": [
+        300,
+        336
+      ]
+    },
+    "eyes": {
+      "parent": "head",
+      "pivot": [
+        300,
+        392
+      ],
+      "look": [
+        12,
+        7
+      ],
+      "states": {
+        "open": "parts/eyes-open.svg",
+        "closed": "parts/eyes-closed.svg"
+      }
+    },
+    "mouth": {
+      "parent": "head",
+      "pivot": [
+        300,
+        478
+      ],
+      "shapes": {
+        "X": "parts/mouth-X.svg",
+        "A": "parts/mouth-A.svg",
+        "B": "parts/mouth-B.svg",
+        "C": "parts/mouth-C.svg",
+        "D": "parts/mouth-D.svg",
+        "E": "parts/mouth-E.svg",
+        "F": "parts/mouth-F.svg",
+        "G": "parts/mouth-G.svg",
+        "H": "parts/mouth-H.svg"
+      }
+    },
+    "armL": {
+      "src": "parts/arm-left.svg",
+      "parent": "body",
+      "pivot": [
+        157,
+        626
+      ]
+    },
+    "armR": {
+      "src": "parts/arm-right.svg",
+      "parent": "body",
+      "pivot": [
+        443,
+        626
+      ]
+    }
+  },
+  "colors": {
+    "skin": "text",
+    "shirt": "accent",
+    "hair": "muted",
+    "brow": "muted",
+    "feature": "bg",
+    "shine": "text",
+    "mouth": "bg",
+    "teeth": "text",
+    "tongue": "accent"
+  },
+  "expressions": {
+    "smile": {
+      "head": {
+        "rotate": -3
+      },
+      "brows": {
+        "y": -8
+      }
+    },
+    "happy": {
+      "head": {
+        "rotate": -4
+      },
+      "brows": {
+        "y": -12
+      },
+      "mouth": "C"
+    },
+    "think": {
+      "head": {
+        "rotate": 7
+      },
+      "brows": {
+        "y": 6,
+        "rotate": -4
+      }
+    },
+    "surprise": {
+      "brows": {
+        "y": -24
+      },
+      "mouth": "E"
+    },
+    "sad": {
+      "head": {
+        "rotate": 4,
+        "y": 6
+      },
+      "brows": {
+        "y": 8
+      }
+    }
+  },
+  "gestures": {
+    "nod": {
+      "dur": 0.6,
+      "head": {
+        "y": [
+          [
+            0,
+            0
+          ],
+          [
+            0.15,
+            12
+          ],
+          [
+            0.3,
+            0
+          ],
+          [
+            0.45,
+            7
+          ],
+          [
+            0.6,
+            0
+          ]
+        ],
+        "rotate": [
+          [
+            0,
+            0
+          ],
+          [
+            0.15,
+            2
+          ],
+          [
+            0.3,
+            0
+          ]
+        ]
+      }
+    },
+    "shake": {
+      "dur": 0.8,
+      "head": {
+        "rotate": [
+          [
+            0,
+            0
+          ],
+          [
+            0.15,
+            -7
+          ],
+          [
+            0.35,
+            7
+          ],
+          [
+            0.55,
+            -5
+          ],
+          [
+            0.8,
+            0
+          ]
+        ]
+      }
+    },
+    "tilt": {
+      "dur": 1.0,
+      "head": {
+        "rotate": [
+          [
+            0,
+            0
+          ],
+          [
+            0.3,
+            -10
+          ],
+          [
+            0.7,
+            -10
+          ],
+          [
+            1.0,
+            0
+          ]
+        ]
+      }
+    },
+    "wave": {
+      "dur": 1.4,
+      "armR": {
+        "rotate": [
+          [
+            0,
+            0
+          ],
+          [
+            0.3,
+            -150
+          ],
+          [
+            0.55,
+            -125
+          ],
+          [
+            0.8,
+            -150
+          ],
+          [
+            1.05,
+            -125
+          ],
+          [
+            1.4,
+            0
+          ]
+        ]
+      }
+    },
+    "point": {
+      "dur": 1.2,
+      "armR": {
+        "rotate": [
+          [
+            0,
+            0
+          ],
+          [
+            0.3,
+            -100
+          ],
+          [
+            0.9,
+            -100
+          ],
+          [
+            1.2,
+            0
+          ]
+        ]
+      }
+    },
+    "shrug": {
+      "dur": 0.9,
+      "armL": {
+        "y": [
+          [
+            0,
+            0
+          ],
+          [
+            0.3,
+            -20
+          ],
+          [
+            0.6,
+            -20
+          ],
+          [
+            0.9,
+            0
+          ]
+        ],
+        "rotate": [
+          [
+            0,
+            0
+          ],
+          [
+            0.3,
+            6
+          ],
+          [
+            0.6,
+            6
+          ],
+          [
+            0.9,
+            0
+          ]
+        ]
+      },
+      "armR": {
+        "y": [
+          [
+            0,
+            0
+          ],
+          [
+            0.3,
+            -20
+          ],
+          [
+            0.6,
+            -20
+          ],
+          [
+            0.9,
+            0
+          ]
+        ],
+        "rotate": [
+          [
+            0,
+            0
+          ],
+          [
+            0.3,
+            -6
+          ],
+          [
+            0.6,
+            -6
+          ],
+          [
+            0.9,
+            0
+          ]
+        ]
+      },
+      "head": {
+        "y": [
+          [
+            0,
+            0
+          ],
+          [
+            0.3,
+            10
+          ],
+          [
+            0.6,
+            10
+          ],
+          [
+            0.9,
+            0
+          ]
+        ]
+      }
+    }
+  },
+  "idle": {
+    "blink": [
+      2.5,
+      5.0
+    ],
+    "breath": 0.012,
+    "saccade": [
+      0.8,
+      2.5
+    ]
+  },
+  "voice": {
+    "backend": "kokoro",
+    "speaker": "af_heart"
+  }
+}
