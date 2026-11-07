@@ -510,6 +510,11 @@ DEPTH AND CAMERA (3D)
             and scale, morph target weights and skins move (LINEAR, STEP and CUBICSPLINE keys). The
             model keeps the size and centre of its rest pose, so a clip that walks it moves it. A
             name the file lacks is an error (unknown-animation) that lists the ones it has.
+  morphs    the glTF file's morph targets by name and their weights, each a number (0 to 1), keys
+            or an expression: {"smile": 1, "blink": [[0, 0], [0.1, 1], [0.2, 0]]}. They set the
+            target over what the file and the animation give it, on the layer's clock. kine probe
+            lists the names (from the mesh's extras.targetNames); a name the file lacks is an error
+            (unknown-morph).
   ground    true or {"opacity": 0.5, "blur": px, "y": px, "from": "above"}: a soft shadow on a level
             floor under the model, as if lit from above, fainter as the model rises. The floor sits at
             the model's lowest point before it turns, or at y in the layer's parent space (canvas px
@@ -999,7 +1004,7 @@ COMMANDS
                                   shown (after rotation), fps, audio, alpha and rotation; a note
                                   when it lists a video stream with no frames in it. A model file
                                   (.glb, .gltf, .obj): its triangles, vertices, materials, size,
-                                  animations with their durations, skins, morph targets, textures
+                                  animations with their durations, skins, morph targets (and their names), textures
                                   and texture coordinate sets. An .svg: the w and h it is drawn
                                   at and the kinds of element left out of it (undrawn).
   kine render scene.json -o out.mp4 -q draft|standard|high

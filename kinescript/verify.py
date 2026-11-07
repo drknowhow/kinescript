@@ -570,6 +570,7 @@ def probe_media(src: str) -> dict:
                "vertices": int(len(imp.mesh.P)), "materials": len(imp.materials),
                "size": [round(float(v), 3) for v in imp.size], "animations": about.get("animations", []),
                "skins": about.get("skins", []), "morphTargets": about.get("morphTargets", 0),
+               "morphs": about.get("morphs", []),
                "textures": about.get("textures", 0), "uvSets": about.get("uvSets", [])}
         if about.get("crowded"):
             out["note"] = (f"{about['crowded']} vertices are moved by more than four joints; each follows the four "

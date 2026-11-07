@@ -26,7 +26,7 @@ STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "emphasis", "chil
           "allowOffscreen", "style", "audio", "shadow", "box", "fx", "fill", "stroke", "emph", "active",
           "sksl", "preset", "uniforms", "caret", "case", "italic", "smooth", "closed", "focus", "use",
           "backface", "fixed", "sort", "shape", "detail", "parts", "light", "span", "sound", "voice",
-          "fadeIn", "fadeOut", "sequence", "animation", "repeat", "profile", "along", "dash", "rough", "mask",
+          "fadeIn", "fadeOut", "sequence", "animation", "morphs", "repeat", "profile", "along", "dash", "rough", "mask",
           "glow", "outline", "innerShadow", "displace", "frames", "sheet", "fps", "pixelated", "textPath",
           "textStyle"}
 PART_STRUCT = {"shape", "texture", "text", "font", "d", "italic", "profile"}  # a part's keys that never animate
@@ -449,6 +449,17 @@ class Scene:
                                      else "which has no animations"),
                                   f"did you mean {close!r}?" if close else
                                   "name one of them, or its number from 0" if clips else "drop animation")
+                    shapes = layer.raw.get("morphs")
+                    if isinstance(shapes, dict) and shapes:
+                        have = models.morph_names(imp)
+                        for mn in shapes:
+                            if mn not in have:
+                                close = schema.suggest(mn, have) if have else None
+                                self.note("error", "unknown-morph", layer.id, f"morph {mn!r} is not in {name}, " + (
+                                    f"whose morph targets are {', '.join(map(repr, have))}" if have else
+                                    "which has no named morph targets (kine probe lists them)"),
+                                    f"did you mean {close!r}?" if close else
+                                    "name one of them" if have else "drop morphs, or export the targets with names")
                     crowded = (imp.about or {}).get("crowded", 0)
                     if crowded:
                         self.note("warning", "skin-influences", layer.id, f"{crowded} vertices of {name} are moved "
@@ -1078,6 +1089,9 @@ class Scene:
                 if isinstance(along, dict) and isinstance(along.get("d"), str):
                     layer.along = (along["d"], along.get("orient") is True)
                     layer.props["along"] = compile_prop("along", along.get("p", [[0, 0], ["end", 1]]), pctx)
+                if ltype == "model" and isinstance(raw.get("morphs"), dict):
+                    for mn, mv in raw["morphs"].items():
+                        layer.props["w_" + mn] = compile_prop("w_" + mn, mv, pctx)
                 for un, uv in (raw.get("uniforms") or {}).items():
                     if not isinstance(uv, (int, float, str)) or (isinstance(uv, str) and uv.startswith("=")):
                         layer.props["u_" + un] = compile_prop("u_" + un, uv, pctx)

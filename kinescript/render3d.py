@@ -744,6 +744,15 @@ def playing(L, imp, t: float) -> tuple[int, float] | None:
     return i, at % length if spec.get("loop", True) else min(max(at, 0.0), length)
 
 
+def morphs(L, imp, t: float, T: float = 0.0) -> dict[str, float]:
+    """The weights the layer's "morphs" give the model file's named morph targets at its time t: a number, keys or
+    an expression each. Empty when it sets none (kine check reports a name the file does not have)."""
+    if imp.motion is None or not isinstance(L.raw.get("morphs"), dict):
+        return {}
+    have = set(models.morph_names(imp))
+    return {n: float(L.get("w_" + n, t, T)) for n in L.raw["morphs"] if n in have and "w_" + n in L.props}
+
+
 def _fit(g, size) -> float:
     """Scale of a model file: it fits inside w and h keeping its proportions, or its longest side is 300 px."""
     s = [float(v) / e for v, e in ((g("w", None), size[0]), (g("h", None), size[1])) if v is not None and e > 1e-9]
@@ -762,13 +771,14 @@ def model(r, L, g, t: float = 0.0, T: float = 0.0, grow: float = 1.0) -> tuple[m
         keys = keys + own
         fit = _fit(g, size)
         play = playing(L, imp, t)
-        if play is None:
+        shapes = morphs(L, imp, t, T)
+        if play is None and not shapes:
             meshes.insert(0, _kept(r, ("fit", L.id), fit, lambda: m._replace(P=m.P * fit)))
-        else:  # posed at this time: a new mesh, kept while the time into the clip holds (its ends, a pause)
+        else:  # posed at this time: a new mesh, kept while the time into the clip and the morphs hold
             def posed():
-                P, N = models.pose(imp, *play)
+                P, N = models.pose(imp, *(play or (None, 0.0)), shapes)
                 return m._replace(P=P * fit, N=N)
-            meshes.insert(0, _kept(r, ("fit", L.id), (fit, play), posed))
+            meshes.insert(0, _kept(r, ("fit", L.id), (fit, play, tuple(sorted(shapes.items()))), posed))
     elif shape:
         meshes.insert(0, _shape(r, shape, g, L.raw, L.raw.get("detail", "medium"), ("shape", L.id), grow))
     if len(meshes) == 1:
@@ -1330,8 +1340,8 @@ def _topology(r, L, m) -> tuple:
 
 def _welded(r, L, m) -> tuple:
     hit = r._models.get(("edges", L.id))
-    if hit is None or hit[0] is not m.T or hit[1] != len(m.P) or (L.raw.get("animation") not in (None, False)
-                                                                  and hit[3] is not m.P):
+    if hit is None or hit[0] is not m.T or hit[1] != len(m.P) or ((L.raw.get("animation") not in (None, False)
+                                                                   or L.raw.get("morphs")) and hit[3] is not m.P):
         hit = r._models[("edges", L.id)] = (m.T, len(m.P), mesh.edges(m.P, m.T), m.P)
     return hit[2]
 
