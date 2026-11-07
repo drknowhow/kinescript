@@ -36,6 +36,8 @@ def segment(scene, part: str) -> tuple[dict, str] | None:
         conf.update(ask)
     dur = conf.pop("dur", default_dur)
     folder = scene.brand.folder.resolve()
+    from_scene = isinstance(ask, dict) and "sound" in ask
+    sound = _sound(conf.pop("sound", None), Path(scene.base).resolve() if from_scene else folder, part, from_scene)
     canvas = {"w": scene.w, "h": scene.h, "fps": scene.fps}
     variant = scene.spec.get("variant")
     if "scene" in conf:
@@ -54,12 +56,32 @@ def segment(scene, part: str) -> tuple[dict, str] | None:
             spec.setdefault("variant", variant)
         for k in PARTS:
             spec.pop(k, None)  # an intro of the intro would never end
+        if sound:
+            spec["audio"] = [*(spec.get("audio") or []), sound]
         return spec, str(p.parent)
     spec = {"canvas": {**canvas, "duration": dur}, "brand": str(folder),
             "layers": [{"use": builtin, "id": part, **conf}]}
     if variant is not None:
         spec["variant"] = variant
+    if sound:
+        spec["audio"] = [sound]
     return spec, str(folder)
+
+
+def _sound(snd, folder: Path, part: str, from_scene: bool) -> dict | None:
+    """The intro's or outro's sound (a sonic logo) as an audio entry with an absolute src: a file in the brand
+    folder, or, when the scene gives it, one relative to the scene (`folder` is then the scene's)."""
+    if not snd:
+        return None
+    entry = dict(snd) if isinstance(snd, dict) else {"src": snd}
+    src = entry.get("src")
+    if not isinstance(src, str):
+        raise ValueError(f"{part}.sound needs a src, such as \"audio/logo.wav\"")
+    if from_scene:
+        entry["src"] = str((folder / src).resolve())
+    else:
+        entry["src"] = str(B.inside(folder, src))  # ValueError for one that leads out of the brand
+    return {"id": f"{part}-sound", "role": "sfx", "at": 0, **entry}
 
 
 def segments(scene) -> dict[str, tuple[dict, str]]:

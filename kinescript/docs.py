@@ -74,6 +74,8 @@ SCENE (top level)
               makes a video file; an object changes the brand's parameters for this video:
               "outro": {"title": "Part two next week"}. The scene's own times stay as written: check,
               look, still and probe show the scene alone (probe lists the bookends' lengths). See BRANDS.
+  music       true plays the brand's music bed under the whole video (an audio entry with id
+              "music", role music, looped, until the end); an object changes its keys for this video.
   theme       {"accent": "#ff633f"}: then "$accent" anywhere means that value. Over a brand, it
               changes the brand's values, except the parts the brand locks.
   markers     {"drop": 12.5}: named times, usable as "at": "drop". A marker is seconds or a clock
@@ -711,6 +713,15 @@ BRANDS
               "acme.com", "dur": 3}, drawn by the endCard component, or {"scene": "outro.json"}.
               Each is rendered as its own segment and joined to the video; its sound (silence when it
               has none) joins the video's. A frame range, a PNG sequence or an audio file leaves them out.
+              "sound": "audio/logo.wav" (or {"src": ..., "gain": -3}) on either plays from its start: a
+              sonic logo.
+  audio       sound defaults, by role: {"voice": {"backend": "kokoro", "speaker": "af_heart", "rate":
+              1.05}, "music": {"src": "audio/bed.mp3", "gain": -4, "fadeIn": 1, "fadeOut": 2},
+              "sfx": {"gain": -3}, "ambience": {...}, "mix": {"loudness": -14, "duck": {"depth": 10}}}.
+              A sound in the scene's audio takes its role's gain, volume, fadeIn, fadeOut, loop and pan
+              where it leaves them out, and a voice with text its speaker, backend, rate and options;
+              kine voice reads the same, so a changed brand speaker shows as voice-stale. The scene's
+              mix goes over the brand's. Sound files live in the brand's audio/ folder.
   lock        parts a scene's theme may not change, such as ["palettes", "fonts"]; check reports
               "brand-locked" for a theme key that would.
   A brand's paths stay inside its folder: an absolute path or one with .. out of it is an error.
@@ -803,6 +814,8 @@ SOUND
   similarity_boost. kokoro has no tags.
   You cannot hear the mix, so read it: kine check measures it and names each sound problem with its
   time range, and kine look --audio draws it under the frames, with each sound's loudness in the JSON.
+  A scene with a brand takes its sound defaults (see BRANDS: audio): speaker and backend for a voice,
+  gain and fades by role, the mix targets, and "music": true for its music bed.
   Sound is mixed into .mp4, .mov and .webm, and into --from/--to renders. -o mix.wav (or .m4a,
   .mp3, .flac) renders the sound alone, without drawing frames.
 
@@ -940,7 +953,7 @@ COMMANDS
   kine brand list|show|init|use|set|add-file|remove-file|check|preview [BRAND] ...
                                   the brand library (see BRANDS); BRAND is an id or a folder.
                                   set BRAND PATH VALUE (VALUE is JSON: '"#ff633f"', null removes);
-                                  add-file BRAND FILE --kind fonts|logos; remove-file BRAND logos/x.svg;
+                                  add-file BRAND FILE --kind fonts|logos|audio; remove-file BRAND logos/x.svg;
                                   use BRAND [--project .] [--force]; preview BRAND [-o p.png] [--variant]
                                   replace BRAND FILE writes a whole brand.json at once.
   kine brand wizard [BRAND]       browser page to see and change brands: colours with contrast, type,

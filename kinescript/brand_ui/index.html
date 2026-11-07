@@ -84,6 +84,7 @@
       <section data-tab="Colours"></section>
       <section data-tab="Type"></section>
       <section data-tab="Logos"></section>
+      <section data-tab="Sound"></section>
       <section data-tab="Gallery"></section>
       <section data-tab="Raw JSON"></section>
     </div>
@@ -188,7 +189,7 @@ function render() {
   const vs = $("#variant"); const vars = I.variants || [];
   if (!vars.includes(S.variant)) S.variant = spec.default && vars.includes(spec.default) ? spec.default : vars[0];
   vs.replaceChildren(...vars.map(v => h("option", { value: v, selected: v === S.variant }, v)));
-  const panels = { "Colours": colours, "Type": type, "Logos": logos, "Gallery": gallery, "Raw JSON": raw };
+  const panels = { "Colours": colours, "Type": type, "Logos": logos, "Sound": sound, "Gallery": gallery, "Raw JSON": raw };
   const sec = document.querySelector(`section[data-tab="${S.tab}"]`);
   sec.replaceChildren(...[panels[S.tab]()].flat());
 }
@@ -377,6 +378,58 @@ function logos() {
       h("label", { class: "inline" }, "opacity", h("input", { type: "number", step: 0.05, min: 0, max: 1, value: bug.opacity ?? "", placeholder: "0.85", style: "width:80px",
         onchange: e => setv("bug.opacity", e.target.value === "" ? null : +e.target.value) }))),
     h("div", { style: "margin-top:10px" }, img("bug"))));
+  return out;
+}
+
+// ---- Sound
+function sound() {
+  const spec = S.info.brand, A = spec.audio || {}, out = [];
+  const files = S.info.files.filter(f => f.startsWith("audio/"));
+  const url = f => `/api/file?ref=${encodeURIComponent(S.ref)}&path=${encodeURIComponent(f)}&r=${S.info.rev.slice(0, 8)}`;
+  const num = (path, cur, ph, step) => h("input", { type: "number", value: cur ?? "", placeholder: ph, step: step || 1, style: "width:80px",
+    onchange: e => setv(path, e.target.value === "" ? null : +e.target.value) });
+  const txt = (path, cur, ph) => h("input", { type: "text", value: cur ?? "", placeholder: ph, style: "width:160px",
+    onchange: e => setv(path, e.target.value.trim() || null) });
+  const pick = (path, cur, blank) => h("select", { onchange: e => setv(path, e.target.value || null) }, h("option", { value: "" }, blank),
+    files.map(f => h("option", { value: f, selected: f === cur }, f)));
+  out.push(h("div", { class: "card" }, h("h3", {}, "Sound files"),
+    h("p", { class: "hint" }, "A music bed, a sonic logo for the intro or outro. Upload .wav, .mp3, .m4a, .flac, .ogg or .opus."),
+    h("div", { class: "flex" }, upload("audio", ".wav,.mp3,.m4a,.aac,.flac,.ogg,.opus")),
+    files.length ? h("table", { style: "margin-top:8px" }, files.map(f => h("tr", {}, h("td", {}, f),
+      h("td", {}, h("audio", { controls: true, preload: "none", src: url(f), style: "height:30px" })),
+      h("td", {}, h("button", { class: "small", onclick: () => op("remove_file", { file: f }) }, "delete"))))) : null));
+  const v = A.voice || {};
+  out.push(h("div", { class: "card" }, h("h3", {}, "Voice"),
+    h("p", { class: "hint" }, "Every sound with role voice and text takes these unless it sets its own; kine voice speaks with them."),
+    h("div", { class: "flex" },
+      h("label", { class: "inline" }, "backend", txt("audio.voice.backend", v.backend, "kokoro")),
+      h("label", { class: "inline" }, "speaker", txt("audio.voice.speaker", v.speaker, "af_heart")),
+      h("label", { class: "inline" }, "rate", num("audio.voice.rate", v.rate, "1", 0.05)),
+      h("label", { class: "inline" }, "gain dB", num("audio.voice.gain", v.gain, "0", 0.5)))));
+  const m = A.music || {};
+  out.push(h("div", { class: "card" }, h("h3", {}, "Music bed"),
+    h("p", { class: "hint" }, "\"music\": true on a scene plays this under the whole video, looped, ducked under the voice. Its gain is a change from the music level."),
+    h("div", { class: "flex" },
+      h("label", { class: "inline" }, "file", pick("audio.music.src", m.src, "(none)")),
+      h("label", { class: "inline" }, "gain dB", num("audio.music.gain", m.gain, "0", 0.5)),
+      h("label", { class: "inline" }, "fade in", num("audio.music.fadeIn", m.fadeIn, "0", 0.1)),
+      h("label", { class: "inline" }, "fade out", num("audio.music.fadeOut", m.fadeOut, "0", 0.1)))));
+  out.push(h("div", { class: "card" }, h("h3", {}, "Effects and ambience"),
+    h("div", { class: "flex" },
+      h("label", { class: "inline" }, "sfx gain dB", num("audio.sfx.gain", (A.sfx || {}).gain, "0", 0.5)),
+      h("label", { class: "inline" }, "ambience gain dB", num("audio.ambience.gain", (A.ambience || {}).gain, "0", 0.5)))));
+  const mix = A.mix || {};
+  out.push(h("div", { class: "card" }, h("h3", {}, "Mix"),
+    h("p", { class: "hint" }, "Under each scene's own mix: the loudness the whole video ends at, and the duck depth under a voice."),
+    h("div", { class: "flex" },
+      h("label", { class: "inline" }, "loudness LUFS", num("audio.mix.loudness", mix.loudness, "-16", 0.5)),
+      h("label", { class: "inline" }, "duck dB", num("audio.mix.duck.depth", (mix.duck || {}).depth, "14", 0.5)))));
+  const snd = part => { const x = (spec[part] || {}).sound; return typeof x === "object" && x ? x.src : x; };
+  out.push(h("div", { class: "card" }, h("h3", {}, "Sonic logo"),
+    h("p", { class: "hint" }, "A sound the intro or outro plays from its start."),
+    h("div", { class: "flex" },
+      h("label", { class: "inline" }, "intro", pick("intro.sound", snd("intro"), "(none)")),
+      h("label", { class: "inline" }, "outro", pick("outro.sound", snd("outro"), "(none)")))));
   return out;
 }
 

@@ -48,7 +48,7 @@ def _brand_args(a) -> dict:
         out["file"] = rest[0]
     elif act == "add-file":
         if len(rest) != 1:
-            raise ValueError("kine brand add-file BRAND FILE --kind fonts|logos")
+            raise ValueError("kine brand add-file BRAND FILE --kind fonts|logos|audio")
         out.update(file=rest[0], kind=a.kind, name=a.name, replace=a.replace)
     elif act == "remove-file":
         if len(rest) != 1:
@@ -148,7 +148,7 @@ def main(argv=None) -> int:
     br.add_argument("--project", default=".", help="use: the folder that gets brand/ [.]")
     br.add_argument("--from", dest="source", help="init: copy this brand instead of the default")
     br.add_argument("--dir", help="init: make it in this folder instead of the library")
-    br.add_argument("--kind", choices=("fonts", "logos"), help="add-file: where it goes")
+    br.add_argument("--kind", choices=("fonts", "logos", "audio"), help="add-file: where it goes")
     br.add_argument("--name", help="add-file: the file name in the brand [the file's own]")
     br.add_argument("--rev", help="refuse the change if the brand's rev is no longer this")
     br.add_argument("--force", action="store_true", help="use: replace a copy edited in the project")
