@@ -391,6 +391,13 @@ def probe(src, at: float | None = None) -> dict:
     """Resolved timeline; with `at`, also every visible layer's screen box at that time."""
     scene = load(src)
     out = {"ok": True, **scene.summary()}  # as a media file's probe says it
+    from . import bookends
+    if bookends.wanted(scene.spec):
+        try:
+            ends = bookends.durations(scene)
+        except (ValueError, SceneError) as e:
+            ends = {"error": str(e)}
+        out["bookends"] = {**ends, "note": "kine render puts these before and after the scene's own duration"}
     if at is not None:
         try:
             t = float(at)
@@ -912,6 +919,9 @@ def check(src, step: float = 0.25, safe: float = 0.05, brand_strict: bool = Fals
             "fewer or smaller particles", until=heavy[-1][0])
     if brand_strict:
         brandcheck.strict(scene, add)
+    from . import bookends
+    for i in bookends.check(scene):  # the brand's intro and outro the scene asks for must load
+        add(i["level"], i["code"], i.get("layer"), 0.0, i["message"], i.get("fix", ""))
     for lid, T, px in strobes(scene, r):
         add("warning", "strobe", lid, T, f"moves {px:.0f} px a frame, fast enough to show as separate copies of "
             "itself instead of one moving thing", "add \"motionBlur\": {\"samples\": 8} to the scene, or slow the move")

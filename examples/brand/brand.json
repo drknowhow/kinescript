@@ -35,6 +35,8 @@
     "closing": {"anchor": "center", "height": "14%"}
   },
   "bug": {"logo": "mark", "placement": "corner", "opacity": 0.9},
+  "intro": {"tagline": "Across the sound since 1952", "dur": 2},
+  "outro": {"title": "Thanks for riding", "subtitle": "Tidewater Ferries", "url": "tidewater.example", "dur": 3},
   "motion": {"enter": "rise", "exit": "fade"},
   "components": {
     "lowerThird": {"plate": "surface", "subColor": "accent2"},

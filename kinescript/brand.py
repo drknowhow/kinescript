@@ -22,7 +22,8 @@ ALIASES = {"void": "bg", "ink": "bg", "sheet": "text", "paper": "text", "track":
            "key": "accent2", "annotation": "muted"}
 FACES = ("display", "body", "mono")
 # Parts whose entries become "$part.name" theme values (and "$part" for the whole object).
-GROUPS = ("text", "charts", "logos", "placements", "bug", "motion", "components")
+GROUPS = ("text", "charts", "logos", "placements", "bug", "motion", "components", "intro", "outro")
+BOOKENDS = {"intro": ("sting", 2.0), "outro": ("endCard", 3.0)}  # the built-in that draws each, its default dur
 PARTS = {"kinescriptBrand", "id", "name", "description", "palettes", "default", "fonts", "safeArea", "lock", *GROUPS}
 LOCKABLE = ("palettes", "fonts", *GROUPS, "safeArea")
 LOGO_FILES = ("file", "onDark", "onLight")
@@ -87,6 +88,9 @@ def _files(spec: dict) -> list[tuple[str, str, tuple]]:
     for name, logo in logos.items():
         if isinstance(logo, dict):
             out += [(f"logos.{name}.{k}", logo[k], LOGO_EXTS) for k in LOGO_FILES if k in logo]
+    for part in BOOKENDS:
+        if isinstance(spec.get(part), dict) and "scene" in spec[part]:
+            out.append((f"{part}.scene", spec[part]["scene"], (".json",)))
     return out
 
 
@@ -188,6 +192,10 @@ def validate(folder: str | Path, spec: dict | None = None) -> list[dict]:
     for g in GROUPS:
         if g in spec and not isinstance(spec[g], dict):
             out.append(_issue("error", "brand-key", f"{g} must be an object"))
+    for part in BOOKENDS:
+        dur = spec.get(part, {}).get("dur") if isinstance(spec.get(part), dict) else None
+        if dur is not None and (isinstance(dur, bool) or not isinstance(dur, (int, float)) or not 0 < dur <= 60):
+            out.append(_issue("error", "brand-key", f"{part}.dur is {dur!r}; it is seconds, above 0 and at most 60"))
     lock = spec.get("lock", [])
     if not isinstance(lock, list):
         out.append(_issue("error", "brand-lock", "lock must be a list such as [\"palettes\", \"fonts\"]"))
@@ -283,6 +291,8 @@ def resolve(brand: Brand, variant: str | None = None) -> tuple[dict, dict[str, s
     for alias, role in ALIASES.items():
         put(alias, pal[role], "palettes")
     put("variant", name, "palettes")
+    if isinstance(brand.spec.get("name"), str):
+        put("brandName", brand.spec["name"], "name")
     fonts = brand.spec.get("fonts") or {}
     fam = {f: fonts[f]["family"] for f in FACES if f in fonts}
     if fam:
