@@ -4,7 +4,7 @@ the eyes, turned into an avatar folder that talks and blinks.
     source/base.png         the character, mouth at rest (shape X), eyes open, on a flat background or with alpha
     source/mouth-A.png ...  the same picture with only the mouth changed (A, C and D at least; X is the base)
     source/blink.png        the same picture with the eyes closed
-    source/source.json      optional: name, voice, files, mouthBox, eyesBox, background
+    source/source.json      optional: name, voice, files, mouthBox, eyesBox, background, height, format (webp)
 
 The character is never cut into limbs. The base becomes the avatar's one body part, and each variant gives a small
 patch, feathered at its edge, that lies over the base where the mouth or the eyes are. Image models move a picture a
@@ -22,6 +22,9 @@ import numpy as np
 from . import mouth as M
 
 SOURCE = "source.json"
+IMAGE_EXTS = (".png", ".webp", ".jpg", ".jpeg")
+LOOKS = ("left", "right", "up", "down")  # eye states a gaze picks (avatar.LOOKS)
+RESERVED = {"open", "closed", *LOOKS}  # eye states an expression can't be named
 PROMPTS = "PROMPTS.md"
 WORK = 512  # the longest side, in pixels, that lining up and finding regions work at
 SCALES = np.linspace(0.96, 1.04, 9)
@@ -54,8 +57,18 @@ def read_image(path: Path) -> np.ndarray:
 
 
 def write_image(px: np.ndarray, path: Path) -> None:
+    """Straight RGBA floats to a .png file, or a .webp one (lossy, quality 90, alpha kept), folders made."""
+    path = Path(path)
+    data = np.clip(np.rint(px * 255), 0, 255).astype(np.uint8)
+    if path.suffix.lower() == ".webp":
+        import skia
+        img = skia.Image.fromarray(np.ascontiguousarray(data), colorType=skia.kRGBA_8888_ColorType,
+                                   alphaType=skia.kUnpremul_AlphaType)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(bytes(img.encodeToData(skia.kWEBP, 90)))
+        return
     from .output import save_png
-    save_png(np.clip(np.rint(px * 255), 0, 255).astype(np.uint8), path)
+    save_png(data, path)
 
 
 # --- sampling -------------------------------------------------------------------------------------------------
@@ -131,12 +144,25 @@ def _grow(seed: np.ndarray, allowed: np.ndarray, limit: int = 100000) -> np.ndar
     return reach
 
 
+def _resize(img: np.ndarray, k: float) -> np.ndarray:
+    """img scaled by k (at most 1): whole-factor block averages first, so a big reduction does not alias."""
+    if k >= 0.999:
+        return img
+    h, w = img.shape[:2]
+    to = (max(1, round(w * k)), max(1, round(h * k)))
+    f = int(1 / k)
+    if f > 1:
+        img = _small(img, f)
+    return _warp(img, 1.0, (0.0, 0.0), to)
+
+
 # --- background -----------------------------------------------------------------------------------------------
 
 def key(img: np.ndarray, background="auto") -> tuple[np.ndarray, list[dict]]:
     """The base picture with its background made transparent. A picture with its own alpha keeps it; otherwise the
-    background is the colour of its border (or `background`, a hex colour), removed where it joins the border, so
-    the same colour inside the figure (white teeth on white) stays."""
+    background is the colour of its border's top and sides (or `background`, a hex colour). A green or blue one is
+    chroma keyed; any other is removed only where it joins the border, so the same colour inside the figure (white
+    teeth on white) stays."""
     issues: list[dict] = []
     if background == "alpha" or (background == "auto" and img[..., 3].min() < 0.98):
         return img.copy(), issues
@@ -153,24 +179,35 @@ def key(img: np.ndarray, background="auto") -> tuple[np.ndarray, list[dict]]:
                                  "the base picture's border is not one flat colour, so its background can't be keyed",
                                  "make the base on a plain background (such as #00FF00), or give it an alpha channel"))
             return img.copy(), issues
-    lo, hi = 0.08, 0.22
-    dist = np.linalg.norm(rgb - bg, axis=2)
-    near = dist < hi
-    f = max(1, max(img.shape[:2]) // WORK)
-    small = _small(near.astype(np.float32), f) > 0.5
-    seed = np.zeros_like(small)
-    seed[0], seed[-1], seed[:, 0], seed[:, -1] = small[0], small[-1], small[:, 0], small[:, -1]
-    reach = _grow(seed, small)
-    reach[1:] |= reach[:-1].copy()  # one low pixel wider, then back to full size
-    reach[:-1] |= reach[1:].copy()
-    reach[:, 1:] |= reach[:, :-1].copy()
-    reach[:, :-1] |= reach[:, 1:].copy()
-    full = np.repeat(np.repeat(reach, f, 0), f, 1)
-    full = np.pad(full, ((0, img.shape[0] - full.shape[0]), (0, img.shape[1] - full.shape[1])), mode="edge")
-    zone = full & near
-    alpha = np.where(zone, np.clip((dist - lo) / (hi - lo), 0, 1), 1.0).astype(np.float32)
-    a = alpha[..., None]
-    unmixed = np.where(a > 0.01, (rgb - (1 - a) * bg) / np.maximum(a, 0.01), rgb)  # take the background's tint out
+    d = int(np.argmax(bg))
+    others = [c for c in range(3) if c != d]
+    if bg[d] - bg[others].max() > 0.2:
+        # A green or blue ground: a chroma key. How far a pixel's main channel stands above the others, as a share
+        # of the ground's, gives its alpha, so shaded ground and gaps the figure encloses go too; then the ground's
+        # spill comes off every pixel (its main channel held to the others' brighter one). No figure is that colour.
+        k = (rgb[..., d] - rgb[..., others].max(axis=2)) / (bg[d] - bg[others].max())
+        alpha = np.clip((0.7 - k) / 0.45, 0, 1).astype(np.float32)
+        unmixed = rgb.copy()
+        unmixed[..., d] = np.minimum(rgb[..., d], rgb[..., others].max(axis=2))
+    else:
+        lo, hi = 0.08, 0.22
+        dist = np.linalg.norm(rgb - bg, axis=2)
+        near = dist < hi
+        f = max(1, max(img.shape[:2]) // WORK)
+        small = _small(near.astype(np.float32), f) > 0.5
+        seed = np.zeros_like(small)
+        seed[0], seed[-1], seed[:, 0], seed[:, -1] = small[0], small[-1], small[:, 0], small[:, -1]
+        reach = _grow(seed, small)
+        reach[1:] |= reach[:-1].copy()  # one low pixel wider, then back to full size
+        reach[:-1] |= reach[1:].copy()
+        reach[:, 1:] |= reach[:, :-1].copy()
+        reach[:, :-1] |= reach[:, 1:].copy()
+        full = np.repeat(np.repeat(reach, f, 0), f, 1)
+        full = np.pad(full, ((0, img.shape[0] - full.shape[0]), (0, img.shape[1] - full.shape[1])), mode="edge")
+        zone = full & near
+        alpha = np.where(zone, np.clip((dist - lo) / (hi - lo), 0, 1), 1.0).astype(np.float32)
+        a = alpha[..., None]
+        unmixed = np.where(a > 0.01, (rgb - (1 - a) * bg) / np.maximum(a, 0.01), rgb)  # the ground's tint out
     out = np.concatenate([np.clip(unmixed, 0, 1), alpha[..., None] * img[..., 3:4]], axis=2).astype(np.float32)
     if float(alpha.mean()) > 0.97:
         issues.append(_issue("warning", "avatar-source-background",
@@ -268,6 +305,15 @@ def _union(boxes: list[list[int]]) -> list[int] | None:
     return [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)]
 
 
+def _overlap(a: list[int], b: list[int]) -> float:
+    """How much of the smaller of two boxes the other covers, 0 to 1."""
+    iw = min(a[2], b[2]) - max(a[0], b[0])
+    ih = min(a[3], b[3]) - max(a[1], b[1])
+    if iw <= 0 or ih <= 0:
+        return 0.0
+    return iw * ih / min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1]))
+
+
 def _pad(box: list[int], size: tuple[int, int], k: float = 0.25, least: int = 8) -> list[int]:
     """box grown on every side by k of its larger side (at least `least` px), so the patch's feather lies outside
     what changed."""
@@ -316,14 +362,17 @@ def patch(base_keyed: np.ndarray, var: np.ndarray, box: list[int]) -> np.ndarray
 # --- the folder -----------------------------------------------------------------------------------------------
 
 def _files(src: Path, spec: dict) -> dict[str, Path]:
-    """The source pictures by role: base, mouth-A ... mouth-H, blink."""
+    """The source pictures by role: base, blink, mouth-A ... mouth-H, look-left ... look-down, expr-NAME."""
     given = spec.get("files") or {}
     out = {}
-    for role in ["base", "blink", *[f"mouth-{s}" for s in M.SHAPES if s != "X"]]:
+    exprs = sorted({q.stem for q in src.iterdir() if q.is_file() and q.stem.startswith("expr-")
+                    and q.suffix.lower() in IMAGE_EXTS} | {r for r in given if r.startswith("expr-")})
+    for role in ["base", "blink", *[f"mouth-{s}" for s in M.SHAPES if s != "X"], *[f"look-{d}" for d in LOOKS],
+                 *exprs]:
         if role in given:
             out[role] = src / given[role]
             continue
-        for ext in (".png", ".webp", ".jpg", ".jpeg"):
+        for ext in IMAGE_EXTS:
             if (src / f"{role}{ext}").is_file():
                 out[role] = src / f"{role}{ext}"
                 break
@@ -355,7 +404,11 @@ def init(src: str | Path) -> dict:
              "open looking at the camera, on a plain flat #00FF00 background (or a transparent one).",
              "- blink.png: the same picture with both eyes fully closed.",
              *[f"- mouth-{s}.png: the same picture, {d}." for s, d in MOUTHS.items()], "",
-             "mouth-A, mouth-C and mouth-D are required; the others fall back to the nearest of those.",
+             "mouth-A, mouth-C and mouth-D are required; the others fall back to the nearest of those.", "",
+             "Optional, for gaze and expressions (eyes and brows only; speech owns the mouth):",
+             *[f"- look-{d}.png: the same picture with only the eyes looking {d}." for d in LOOKS],
+             "- expr-NAME.png (such as expr-happy.png, expr-surprise.png, expr-think.png): the same picture with "
+             "only the eyes and brows changed to show that feeling; keep the mouth closed and relaxed.",
              "Then run: kine avatar from-images " + src.as_posix()]
     for name, text in ((SOURCE, json.dumps(spec, indent=2) + "\n"), (PROMPTS, "\n".join(lines) + "\n")):
         p = src / name
@@ -398,6 +451,12 @@ def from_images(src: str | Path, out: str | Path | None = None, sheet: bool = Tr
         return {"ok": False, "issues": issues}
 
     raw = read_image(files["base"])
+    tall = spec.get("height")
+    if tall is not None and not (isinstance(tall, int) and 64 <= tall):
+        return {"ok": False, "issues": [_issue("error", "avatar-source", f"height is {tall!r}",
+                                               "give a whole number of pixels, 64 or more, such as 1200")]}
+    k = min(1.0, tall / raw.shape[0]) if tall else 1.0
+    raw = _resize(raw, k)
     h, w = raw.shape[:2]
     base, got = key(raw, spec.get("background", "auto"))
     issues += got
@@ -408,7 +467,14 @@ def from_images(src: str | Path, out: str | Path | None = None, sheet: bool = Tr
 
     lined, report, boxes = {}, {}, {}
     for role in [r for r in files if r != "base"]:
-        s, shift, v = align(raw, read_image(files[role]))
+        px = read_image(files[role])
+        px = _resize(px, h / px.shape[0])
+        if abs(px.shape[1] / px.shape[0] - w / h) > 0.01:  # cropped or padded to another shape: it can't line up
+            issues.append(_issue("error", "avatar-source-size", f"{files[role].name} is {px.shape[1]}x{px.shape[0]}, "
+                                 f"a different shape from the base's {w}x{h}",
+                                 "make it again at the base's aspect ratio"))
+            continue
+        s, shift, v = align(raw, px)
         lined[role] = v
         report[role] = {"scale": round(s, 4), "shift": [round(shift[0], 1), round(shift[1], 1)]}
         box, d = region(raw, v)
@@ -416,6 +482,9 @@ def from_images(src: str | Path, out: str | Path | None = None, sheet: bool = Tr
         if box is None:
             issues.append(_issue("warning", "avatar-source-same", f"{files[role].name} looks the same as the base",
                                  "make it again so that the mouth or eyes change as PROMPTS.md says"))
+
+    if any(i["code"] == "avatar-source-size" for i in issues):
+        return {"ok": False, "issues": issues, "files": report}
 
     def chosen(name: str, roles: list[str]) -> list[int] | None:
         given = spec.get(f"{name}Box")
@@ -431,46 +500,67 @@ def from_images(src: str | Path, out: str | Path | None = None, sheet: bool = Tr
 
     mouths = [r for r in files if r.startswith("mouth-")]
     mbox = chosen("mouth", mouths)
-    ebox = chosen("eyes", ["blink"])
+    looks = [r for r in files if r.startswith("look-")]
+    ebox = chosen("eyes", ["blink", *looks])
     for name, box in (("mouth", mbox), ("eyes", ebox)):
         if box is None:
             issues.append(_issue("error", "avatar-source-region", f"could not find where the {name} changes",
                                  f"give source.json \"{name}Box\": [x, y, w, h] in the base's pixels"))
-    if mbox and ebox and not (mbox[2] <= ebox[0] or ebox[2] <= mbox[0] or mbox[3] <= ebox[1] or ebox[3] <= mbox[1]):
+    if mbox and ebox and _overlap(mbox, ebox) > 0.15:
         issues.append(_issue("warning", "avatar-source-region", "the mouth and eye patches overlap",
                              "a variant changed more than its feature; check the sheet, or give mouthBox and eyesBox"))
+    exprs = {r: r[5:] for r in files if r.startswith("expr-")}
+    for role, name in exprs.items():
+        if name in RESERVED or not name:
+            issues.append(_issue("error", "avatar-source", f"{files[role].name}: an expression can't be called "
+                                 f"'{name}'", "those names are the eyes' own drawings; pick another name"))
     if any(i["level"] == "error" for i in issues):
         return {"ok": False, "issues": issues, "files": report}
 
+    own = {}  # each expression's patch: the eyes' box and what it changed above the mouth
+    for role in exprs:
+        found = boxes[role][0]
+        box = _pad(_union([found, ebox]) if found else ebox, (w, h), k=0.1)
+        box[3] = max(box[1] + 4, min(box[3], mbox[1]))
+        own[role] = box
+
     for role in report:
-        box = ebox if role == "blink" else mbox
+        box = own.get(role) or (ebox if role == "blink" or role.startswith("look-") else mbox)
         share = drift(boxes[role][1], box, figure, f)
         report[role]["drift"] = round(share, 4)
         if share > DRIFT_WARN:
             issues.append(_issue("error" if share > DRIFT_ERROR else "warning", "avatar-source-drift",
                                  f"{files[role].name} also changed {share:.0%} of the figure outside its patch",
                                  "make it again from the base, changing only the "
-                                 + ("eyes" if role == "blink" else "mouth")))
+                                 + ("mouth" if role.startswith("mouth-") else "eyes and brows"
+                                    if role.startswith("expr-") else "eyes")))
 
-    parts_dir = out / "parts"
-    write_image(base, parts_dir / "body.png")
-    write_image(patch(base, raw, ebox), parts_dir / "eyes-open.png")
-    write_image(patch(base, lined["blink"], ebox), parts_dir / "eyes-closed.png")
-    shapes = {"X": "parts/mouth-X.png"}
-    write_image(patch(base, raw, mbox), parts_dir / "mouth-X.png")
+    ext = ".webp" if spec.get("format") == "webp" else ".png"
+
+    def put(px: np.ndarray, name: str) -> str:
+        write_image(px, out / "parts" / f"{name}{ext}")
+        return f"parts/{name}{ext}"
+
+    body = put(base, "body")
+    states = {"open": put(patch(base, raw, ebox), "eyes-open"),
+              "closed": put(patch(base, lined["blink"], ebox), "eyes-closed")}
+    for role in looks:
+        states[role[5:]] = put(patch(base, lined[role], ebox), f"eyes-{role[5:]}")
+    for role, name in exprs.items():
+        states[name] = put(patch(base, lined[role], own[role]), f"eyes-{name}")
+    shapes = {"X": put(patch(base, raw, mbox), "mouth-X")}
     for role in mouths:
-        s = role[-1]
-        write_image(patch(base, lined[role], mbox), parts_dir / f"mouth-{s}.png")
-        shapes[s] = f"parts/mouth-{s}.png"
+        shapes[role[-1]] = put(patch(base, lined[role], mbox), f"mouth-{role[-1]}")
     centre = lambda b: [round((b[0] + b[2]) / 2, 1), round((b[1] + b[3]) / 2, 1)]  # noqa: E731
     av = {"kinescriptAvatar": A.VERSION, "name": spec.get("name") or src.name.title(),
           "description": spec.get("description", f"made by kine avatar from-images from {src.name}"),
           "size": [w, h],
-          "parts": {"body": {"src": "parts/body.png", "pivot": [w / 2, float(h)]},
+          "parts": {"body": {"src": body, "pivot": [w / 2, float(h)]},
                     "eyes": {"parent": "body", "pivot": centre(ebox),
-                             "states": {"open": "parts/eyes-open.png", "closed": "parts/eyes-closed.png"}},
+                             "states": states},
                     "mouth": {"parent": "body", "pivot": centre(mbox),
                               "shapes": {s: shapes[s] for s in M.SHAPES if s in shapes}}},
+          **({"expressions": {name: {"eyes": {"state": name}} for name in exprs.values()}} if exprs else {}),
           "gestures": _gestures(w, h),
           "idle": {"blink": [2.5, 5], "breath": 0.008, "saccade": [0.8, 2.5]},
           "voice": spec.get("voice", {"backend": "kokoro", "speaker": "af_heart"})}

@@ -980,9 +980,11 @@ AVATARS
   is how far eyes move to look aside) or shapes (the mouth, by the letters of kine probe --mouth:
   X, A, C and D at least; B falls back to C, E and F to D, G to A, H to C). Files are .svg, .png or
   .webp inside the folder. colors gives each name a colour or palette role, for svg pieces with
-  that id. An expression sets x, y, rotate, scale or opacity on parts, and may hold a mouth shape;
-  a gesture keys them over its dur. idle: false stops blinks, breath and glances. voice takes
-  speaker, backend, rate and options, as a sound does.
+  that id. An expression sets x, y, rotate, scale or opacity on parts, may pick one of a part's
+  states ({"eyes": {"state": "happy"}}: that drawing shows while it lasts, blinks paused), and may
+  hold a mouth shape; a gesture keys moves over its dur. Eyes with states left, right, up or down
+  and no look are drawn looking each way, and a gaze picks the drawing. idle: false stops blinks,
+  breath and glances. voice takes speaker, backend, rate and options, as a sound does.
   In a scene, a layer {"use": "avatar"} draws it, centred on x, y (default "50%"), h (or w) pixels
   tall, and say makes it talk:
     {"id": "host", "use": "avatar", "avatar": "avatars/host", "x": "30%", "y": "60%", "h": 600,
@@ -1017,16 +1019,20 @@ AVATARS
   (a stored .mouth.json older than its words file; the video uses the words).
   From generated pictures: kine avatar from-images FOLDER builds an avatar from a base picture
   (base.png: the character facing the camera, mouth at rest, eyes open, on a plain background or
-  with alpha), blink.png (eyes closed) and mouth-A.png ... mouth-H.png (only the mouth changed; A,
-  C and D at least), each made from the base with an image model. kine avatar from-images FOLDER
+  with alpha), blink.png (eyes closed) and mouth-A.png ... mouth-H.png (only the mouth changed; A, C
+  and D at least), each made from the base with an image model. kine avatar from-images FOLDER
   --init writes PROMPTS.md (what to ask for, picture by picture) and source.json (name, voice,
-  background, and mouthBox or eyesBox [x, y, w, h] when the regions are not found). The base becomes
-  the one body part, its background keyed out; each variant is lined up with the base (shift and
-  scale), and the region it changed becomes a feathered patch over the base. The report gives each
-  picture's scale, shift and drift: avatar-source-drift names a picture that also changed the figure
-  outside its patch, to be made again. Check the sheet it writes (avatar_sheet.png) for seams. The
-  head does not turn on its own: nod, shake, tilt and lean move the whole figure, so stand it with
-  its bottom edge below the frame. Its eyes have no look, so it takes no gaze.
+  background, height to scale the pictures down, format "webp" for smaller parts, and mouthBox or
+  eyesBox [x, y, w, h] when the regions are not found). The base becomes the one body part, its
+  background keyed out (a green or blue one by chroma key, spill removed); each variant is lined up
+  with the base (shift and scale), and the region it changed becomes a feathered patch over the
+  base. The report gives each picture's scale, shift and drift: avatar-source-drift names a picture
+  that also changed the figure outside its patch, to be made again. Check the sheet it writes
+  (avatar_sheet.png) for seams. The head does not turn on its own: nod, shake, tilt and lean move
+  the whole figure, so stand it with its bottom edge below the frame. look-left.png (and right, up,
+  down: only the eyes moved) become eye drawings that gaze picks, and expr-NAME.png (only the eyes
+  and brows changed, such as expr-happy.png) an expression NAME that shows its drawing; without look
+  pictures it takes no gaze.
   A 3D avatar is a glTF file in place of parts. Its mouth shapes, blink and expressions are morph
   target weights by name (kine probe FILE lists them under morphs):
     {"kinescriptAvatar": 1, "name": "Ada", "model": {"src": "ada.glb", "animation": "Idle"},

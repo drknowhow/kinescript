@@ -16,7 +16,7 @@ def _ellipse(xx, yy, cx, cy, rx, ry):
     return ((xx - cx) / rx) ** 2 + ((yy - cy) / ry) ** 2 <= 1
 
 
-def draw(mouth=4.0, eyes=9.0, scale=1.0, shift=(0.0, 0.0), bg=GREEN, hair=False, teeth=False):
+def draw(mouth=4.0, eyes=9.0, scale=1.0, shift=(0.0, 0.0), bg=GREEN, hair=False, teeth=False, gaze=0.0, brows=False):
     """A figure on a flat background: shirt, face, two eyes and a mouth whose height is `mouth`. The figure is
     scaled by `scale` about the centre and moved by `shift`, as an image model moves a variant."""
     yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
@@ -25,10 +25,12 @@ def draw(mouth=4.0, eyes=9.0, scale=1.0, shift=(0.0, 0.0), bg=GREEN, hair=False,
     img = np.zeros((H, W, 4), np.float32)
     img[..., :3], img[..., 3] = bg, 1
     paint = [(_ellipse(fx, fy, 160, 470, 130, 120), SHIRT), (_ellipse(fx, fy, 160, 220, 95, 115), SKIN),
-             (_ellipse(fx, fy, 125, 200, 12, eyes), DARK), (_ellipse(fx, fy, 195, 200, 12, eyes), DARK),
+             (_ellipse(fx, fy, 125 + gaze, 200, 12, eyes), DARK), (_ellipse(fx, fy, 195 + gaze, 200, 12, eyes), DARK),
              (_ellipse(fx, fy, 160, 285, 30, mouth), DARK)]
     if teeth:
         paint.append((_ellipse(fx, fy, 160, 282, 22, 3), WHITE))
+    if brows:
+        paint += [((abs(fy - 172) < 4) & (abs(fx - 125) < 16), DARK), ((abs(fy - 172) < 4) & (abs(fx - 195) < 16), DARK)]
     if hair:
         paint.append(((fy > 100) & (fy < 150) & (abs(fx - 160) < 80), (0.3, 0.2, 0.1)))
     for mask, colour in paint:
@@ -175,3 +177,76 @@ def test_noise_and_a_small_tone_change_in_every_variant_are_not_drift(tmp_path):
     assert not [i for i in got["issues"] if i["code"] == "avatar-source-drift"]
     x, y, w, h = got["boxes"]["mouth"]
     assert x < 160 < x + w and y < 285 < y + h and h < 120
+
+
+def test_look_and_expression_pictures_become_eye_drawings_a_scene_picks(tmp_path):
+    from kinescript.output import still
+    src = source(tmp_path / "src", **{"look-left": draw(gaze=-10, shift=(1, 1)), "expr-happy": draw(brows=True)})
+    got = I.from_images(src)
+    assert got["ok"], got["issues"]
+    av = A.load(tmp_path / "src" / "avatar")
+    eyes = av.parts["eyes"]
+    assert set(eyes.files) == {"open", "closed", "left", "happy"}
+    assert av.spec["expressions"] == {"happy": {"eyes": {"state": "happy"}}}
+    names = [n for n, _ in A.poses(av)]
+    assert "look left" in names and "expression happy" in names
+    scene = {"canvas": {"w": W, "h": H, "fps": 10, "duration": 3, "bg": "#ffffff"},
+             "layers": [{"id": "a", "use": "avatar", "avatar": str(tmp_path / "src" / "avatar"), "x": W / 2,
+                         "y": H / 2, "h": H, "idle": False,
+                         "expressions": [{"name": "happy", "at": 0.5, "dur": 0.5}],
+                         "gaze": [{"at": 1.5, "target": "left"}, {"at": 2.5, "target": "camera"}]}]}
+
+    def dark(t, x, y):
+        still(scene, t, str(tmp_path / "f.png"))
+        return I.read_image(tmp_path / "f.png")[y, x, :3].max() < 0.3
+
+    assert [dark(t, 125, 172) for t in (0.2, 0.75, 1.2)] == [False, True, False]  # the brows come and go
+    assert [dark(t, 112, 200) for t in (1.2, 1.8, 2.8)] == [False, True, False]  # the eyes look left, then back
+
+
+def test_an_expression_name_that_is_an_eye_drawing_is_refused(tmp_path):
+    got = I.from_images(source(tmp_path / "src", **{"expr-left": draw(brows=True)}))
+    assert not got["ok"] and "expr-left.png" in json.dumps(got["issues"])
+
+
+def test_an_avatar_that_swaps_drawings_renders_the_same_frames_in_any_order(tmp_path):
+    import kinescript as k
+    from kinescript.render import Renderer
+    src = source(tmp_path / "src", **{"look-left": draw(gaze=-10), "expr-happy": draw(brows=True)})
+    I.from_images(src)
+    spec = {"canvas": {"w": 160, "h": 240, "fps": 10, "duration": 3},
+            "layers": [{"id": "a", "use": "avatar", "avatar": str(src / "avatar"), "h": 240,
+                        "expressions": [{"name": "happy", "at": 0.4, "dur": 0.6}],
+                        "gaze": [{"at": 1.2, "target": "left"}, {"at": 2.0, "target": "camera"}],
+                        "gestures": [{"name": "nod", "at": 0.5}]}]}
+    r = Renderer(k.Scene(spec, tmp_path), backend="cpu")
+    sequential = [r.frame(n).copy() for n in range(30)]
+    shuffled = Renderer(k.Scene(spec, tmp_path), backend="cpu")
+    for n in (25, 6, 14, 3, 19):
+        assert np.array_equal(shuffled.frame(n), sequential[n])
+
+
+def test_a_variant_of_another_shape_is_named(tmp_path):
+    square = np.zeros((W, W, 4), np.float32)
+    square[..., 3] = 1
+    got = I.from_images(source(tmp_path / "src", **{"mouth-C": square}))
+    sized = [i for i in got["issues"] if i["code"] == "avatar-source-size"]
+    assert not got["ok"] and len(sized) == 1 and "mouth-C.png" in sized[0]["message"]
+
+
+def test_height_scales_the_avatar_down(tmp_path):
+    src = source(tmp_path / "src")
+    (src / "source.json").write_text(json.dumps({"height": 240}))
+    got = I.from_images(src)
+    assert got["ok"], got["issues"]
+    assert got["size"] == [160, 240] and A.read(src / "avatar")["size"] == [160, 240]
+
+
+def test_webp_parts_keep_their_alpha(tmp_path):
+    src = source(tmp_path / "src")
+    (src / "source.json").write_text(json.dumps({"format": "webp"}))
+    got = I.from_images(src)
+    assert got["ok"], got["issues"]
+    assert A.read(src / "avatar")["parts"]["body"]["src"] == "parts/body.webp"
+    body = I.read_image(src / "avatar" / "parts" / "body.webp")
+    assert body[5, 5, 3] == 0 and body[240, 160, 3] == 1
