@@ -250,3 +250,49 @@ def test_webp_parts_keep_their_alpha(tmp_path):
     assert A.read(src / "avatar")["parts"]["body"]["src"] == "parts/body.webp"
     body = I.read_image(src / "avatar" / "parts" / "body.webp")
     assert body[5, 5, 3] == 0 and body[240, 160, 3] == 1
+
+
+def test_effect_files_become_effect_parts_that_source_json_expressions_show(tmp_path):
+    src = source(tmp_path / "src", **{"expr-happy": draw(brows=True)})
+    (src / "fx-star.svg").write_text(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" '
+                                     f'viewBox="0 0 {W} {H}"><circle cx="40" cy="40" r="20" fill="#000"/></svg>')
+    drop = np.zeros((H, W, 4), np.float32)
+    drop[60:100, 260:290] = (0.5, 0.8, 1.0, 1.0)
+    I.write_image(drop, src / "fx-drop.png")
+    (src / "source.json").write_text(json.dumps({
+        "effects": {"fx-star": {"pivot": [40, 40]}},
+        "expressions": {"happy": {"fx-star": {}}, "nervous": {"fx-drop": {"y": 6}}},
+        "gestures": {"nod": {"fx-star": {"scale": [[0, 1], [0.3, 1.2], [0.6, 1]]}}}}))
+    got = I.from_images(src)
+    assert got["ok"], got["issues"]
+    av = A.load(src / "avatar")
+    assert av.parts["fx-star"].effect and av.parts["fx-star"].pivot == (40, 40)
+    assert av.parts["fx-drop"].pivot == pytest.approx((274.5, 79.5), abs=1)  # the middle of what it draws
+    assert av.spec["expressions"]["happy"] == {"eyes": {"state": "happy"}, "fx-star": {}}
+    assert av.spec["expressions"]["nervous"] == {"fx-drop": {"y": 6}}
+    assert "body" in av.spec["gestures"]["nod"] and "fx-star" in av.spec["gestures"]["nod"]
+    from kinescript.output import still
+    scene = {"canvas": {"w": W, "h": H, "fps": 10, "duration": 2, "bg": "#ffffff"},
+             "layers": [{"id": "a", "use": "avatar", "avatar": str(src / "avatar"), "x": W / 2, "y": H / 2, "h": H,
+                         "idle": False, "expressions": [{"name": "happy", "at": 1, "dur": 0.6}]}]}
+
+    def star(t):
+        still(scene, t, str(tmp_path / "f.png"))
+        return I.read_image(tmp_path / "f.png")[40, 40, :3].max() < 0.3
+
+    assert [star(t) for t in (0.5, 1.3, 1.9)] == [False, True, False]
+
+
+def test_an_effect_of_another_shape_is_named(tmp_path):
+    src = source(tmp_path / "src")
+    I.write_image(np.zeros((100, 100, 4), np.float32), src / "fx-odd.png")
+    got = I.from_images(src)
+    assert not got["ok"] and "fx-odd.png" in json.dumps(got["issues"])
+
+
+def test_an_expression_cut_off_above_the_mouth_keeps_its_eyes_solid(tmp_path):
+    base = draw()
+    var = draw(eyes=2.0, brows=True)
+    feathered = I.patch(base, var, [40, 150, 280, 214])  # the box's bottom is 5 px under the eyes
+    kept = I.patch(base, var, [40, 150, 280, 214], inner=[100, 165, 220, 209])
+    assert feathered[205, 125, 3] < 0.9 and kept[205, 125, 3] == 1

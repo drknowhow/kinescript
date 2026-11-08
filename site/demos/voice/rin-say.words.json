@@ -1,0 +1,376 @@
+{
+ "words": [
+  {
+   "word": "Hi,",
+   "start": 0.375,
+   "end": 0.55
+  },
+  {
+   "word": "I'm",
+   "start": 0.5875,
+   "end": 0.775
+  },
+  {
+   "word": "Rin!",
+   "start": 0.775,
+   "end": 1.1
+  },
+  {
+   "word": "I'm",
+   "start": 1.175,
+   "end": 1.35
+  },
+  {
+   "word": "drawn",
+   "start": 1.35,
+   "end": 1.65
+  },
+  {
+   "word": "anime",
+   "start": 1.65,
+   "end": 2.0625
+  },
+  {
+   "word": "style,",
+   "start": 2.0625,
+   "end": 2.475
+  },
+  {
+   "word": "so",
+   "start": 2.525,
+   "end": 2.6375
+  },
+  {
+   "word": "I",
+   "start": 2.6375,
+   "end": 2.775
+  },
+  {
+   "word": "react",
+   "start": 2.775,
+   "end": 3.175
+  },
+  {
+   "word": "like",
+   "start": 3.175,
+   "end": 3.425
+  },
+  {
+   "word": "it.",
+   "start": 3.425,
+   "end": 3.925
+  },
+  {
+   "word": "Good",
+   "start": 4.0625,
+   "end": 4.275
+  },
+  {
+   "word": "news?",
+   "start": 4.275,
+   "end": 4.85
+  },
+  {
+   "word": "Sparkles!",
+   "start": 4.9625,
+   "end": 5.725,
+   "id": "spark"
+  },
+  {
+   "word": "Too",
+   "start": 5.8125,
+   "end": 6.0
+  },
+  {
+   "word": "much",
+   "start": 6.0,
+   "end": 6.25
+  },
+  {
+   "word": "to",
+   "start": 6.25,
+   "end": 6.375
+  },
+  {
+   "word": "do?",
+   "start": 6.375,
+   "end": 6.725
+  },
+  {
+   "word": "A",
+   "start": 6.8625,
+   "end": 6.9875,
+   "id": "sweat"
+  },
+  {
+   "word": "sweat",
+   "start": 6.9875,
+   "end": 7.325
+  },
+  {
+   "word": "drop.",
+   "start": 7.325,
+   "end": 7.725
+  },
+  {
+   "word": "A",
+   "start": 7.775,
+   "end": 7.8875
+  },
+  {
+   "word": "failed",
+   "start": 7.8875,
+   "end": 8.25
+  },
+  {
+   "word": "render?",
+   "start": 8.25,
+   "end": 8.75
+  },
+  {
+   "word": "I",
+   "start": 8.85,
+   "end": 9.0375,
+   "id": "fume"
+  },
+  {
+   "word": "fume.",
+   "start": 9.0375,
+   "end": 9.75
+  },
+  {
+   "word": "Then",
+   "start": 9.8875,
+   "end": 10.1375
+  },
+  {
+   "word": "kine",
+   "start": 10.1375,
+   "end": 10.4625
+  },
+  {
+   "word": "check",
+   "start": 10.4625,
+   "end": 10.725
+  },
+  {
+   "word": "tells",
+   "start": 10.725,
+   "end": 11.025
+  },
+  {
+   "word": "me",
+   "start": 11.025,
+   "end": 11.175
+  },
+  {
+   "word": "why,",
+   "start": 11.175,
+   "end": 11.4
+  },
+  {
+   "word": "and",
+   "start": 11.4375,
+   "end": 11.5375
+  },
+  {
+   "word": "I'm",
+   "start": 11.5375,
+   "end": 11.7125
+  },
+  {
+   "word": "fine.",
+   "start": 11.7125,
+   "end": 12.45,
+   "id": "fine"
+  }
+ ],
+ "phones": [
+  {
+   "ipa": "hˈI",
+   "start": 0.375,
+   "end": 0.55
+  },
+  {
+   "ipa": "ˌIm",
+   "start": 0.5875,
+   "end": 0.775
+  },
+  {
+   "ipa": "ɹˈɪn",
+   "start": 0.775,
+   "end": 1.1
+  },
+  {
+   "ipa": "ˌIm",
+   "start": 1.175,
+   "end": 1.35
+  },
+  {
+   "ipa": "dɹˈɔn",
+   "start": 1.35,
+   "end": 1.65
+  },
+  {
+   "ipa": "ˈænəmA",
+   "start": 1.65,
+   "end": 2.0625
+  },
+  {
+   "ipa": "stˈIl",
+   "start": 2.0625,
+   "end": 2.475
+  },
+  {
+   "ipa": "sˌO",
+   "start": 2.525,
+   "end": 2.6375
+  },
+  {
+   "ipa": "ˌI",
+   "start": 2.6375,
+   "end": 2.775
+  },
+  {
+   "ipa": "ɹiˈækt",
+   "start": 2.775,
+   "end": 3.175
+  },
+  {
+   "ipa": "lˈIk",
+   "start": 3.175,
+   "end": 3.425
+  },
+  {
+   "ipa": "ɪt",
+   "start": 3.425,
+   "end": 3.925
+  },
+  {
+   "ipa": "ɡˈʊd",
+   "start": 4.0625,
+   "end": 4.275
+  },
+  {
+   "ipa": "nˈuz",
+   "start": 4.275,
+   "end": 4.85
+  },
+  {
+   "ipa": "spˈɑɹkᵊlz",
+   "start": 4.9625,
+   "end": 5.725
+  },
+  {
+   "ipa": "tˈu",
+   "start": 5.8125,
+   "end": 6.0
+  },
+  {
+   "ipa": "mˈʌʧ",
+   "start": 6.0,
+   "end": 6.25
+  },
+  {
+   "ipa": "tə",
+   "start": 6.25,
+   "end": 6.375
+  },
+  {
+   "ipa": "dˈu",
+   "start": 6.375,
+   "end": 6.725
+  },
+  {
+   "ipa": "ɐ",
+   "start": 6.8625,
+   "end": 6.9875
+  },
+  {
+   "ipa": "swˈɛt",
+   "start": 6.9875,
+   "end": 7.325
+  },
+  {
+   "ipa": "dɹˈɑp",
+   "start": 7.325,
+   "end": 7.725
+  },
+  {
+   "ipa": "ɐ",
+   "start": 7.775,
+   "end": 7.8875
+  },
+  {
+   "ipa": "fˈAld",
+   "start": 7.8875,
+   "end": 8.25
+  },
+  {
+   "ipa": "ɹˈɛndəɹ",
+   "start": 8.25,
+   "end": 8.75
+  },
+  {
+   "ipa": "ˌI",
+   "start": 8.85,
+   "end": 9.0375
+  },
+  {
+   "ipa": "fjˈum",
+   "start": 9.0375,
+   "end": 9.75
+  },
+  {
+   "ipa": "ðˈɛn",
+   "start": 9.8875,
+   "end": 10.1375
+  },
+  {
+   "ipa": "kˈIn",
+   "start": 10.1375,
+   "end": 10.4625
+  },
+  {
+   "ipa": "ʧˈɛk",
+   "start": 10.4625,
+   "end": 10.725
+  },
+  {
+   "ipa": "tˈɛlz",
+   "start": 10.725,
+   "end": 11.025
+  },
+  {
+   "ipa": "mˌi",
+   "start": 11.025,
+   "end": 11.175
+  },
+  {
+   "ipa": "wˌI",
+   "start": 11.175,
+   "end": 11.4
+  },
+  {
+   "ipa": "ænd",
+   "start": 11.4375,
+   "end": 11.5375
+  },
+  {
+   "ipa": "ˌIm",
+   "start": 11.5375,
+   "end": 11.7125
+  },
+  {
+   "ipa": "fˈIn",
+   "start": 11.7125,
+   "end": 12.45
+  }
+ ],
+ "made": {
+  "hash": "69b8b20b8a0319fd",
+  "backend": "kokoro",
+  "version": "kokoro 0.9.4, kinescript-kokoro 0.1.0",
+  "speaker": "af_bella"
+ }
+}

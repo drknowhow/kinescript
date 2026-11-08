@@ -1,0 +1,338 @@
+{
+  "kinescriptAvatar": 1,
+  "name": "Rin",
+  "description": "An anime presenter built by kine avatar from-images from pictures generated with Nano Banana 2.1.",
+  "size": [
+    896,
+    1200
+  ],
+  "parts": {
+    "body": {
+      "src": "parts/body.webp",
+      "pivot": [
+        448.0,
+        1200.0
+      ]
+    },
+    "eyes": {
+      "parent": "body",
+      "pivot": [
+        449.0,
+        496.0
+      ],
+      "states": {
+        "open": "parts/eyes-open.webp",
+        "closed": "parts/eyes-closed.webp",
+        "left": "parts/eyes-left.webp",
+        "right": "parts/eyes-right.webp",
+        "happy": "parts/eyes-happy.webp",
+        "joy": "parts/eyes-joy.webp",
+        "surprise": "parts/eyes-surprise.webp"
+      }
+    },
+    "mouth": {
+      "parent": "body",
+      "pivot": [
+        450.0,
+        642.0
+      ],
+      "shapes": {
+        "X": "parts/mouth-X.webp",
+        "A": "parts/mouth-A.webp",
+        "B": "parts/mouth-B.webp",
+        "C": "parts/mouth-C.webp",
+        "D": "parts/mouth-D.webp",
+        "E": "parts/mouth-E.webp",
+        "F": "parts/mouth-F.webp",
+        "G": "parts/mouth-G.webp",
+        "H": "parts/mouth-H.webp"
+      }
+    },
+    "fx-anger": {
+      "src": "parts/fx-anger.svg",
+      "parent": "body",
+      "pivot": [
+        690,
+        175
+      ],
+      "effect": true
+    },
+    "fx-shock": {
+      "src": "parts/fx-shock.svg",
+      "parent": "body",
+      "pivot": [
+        448,
+        200
+      ],
+      "effect": true
+    },
+    "fx-sparkles": {
+      "src": "parts/fx-sparkles.svg",
+      "parent": "body",
+      "pivot": [
+        448,
+        380
+      ],
+      "effect": true
+    },
+    "fx-sweat": {
+      "src": "parts/fx-sweat.svg",
+      "parent": "body",
+      "pivot": [
+        712,
+        400
+      ],
+      "effect": true
+    }
+  },
+  "expressions": {
+    "happy": {
+      "eyes": {
+        "state": "happy"
+      }
+    },
+    "joy": {
+      "eyes": {
+        "state": "joy"
+      },
+      "mouth": "D"
+    },
+    "surprise": {
+      "eyes": {
+        "state": "surprise"
+      },
+      "mouth": "E",
+      "fx-shock": {}
+    },
+    "nervous": {
+      "fx-sweat": {}
+    },
+    "annoyed": {
+      "fx-anger": {}
+    }
+  },
+  "gestures": {
+    "nod": {
+      "dur": 0.6,
+      "body": {
+        "y": [
+          [
+            0,
+            0
+          ],
+          [
+            0.15,
+            14.4
+          ],
+          [
+            0.3,
+            0
+          ],
+          [
+            0.45,
+            8.4
+          ],
+          [
+            0.6,
+            0
+          ]
+        ],
+        "rotate": [
+          [
+            0,
+            0
+          ],
+          [
+            0.15,
+            0.8
+          ],
+          [
+            0.3,
+            0
+          ]
+        ]
+      }
+    },
+    "shake": {
+      "dur": 0.8,
+      "body": {
+        "rotate": [
+          [
+            0,
+            0
+          ],
+          [
+            0.15,
+            -1.6
+          ],
+          [
+            0.35,
+            1.6
+          ],
+          [
+            0.55,
+            -1
+          ],
+          [
+            0.8,
+            0
+          ]
+        ]
+      }
+    },
+    "tilt": {
+      "dur": 1.0,
+      "body": {
+        "rotate": [
+          [
+            0,
+            0
+          ],
+          [
+            0.3,
+            -2.5
+          ],
+          [
+            0.7,
+            -2.5
+          ],
+          [
+            1.0,
+            0
+          ]
+        ]
+      }
+    },
+    "lean": {
+      "dur": 1.2,
+      "body": {
+        "y": [
+          [
+            0,
+            0
+          ],
+          [
+            0.3,
+            24.0
+          ],
+          [
+            0.9,
+            24.0
+          ],
+          [
+            1.2,
+            0
+          ]
+        ],
+        "rotate": [
+          [
+            0,
+            0
+          ],
+          [
+            0.3,
+            1.5
+          ],
+          [
+            0.9,
+            1.5
+          ],
+          [
+            1.2,
+            0
+          ]
+        ]
+      }
+    },
+    "sparkle": {
+      "dur": 1.3,
+      "fx-sparkles": {
+        "scale": [
+          [
+            0,
+            0.5
+          ],
+          [
+            0.3,
+            1.08
+          ],
+          [
+            0.5,
+            1
+          ],
+          [
+            1.3,
+            1
+          ]
+        ],
+        "rotate": [
+          [
+            0,
+            -12
+          ],
+          [
+            1.3,
+            0
+          ]
+        ]
+      }
+    },
+    "sweat": {
+      "dur": 1.4,
+      "fx-sweat": {
+        "y": [
+          [
+            0,
+            -12
+          ],
+          [
+            1.4,
+            36
+          ]
+        ]
+      }
+    },
+    "fume": {
+      "dur": 0.8,
+      "fx-anger": {
+        "scale": [
+          [
+            0,
+            0.6
+          ],
+          [
+            0.15,
+            1.15
+          ],
+          [
+            0.3,
+            0.95
+          ],
+          [
+            0.45,
+            1.1
+          ],
+          [
+            0.8,
+            1
+          ]
+        ]
+      }
+    }
+  },
+  "idle": {
+    "blink": [
+      2.5,
+      5
+    ],
+    "breath": 0.008,
+    "saccade": [
+      0.8,
+      2.5
+    ]
+  },
+  "voice": {
+    "backend": "kokoro",
+    "speaker": "af_bella"
+  }
+}

@@ -647,3 +647,58 @@ def test_an_expression_state_shows_that_drawing_in_a_still(tmp_path):
     eyes = A._find(g, "a-eyes")
     shown = {c["id"]: c.get("opacity", 1) for c in eyes["children"]}
     assert shown == {"a-eyes-open": 0, "a-eyes-closed": 1}
+
+
+def _sparkly(tmp_path, **over):
+    """The test avatar with an effect part, sparkle, that the expression joy and the gesture pop show."""
+    folder = tmp_path / "host"
+    make(folder, expressions={"joy": {"sparkle": {"scale": 1.2}}},
+         gestures={"pop": {"dur": 0.6, "sparkle": {"y": [[0, 0], [0.3, -10], [0.6, 0]]}}})
+    (folder / "parts" / "sparkle.svg").write_text(_svg('<path d="M160 40 l6 14 14 6 -14 6 -6 14 -6 -14 -14 -6 '
+                                                       '14 -6z" fill="#b9f45d"/>'), encoding="utf-8")
+    spec = json.loads((folder / "avatar.json").read_text())
+    spec["parts"]["sparkle"] = {"src": "parts/sparkle.svg", "parent": "body", "pivot": [160, 60], "effect": True}
+    spec.update(over)
+    (folder / "avatar.json").write_text(json.dumps(spec), encoding="utf-8")
+    return folder
+
+
+def _shows(spec, base, t):
+    from kinescript.verify import probe
+    f = base / "s.json"
+    f.write_text(json.dumps(spec))
+    seen = probe(str(f), t)["visible"]
+    return sorted(k for k, v in seen.items() if k.startswith("host-rig-sparkle-art") and v["type"] == "group")
+
+
+def test_an_effect_part_shows_only_while_an_expression_or_gesture_names_it(tmp_path):
+    spec = _moving(tmp_path, expressions=[{"name": "joy", "at": 1, "dur": 1}], gestures=[{"name": "pop", "at": 2.5}])
+    assert not codes(_sparkly(tmp_path))  # after _moving, which writes the folder without the effect
+    assert _shows(spec, tmp_path, 1.2) == []
+    assert _shows(spec, tmp_path, 2.0) == ["host-rig-sparkle-art-host-expr1-sparkle"]
+    assert _shows(spec, tmp_path, 2.7) == []
+    assert _shows(spec, tmp_path, 3.25) == ["host-rig-sparkle-art-host-gesture1-sparkle"]
+    assert _shows(spec, tmp_path, 3.8) == []
+
+
+def test_an_effect_shows_in_its_poses_on_the_sheet_and_not_at_rest(tmp_path):
+    av = A.load(_sparkly(tmp_path))
+    hidden = lambda pose: A._find(A.layers(av, "a", pose), "a-sparkle-art").get("opacity", 1) == 0  # noqa: E731
+    assert hidden({}) and hidden({"mouth": "D"})
+    names = dict(A.poses(av))
+    assert not hidden(names["expression joy"]) and not hidden(names["gesture pop at 0.3s"])
+
+
+@pytest.mark.parametrize("change, message", [
+    (lambda p: p["sparkle"].update(effect="yes"), "effect is true or false"),
+    (lambda p: p.update(sparkle={"states": {"open": "parts/sparkle.svg"}, "parent": "body", "effect": True}),
+     "only a part with src"),
+    (lambda p: p["mouth"].update(parent="sparkle"), "an effect holds no other parts"),
+])
+def test_effect_mistakes_are_named(tmp_path, change, message):
+    folder = _sparkly(tmp_path)
+    spec = json.loads((folder / "avatar.json").read_text())
+    change(spec["parts"])
+    (folder / "avatar.json").write_text(json.dumps(spec), encoding="utf-8")
+    issues = A.validate(folder)
+    assert any(message in i["message"] + i["fix"] for i in issues if i["level"] == "error"), issues
