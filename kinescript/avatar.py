@@ -41,7 +41,7 @@ VERSION = 1
 FILE = "avatar.json"
 TOP = {"kinescriptAvatar", "name", "description", "size", "parts", "colors", "expressions", "gestures", "idle",
        "voice", "mouthMode", "model", "mouth", "blink", "look"}  # model, mouth and blink: a 3D avatar (avatar3d)
-PART_KEYS = {"src", "states", "shapes", "parent", "pivot", "look"}
+PART_KEYS = {"src", "states", "shapes", "parent", "pivot", "look", "effect"}
 POSE_KEYS = ("x", "y", "rotate", "scale", "opacity")  # what an expression or gesture may change on a part
 IDLE_KEYS = {"blink", "breath", "saccade"}
 EXTS = (".svg", ".png", ".webp")
@@ -64,6 +64,7 @@ class Part:
     parent: str | None
     pivot: tuple[float, float]
     look: tuple[float, float] = (0.0, 0.0)
+    effect: bool = False  # hidden until an expression or gesture names it: sparkles, a sweat drop, motion lines
 
 
 @dataclass
@@ -237,8 +238,13 @@ def _parts(folder: Path, spec: dict, out: list) -> dict[str, Part]:
         if kind == "states" and "open" not in p[kind]:
             out.append(_issue("error", "avatar-states", f"{where} has no \"open\" state",
                               "name the drawing that shows unless asked otherwise open"))
+        effect = p.get("effect", False)
+        if not isinstance(effect, bool) or effect and kind != "src":
+            out.append(_issue("error", "avatar-effect", f"{where}: effect is true or false, and only a part with src "
+                                                        "takes it", "make each effect its own part with one drawing"))
+            effect = False
         parts[name] = Part(name, files, kind, parent, (float(pivot[0]), float(pivot[1])),
-                           (float(look[0]), float(look[1])))
+                           (float(look[0]), float(look[1])), effect)
     for name in parts:  # a parent chain that comes back to itself
         seen, at = {name}, parts[name].parent
         while at in parts:
@@ -249,6 +255,10 @@ def _parts(folder: Path, spec: dict, out: list) -> dict[str, Part]:
                 break
             seen.add(at)
             at = parts[at].parent
+    for p in parts.values():
+        if p.parent in parts and parts[p.parent].effect:
+            out.append(_issue("error", "avatar-effect", f"part '{p.name}' has the effect '{p.parent}' as its parent",
+                              "an effect holds no other parts; give it the body as its parent"))
     mouths = [p for p in parts.values() if p.kind == "shapes"]
     if len(mouths) > 1:
         out.append(_issue("error", "avatar-mouth", "parts " + " and ".join(p.name for p in mouths)
@@ -512,7 +522,7 @@ def layers(av: Avatar, lid: str, pose: dict | None = None, theme: dict | None = 
             if k in change:
                 G[k] = change[k]
         if p.kind == "src":
-            art = [_drawing(av, p, "", lid, fills, True)]
+            art = [_drawing(av, p, "", lid, fills, not p.effect or name in (pose.get("parts") or {}))]
         elif p.kind == "shapes":
             art = [_drawing(av, p, k, lid, fills, k == shape) for k in p.files]
         else:
@@ -551,6 +561,17 @@ def sample(keys: list, t: float) -> float:
         if t <= t1:
             return v0 + (v1 - v0) * ((t - t0) / (t1 - t0) if t1 > t0 else 1)
     return keys[-1][1]
+
+
+def _effect(G: dict, rig: str, part: Part, gid: str, at: str, props: dict) -> None:
+    """An effect part shown once: a copy of its drawing in a group that starts at `at` and carries props, opacity
+    among them. Each showing is its own copy, so effects that overlap in time each show."""
+    art = _find(G, f"{rig}-{part.name}-art")
+    if art is None:
+        return
+    copy_ = _renamed(art, gid)
+    copy_["opacity"] = 1
+    G["children"].append({"id": gid, "type": "group", "at": at, **props, "children": [copy_]})
 
 
 def poses(av: Avatar) -> list[tuple[str, dict]]:
@@ -1160,17 +1181,19 @@ def component(p, theme: dict, scene) -> dict:
             if change.get("state") and wt > 0:
                 _expression_state(G, av, av.parts[pname], change["state"], rig, f"{lid}-expr{i + 1}-{pname}-state",
                                   at, dur)
-            props = {}
-            for a, v in change.items():
+            props, fx = {}, av.parts[pname].effect
+            for a, v in ({"opacity": 1, **change} if fx else change).items():
                 if a == "state":
                     continue
-                base = 1.0 if a in ("scale", "opacity") else 0.0
+                base = 1.0 if a == "scale" or a == "opacity" and not fx else 0.0
                 to = round(base + wt * (v - base), 4)
                 keys = [[0, base], [PRE, base], [PRE + r, to]]
                 if dur:
                     keys += ([[PRE + dur - r, to]] if dur > 2 * r else []) + [[PRE + dur, base]]
                 props[a] = keys
-            if props:
+            if fx:
+                _effect(G, rig, av.parts[pname], f"{lid}-expr{i + 1}-{pname}", at, props)
+            elif props:
                 _wrap(G, f"{lid}-expr{i + 1}-{pname}", at, props)
 
     spans = getattr(scene, "gestures", None)
@@ -1182,8 +1205,15 @@ def component(p, theme: dict, scene) -> dict:
             if G is None:
                 continue
             gid = f"{lid}-gesture{i + 1}-{pname}"
-            _wrap(G, gid, at, {a: {"keys": [[0, ks[0][1]]] + [[PRE + t, v] for t, v in ks], "smooth": True}
-                               for a, ks in change.items()})  # through each key, as a hand moves
+            props = {a: {"keys": [[0, ks[0][1]]] + [[PRE + t, v] for t, v in ks], "smooth": True}
+                     for a, ks in change.items()}  # through each key, as a hand moves
+            if av.parts[pname].effect:
+                d = float(pose["dur"])
+                props.setdefault("opacity", [[0, 0], [PRE, 0], [PRE + min(SWAP, d / 2), 1],
+                                             [PRE + max(d - SWAP, d / 2), 1], [PRE + d, 0]])
+                _effect(G, rig, av.parts[pname], gid, at, props)
+            else:
+                _wrap(G, gid, at, props)
             if spans is not None:
                 spans.append({"layer": lid, "name": g["name"], "part": pname, "id": gid, "dur": float(pose["dur"])})
 

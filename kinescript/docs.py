@@ -983,8 +983,12 @@ AVATARS
   that id. An expression sets x, y, rotate, scale or opacity on parts, may pick one of a part's
   states ({"eyes": {"state": "happy"}}: that drawing shows while it lasts, blinks paused), and may
   hold a mouth shape; a gesture keys moves over its dur. Eyes with states left, right, up or down
-  and no look are drawn looking each way, and a gaze picks the drawing. idle: false stops blinks,
-  breath and glances. voice takes speaker, backend, rate and options, as a sound does.
+  and no look are drawn looking each way, and a gaze picks the drawing. A part with "effect": true
+  (and src) is hidden until an expression or gesture names it: sparkles, a sweat drop, an anger
+  mark, motion lines. Naming it shows it while the expression lasts ({"sparkles": {}}, with any
+  moves) or over the gesture's dur (or by its own opacity keys), and its opacity there is how much
+  it shows. Effects hold no other parts. idle: false stops blinks, breath and glances. voice takes
+  speaker, backend, rate and options, as a sound does.
   In a scene, a layer {"use": "avatar"} draws it, centred on x, y (default "50%"), h (or w) pixels
   tall, and say makes it talk:
     {"id": "host", "use": "avatar", "avatar": "avatars/host", "x": "30%", "y": "60%", "h": 600,
@@ -1032,7 +1036,11 @@ AVATARS
   the whole figure, so stand it with its bottom edge below the frame. look-left.png (and right, up,
   down: only the eyes moved) become eye drawings that gaze picks, and expr-NAME.png (only the eyes
   and brows changed, such as expr-happy.png) an expression NAME that shows its drawing; without look
-  pictures it takes no gaze.
+  pictures it takes no gaze. fx-NAME.svg (or .png or .webp, drawn over the whole picture) becomes an
+  effect part fx-NAME, and source.json's expressions and gestures add to the ones made from the
+  pictures, part by part, so they can show it: "expressions": {"joy": {"mouth": "D", "fx-sparkles":
+  {}}}. Give an effect that scales or turns "effects": {"fx-sparkles": {"pivot": [x, y]}}; a .png's
+  pivot is the middle of what it draws.
   A 3D avatar is a glTF file in place of parts. Its mouth shapes, blink and expressions are morph
   target weights by name (kine probe FILE lists them under morphs):
     {"kinescriptAvatar": 1, "name": "Ada", "model": {"src": "ada.glb", "animation": "Idle"},

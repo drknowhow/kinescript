@@ -367,6 +367,10 @@ only the mouth (nine shapes), the eyes (a blink, looks left and right) or the ey
 out the background, lines each picture up with the portrait and lays what each one changed over it as a patch;
 `--init` writes the prompts. `examples/avatars/maya` was made this way from fourteen Nano Banana 2.1 edits.
 
+A part with `"effect": true` stays hidden until an expression or gesture names it: sparkles, a sweat drop, an anger
+mark. `fx-NAME.svg` beside the pictures becomes one, and `source.json` adds expressions and gestures that show it.
+`examples/avatars/rin`, an anime presenter, has four.
+
 `examples/avatar3d.json` is a 3D avatar built from a head that `examples/make_media.py` generates. Drawn avatars cost
 little more to render than still pictures of them (`bench/stress.py avatars-4`). `kine docs avatars` documents the
 format.

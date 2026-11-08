@@ -95,10 +95,11 @@ DEMO = {
     "avatar-host": ("site/demos/avatar-host.json", 3.9, 0.5),
     "avatar-3d": ("site/demos/avatar-3d.json", 4.6, 0.5),
     "avatar-maya": ("site/demos/avatar-maya.json", 8.0, 0.5),
+    "avatar-rin": ("site/demos/avatar-rin.json", 9.0, 0.5),
 }
-AVATARS = ("avatar-host", "avatar-3d", "avatar-maya")  # demos whose lines kine voice speaks before the render
+AVATARS = ("avatar-host", "avatar-3d", "avatar-maya", "avatar-rin")  # demos whose lines kine voice speaks before the render
 SHEETS = {"avatar-sheet": "kinescript/avatars/host", "avatar-sheet-3d": "examples/media/head",
-          "avatar-sheet-maya": "examples/avatars/maya"}  # kine look FOLDER
+          "avatar-sheet-maya": "examples/avatars/maya", "avatar-sheet-rin": "examples/avatars/rin"}  # kine look FOLDER
 BRANDS = ("site/demos/brand-tidewater.json", "site/demos/brand-tidewater-dark.json")  # the same scene but its variant
 HERO = ("marketing/hero.json", 3.6, 2 / 3)
 LOOK = "card-flip"          # the contact sheet shown in the agent section

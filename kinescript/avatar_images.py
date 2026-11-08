@@ -4,7 +4,12 @@ the eyes, turned into an avatar folder that talks and blinks.
     source/base.png         the character, mouth at rest (shape X), eyes open, on a flat background or with alpha
     source/mouth-A.png ...  the same picture with only the mouth changed (A, C and D at least; X is the base)
     source/blink.png        the same picture with the eyes closed
-    source/source.json      optional: name, voice, files, mouthBox, eyesBox, background, height, format (webp)
+    source/look-left.png    optional: the eyes looking left (also right, up, down), for gaze
+    source/expr-NAME.png    optional: the eyes and brows showing a feeling, as the expression NAME
+    source/fx-NAME.svg      optional: an effect drawn over the figure (sparkles, a sweat drop), shown only when an
+                            expression or gesture in source.json names it; .png and .webp work too
+    source/source.json      optional: name, voice, files, mouthBox, eyesBox, background, height, format (webp), and
+                            expressions and gestures that add to the ones made from the pictures
 
 The character is never cut into limbs. The base becomes the avatar's one body part, and each variant gives a small
 patch, feathered at its edge, that lies over the base where the mouth or the eyes are. Image models move a picture a
@@ -333,21 +338,25 @@ def drift(d: np.ndarray, box: list[int], figure: np.ndarray, f: int) -> float:
 
 # --- patches --------------------------------------------------------------------------------------------------
 
-def _ramp(n: int, f: int) -> np.ndarray:
+def _ramp(n: int, a: int, b: int | None = None) -> np.ndarray:
+    """0 to 1 over the first a pixels and 1 to 0 over the last b (default a), smoothly."""
     i = np.arange(n, dtype=np.float32)
-    e = np.minimum(i + 0.5, n - 0.5 - i) / max(f, 1)
+    e = np.minimum((i + 0.5) / max(a, 1), (n - 0.5 - i) / max(a if b is None else b, 1))
     t = np.clip(e, 0, 1)
     return t * t * (3 - 2 * t)
 
 
-def patch(base_keyed: np.ndarray, var: np.ndarray, box: list[int]) -> np.ndarray:
+def patch(base_keyed: np.ndarray, var: np.ndarray, box: list[int], inner: list[int] | None = None) -> np.ndarray:
     """A full-size picture, clear except box, where it shows var feathered into the base at its edge, its colour
-    matched to the base's on the feather."""
+    matched to the base's on the feather. inner: what changed, which no side's feather reaches into."""
     h, w = base_keyed.shape[:2]
     x0, y0, x1, y1 = box
     bw, bh = x1 - x0, y1 - y0
     f = max(3, min(int(0.15 * max(bw, bh)), bw // 3, bh // 3))
-    m = np.outer(_ramp(bh, f), _ramp(bw, f))
+    side = [f] * 4
+    if inner:
+        side = [max(3, min(f, g)) for g in (inner[0] - x0, inner[1] - y0, x1 - inner[2], y1 - inner[3])]
+    m = np.outer(_ramp(bh, side[1], side[3]), _ramp(bw, side[0], side[2]))
     src = var[y0:y1, x0:x1, :3].copy()
     ref = base_keyed[y0:y1, x0:x1, :3]
     ring = (m > 0) & (m < 1) & (base_keyed[y0:y1, x0:x1, 3] > 0.5)
@@ -376,6 +385,30 @@ def _files(src: Path, spec: dict) -> dict[str, Path]:
             if (src / f"{role}{ext}").is_file():
                 out[role] = src / f"{role}{ext}"
                 break
+    return out
+
+
+def _effects(src: Path) -> dict[str, Path]:
+    """The effect drawings by part name: fx-NAME.svg, .png or .webp."""
+    return {q.stem: q for q in sorted(src.iterdir()) if q.is_file() and q.stem.startswith("fx-") and len(q.stem) > 3
+            and q.suffix.lower() in (".svg", ".png", ".webp")}
+
+
+def _merged(made: dict, given, where: str, issues: list) -> dict:
+    """Expressions or gestures from source.json laid over the ones made from the pictures, part by part."""
+    if given is None:
+        return made
+    if not isinstance(given, dict):
+        issues.append(_issue("error", "avatar-source", f"source.json {where} must be an object of names"))
+        return made
+    out = {k: dict(v) for k, v in made.items()}
+    for name, pose in given.items():
+        if not isinstance(pose, dict):
+            issues.append(_issue("error", "avatar-source", f"source.json {where} '{name}' must be an object"))
+            continue
+        got = out.setdefault(name, {})
+        for part, keys in pose.items():
+            got[part] = {**got[part], **keys} if isinstance(got.get(part), dict) and isinstance(keys, dict) else keys
     return out
 
 
@@ -409,6 +442,9 @@ def init(src: str | Path) -> dict:
              *[f"- look-{d}.png: the same picture with only the eyes looking {d}." for d in LOOKS],
              "- expr-NAME.png (such as expr-happy.png, expr-surprise.png, expr-think.png): the same picture with "
              "only the eyes and brows changed to show that feeling; keep the mouth closed and relaxed.",
+             "- fx-NAME.svg (or .png): an effect drawn over the whole picture at its size, such as sparkles or a "
+             "sweat drop. It shows only when an expression or gesture in source.json names it, as in "
+             "\"expressions\": {\"happy\": {\"fx-sparkles\": {}}}.",
              "Then run: kine avatar from-images " + src.as_posix()]
     for name, text in ((SOURCE, json.dumps(spec, indent=2) + "\n"), (PROMPTS, "\n".join(lines) + "\n")):
         p = src / name
@@ -547,7 +583,31 @@ def from_images(src: str | Path, out: str | Path | None = None, sheet: bool = Tr
     for role in looks:
         states[role[5:]] = put(patch(base, lined[role], ebox), f"eyes-{role[5:]}")
     for role, name in exprs.items():
-        states[name] = put(patch(base, lined[role], own[role]), f"eyes-{name}")
+        b, found = own[role], boxes[role][0] or ebox
+        inner = [max(b[0], found[0]), max(b[1], found[1]), min(b[2], found[2]), min(b[3], found[3])]
+        states[name] = put(patch(base, lined[role], b, inner), f"eyes-{name}")
+    effects = {}
+    for name, q in _effects(src).items():
+        if q.suffix.lower() == ".svg":
+            (out / "parts").mkdir(parents=True, exist_ok=True)
+            (out / "parts" / q.name).write_bytes(q.read_bytes())
+            effects[name] = {"src": f"parts/{q.name}", "parent": "body", "pivot": [w / 2, h / 2], "effect": True}
+            continue
+        px = read_image(q)
+        if abs(px.shape[1] / px.shape[0] - w / h) > 0.01:
+            issues.append(_issue("error", "avatar-source-size", f"{q.name} is {px.shape[1]}x{px.shape[0]}, a different "
+                                 f"shape from the base's {w}x{h}", "draw effects over the whole picture, at its size"))
+            continue
+        px = _resize(px, h / px.shape[0])
+        ys, xs = np.nonzero(px[..., 3] > 0.05)
+        at = [round(float(xs.mean()), 1), round(float(ys.mean()), 1)] if len(xs) else [w / 2, h / 2]
+        effects[name] = {"src": put(px, name), "parent": "body", "pivot": at, "effect": True}
+    for name, e in ((spec.get("effects") or {}).items() if isinstance(spec.get("effects"), dict) else []):
+        if name in effects and isinstance(e, dict) and "pivot" in e:
+            effects[name]["pivot"] = e["pivot"]
+    exprs_out = _merged({name: {"eyes": {"state": name}} for name in exprs.values()}, spec.get("expressions"),
+                        "expressions", issues)
+    gests_out = _merged(_gestures(w, h), spec.get("gestures"), "gestures", issues)
     shapes = {"X": put(patch(base, raw, mbox), "mouth-X")}
     for role in mouths:
         shapes[role[-1]] = put(patch(base, lined[role], mbox), f"mouth-{role[-1]}")
@@ -559,9 +619,10 @@ def from_images(src: str | Path, out: str | Path | None = None, sheet: bool = Tr
                     "eyes": {"parent": "body", "pivot": centre(ebox),
                              "states": states},
                     "mouth": {"parent": "body", "pivot": centre(mbox),
-                              "shapes": {s: shapes[s] for s in M.SHAPES if s in shapes}}},
-          **({"expressions": {name: {"eyes": {"state": name}} for name in exprs.values()}} if exprs else {}),
-          "gestures": _gestures(w, h),
+                              "shapes": {s: shapes[s] for s in M.SHAPES if s in shapes}},
+                    **effects},
+          **({"expressions": exprs_out} if exprs_out else {}),
+          "gestures": gests_out,
           "idle": {"blink": [2.5, 5], "breath": 0.008, "saccade": [0.8, 2.5]},
           "voice": spec.get("voice", {"backend": "kokoro", "speaker": "af_heart"})}
     (out / A.FILE).write_text(json.dumps(av, indent=2) + "\n", encoding="utf-8")

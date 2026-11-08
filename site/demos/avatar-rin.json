@@ -1,0 +1,22 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": "auto", "bg": "$void", "poster": "rin-say:spark+0.5"},
+  "layers": [
+    {"id": "card", "type": "text", "text": "Reactions,\non cue.", "x": "70%", "y": "42%", "size": 104,
+     "weight": 800, "at": "rin-say:spark", "until": "end", "enter": {"name": "rise", "dur": 0.4}},
+    {"id": "sub", "type": "text", "text": "\"effect\": true", "x": "70%", "y": "60%", "size": 44,
+     "font": "IBM Plex Mono", "fill": "$accent2", "at": "rin-say:spark+0.5", "until": "end", "enter": "fade"},
+    {"id": "rin", "use": "avatar", "avatar": "../../examples/avatars/rin", "x": "27%", "y": "56%", "h": 1180,
+     "until": "rin-say.out+2",
+     "say": {"text": "Hi, I'm Rin! I'm drawn anime style, so I react like it. Good news? [[spark]]Sparkles! Too much to do? [[sweat]]A sweat drop. A failed render? [[fume]]I fume. Then kine check tells me why, and I'm [[fine]]fine."},
+     "expressions": [{"name": "happy", "at": "rin-say.in", "dur": 1.4},
+                     {"name": "joy", "at": "rin-say:spark", "dur": 1.3},
+                     {"name": "nervous", "at": "rin-say:sweat", "dur": 1.6},
+                     {"name": "annoyed", "at": "rin-say:fume", "dur": 1.3},
+                     {"name": "happy", "at": "rin-say:fine", "dur": 2.0}],
+     "gaze": [{"at": 0, "target": "camera"}, {"at": "rin-say:spark+0.2", "target": "#card"},
+              {"at": "rin-say:sweat", "target": "camera"}],
+     "gestures": [{"name": "sparkle", "at": "rin-say:spark"}, {"name": "sweat", "at": "rin-say:sweat"},
+                  {"name": "fume", "at": "rin-say:fume"}, {"name": "shake", "at": "rin-say:fume+0.1"},
+                  {"name": "nod", "at": "rin-say:fine"}]}
+  ]
+}

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Effect parts: a part with `"effect": true` (and `src`) is hidden until an expression or gesture names it, such as
+  sparkles, a sweat drop or motion lines. An expression shows it while it lasts; a gesture shows it over its `dur`, or
+  by its own opacity keys. Each showing is its own copy, so frames stay a pure function of their number.
+- `kine avatar from-images`: `fx-NAME.svg` (or `.png`, `.webp`) becomes an effect part, and `source.json`
+  `expressions`, `gestures` and `effects` (pivots) add to what the pictures make, part by part.
+- `kine avatar from-images`: an expression whose patch is cut off above the mouth no longer feathers into the eyes it
+  changed; each side's feather stops at what changed.
+- Example: `examples/avatars/rin`, an anime presenter from fifteen generated pictures and four SVG effects, with a
+  voiced demo and pose sheet on the Avatars page.
+
 ## 2.1.0 (2026-11-08)
 
 - `kine avatar from-images FOLDER` builds an avatar from generated pictures: a base picture, a blink and mouth
