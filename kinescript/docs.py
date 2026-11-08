@@ -1,4 +1,5 @@
-"""The scene reference printed by `kine docs` and served to agents by the MCP server.
+"""The scene reference printed by `kine docs` and served to agents by the MCP server, and the longer
+topics (`kine docs avatars`, `kine docs brands`) it points to.
 
 Written for small models as well as large ones: rules first, one complete example, every default
 stated, then recipes to copy. Names of motions, eases, shaders and components are filled in from
@@ -68,12 +69,12 @@ SCENE (top level)
               kine still --at poster saves it as an image, for a page's <video poster>.
   layers      the list of layers.
   brand       "brand": the folder (relative to the scene) holding a brand.json, which gives the
-              theme its colours, fonts, text styles, chart colours and logos (see BRANDS).
+              theme its colours, fonts, text styles, chart colours and logos (see kine docs brands).
   variant     which of the brand's palettes to use, such as "light" [the brand's default].
   intro, outro  true puts the brand's intro before the video and its outro after it, when kine render
               makes a video file; an object changes the brand's parameters for this video:
               "outro": {"title": "Part two next week"}. The scene's own times stay as written: check,
-              look, still and probe show the scene alone (probe lists the bookends' lengths). See BRANDS.
+              look, still and probe show the scene alone (probe lists the bookends' lengths). See kine docs brands.
   music       true plays the brand's music bed under the whole video (an audio entry with id
               "music", role music, looped, until the end); an object changes its keys for this video.
   theme       {"accent": "#ff633f"}: then "$accent" anywhere means that value. Over a brand, it
@@ -210,7 +211,7 @@ LAYER TYPES (defaults in brackets)
             box {"fill": "#000000b0", "pad": [12, 20], "radius": 10} (a background behind the
             text; pad is [vertical, horizontal]), case (upper|lower),
             textStyle (title|heading|body|caption|label, or a brand's own: its font, size, weight,
-            letterSpacing and case, under the layer's own keys; see BRANDS),
+            letterSpacing and case, under the layer's own keys; see kine docs brands),
             split (chars|words|lines: animate each unit, see ENTER AND EXIT),
             caret (true shows a cursor while typing),
             unitX unitY unitRotate unitScale unitOpacity unitBlur unitFill (expressions per unit:
@@ -676,82 +677,9 @@ EASES  {eases}, spring, spring(stiffness, damping), bezier(x1, y1, x2, y2), step
   with x1 and x2 from 0 to 1, as in CSS; steps takes a whole number, 1 or more.
 
 BRANDS
-  A brand is a folder that many scenes share: brand.json, with its fonts/ and logos/ beside it.
-  A scene names it with "brand": "brand" (the folder, relative to the scene). A brand.json:
-    {"kinescriptBrand": 1, "id": "acme", "name": "Acme", "default": "dark",
-     "palettes": {"dark": {"bg": "#0a0c10", "surface": "#242832", "text": "#f2f0e8", "muted": "#9299a8",
-                           "accent": "#ff633f", "accent2": "#b9f45d"},
-                  "light": {"bg": "#f2f0e8", "text": "#0a0c10", "muted": "#5b6272", "accent": "#d9431f"}},
-     "fonts": {"display": {"family": "Space Grotesk"}, "body": {"family": "Space Grotesk"},
-               "mono": {"family": "IBM Plex Mono"}},
-     "charts": {"series": ["accent", "text", "muted"]},
-     "lock": ["palettes"]}
-  palettes    one or more, each with bg, text and accent, and optionally surface, muted, accent2,
-              positive, negative. The scene's variant picks one [default, else the first]. Each role
-              is a theme value ("$accent", "$text", "$surface"), and the older names follow them:
-              $paper and $sheet are text, $ink and $void are bg, $muted, $track (surface), $cue
-              (accent), $key (accent2). canvas.bg defaults to "$bg".
-  fonts       display, body and mono faces, each {"family": "..."}: $font is the body family,
-              $fontDisplay the display one, $mono the mono one. A face may list its files, with a
-              license: "files": [{"file": "fonts/Acme-Bold.ttf", "weight": 700}], "license": "OFL".
-  text        text styles by name, each with font (display|body|mono, or a family), size, weight,
-              tracking, case, italic, lineHeight; over the built-in title [128, 800], heading
-              [72, 700], body [40, 400], caption [28, 500] and label [24, 500, mono]:
-              {"title": {"size": 110, "tracking": 2}, "quote": {"font": "body", "italic": true}}.
-  charts      series (pieChart colours), color (bars), highlight (the highlighted bar and
-              lineChart's line), axis {"color": "muted", "width": 3}.
-  components  each built-in's look, by name, where the instance leaves it out: lowerThird accent,
-              plate, color, subColor; titleCard accent, color; callout accent, boxColor; focus
-              accent; progress color; kinetic color, motion; barChart color, accent; lineChart
-              color; pieChart colors. A palette role ("surface") means that colour. "<part>Text"
-              names the text style of a part, keeping its size: {"titleCard": {"titleText": "heading"}}.
-              With a brand, built-in titles take the display font and other text the body font.
-  logos       named logos, each {"file": "logos/full.svg", "onDark": "logos/full-dark.svg",
-              "alt": "Acme"} (.svg, .png, .jpg or .webp, read from the brand folder), and minHeight
-              (px at 1080p; a logo drawn smaller warns logo-small). Draw one with the logo component.
-  placements  where logos go: {"corner": {"anchor": "topright", "margin": "4%", "height": "7%"}}.
-              Without one, a logo's placement may be a corner or edge (bottomright, top...), inside
-              the brand's safeArea [5%] at 8% of the height.
-  bug         the logo the bug component shows all video: {"logo": "mark", "placement": "corner",
-              "opacity": 0.85}.
-  motion      named motions by dotted name: "enter": "$motion.enter" for {"motion": {"enter": "rise"}}.
-  intro       what "intro": true on a scene plays first: {"tagline": "Since 1952", "logo": "full", "dur": 2,
-              "enter": "pop"}, drawn by the sting component; or {"scene": "intro.json"}, a scene file in
-              the brand folder, rendered at the video's size and frame rate (its own duration, else dur).
-  outro       what "outro": true plays last: {"title": "Thanks for watching", "subtitle": "...", "url":
-              "acme.com", "dur": 3}, drawn by the endCard component, or {"scene": "outro.json"}.
-              Each is rendered as its own segment and joined to the video; its sound (silence when it
-              has none) joins the video's. A frame range, a PNG sequence or an audio file leaves them out.
-              "sound": "audio/logo.wav" (or {"src": ..., "gain": -3}) on either plays from its start: a
-              sonic logo.
-  audio       sound defaults, by role: {"voice": {"backend": "kokoro", "speaker": "af_heart", "rate":
-              1.05}, "music": {"src": "audio/bed.mp3", "gain": -4, "fadeIn": 1, "fadeOut": 2},
-              "sfx": {"gain": -3}, "ambience": {...}, "mix": {"loudness": -14, "duck": {"depth": 10}}}.
-              A sound in the scene's audio takes its role's gain, volume, fadeIn, fadeOut, loop and pan
-              where it leaves them out, and a voice with text its speaker, backend, rate and options;
-              kine voice reads the same, so a changed brand speaker shows as voice-stale. The scene's
-              mix goes over the brand's. Sound files live in the brand's audio/ folder.
-  avatars     the brand's characters: {"host": {"src": "avatars/host", "voice": {"speaker":
-              "am_michael"}, "idle": {"saccade": false}}} ("src" alone may be the whole entry, and
-              "kine:host" is the starter). A scene names one "avatar": "brand:host"; the brand's voice
-              goes over the avatar's own, its idle sits between the avatar's and the layer's, and its
-              palette colours the avatar's roles. check reports each avatar folder's problems.
-              kine brand add-avatar BRAND NAME names the starter; --copy puts its files in the brand's
-              avatars/NAME to redraw (the wizard's Avatars tab does both and shows each avatar).
-  grade       the colour grade every video gets: the scene "grade" keys, such as {"temperature": 0.1,
-              "contrast": 1.05}. A scene's own grade keys go over it, unless the brand locks "grade".
-  lock        parts a scene's theme may not change, such as ["palettes", "fonts"]; check reports
-              "brand-locked" for a theme key that would.
-  A brand's paths stay inside its folder: an absolute path or one with .. out of it is an error.
-  The library: brands live in ~/.kinescript/brands/<id> (KINE_BRANDS moves it). kine brand init acme
-  makes one from the default Kinescript brand; kine brand use acme copies it into the project's
-  brand/ and records what it copied, so a scene keeps the brand it was made with until you run use
-  again (use refuses to replace a copy edited in the project, unless --force). Change a brand with
-  kine brand set and add-file (or kine_brand); each write checks the brand and refuses a change
-  that breaks it, and --rev (base_rev) refuses it when the brand changed since you read it.
-  kine brand import acme logos/full.svg proposes dark and light palettes and chart series from a
-  logo's colours (each text and accent moved until it passes check's contrast); --apply writes them.
-
+  A brand is a folder of colours, fonts, text styles, chart colours, logos, sound and avatars that
+  scenes share: "brand": "brand" on a scene. kine docs brands (kine_docs topic "brands") is its
+  reference: brand.json, the library, kine brand and bookends.
 COMPONENTS  {"use": "<name>", "id": "...", "at": ..., "dur": ..., ...parameters}
   Built in (parameters):
 {components}
@@ -765,84 +693,10 @@ COMPONENTS  {"use": "<name>", "id": "...", "at": ..., "dur": ..., ...parameters}
   ({{ label }} with spaces works too) with no value and no default is an error that names it.
 
 AVATARS
-  An avatar is a character drawn once as parts, in a folder with an avatar.json, that a scene makes
-  talk. kine avatar check FOLDER checks the folder and lists what it has, and kine look FOLDER
-  draws every pose on one sheet: each mouth shape (and what a missing one shows), eyes closed and
-  looking aside, each expression, and each gesture where it moves most, with pivots marked.
-  "avatar": "kine:host" is the built-in starter, a plain friendly figure whose shirt, hair, brows
-  and outline are palette roles, so it takes the scene's brand (its face keeps one light neutral
-  tone); it draws all nine mouth shapes and speaks with Kokoro
-  (af_heart). Its expressions: smile, happy, think, surprise, sad; gestures: nod, shake, tilt,
-  wave, point, shrug. kine avatar new FOLDER copies it as files to redraw. "brand:NAME" is an
-  avatar the scene's brand names (see BRANDS avatars), with the brand's voice for it.
-  Every part file is drawn at the avatar's full size, in place, so pivots are points in the avatar's
-  own pixels. Parts draw in the order listed; a part with a parent turns and moves with it.
-    {"kinescriptAvatar": 1, "name": "Host", "size": [600, 900],
-     "parts": {"body": {"src": "parts/body.svg", "pivot": [300, 700]},
-               "head": {"src": "parts/head.svg", "parent": "body", "pivot": [300, 380]},
-               "eyes": {"parent": "head", "look": [14, 8],
-                        "states": {"open": "parts/eyes-open.svg", "closed": "parts/eyes-closed.svg"}},
-               "mouth": {"parent": "head", "shapes": {"X": "parts/mouth-X.svg", "A": "parts/mouth-A.svg",
-                         "C": "parts/mouth-C.svg", "D": "parts/mouth-D.svg"}}},
-     "colors": {"skin": "#e8c4a0", "shirt": "accent"},
-     "expressions": {"smile": {"head": {"rotate": -3}, "mouth": "C"}},
-     "gestures": {"nod": {"dur": 0.5, "head": {"rotate": [[0, 0], [0.2, 6], [0.5, 0]]}}},
-     "idle": {"blink": [2.5, 5], "breath": 0.012, "saccade": [0.8, 2.5]},
-     "voice": {"backend": "kokoro", "speaker": "am_michael"}}
-  A part has one of src, states (named drawings: open shows by default, closed is the blink; look
-  is how far eyes move to look aside) or shapes (the mouth, by the letters of kine probe --mouth:
-  X, A, C and D at least; B falls back to C, E and F to D, G to A, H to C). Files are .svg, .png or
-  .webp inside the folder. colors gives each name a colour or palette role, for svg pieces with
-  that id. An expression sets x, y, rotate, scale or opacity on parts, and may hold a mouth shape;
-  a gesture keys them over its dur. idle: false stops blinks, breath and glances. voice takes
-  speaker, backend, rate and options, as a sound does.
-  In a scene, a layer {"use": "avatar"} draws it, centred on x, y (default "50%"), h (or w) pixels
-  tall, and say makes it talk:
-    {"id": "host", "use": "avatar", "avatar": "avatars/host", "x": "30%", "y": "60%", "h": 600,
-     "at": 0.5, "say": {"text": "Write the scene. Check it. Render it."}}
-  say is a line ({"text": ...}, with a sound's id, at, speaker, backend, rate, options, gain, volume
-  and pan), the id of a sound in "audio" (recorded speech too), or a list of them. A line becomes
-  the voice sound <id>-say (<id>-say1, -say2 ... in a list) that kine voice speaks, with the
-  avatar's voice where the line sets none; it starts with the avatar and each next line 0.4 s after
-  the one before, unless it gives at. Cue from it like any voice: "at": "host-say:render". The
-  mouth follows the line's mouth track (see kine probe --mouth) and rests between lines.
-  expressions, gaze and gestures time the rest, each a list; at is a cue or seconds from the
-  avatar's start:
-    "expressions": [{"name": "smile", "at": "host-say.in", "dur": 2, "weight": 1}],
-    "gaze": [{"at": 0, "target": "camera"}, {"at": "host-say:chart", "target": "#chart"}],
-    "gestures": [{"name": "nod", "at": "host-say:render"}]
-  An expression comes on over 0.2 s and goes after dur (with no dur it stays); weight scales its
-  offsets, which add to the parts' own and to other expressions'. Its mouth shape shows where the
-  mouth would rest: speech owns the mouth. gaze moves the eyes in 0.12 s to camera (ahead), left,
-  right, up, down, [gx, gy] (each -1 to 1 of the eyes' look) or "#id", a layer at the top of the
-  scene with a fixed x and y; list them in time order. A gesture plays its keys from at. Two
-  gestures that move the same part at the same time are an error (avatar-gesture-overlap), not a
-  blend. A gaze target it cannot use is avatar-gaze-target.
-  While nothing tells them otherwise, avatars live: they blink (now and then twice) at gaps from
-  idle.blink, glance about by up to a third of the eyes' look at gaps from idle.saccade, and
-  breathe, swelling by idle.breath every 4 s. The times come from the layer's id and its seed (a
-  number; change it for other times), so every render of a frame is the same. No blink shows as a
-  line starts or at a gesture's peak, and any gaze turns the glances off. The layer's idle
-  overrides the avatar's: "idle": false stops all three, "idle": {"blink": false} one.
-  kine check also reports on each sound an avatar says: mouth-approximate (no words, so the mouth
-  follows only loudness), mouth-unknown-words (words the spelling rules cannot read),
-  avatar-missing-shape (shapes the avatar does not draw, and what shows instead) and mouth-stale
-  (a stored .mouth.json older than its words file; the video uses the words).
-  A 3D avatar is a glTF file in place of parts. Its mouth shapes, blink and expressions are morph
-  target weights by name (kine probe FILE lists them under morphs):
-    {"kinescriptAvatar": 1, "name": "Ada", "model": {"src": "ada.glb", "animation": "Idle"},
-     "mouth": {"A": {"mouthClose": 1}, "C": {"jawOpen": 0.4}, "D": {"jawOpen": 0.9}},
-     "blink": {"eyeBlinkLeft": 1, "eyeBlinkRight": 1},
-     "expressions": {"smile": {"morphs": {"mouthSmileLeft": 0.8, "mouthSmileRight": 0.8}}}}
-  mouth maps A, C and D at least (the others fall back as above); X, at rest, is every morph at 0
-  unless mapped. animation is a clip the model plays throughout. size (default [600, 600]) is the
-  box the model fits in, which h or w on the layer scales. The mouth moves between shapes in
-  0.06 s; morphs that several things set add up, to at most 1. It blinks and breathes like a drawn
-  avatar. "gestures": {"wave": {"clip": "Wave", "speed": 1}} names the model's clips, played over
-  animation as a layer's clips are; "look": [30, 15] is how many degrees the model turns for a
-  full gaze left or right and up or down (default [25, 12]), in 0.3 s. Glances are not for 3D
-  avatars. kine check names a morph or clip the model lacks (avatar-morph, avatar-gesture).
-
+  An avatar is a character drawn once, as parts or as a glTF model, that a scene makes talk:
+  {"use": "avatar", "avatar": "kine:host", "say": {"text": "..."}}. kine docs avatars (kine_docs
+  topic "avatars") is its reference: avatar.json, say, expressions, gaze, gestures, idle life and
+  3D avatars.
 SOUND
   Top-level "audio" lists the sounds. Each one:
     {"id": "vo1", "role": "voice", "src": "vo1.wav", "at": 0.5}
@@ -913,7 +767,7 @@ SOUND
   similarity_boost. kokoro has no tags.
   You cannot hear the mix, so read it: kine check measures it and names each sound problem with its
   time range, and kine look --audio draws it under the frames, with each sound's loudness in the JSON.
-  A scene with a brand takes its sound defaults (see BRANDS: audio): speaker and backend for a voice,
+  A scene with a brand takes its sound defaults (see kine docs brands: audio): speaker and backend for a voice,
   gain and fades by role, the mix targets, and "music": true for its music bed.
   Sound is mixed into .mp4, .mov and .webm, and into --from/--to renders. -o mix.wav (or .m4a,
   .mp3, .flac) renders the sound alone, without drawing frames.
@@ -1007,7 +861,7 @@ COMMANDS
                                   fastest frame. An enter, exit or along moves a layer as well.
   kine look FOLDER                an avatar folder's poses on one sheet (FOLDER/avatar_sheet.png,
                                   or -o); --width and --cols as for a scene
-  kine avatar check FOLDER        an avatar folder's problems (see AVATARS), and for one without
+  kine avatar check FOLDER        an avatar folder's problems (see kine docs avatars), and for one without
                                   errors its parts, mouth shapes and fallbacks, eyes, expressions
                                   and gestures; FOLDER may be kine:host, the built-in starter
   kine avatar new FOLDER          copy the starter avatar (or --from another) into FOLDER as
@@ -1063,7 +917,7 @@ COMMANDS
   kine watch scene.json           re-makes the contact sheet on every save
   kine edit scene.json            browser page: scrub, pin notes on frames; an agent reads them with kine_feedback
   kine brand list|show|init|use|set|add-file|remove-file|check|preview [BRAND] ...
-                                  the brand library (see BRANDS); BRAND is an id or a folder.
+                                  the brand library (see kine docs brands); BRAND is an id or a folder.
                                   set BRAND PATH VALUE (VALUE is JSON: '"#ff633f"', null removes);
                                   add-file BRAND FILE --kind fonts|logos|audio; remove-file BRAND logos/x.svg;
                                   use BRAND [--project .] [--force]; preview BRAND [-o p.png] [--variant]
@@ -1095,8 +949,178 @@ WORKFLOW FOR AGENTS
   4. kine render -q draft, then the final render.
 """
 
+TOPICS = {  # longer references kept out of the main one: kine docs TOPIC
+    "avatars": """\
+AVATARS
+  An avatar is a character drawn once as parts, in a folder with an avatar.json, that a scene makes
+  talk. kine avatar check FOLDER checks the folder and lists what it has, and kine look FOLDER
+  draws every pose on one sheet: each mouth shape (and what a missing one shows), eyes closed and
+  looking aside, each expression, and each gesture where it moves most, with pivots marked.
+  "avatar": "kine:host" is the built-in starter, a plain friendly figure whose shirt, hair, brows
+  and outline are palette roles, so it takes the scene's brand (its face keeps one light neutral
+  tone); it draws all nine mouth shapes and speaks with Kokoro
+  (af_heart). Its expressions: smile, happy, think, surprise, sad; gestures: nod, shake, tilt,
+  wave, point, shrug. kine avatar new FOLDER copies it as files to redraw. "brand:NAME" is an
+  avatar the scene's brand names (see kine docs brands: avatars), with the brand's voice for it.
+  Every part file is drawn at the avatar's full size, in place, so pivots are points in the avatar's
+  own pixels. Parts draw in the order listed; a part with a parent turns and moves with it.
+    {"kinescriptAvatar": 1, "name": "Host", "size": [600, 900],
+     "parts": {"body": {"src": "parts/body.svg", "pivot": [300, 700]},
+               "head": {"src": "parts/head.svg", "parent": "body", "pivot": [300, 380]},
+               "eyes": {"parent": "head", "look": [14, 8],
+                        "states": {"open": "parts/eyes-open.svg", "closed": "parts/eyes-closed.svg"}},
+               "mouth": {"parent": "head", "shapes": {"X": "parts/mouth-X.svg", "A": "parts/mouth-A.svg",
+                         "C": "parts/mouth-C.svg", "D": "parts/mouth-D.svg"}}},
+     "colors": {"skin": "#e8c4a0", "shirt": "accent"},
+     "expressions": {"smile": {"head": {"rotate": -3}, "mouth": "C"}},
+     "gestures": {"nod": {"dur": 0.5, "head": {"rotate": [[0, 0], [0.2, 6], [0.5, 0]]}}},
+     "idle": {"blink": [2.5, 5], "breath": 0.012, "saccade": [0.8, 2.5]},
+     "voice": {"backend": "kokoro", "speaker": "am_michael"}}
+  A part has one of src, states (named drawings: open shows by default, closed is the blink; look
+  is how far eyes move to look aside) or shapes (the mouth, by the letters of kine probe --mouth:
+  X, A, C and D at least; B falls back to C, E and F to D, G to A, H to C). Files are .svg, .png or
+  .webp inside the folder. colors gives each name a colour or palette role, for svg pieces with
+  that id. An expression sets x, y, rotate, scale or opacity on parts, and may hold a mouth shape;
+  a gesture keys them over its dur. idle: false stops blinks, breath and glances. voice takes
+  speaker, backend, rate and options, as a sound does.
+  In a scene, a layer {"use": "avatar"} draws it, centred on x, y (default "50%"), h (or w) pixels
+  tall, and say makes it talk:
+    {"id": "host", "use": "avatar", "avatar": "avatars/host", "x": "30%", "y": "60%", "h": 600,
+     "at": 0.5, "say": {"text": "Write the scene. Check it. Render it."}}
+  say is a line ({"text": ...}, with a sound's id, at, speaker, backend, rate, options, gain, volume
+  and pan), the id of a sound in "audio" (recorded speech too), or a list of them. A line becomes
+  the voice sound <id>-say (<id>-say1, -say2 ... in a list) that kine voice speaks, with the
+  avatar's voice where the line sets none; it starts with the avatar and each next line 0.4 s after
+  the one before, unless it gives at. Cue from it like any voice: "at": "host-say:render". The
+  mouth follows the line's mouth track (see kine probe --mouth) and rests between lines.
+  expressions, gaze and gestures time the rest, each a list; at is a cue or seconds from the
+  avatar's start:
+    "expressions": [{"name": "smile", "at": "host-say.in", "dur": 2, "weight": 1}],
+    "gaze": [{"at": 0, "target": "camera"}, {"at": "host-say:chart", "target": "#chart"}],
+    "gestures": [{"name": "nod", "at": "host-say:render"}]
+  An expression comes on over 0.2 s and goes after dur (with no dur it stays); weight scales its
+  offsets, which add to the parts' own and to other expressions'. Its mouth shape shows where the
+  mouth would rest: speech owns the mouth. gaze moves the eyes in 0.12 s to camera (ahead), left,
+  right, up, down, [gx, gy] (each -1 to 1 of the eyes' look) or "#id", a layer at the top of the
+  scene with a fixed x and y; list them in time order. A gesture plays its keys from at. Two
+  gestures that move the same part at the same time are an error (avatar-gesture-overlap), not a
+  blend. A gaze target it cannot use is avatar-gaze-target.
+  While nothing tells them otherwise, avatars live: they blink (now and then twice) at gaps from
+  idle.blink, glance about by up to a third of the eyes' look at gaps from idle.saccade, and
+  breathe, swelling by idle.breath every 4 s. The times come from the layer's id and its seed (a
+  number; change it for other times), so every render of a frame is the same. No blink shows as a
+  line starts or at a gesture's peak, and any gaze turns the glances off. The layer's idle
+  overrides the avatar's: "idle": false stops all three, "idle": {"blink": false} one.
+  kine check also reports on each sound an avatar says: mouth-approximate (no words, so the mouth
+  follows only loudness), mouth-unknown-words (words the spelling rules cannot read),
+  avatar-missing-shape (shapes the avatar does not draw, and what shows instead) and mouth-stale
+  (a stored .mouth.json older than its words file; the video uses the words).
+  A 3D avatar is a glTF file in place of parts. Its mouth shapes, blink and expressions are morph
+  target weights by name (kine probe FILE lists them under morphs):
+    {"kinescriptAvatar": 1, "name": "Ada", "model": {"src": "ada.glb", "animation": "Idle"},
+     "mouth": {"A": {"mouthClose": 1}, "C": {"jawOpen": 0.4}, "D": {"jawOpen": 0.9}},
+     "blink": {"eyeBlinkLeft": 1, "eyeBlinkRight": 1},
+     "expressions": {"smile": {"morphs": {"mouthSmileLeft": 0.8, "mouthSmileRight": 0.8}}}}
+  mouth maps A, C and D at least (the others fall back as above); X, at rest, is every morph at 0
+  unless mapped. animation is a clip the model plays throughout. size (default [600, 600]) is the
+  box the model fits in, which h or w on the layer scales. The mouth moves between shapes in
+  0.06 s; morphs that several things set add up, to at most 1. It blinks and breathes like a drawn
+  avatar. "gestures": {"wave": {"clip": "Wave", "speed": 1}} names the model's clips, played over
+  animation as a layer's clips are; "look": [30, 15] is how many degrees the model turns for a
+  full gaze left or right and up or down (default [25, 12]), in 0.3 s. Glances are not for 3D
+  avatars. kine check names a morph or clip the model lacks (avatar-morph, avatar-gesture).
 
-def reference() -> str:
+""",
+    "brands": """\
+BRANDS
+  A brand is a folder that many scenes share: brand.json, with its fonts/ and logos/ beside it.
+  A scene names it with "brand": "brand" (the folder, relative to the scene). A brand.json:
+    {"kinescriptBrand": 1, "id": "acme", "name": "Acme", "default": "dark",
+     "palettes": {"dark": {"bg": "#0a0c10", "surface": "#242832", "text": "#f2f0e8", "muted": "#9299a8",
+                           "accent": "#ff633f", "accent2": "#b9f45d"},
+                  "light": {"bg": "#f2f0e8", "text": "#0a0c10", "muted": "#5b6272", "accent": "#d9431f"}},
+     "fonts": {"display": {"family": "Space Grotesk"}, "body": {"family": "Space Grotesk"},
+               "mono": {"family": "IBM Plex Mono"}},
+     "charts": {"series": ["accent", "text", "muted"]},
+     "lock": ["palettes"]}
+  palettes    one or more, each with bg, text and accent, and optionally surface, muted, accent2,
+              positive, negative. The scene's variant picks one [default, else the first]. Each role
+              is a theme value ("$accent", "$text", "$surface"), and the older names follow them:
+              $paper and $sheet are text, $ink and $void are bg, $muted, $track (surface), $cue
+              (accent), $key (accent2). canvas.bg defaults to "$bg".
+  fonts       display, body and mono faces, each {"family": "..."}: $font is the body family,
+              $fontDisplay the display one, $mono the mono one. A face may list its files, with a
+              license: "files": [{"file": "fonts/Acme-Bold.ttf", "weight": 700}], "license": "OFL".
+  text        text styles by name, each with font (display|body|mono, or a family), size, weight,
+              tracking, case, italic, lineHeight; over the built-in title [128, 800], heading
+              [72, 700], body [40, 400], caption [28, 500] and label [24, 500, mono]:
+              {"title": {"size": 110, "tracking": 2}, "quote": {"font": "body", "italic": true}}.
+  charts      series (pieChart colours), color (bars), highlight (the highlighted bar and
+              lineChart's line), axis {"color": "muted", "width": 3}.
+  components  each built-in's look, by name, where the instance leaves it out: lowerThird accent,
+              plate, color, subColor; titleCard accent, color; callout accent, boxColor; focus
+              accent; progress color; kinetic color, motion; barChart color, accent; lineChart
+              color; pieChart colors. A palette role ("surface") means that colour. "<part>Text"
+              names the text style of a part, keeping its size: {"titleCard": {"titleText": "heading"}}.
+              With a brand, built-in titles take the display font and other text the body font.
+  logos       named logos, each {"file": "logos/full.svg", "onDark": "logos/full-dark.svg",
+              "alt": "Acme"} (.svg, .png, .jpg or .webp, read from the brand folder), and minHeight
+              (px at 1080p; a logo drawn smaller warns logo-small). Draw one with the logo component.
+  placements  where logos go: {"corner": {"anchor": "topright", "margin": "4%", "height": "7%"}}.
+              Without one, a logo's placement may be a corner or edge (bottomright, top...), inside
+              the brand's safeArea [5%] at 8% of the height.
+  bug         the logo the bug component shows all video: {"logo": "mark", "placement": "corner",
+              "opacity": 0.85}.
+  motion      named motions by dotted name: "enter": "$motion.enter" for {"motion": {"enter": "rise"}}.
+  intro       what "intro": true on a scene plays first: {"tagline": "Since 1952", "logo": "full", "dur": 2,
+              "enter": "pop"}, drawn by the sting component; or {"scene": "intro.json"}, a scene file in
+              the brand folder, rendered at the video's size and frame rate (its own duration, else dur).
+  outro       what "outro": true plays last: {"title": "Thanks for watching", "subtitle": "...", "url":
+              "acme.com", "dur": 3}, drawn by the endCard component, or {"scene": "outro.json"}.
+              Each is rendered as its own segment and joined to the video; its sound (silence when it
+              has none) joins the video's. A frame range, a PNG sequence or an audio file leaves them out.
+              "sound": "audio/logo.wav" (or {"src": ..., "gain": -3}) on either plays from its start: a
+              sonic logo.
+  audio       sound defaults, by role: {"voice": {"backend": "kokoro", "speaker": "af_heart", "rate":
+              1.05}, "music": {"src": "audio/bed.mp3", "gain": -4, "fadeIn": 1, "fadeOut": 2},
+              "sfx": {"gain": -3}, "ambience": {...}, "mix": {"loudness": -14, "duck": {"depth": 10}}}.
+              A sound in the scene's audio takes its role's gain, volume, fadeIn, fadeOut, loop and pan
+              where it leaves them out, and a voice with text its speaker, backend, rate and options;
+              kine voice reads the same, so a changed brand speaker shows as voice-stale. The scene's
+              mix goes over the brand's. Sound files live in the brand's audio/ folder.
+  avatars     the brand's characters: {"host": {"src": "avatars/host", "voice": {"speaker":
+              "am_michael"}, "idle": {"saccade": false}}} ("src" alone may be the whole entry, and
+              "kine:host" is the starter). A scene names one "avatar": "brand:host"; the brand's voice
+              goes over the avatar's own, its idle sits between the avatar's and the layer's, and its
+              palette colours the avatar's roles. check reports each avatar folder's problems.
+              kine brand add-avatar BRAND NAME names the starter; --copy puts its files in the brand's
+              avatars/NAME to redraw (the wizard's Avatars tab does both and shows each avatar).
+  grade       the colour grade every video gets: the scene "grade" keys, such as {"temperature": 0.1,
+              "contrast": 1.05}. A scene's own grade keys go over it, unless the brand locks "grade".
+  lock        parts a scene's theme may not change, such as ["palettes", "fonts"]; check reports
+              "brand-locked" for a theme key that would.
+  A brand's paths stay inside its folder: an absolute path or one with .. out of it is an error.
+  The library: brands live in ~/.kinescript/brands/<id> (KINE_BRANDS moves it). kine brand init acme
+  makes one from the default Kinescript brand; kine brand use acme copies it into the project's
+  brand/ and records what it copied, so a scene keeps the brand it was made with until you run use
+  again (use refuses to replace a copy edited in the project, unless --force). Change a brand with
+  kine brand set and add-file (or kine_brand); each write checks the brand and refuses a change
+  that breaks it, and --rev (base_rev) refuses it when the brand changed since you read it.
+  kine brand import acme logos/full.svg proposes dark and light palettes and chart series from a
+  logo's colours (each text and accent moved until it passes check's contrast); --apply writes them.
+
+""",
+}
+
+
+def reference(topic: str | None = None) -> str:
+    """The scene reference, or one of TOPICS ("all" for the reference and every topic)."""
+    if topic not in (None, "all"):
+        if topic not in TOPICS:
+            raise ValueError(f"no docs topic {topic!r}; topics: " + ", ".join(TOPICS))
+        return TOPICS[topic]
+    if topic == "all":
+        return reference() + "".join("\n" + TOPICS[t] for t in TOPICS)
     comps = "\n".join(textwrap.fill(v, 108, initial_indent=f"    {k:<11}", subsequent_indent=" " * 15)
                       for k, v in COMPONENT_DOCS.items())
     eases = " ".join(sorted(k for k in EASES if k not in ("in", "out", "inOut")))

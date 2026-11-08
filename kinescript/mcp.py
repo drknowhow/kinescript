@@ -18,7 +18,9 @@ from . import __version__
 _SCENE = {"description": "Path to a scene .json, or the scene object itself", "type": ["string", "object"]}
 TOOLS = [
     {"name": "kine_docs", "description": "Kinescript scene reference: layer types, properties, timing, motions, "
-     "components, eases. Read once before writing a scene.", "inputSchema": {"type": "object", "properties": {}}},
+     "components, eases. Read once before writing a scene. topic: avatars (talking characters) or brands, "
+     "for those references.", "inputSchema": {"type": "object", "properties": {
+         "topic": {"type": "string", "enum": ["avatars", "brands", "all"]}}}},
     {"name": "kine_check", "description": "Lint a scene: load errors, text off canvas or in the safe margin, overlapping "
      "text, low contrast, tiny text, too little reading time, and sound (a voice cut off or under the music, voices "
      "overlapping, an effect late on its cue, silence, loudness and peaks), and a brand's contrast and logo clear "
@@ -28,7 +30,7 @@ TOOLS = [
                                                       "brand_strict": {"type": "boolean", "default": False}},
                      "required": ["scene"]}},
     {"name": "kine_brand", "description": "Brands: one set of colours, fonts, text styles, chart colours and logos "
-     "that scenes share (\"brand\": \"brand\" in a scene; see BRANDS in kine_docs). list: the library "
+     "that scenes share (\"brand\": \"brand\" in a scene; see kine_docs topic brands). list: the library "
      "(~/.kinescript/brands). show: a brand's brand.json, files, issues and rev. init: a new library brand (id) from "
      "the default or from another. use: copy a brand into project/brand (refuses to replace a copy edited there "
      "unless force). set: one value by path (\"palettes.dark.accent\"), null removes it; a change that breaks the "
@@ -147,7 +149,7 @@ def _text(obj) -> dict:
 def call(name: str, args: dict) -> list[dict]:
     if name == "kine_docs":
         from .docs import reference
-        return [_text(reference())]
+        return [_text(reference(args.get("topic")))]
     if name == "kine_brand":
         from .brandops import run
         out = run(_need(args, "action"), args)

@@ -133,3 +133,15 @@ def test_contrast_warning_names_the_shape_behind_but_not_the_background():
     default_fill = {k: v for k, v in text.items() if k != "fill"}  # the theme's paper colour
     assert warn([{"id": "slab", "type": "rect", "x": 640, "y": 360, "w": 600, "h": 200, "fill": "#ff633f"},
                  default_fill])
+
+
+def test_avatars_and_brands_are_topics_the_reference_points_to():
+    main = reference()
+    for topic in ("avatars", "brands"):
+        text = reference(topic)
+        assert text.startswith(topic.upper() + "\n") and text not in main
+        assert f"kine docs {topic}" in main and text in reference("all")
+    assert len(main.splitlines()) < 1000  # short enough to keep in context
+    assert max(len(line) for t in ("avatars", "brands") for line in reference(t).splitlines()) <= 108
+    from kinescript.mcp import call
+    assert call("kine_docs", {"topic": "avatars"})[0]["text"] == reference("avatars")
