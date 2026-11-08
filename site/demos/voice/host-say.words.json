@@ -1,0 +1,245 @@
+{
+ "words": [
+  {
+   "word": "Hi,",
+   "start": 0.3,
+   "end": 0.55
+  },
+  {
+   "word": "I'm",
+   "start": 0.6,
+   "end": 0.7625
+  },
+  {
+   "word": "the",
+   "start": 0.7625,
+   "end": 0.85
+  },
+  {
+   "word": "host.",
+   "start": 0.85,
+   "end": 1.575
+  },
+  {
+   "word": "Sales",
+   "start": 1.725,
+   "end": 2.15,
+   "id": "sales"
+  },
+  {
+   "word": "grew",
+   "start": 2.15,
+   "end": 2.4
+  },
+  {
+   "word": "all",
+   "start": 2.4,
+   "end": 2.65
+  },
+  {
+   "word": "year,",
+   "start": 2.65,
+   "end": 2.925
+  },
+  {
+   "word": "and",
+   "start": 3.0,
+   "end": 3.1125
+  },
+  {
+   "word": "the",
+   "start": 3.1125,
+   "end": 3.2125
+  },
+  {
+   "word": "third",
+   "start": 3.2125,
+   "end": 3.5,
+   "id": "third"
+  },
+  {
+   "word": "quarter",
+   "start": 3.5,
+   "end": 3.9
+  },
+  {
+   "word": "was",
+   "start": 3.9,
+   "end": 4.0625
+  },
+  {
+   "word": "the",
+   "start": 4.0625,
+   "end": 4.15
+  },
+  {
+   "word": "best",
+   "start": 4.15,
+   "end": 4.4625
+  },
+  {
+   "word": "one.",
+   "start": 4.4625,
+   "end": 4.95
+  },
+  {
+   "word": "Write",
+   "start": 5.0875,
+   "end": 5.375
+  },
+  {
+   "word": "the",
+   "start": 5.375,
+   "end": 5.5
+  },
+  {
+   "word": "line,",
+   "start": 5.5,
+   "end": 5.9
+  },
+  {
+   "word": "and",
+   "start": 5.95,
+   "end": 6.0625
+  },
+  {
+   "word": "I",
+   "start": 6.0625,
+   "end": 6.2125
+  },
+  {
+   "word": "say",
+   "start": 6.2125,
+   "end": 6.4625,
+   "id": "say"
+  },
+  {
+   "word": "it.",
+   "start": 6.4625,
+   "end": 6.9
+  }
+ ],
+ "phones": [
+  {
+   "ipa": "hˈI",
+   "start": 0.3,
+   "end": 0.55
+  },
+  {
+   "ipa": "ˌIm",
+   "start": 0.6,
+   "end": 0.7625
+  },
+  {
+   "ipa": "ðə",
+   "start": 0.7625,
+   "end": 0.85
+  },
+  {
+   "ipa": "hˈOst",
+   "start": 0.85,
+   "end": 1.575
+  },
+  {
+   "ipa": "sˈAlz",
+   "start": 1.725,
+   "end": 2.15
+  },
+  {
+   "ipa": "ɡɹˈu",
+   "start": 2.15,
+   "end": 2.4
+  },
+  {
+   "ipa": "ˈɔl",
+   "start": 2.4,
+   "end": 2.65
+  },
+  {
+   "ipa": "jˈɪɹ",
+   "start": 2.65,
+   "end": 2.925
+  },
+  {
+   "ipa": "ænd",
+   "start": 3.0,
+   "end": 3.1125
+  },
+  {
+   "ipa": "ðə",
+   "start": 3.1125,
+   "end": 3.2125
+  },
+  {
+   "ipa": "θˈɜɹd",
+   "start": 3.2125,
+   "end": 3.5
+  },
+  {
+   "ipa": "kwˈɔɹTəɹ",
+   "start": 3.5,
+   "end": 3.9
+  },
+  {
+   "ipa": "wʌz",
+   "start": 3.9,
+   "end": 4.0625
+  },
+  {
+   "ipa": "ðə",
+   "start": 4.0625,
+   "end": 4.15
+  },
+  {
+   "ipa": "bˈɛst",
+   "start": 4.15,
+   "end": 4.4625
+  },
+  {
+   "ipa": "wˈʌn",
+   "start": 4.4625,
+   "end": 4.95
+  },
+  {
+   "ipa": "ɹˈIt",
+   "start": 5.0875,
+   "end": 5.375
+  },
+  {
+   "ipa": "ðə",
+   "start": 5.375,
+   "end": 5.5
+  },
+  {
+   "ipa": "lˈIn",
+   "start": 5.5,
+   "end": 5.9
+  },
+  {
+   "ipa": "ænd",
+   "start": 5.95,
+   "end": 6.0625
+  },
+  {
+   "ipa": "ˌI",
+   "start": 6.0625,
+   "end": 6.2125
+  },
+  {
+   "ipa": "sˈA",
+   "start": 6.2125,
+   "end": 6.4625
+  },
+  {
+   "ipa": "ɪt",
+   "start": 6.4625,
+   "end": 6.9
+  }
+ ],
+ "made": {
+  "hash": "854047d463feab90",
+  "backend": "kokoro",
+  "version": "kokoro 0.9.4, kinescript-kokoro 0.1.0",
+  "speaker": "af_heart"
+ }
+}

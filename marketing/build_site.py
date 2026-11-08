@@ -64,6 +64,9 @@ PAGES = [
      "A browser page where a person points at what is wrong and the agent reads it as notes.", "media/editor.jpg"),
     ("brands.html", "Brands", "One brand, every video",
      "Colours, fonts, logos, an intro and outro and sound defaults, defined once.", "demos/brand-tidewater.jpg"),
+    ("avatars.html", "Avatars", "Characters that talk",
+     "A drawn or 3D character whose mouth follows the voice, and who smiles, points and looks where you say.",
+     "demos/avatar-host.jpg"),
     ("install.html", "Install", "", "", ""),
 ]
 PAGE = SITE / "index.html"
@@ -89,7 +92,11 @@ DEMO = {
     "cues": ("site/demos/cues.json", 3.6, 0.5),
     "brand-tidewater": ("site/demos/brand-tidewater.json", 5.5, 0.5),
     "brand-tidewater-dark": ("site/demos/brand-tidewater-dark.json", 5.5, 0.5),
+    "avatar-host": ("site/demos/avatar-host.json", 3.9, 0.5),
+    "avatar-3d": ("site/demos/avatar-3d.json", 4.6, 0.5),
 }
+AVATARS = ("avatar-host", "avatar-3d")  # demos whose lines kine voice speaks before the render
+SHEETS = {"avatar-sheet": "kinescript/avatars/host", "avatar-sheet-3d": "examples/media/head"}  # kine look FOLDER
 BRANDS = ("site/demos/brand-tidewater.json", "site/demos/brand-tidewater-dark.json")  # the same scene but its variant
 HERO = ("marketing/hero.json", 3.6, 2 / 3)
 LOOK = "card-flip"          # the contact sheet shown in the agent section
@@ -132,6 +139,10 @@ def look_sheet() -> None:
         png = Path(tmp) / "trails.png"
         run(*KINE, "look", DEMO[TRAILS][0], "--trails", "-n", "8", "--cols", "4", "--width", "480", "-o", str(png))
         run("ffmpeg", "-y", "-v", "error", "-i", str(png), "-q:v", "3", str(MEDIA / "trails.jpg"))
+        for name, folder in SHEETS.items():  # every pose of an avatar on one sheet
+            png = Path(tmp) / f"{name}.png"
+            run(*KINE, "look", folder, "--width", "240", "-o", str(png))
+            run("ffmpeg", "-y", "-v", "error", "-i", str(png), "-q:v", "3", str(MEDIA / f"{name}.jpg"))
 
 
 def _wav(path: Path, audio, rate: int = 48000) -> None:
@@ -388,7 +399,7 @@ def main(argv: list[str]) -> None:
     if "--page" not in argv:
         if not (DEMOS / "sound" / "bed.m4a").exists() or "sound" in names:
             sound_assets()
-        for scene in (DEMO["voice"][0], DEMO["voices"][0], HERO[0]):  # speaks only the lines that changed since their files were made
+        for scene in (DEMO["voice"][0], DEMO["voices"][0], HERO[0], *(DEMO[a][0] for a in AVATARS)):  # speaks only the lines that changed since their files were made
             run(*KINE, "voice", scene)
         for name in names or [*DEMO, "hero", "look"]:
             if name == "sound":

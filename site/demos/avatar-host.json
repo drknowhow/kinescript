@@ -1,0 +1,17 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": "auto", "bg": "$void", "poster": "host-say:third"},
+  "layers": [
+    {"use": "barChart", "id": "sales", "data": [["Q1", 42], ["Q2", 58], ["Q3", 91], ["Q4", 64]],
+     "x": "66%", "y": "52%", "w": 980, "h": 600, "at": "host-say:sales", "until": "end"},
+    {"id": "host", "use": "avatar", "avatar": "kine:host", "x": "20%", "y": "58%", "h": 900,
+     "until": "host-say.out+1.5",
+     "say": {"text": "Hi, I'm the host. [[sales]]Sales grew all year, and the [[third]]third quarter was the best one. Write the line, and I [[say]]say it."},
+     "expressions": [{"name": "smile", "at": "host-say.in", "dur": 1.2},
+                     {"name": "surprise", "at": "host-say:third", "dur": 1.2},
+                     {"name": "happy", "at": "host-say:say"}],
+     "gaze": [{"at": 0, "target": "camera"}, {"at": "host-say:sales-0.2", "target": "#sales"},
+              {"at": "host-say:say-0.3", "target": "camera"}],
+     "gestures": [{"name": "wave", "at": "host-say.in"}, {"name": "point", "at": "host-say:third"},
+                  {"name": "nod", "at": "host-say:say"}]}
+  ]
+}
