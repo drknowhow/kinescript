@@ -618,7 +618,7 @@ def sheet_scene(av: Avatar, width: int = 240, cols: int | None = None) -> tuple[
     layers_out = []
     for i, (name, pose) in enumerate(cells):
         x0, y0 = (i % cols) * cw, (i // cols) * (ch + label)
-        g = placed(av, f"c{i}", pose, None, x0, y0, k)
+        g = placed(av, f"p{i}", pose, None, x0, y0, k)  # p: no part name can clash with a cell's own ids
         layers_out += [{"id": f"c{i}-cell", "type": "rect", "anchor": "topleft", "x": x0 + 2, "y": y0 + 2,
                         "w": cw - 4, "h": ch - 4, "radius": 6, "fill": "#1b1f27"}, g,
                        {"id": f"c{i}-label", "type": "text", "text": name, "x": x0 + cw / 2, "y": y0 + ch + label / 2,

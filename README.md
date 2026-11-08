@@ -371,6 +371,9 @@ A part with `"effect": true` stays hidden until an expression or gesture names i
 mark. `fx-NAME.svg` beside the pictures becomes one, and `source.json` adds expressions and gestures that show it.
 `examples/avatars/rin`, an anime presenter, has four.
 
+`examples/avatars/cue` (a robot whose mouth is a waveform) and `examples/avatars/slate` (a clapperboard whose clapper
+is its jaw) are drawn SVG avatars from `brand/make_mascots.py`, coloured by palette roles.
+
 `examples/avatar3d.json` is a 3D avatar built from a head that `examples/make_media.py` generates. Drawn avatars cost
 little more to render than still pictures of them (`bench/stress.py avatars-4`). `kine docs avatars` documents the
 format.

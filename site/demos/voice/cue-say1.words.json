@@ -1,0 +1,164 @@
+{
+ "words": [
+  {
+   "word": "Hi,",
+   "start": 0.175,
+   "end": 0.35
+  },
+  {
+   "word": "I'm",
+   "start": 0.3875,
+   "end": 0.5875
+  },
+  {
+   "word": "Cue.",
+   "start": 0.5875,
+   "end": 0.925
+  },
+  {
+   "word": "My",
+   "start": 1.0,
+   "end": 1.175
+  },
+  {
+   "word": "mouth",
+   "start": 1.175,
+   "end": 1.4625
+  },
+  {
+   "word": "is",
+   "start": 1.4625,
+   "end": 1.5625
+  },
+  {
+   "word": "a",
+   "start": 1.5625,
+   "end": 1.65
+  },
+  {
+   "word": "waveform,",
+   "start": 1.65,
+   "end": 2.275,
+   "id": "wave"
+  },
+  {
+   "word": "and",
+   "start": 2.325,
+   "end": 2.4375
+  },
+  {
+   "word": "my",
+   "start": 2.4375,
+   "end": 2.6125
+  },
+  {
+   "word": "antenna",
+   "start": 2.6125,
+   "end": 3.0875
+  },
+  {
+   "word": "pings",
+   "start": 3.0875,
+   "end": 3.3875,
+   "id": "ping"
+  },
+  {
+   "word": "on",
+   "start": 3.3875,
+   "end": 3.55
+  },
+  {
+   "word": "every",
+   "start": 3.55,
+   "end": 3.8625
+  },
+  {
+   "word": "cue.",
+   "start": 3.8625,
+   "end": 4.675
+  }
+ ],
+ "phones": [
+  {
+   "ipa": "hˈI",
+   "start": 0.175,
+   "end": 0.35
+  },
+  {
+   "ipa": "ˌIm",
+   "start": 0.3875,
+   "end": 0.5875
+  },
+  {
+   "ipa": "kjˈu",
+   "start": 0.5875,
+   "end": 0.925
+  },
+  {
+   "ipa": "mˌI",
+   "start": 1.0,
+   "end": 1.175
+  },
+  {
+   "ipa": "mˈWθ",
+   "start": 1.175,
+   "end": 1.4625
+  },
+  {
+   "ipa": "ɪz",
+   "start": 1.4625,
+   "end": 1.5625
+  },
+  {
+   "ipa": "ɐ",
+   "start": 1.5625,
+   "end": 1.65
+  },
+  {
+   "ipa": "wˈAvfˌɔɹm",
+   "start": 1.65,
+   "end": 2.275
+  },
+  {
+   "ipa": "ænd",
+   "start": 2.325,
+   "end": 2.4375
+  },
+  {
+   "ipa": "mI",
+   "start": 2.4375,
+   "end": 2.6125
+  },
+  {
+   "ipa": "æntˈɛnə",
+   "start": 2.6125,
+   "end": 3.0875
+  },
+  {
+   "ipa": "pˈɪŋz",
+   "start": 3.0875,
+   "end": 3.3875
+  },
+  {
+   "ipa": "ˌɔn",
+   "start": 3.3875,
+   "end": 3.55
+  },
+  {
+   "ipa": "ˈɛvəɹi",
+   "start": 3.55,
+   "end": 3.8625
+  },
+  {
+   "ipa": "kjˈu",
+   "start": 3.8625,
+   "end": 4.675
+  }
+ ],
+ "made": {
+  "hash": "7ca60eefc3868058",
+  "backend": "kokoro",
+  "version": "kokoro 0.9.4, kinescript-kokoro 0.1.0",
+  "speaker": "am_puck"
+ }
+}

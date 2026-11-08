@@ -1,0 +1,333 @@
+{
+  "kinescriptAvatar": 1,
+  "name": "Slate",
+  "description": "A clapperboard with a face; the clapper is its jaw, so every word is a little clap. Drawn by brand/make_mascots.py.",
+  "size": [
+    600,
+    750
+  ],
+  "parts": {
+    "body": {
+      "src": "parts/body.svg",
+      "pivot": [
+        300,
+        708
+      ]
+    },
+    "board": {
+      "src": "parts/board.svg",
+      "parent": "body",
+      "pivot": [
+        300,
+        600
+      ]
+    },
+    "label": {
+      "parent": "board",
+      "pivot": [
+        300,
+        540
+      ],
+      "states": {
+        "open": "parts/label-open.svg",
+        "cut": "parts/label-cut.svg"
+      }
+    },
+    "eyes": {
+      "parent": "board",
+      "pivot": [
+        300,
+        408
+      ],
+      "look": [
+        16,
+        8
+      ],
+      "states": {
+        "open": "parts/eyes-open.svg",
+        "closed": "parts/eyes-closed.svg",
+        "happy": "parts/eyes-happy.svg",
+        "squeeze": "parts/eyes-squeeze.svg",
+        "wow": "parts/eyes-wow.svg"
+      }
+    },
+    "mouth": {
+      "parent": "board",
+      "pivot": [
+        132,
+        288
+      ],
+      "shapes": {
+        "X": "parts/mouth-X.svg",
+        "A": "parts/mouth-A.svg",
+        "B": "parts/mouth-B.svg",
+        "C": "parts/mouth-C.svg",
+        "D": "parts/mouth-D.svg",
+        "E": "parts/mouth-E.svg",
+        "F": "parts/mouth-F.svg",
+        "G": "parts/mouth-G.svg",
+        "H": "parts/mouth-H.svg"
+      }
+    },
+    "fx-lines": {
+      "src": "parts/fx-lines.svg",
+      "parent": "board",
+      "pivot": [
+        300,
+        240
+      ],
+      "effect": true
+    },
+    "fx-stars": {
+      "src": "parts/fx-stars.svg",
+      "parent": "board",
+      "pivot": [
+        300,
+        430
+      ],
+      "effect": true
+    }
+  },
+  "colors": {
+    "leg": "text",
+    "board": "#12151B",
+    "edge": "text",
+    "bar": "text",
+    "stripes": "bg",
+    "label": "muted",
+    "dot": "accent",
+    "cut": "accent",
+    "white": "text",
+    "pupil": "bg",
+    "lid": "text",
+    "clap": "text",
+    "clapstripes": "bg",
+    "line": "accent",
+    "star": "accent2"
+  },
+  "expressions": {
+    "cut": {
+      "label": {
+        "state": "cut"
+      },
+      "eyes": {
+        "state": "squeeze"
+      },
+      "mouth": "A",
+      "fx-lines": {}
+    },
+    "happy": {
+      "eyes": {
+        "state": "happy"
+      },
+      "board": {
+        "rotate": -4
+      },
+      "fx-stars": {}
+    },
+    "wow": {
+      "eyes": {
+        "state": "wow"
+      },
+      "board": {
+        "y": -10
+      },
+      "mouth": "D"
+    },
+    "think": {
+      "board": {
+        "rotate": 5
+      },
+      "eyes": {
+        "y": -6
+      }
+    }
+  },
+  "gestures": {
+    "snap": {
+      "dur": 0.6,
+      "board": {
+        "scale": [
+          [
+            0,
+            1
+          ],
+          [
+            0.1,
+            1.06
+          ],
+          [
+            0.25,
+            0.98
+          ],
+          [
+            0.6,
+            1
+          ]
+        ]
+      },
+      "fx-lines": {
+        "scale": [
+          [
+            0,
+            0.8
+          ],
+          [
+            0.15,
+            1.1
+          ],
+          [
+            0.6,
+            1.2
+          ]
+        ],
+        "opacity": [
+          [
+            0,
+            0
+          ],
+          [
+            0.08,
+            1
+          ],
+          [
+            0.45,
+            1
+          ],
+          [
+            0.6,
+            0
+          ]
+        ]
+      }
+    },
+    "hop": {
+      "dur": 0.8,
+      "body": {
+        "y": [
+          [
+            0,
+            0
+          ],
+          [
+            0.15,
+            12
+          ],
+          [
+            0.4,
+            -60
+          ],
+          [
+            0.65,
+            0
+          ],
+          [
+            0.72,
+            8
+          ],
+          [
+            0.8,
+            0
+          ]
+        ],
+        "rotate": [
+          [
+            0,
+            0
+          ],
+          [
+            0.4,
+            -4
+          ],
+          [
+            0.65,
+            0
+          ]
+        ]
+      }
+    },
+    "nod": {
+      "dur": 0.6,
+      "board": {
+        "rotate": [
+          [
+            0,
+            0
+          ],
+          [
+            0.15,
+            3
+          ],
+          [
+            0.3,
+            0
+          ],
+          [
+            0.45,
+            2
+          ],
+          [
+            0.6,
+            0
+          ]
+        ],
+        "y": [
+          [
+            0,
+            0
+          ],
+          [
+            0.15,
+            8
+          ],
+          [
+            0.3,
+            0
+          ]
+        ]
+      }
+    },
+    "shake": {
+      "dur": 0.8,
+      "board": {
+        "rotate": [
+          [
+            0,
+            0
+          ],
+          [
+            0.15,
+            -5
+          ],
+          [
+            0.35,
+            5
+          ],
+          [
+            0.55,
+            -3
+          ],
+          [
+            0.8,
+            0
+          ]
+        ]
+      }
+    }
+  },
+  "idle": {
+    "blink": [
+      2.5,
+      5
+    ],
+    "breath": 0.01,
+    "saccade": [
+      0.8,
+      2.5
+    ]
+  },
+  "voice": {
+    "backend": "kokoro",
+    "speaker": "bm_george"
+  }
+}
