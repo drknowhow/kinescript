@@ -432,7 +432,7 @@ def _bookend_logo(p, th, scene, h):
 
 def _sting(p, th, scene=None):
     """A brand intro: the logo (or the brand's name) comes in, a tagline follows, both leave before the end.
-    Read from the brand's "intro"; "intro": true on a scene puts it before the video (see BRANDS)."""
+    Read from the brand's "intro"; "intro": true on a scene puts it before the video (see kine docs brands)."""
     p = {**{k: v for k, v in group(th, "intro").items() if k not in ("scene", "dur")}, **p}
     H = scene.h if scene is not None else 1080
     h = _pct(p.get("h", "22%"), H)
@@ -460,7 +460,7 @@ def _sting(p, th, scene=None):
 
 def _end_card(p, th, scene=None):
     """A brand outro: logo, a title, a subtitle and a link line, staggered in, held to the end.
-    Read from the brand's "outro"; "outro": true on a scene puts it after the video (see BRANDS)."""
+    Read from the brand's "outro"; "outro": true on a scene puts it after the video (see kine docs brands)."""
     p = {**{k: v for k, v in group(th, "outro").items() if k not in ("scene", "dur")}, **p}
     H = scene.h if scene is not None else 1080
     h = _pct(p.get("h", "16%"), H)
@@ -530,7 +530,7 @@ def _avatar(p, th, scene):
 
 COMPONENT_DOCS = {
     "avatar": "avatar (the folder holding avatar.json), x, y [\"50%\"] (its middle), h or w (its size; its own "
-              "without), say (a sound id, {\"text\": ...} or a list of them), expressions, gaze, gestures, idle, seed (see AVATARS)",
+              "without), say (a sound id, {\"text\": ...} or a list of them), expressions, gaze, gestures, idle, seed (see kine docs avatars)",
     "lowerThird": "title, subtitle, x [\"6%\"], y [\"78%\"] (top-left of its accent bar), accent, size [54], "
                   "color, subColor, plate (box colour, or false for none)",
     "titleCard": "title, subtitle, kicker (small line above), x, y [\"50%\"] (centre), size [128], accent, color",

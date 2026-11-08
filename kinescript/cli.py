@@ -140,7 +140,8 @@ def main(argv=None) -> int:
     v.add_argument("--force", action="store_true", help="speak them again even if their text did not change")
     v.add_argument("--backend", help="which installed voice backend to use, when there are several")
 
-    sub.add_parser("docs", help="print the scene reference")
+    dc = sub.add_parser("docs", help="print the scene reference, or one topic of it")
+    dc.add_argument("topic", nargs="?", help="avatars, brands, or all")
     nw = sub.add_parser("new", help="write a starter scene")
     nw.add_argument("path", nargs="?", default="scene.json")
 
@@ -153,7 +154,7 @@ def main(argv=None) -> int:
     ed.add_argument("--port", type=int, default=8765, help="0 picks a free port")
     ed.add_argument("--no-open", action="store_true", help="do not open the browser")
 
-    br = sub.add_parser("brand", help="make, show, change and use brands (see BRANDS in kine docs)")
+    br = sub.add_parser("brand", help="make, show, change and use brands (see kine docs brands)")
     br.add_argument("action", choices=[x.replace("_", "-") for x in ("list", "show", "init", "use", "set", "replace",
                                                                      "add_file", "remove_file", "add_avatar",
                                                                      "check", "preview",
@@ -237,7 +238,7 @@ def _default_out(scene: str, suffix: str) -> str:
 def _run(a) -> int:
     if a.cmd == "docs":
         from .docs import reference
-        sys.stdout.write(reference())
+        sys.stdout.write(reference(a.topic))
         return 0
     if a.cmd == "new":
         p = Path(a.path)

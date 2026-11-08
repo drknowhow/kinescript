@@ -219,7 +219,7 @@ An agent cannot watch a video, so Kinescript gives it things it can read:
 
 | Command | What the agent gets |
 |---|---|
-| `kine docs` | the full scene reference, short enough to keep in context |
+| `kine docs [TOPIC]` | the scene reference, short enough to keep in context; `avatars` and `brands` are topics of their own |
 | `kine check scene.json` | every problem at once as JSON, each with its layer, time range and a fix |
 | `kine look scene.json --boxes` | one PNG of many labelled frames, with every layer outlined and the top-level ones named |
 | `kine look scene.json --wire --depth` | the same frames with every model's triangles drawn over them, and each stage's depth image, nearer brighter |
@@ -331,7 +331,7 @@ Brands live in a library, `~/.kinescript/brands` (`KINE_BRANDS` moves it):
   intro and outro, sound, a gallery of every built-in drawn in the brand, and the raw file.
 
 The wizard, `kine brand` and the `kine_brand` MCP tool make every change through the same code, so an agent can do
-all of it. `kine docs` documents the format under BRANDS.
+all of it. `kine docs brands` documents the format.
 
 ## Install
 

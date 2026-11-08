@@ -1,8 +1,8 @@
 ---
 name: making-kinescript-videos
-description: "Make an MP4 from a JSON scene file with Kinescript (drknowhow/kinescript, the `kine` CLI): text, shapes, charts, SVG, images, video clips, particles and 3D models on cue-based timing, with a checker that lints layout, contrast, reading time and the sound mix, and narration spoken by Kokoro TTS with word-level cues and captions. Covers setup in a Linux container (CPU backend, Python 3.12 venv for Kokoro), the write → voice → check → look → render loop, and controlling Kokoro's pronunciation, stress, pauses, pace and voice blends. Use for 'kine', 'Kinescript', 'kinescript scene', 'kine voice', 'narrated promo', 'explainer video', 'motion graphics video', 'video with voice-over and captions', 'Kokoro pronunciation', 'TTS says a name wrong', 'make the narrator emphasise', 'video thumbnail is blank', 'poster frame', or any video built from type, shapes and captured footage."
+description: "Make an MP4 from a JSON scene file with Kinescript (drknowhow/kinescript, the `kine` CLI): text, shapes, charts, SVG, images, video clips, particles and 3D models on cue-based timing, with a checker that lints layout, contrast, reading time and the sound mix, and narration spoken by Kokoro TTS with word-level cues and captions, and avatars (drawn or glTF characters) that lip-sync to it. Covers setup in a Linux container (CPU backend, Python 3.12 venv for Kokoro), the write → voice → check → look → render loop, and controlling Kokoro's pronunciation, stress, pauses, pace and voice blends. Use for 'kine', 'Kinescript', 'kinescript scene', 'kine voice', 'narrated promo', 'explainer video', 'motion graphics video', 'video with voice-over and captions', 'Kokoro pronunciation', 'TTS says a name wrong', 'make the narrator emphasise', 'video thumbnail is blank', 'poster frame', 'talking avatar', 'presenter character', 'lip sync', or any video built from type, shapes and captured footage."
 metadata:
-  version: 0.2.0
+  version: 0.3.0
 ---
 
 # Making videos with Kinescript
@@ -110,7 +110,7 @@ The CPU torch index avoids a multi-GB CUDA download. The first `kine voice` run 
 
 When the person has a brand, or makes several videos that should look alike,
 use a Kinescript brand (1.9.0) instead of copying colours and fonts into
-each scene. `kine docs` has the full format under BRANDS.
+each scene. `kine docs brands` has the full format.
 
 - **Find or make one.** `kine brand list` shows the library
   (`~/.kinescript/brands`). `kine brand init acme` makes one from the default
@@ -137,6 +137,35 @@ each scene. `kine docs` has the full format under BRANDS.
   changes a part the brand locks (remove the override, don't remove the
   lock), and contrast and logo size issues for the brand's colours and
   placements.
+
+## Avatars
+
+An avatar (2.0) is a character that talks: its mouth follows a voice line's
+words, and it blinks, breathes and glances on its own. `kine docs avatars` is
+the reference.
+
+- **Start from the built-in one.** `"avatar": "kine:host"` is a plain,
+  friendly figure in the scene's palette with all nine mouth shapes and
+  Kokoro's af_heart voice. `kine avatar new FOLDER` copies it as SVG parts to
+  redraw. A brand can name avatars (`"avatar": "brand:host"`).
+- **Make it talk with `say`**, which takes a line (`{"text": ...}`, spoken by
+  `kine voice`), a sound id, or a list of them:
+  `{"id": "host", "use": "avatar", "avatar": "kine:host", "x": "30%", "h": 600, "say": {"text": "..."}}`.
+  Cue other layers from its words, e.g. `"at": "host-say:render"`.
+- **Time the acting** as lists on the layer: `expressions`
+  (`{"name": "smile", "at": ..., "dur": ...}`), `gestures` (`nod`, `wave`, ...)
+  and `gaze` (`camera`, `left`, `#chart`, ...). Kinescript checks them but
+  does not infer them from the text: you write them.
+- **3D avatars** are a glTF file whose mouth, blink and expressions are morph
+  targets by name, with gestures as the model's clips. `examples/avatar3d.json`
+  is one, built from `examples/make_media.py`.
+- **Check before rendering.** `kine avatar check FOLDER` validates a folder.
+  `kine look FOLDER` draws every pose on one sheet; a broken pivot or a
+  missing mouth shape shows there. `kine check` on the scene reports
+  `mouth-approximate` (no word times), `avatar-missing-shape` and gesture
+  overlaps.
+- **Cost.** Drawn avatars cost little more than still pictures of them. A 3D
+  head costs about as much as any model of its triangle count, moving or not.
 
 ## Narration
 

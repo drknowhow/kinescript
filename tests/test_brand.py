@@ -157,9 +157,7 @@ def test_branded_frame_is_pure_function_of_index(tmp_path):
 
 
 def test_brand_example_in_docs_is_a_valid_brand(tmp_path):
-    doc = reference()
-    start = doc.index("BRANDS\n")
-    text = doc[start:doc.index("\nCOMPONENTS", start)]
+    text = reference("brands")
     m = re.search(r'\{"kinescriptBrand".*?"lock": \["palettes"\]\}', " ".join(text.split()))
     spec = json.loads(m.group(0))
     folder = tmp_path / "brand"
