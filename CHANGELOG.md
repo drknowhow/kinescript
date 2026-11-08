@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.2.0 (2026-11-08)
 
 - Effect parts: a part with `"effect": true` (and `src`) is hidden until an expression or gesture names it, such as
   sparkles, a sweat drop or motion lines. An expression shows it while it lasts; a gesture shows it over its `dur`, or
