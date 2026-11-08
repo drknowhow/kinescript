@@ -499,6 +499,138 @@ def figure(path: Path):
     print("wrote", path)
 
 
+def head(folder: Path):
+    """A 3D avatar folder: head.glb, a round friendly head and shoulders facing the viewer (+z), with morph targets
+    for the mouth (jawOpen, mouthClose, mouthRound), the face (smile, eyesWide) and blink, and two clips that turn
+    the head on its neck ("Nod", 0.8 s; "Shake", 1 s), and an avatar.json that maps them."""
+    folder.mkdir(exist_ok=True)
+    sp = mesh.unit("sphere")  # y down, wound clockwise on screen: turn both round for glTF
+    U, Nu, Tu = sp.P * [1, -1, 1], sp.N * [1, -1, 1], sp.T[:, [0, 2, 1]]
+    MORPHS = ["jawOpen", "mouthClose", "mouthRound", "smile", "eyesWide", "blink"]
+
+    def egg(c, r):
+        """An ellipsoid at c with radii r: points, normals, triangles, and each point's offset from c."""
+        r = np.asarray(r, float)
+        N = Nu / r
+        return U * r + c, N / np.linalg.norm(N, axis=1, keepdims=True), Tu, U * r
+
+    def face(c, r, moves):
+        """A piece of the head, with its offset for each morph from moves(u, P), zero where it gives none."""
+        P, N, T, u = egg(c, r)
+        got = moves(u, P)
+        return P, N, T, [got.get(m, np.zeros_like(P)) for m in MORPHS]
+
+    def skin(u, P):  # the chin drops with the jaw
+        low = np.clip((32 - P[:, 1]) / 22, 0, 1) * np.clip(P[:, 2] / 30, 0, 1)
+        return {"jawOpen": np.c_[0 * low, -6 * low, 0 * low]}
+
+    RX, RY = 14, 2.4  # the mouth's half width and half height at rest
+
+    def mouth(u, P):  # each shape a new width and height for the mouth, and where it sits
+        x, y = u[:, 0], u[:, 1]
+        z0 = np.zeros_like(x)
+        return {"jawOpen": np.c_[-0.1 * x, y * (9 / RY - 1) - 4, z0],
+                "mouthClose": np.c_[x * (12 / RX - 1), y * (0.6 / RY - 1), z0],
+                "mouthRound": np.c_[x * (6.5 / RX - 1), y * (6.5 / RY - 1), z0 + 1.5],
+                "smile": np.c_[x * 0.25, 4 * (x / RX) ** 2 - 1, z0]}
+
+    def eye(cx, shut):
+        def moves(u, P):
+            d = P - [cx, 56, 37]  # from the eye's centre, so the pupil closes and widens with it
+            z0 = np.zeros(len(P))
+            sx, sy, sz = shut  # shut, the white sinks to a sliver behind the pupil, which spreads into a lash line
+            return {"blink": np.c_[d[:, 0] * sx, -d[:, 1] * sy, z0 + sz], "eyesWide": d * 0.2,
+                    "smile": np.c_[z0, -d[:, 1] * 0.18, z0]}
+        return moves
+
+    def brow(u, P):
+        z0 = np.zeros(len(P))
+        return {"eyesWide": np.c_[z0, z0 + 5, z0 + 0.5], "smile": np.c_[z0, z0 + 1.5, z0]}
+
+    parts = {"skin": [face((0, 48, 0), (44, 48, 42), skin)],
+             "eye": [face((s * 16, 56, 37), (8.5, 9.5, 5), eye(s * 16, (0, 0.97, -1.5))) for s in (-1, 1)],
+             "ink": [face((s * 16, 55.5, 41.2), (4.2, 4.8, 2), eye(s * 16, (0.7, 0.8, 0))) for s in (-1, 1)]
+             + [face((s * 16, 71, 33.5), (8, 1.7, 2.5), brow) for s in (-1, 1)],
+             "lips": [face((0, 31, 37.5), (RX, RY, 3), mouth)]}
+    body = {"shirt": [egg((0, -40, 0), (54, 30, 28))], "skin": [egg((0, -4, -2), (15, 14, 13))]}
+    blob, views, accessors = bytearray(), [], []
+
+    def add(arr, ctype, kind):
+        views.append({"buffer": 0, "byteOffset": len(blob), "byteLength": arr.nbytes})
+        blob.extend(arr.tobytes() + b"\0" * (-arr.nbytes % 4))
+        acc = {"bufferView": len(views) - 1, "componentType": ctype, "count": len(arr), "type": kind}
+        if kind == "VEC3":
+            acc.update(min=arr.min(0).tolist(), max=arr.max(0).tolist())
+        accessors.append(acc)
+        return len(accessors) - 1
+
+    mats = ["skin", "shirt", "eye", "ink", "lips"]
+
+    def prims(pieces, morphs):
+        out = []
+        for name, group in pieces.items():
+            Ps, Ns, Ts, Ds, base = [], [], [], [], 0
+            for piece in group:
+                Ps.append(piece[0])
+                Ns.append(piece[1])
+                Ts.append(piece[2] + base)
+                Ds.append(piece[3] if morphs else [])
+                base += len(piece[0])
+            p = {"attributes": {"POSITION": add(np.concatenate(Ps).astype("<f4"), 5126, "VEC3"),
+                                "NORMAL": add(np.concatenate(Ns).astype("<f4"), 5126, "VEC3")},
+                 "material": mats.index(name),
+                 "indices": add(np.concatenate(Ts).astype("<u2").ravel(), 5123, "SCALAR")}
+            if morphs:
+                p["targets"] = [{"POSITION": add(np.concatenate([d[k] for d in Ds]).astype("<f4"), 5126, "VEC3")}
+                                for k in range(len(MORPHS))]
+            out.append(p)
+        return out
+
+    meshes = [{"name": "head", "primitives": prims(parts, True), "weights": [0.0] * len(MORPHS),
+               "extras": {"targetNames": MORPHS}},
+              {"name": "body", "primitives": prims(body, False)}]
+
+    def turn(axis, deg):
+        h = np.radians(np.asarray(deg, float)) / 2
+        return np.c_[np.outer(np.sin(h), axis), np.cos(h)]
+
+    anims = []
+    for clip, axis, keys in (("Nod", (1, 0, 0), [(0, 0), (0.2, 13), (0.45, -4), (0.65, 3), (0.8, 0)]),
+                             ("Shake", (0, 1, 0), [(0, 0), (0.2, 14), (0.5, -14), (0.75, 7), (1.0, 0)])):
+        t, deg = np.array(keys, float).T
+        anims.append({"name": clip, "samplers": [{"input": add(t.astype("<f4"), 5126, "SCALAR"),
+                                                  "output": add(turn(axis, deg).astype("<f4"), 5126, "VEC4")}],
+                      "channels": [{"sampler": 0, "target": {"node": 1, "path": "rotation"}}]})
+    lin = lambda h: [(int(h[k:k + 2], 16) / 255) ** 2.2 for k in (1, 3, 5)] + [1.0]  # noqa: E731
+    colours = {"skin": ("#f2f0e8", 0.55), "shirt": ("#ff633f", 0.6), "eye": ("#ffffff", 0.3),
+               "ink": ("#1d2230", 0.4), "lips": ("#5a2430", 0.5)}
+    doc = {"asset": {"version": "2.0", "generator": "kinescript examples/make_media.py"}, "scene": 0,
+           "scenes": [{"nodes": [0]}],
+           "nodes": [{"name": "bust", "children": [1, 2]}, {"name": "head", "mesh": 0}, {"name": "body", "mesh": 1}],
+           "meshes": meshes, "animations": anims,
+           "materials": [{"name": n, "pbrMetallicRoughness": {"baseColorFactor": lin(colours[n][0]),
+                                                              "metallicFactor": 0.0, "roughnessFactor": colours[n][1]}}
+                         for n in mats],
+           "accessors": accessors, "bufferViews": views, "buffers": [{"byteLength": len(blob)}]}
+    js = json.dumps(doc).encode()
+    js += b" " * (-len(js) % 4)
+    chunks = struct.pack("<II", len(js), 0x4E4F534A) + js + struct.pack("<II", len(blob), 0x004E4942) + bytes(blob)
+    (folder / "head.glb").write_bytes(b"glTF" + struct.pack("<II", 2, 12 + len(chunks)) + chunks)
+    spec = {"kinescriptAvatar": 1, "name": "Sam",
+            "description": "A generated 3D avatar: a round head whose mouth, eyes and brows are morph targets.",
+            "model": {"src": "head.glb"}, "size": [600, 600],
+            "mouth": {"A": {"mouthClose": 1}, "B": {"jawOpen": 0.25}, "C": {"jawOpen": 0.5}, "D": {"jawOpen": 1},
+                      "E": {"jawOpen": 0.45, "mouthRound": 0.7}, "F": {"jawOpen": 0.1, "mouthRound": 1},
+                      "G": {"jawOpen": 0.1, "mouthClose": 0.4}, "H": {"jawOpen": 0.35}},
+            "blink": {"blink": 1},
+            "expressions": {"smile": {"morphs": {"smile": 1}}, "surprise": {"morphs": {"eyesWide": 1, "jawOpen": 0.2}}},
+            "gestures": {"nod": {"clip": "Nod"}, "shake": {"clip": "Shake"}},
+            "voice": {"backend": "kokoro", "speaker": "af_heart"}}
+    (folder / "avatar.json").write_text(json.dumps(spec, indent=1))
+    print("wrote", folder / "head.glb", "and its avatar.json")
+
+
 can(out / "can.glb")
 arm(out / "arm.glb")
 figure(out / "figure.glb")
+head(out / "head")

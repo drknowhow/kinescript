@@ -149,3 +149,23 @@ def test_a_3d_avatar_gestures_with_clips_and_turns_to_gaze(tmp_path):
     assert at("rotateY", 3.5) == 0 and at("rotateX", 3.5) == 12  # up: the face tilts back, turning about x
     names = [n for n, _ in A.poses(A.load(tmp_path / "ada"))]
     assert "look right" in names and "gesture nod at 0.5s" in names
+
+
+def test_the_sample_head_is_a_3d_avatar_that_talks_and_nods():
+    from pathlib import Path
+
+    from kinescript import models
+    folder = Path(__file__).resolve().parents[1] / "examples" / "media" / "head"
+    if not (folder / "avatar.json").exists():
+        pytest.skip("run examples/make_media.py first")
+    got = A.summary(folder)
+    assert got["ok"] and got["shapes"] == list("ABCDEFGH") and got["gestures"] == ["nod", "shake"]
+    imp = models.load(str(folder / "head.glb"))
+    rest = imp.mesh.P
+    P, _ = models.pose(imp, None, 0, {"jawOpen": 1})
+    lips = np.abs(P - rest).max(1) > 3  # y runs down: the jaw opens downward
+    assert lips.any() and (P[lips, 1] - rest[lips, 1]).max() > 5
+    P, _ = models.pose(imp, models.clip_index(imp, "Nod"), 0.2)
+    top = rest[:, 1] < rest[:, 1].min() + 2  # the crown tips toward the viewer, the shoulders stay
+    low = rest[:, 1] > rest[:, 1].max() - 2
+    assert (P[top, 2] - rest[top, 2]).mean() > 10 and np.allclose(P[low], rest[low], atol=1e-4)
