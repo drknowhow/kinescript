@@ -22,6 +22,9 @@ import numpy as np
 from . import mouth as M
 
 SOURCE = "source.json"
+IMAGE_EXTS = (".png", ".webp", ".jpg", ".jpeg")
+LOOKS = ("left", "right", "up", "down")  # eye states a gaze picks (avatar.LOOKS)
+RESERVED = {"open", "closed", *LOOKS}  # eye states an expression can't be named
 PROMPTS = "PROMPTS.md"
 WORK = 512  # the longest side, in pixels, that lining up and finding regions work at
 SCALES = np.linspace(0.96, 1.04, 9)
@@ -316,14 +319,17 @@ def patch(base_keyed: np.ndarray, var: np.ndarray, box: list[int]) -> np.ndarray
 # --- the folder -----------------------------------------------------------------------------------------------
 
 def _files(src: Path, spec: dict) -> dict[str, Path]:
-    """The source pictures by role: base, mouth-A ... mouth-H, blink."""
+    """The source pictures by role: base, blink, mouth-A ... mouth-H, look-left ... look-down, expr-NAME."""
     given = spec.get("files") or {}
     out = {}
-    for role in ["base", "blink", *[f"mouth-{s}" for s in M.SHAPES if s != "X"]]:
+    exprs = sorted({q.stem for q in src.iterdir() if q.is_file() and q.stem.startswith("expr-")
+                    and q.suffix.lower() in IMAGE_EXTS} | {r for r in given if r.startswith("expr-")})
+    for role in ["base", "blink", *[f"mouth-{s}" for s in M.SHAPES if s != "X"], *[f"look-{d}" for d in LOOKS],
+                 *exprs]:
         if role in given:
             out[role] = src / given[role]
             continue
-        for ext in (".png", ".webp", ".jpg", ".jpeg"):
+        for ext in IMAGE_EXTS:
             if (src / f"{role}{ext}").is_file():
                 out[role] = src / f"{role}{ext}"
                 break
@@ -355,7 +361,11 @@ def init(src: str | Path) -> dict:
              "open looking at the camera, on a plain flat #00FF00 background (or a transparent one).",
              "- blink.png: the same picture with both eyes fully closed.",
              *[f"- mouth-{s}.png: the same picture, {d}." for s, d in MOUTHS.items()], "",
-             "mouth-A, mouth-C and mouth-D are required; the others fall back to the nearest of those.",
+             "mouth-A, mouth-C and mouth-D are required; the others fall back to the nearest of those.", "",
+             "Optional, for gaze and expressions (eyes and brows only; speech owns the mouth):",
+             *[f"- look-{d}.png: the same picture with only the eyes looking {d}." for d in LOOKS],
+             "- expr-NAME.png (such as expr-happy.png, expr-surprise.png, expr-think.png): the same picture with "
+             "only the eyes and brows changed to show that feeling; keep the mouth closed and relaxed.",
              "Then run: kine avatar from-images " + src.as_posix()]
     for name, text in ((SOURCE, json.dumps(spec, indent=2) + "\n"), (PROMPTS, "\n".join(lines) + "\n")):
         p = src / name
@@ -431,7 +441,8 @@ def from_images(src: str | Path, out: str | Path | None = None, sheet: bool = Tr
 
     mouths = [r for r in files if r.startswith("mouth-")]
     mbox = chosen("mouth", mouths)
-    ebox = chosen("eyes", ["blink"])
+    looks = [r for r in files if r.startswith("look-")]
+    ebox = chosen("eyes", ["blink", *looks])
     for name, box in (("mouth", mbox), ("eyes", ebox)):
         if box is None:
             issues.append(_issue("error", "avatar-source-region", f"could not find where the {name} changes",
@@ -439,23 +450,43 @@ def from_images(src: str | Path, out: str | Path | None = None, sheet: bool = Tr
     if mbox and ebox and not (mbox[2] <= ebox[0] or ebox[2] <= mbox[0] or mbox[3] <= ebox[1] or ebox[3] <= mbox[1]):
         issues.append(_issue("warning", "avatar-source-region", "the mouth and eye patches overlap",
                              "a variant changed more than its feature; check the sheet, or give mouthBox and eyesBox"))
+    exprs = {r: r[5:] for r in files if r.startswith("expr-")}
+    for role, name in exprs.items():
+        if name in RESERVED or not name:
+            issues.append(_issue("error", "avatar-source", f"{files[role].name}: an expression can't be called "
+                                 f"'{name}'", "those names are the eyes' own drawings; pick another name"))
     if any(i["level"] == "error" for i in issues):
         return {"ok": False, "issues": issues, "files": report}
 
+    own = {}  # each expression's patch: the eyes' box and what it changed above the mouth
+    for role in exprs:
+        found = boxes[role][0]
+        box = _pad(_union([found, ebox]) if found else ebox, (w, h), k=0.1)
+        box[3] = max(box[1] + 4, min(box[3], mbox[1]))
+        own[role] = box
+
     for role in report:
-        box = ebox if role == "blink" else mbox
+        box = own.get(role) or (ebox if role == "blink" or role.startswith("look-") else mbox)
         share = drift(boxes[role][1], box, figure, f)
         report[role]["drift"] = round(share, 4)
         if share > DRIFT_WARN:
             issues.append(_issue("error" if share > DRIFT_ERROR else "warning", "avatar-source-drift",
                                  f"{files[role].name} also changed {share:.0%} of the figure outside its patch",
                                  "make it again from the base, changing only the "
-                                 + ("eyes" if role == "blink" else "mouth")))
+                                 + ("mouth" if role.startswith("mouth-") else "eyes and brows"
+                                    if role.startswith("expr-") else "eyes")))
 
     parts_dir = out / "parts"
     write_image(base, parts_dir / "body.png")
     write_image(patch(base, raw, ebox), parts_dir / "eyes-open.png")
     write_image(patch(base, lined["blink"], ebox), parts_dir / "eyes-closed.png")
+    states = {"open": "parts/eyes-open.png", "closed": "parts/eyes-closed.png"}
+    for role in looks:
+        write_image(patch(base, lined[role], ebox), parts_dir / f"eyes-{role[5:]}.png")
+        states[role[5:]] = f"parts/eyes-{role[5:]}.png"
+    for role, name in exprs.items():
+        write_image(patch(base, lined[role], own[role]), parts_dir / f"eyes-{name}.png")
+        states[name] = f"parts/eyes-{name}.png"
     shapes = {"X": "parts/mouth-X.png"}
     write_image(patch(base, raw, mbox), parts_dir / "mouth-X.png")
     for role in mouths:
@@ -468,9 +499,10 @@ def from_images(src: str | Path, out: str | Path | None = None, sheet: bool = Tr
           "size": [w, h],
           "parts": {"body": {"src": "parts/body.png", "pivot": [w / 2, float(h)]},
                     "eyes": {"parent": "body", "pivot": centre(ebox),
-                             "states": {"open": "parts/eyes-open.png", "closed": "parts/eyes-closed.png"}},
+                             "states": states},
                     "mouth": {"parent": "body", "pivot": centre(mbox),
                               "shapes": {s: shapes[s] for s in M.SHAPES if s in shapes}}},
+          **({"expressions": {name: {"eyes": {"state": name}} for name in exprs.values()}} if exprs else {}),
           "gestures": _gestures(w, h),
           "idle": {"blink": [2.5, 5], "breath": 0.008, "saccade": [0.8, 2.5]},
           "voice": spec.get("voice", {"backend": "kokoro", "speaker": "af_heart"})}

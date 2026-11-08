@@ -293,9 +293,22 @@ def _pose(where: str, pose, parts: dict, out: list, keyed: bool) -> None:
                                                       '{"rotate": 6}'))
             continue
         for k, v in keys.items():
+            if k == "state":
+                part = parts[pname]
+                if keyed:
+                    out.append(_issue("error", "avatar-gesture", f"{where} picks a state of '{pname}'",
+                                      "an expression can pick a state; a gesture only moves parts"))
+                elif part.kind != "states":
+                    out.append(_issue("error", "avatar-pose", f"{where} picks a state of '{pname}', which has none",
+                                      'give the part "states": {"open": ..., "' + str(v) + '": ...}'))
+                elif v not in part.files:
+                    out.append(_issue("error", "avatar-pose", f"{where}: '{pname}' has no state {v!r}",
+                                      "its states: " + ", ".join(part.files)))
+                continue
             if k not in POSE_KEYS:
                 out.append(_issue("error", "avatar-pose", f"{where} sets '{k}' on '{pname}'",
-                                  "a pose sets " + ", ".join(POSE_KEYS)))
+                                  "a pose sets " + ", ".join(POSE_KEYS)
+                                  + ("" if keyed else ", and state (one of a part's drawings)")))
             elif keyed:
                 dur = pose.get("dur")
                 ok = isinstance(v, list) and v and all(isinstance(x, list) and len(x) == 2 and _num(x[0]) and
@@ -503,7 +516,7 @@ def layers(av: Avatar, lid: str, pose: dict | None = None, theme: dict | None = 
         elif p.kind == "shapes":
             art = [_drawing(av, p, k, lid, fills, k == shape) for k in p.files]
         else:
-            state = pose.get("eyes", "open") if p in av.eyes else "open"
+            state = change.get("state") or (pose.get("eyes", "open") if p in av.eyes else "open")
             state = state if state in p.files else "open"
             shift = (look[0] * p.look[0], look[1] * p.look[1])
             art = [_drawing(av, p, k, lid, fills, k == state, shift) for k in p.files]
@@ -553,6 +566,8 @@ def poses(av: Avatar) -> list[tuple[str, dict]]:
         out.append(("eyes closed", {"eyes": "closed"}))
     if any(p.look != (0.0, 0.0) for p in av.eyes):
         out += [("look left", {"look": [-1, 0]}), ("look right", {"look": [1, 0]})]
+    for p in _looking(av):
+        out += [(f"look {d}", {"parts": {p.name: {"state": d}}}) for d in LOOKS if d in p.files]
     for name, e in (av.spec.get("expressions") or {}).items():
         parts = {k: v for k, v in e.items() if k != "mouth"}
         out.append((f"expression {name}", {"parts": parts, **({"mouth": e["mouth"]} if "mouth" in e else {})}))
@@ -992,6 +1007,91 @@ def _glances(eye: Part, idle: dict, lid: str, scene) -> dict:
     return {"x": xs, "y": ys}
 
 
+LOOKS = ("left", "right", "up", "down")  # eye states a gaze picks, for eyes drawn looking each way instead of moved
+SWAP = 0.06  # seconds one drawing of a part takes to give way to another
+
+
+def _looking(av: Avatar) -> list[Part]:
+    """Parts with states drawn looking aside (left, right, up, down) and no look reach: a gaze picks the drawing."""
+    return [q for q in av.parts.values() if q.kind == "states" and q.look == (0.0, 0.0)
+            and any(d in q.files for d in LOOKS)]
+
+
+def _renamed(node: dict, tag: str) -> dict:
+    """A copy of a layer tree with every id given the suffix -tag, so it can stand beside the original."""
+    out = {k: v for k, v in node.items() if k != "children"}
+    if "id" in out:
+        out["id"] = f"{out['id']}-{tag}"
+    if node.get("children"):
+        out["children"] = [_renamed(c, tag) for c in node["children"]]
+    return out
+
+
+def _shown(G: dict, rig: str, part: Part, state: str, tag: str) -> dict | None:
+    """A copy of a part's drawing of `state`, shown (its own drawing stays hidden)."""
+    src = _find(G, f"{rig}-{part.name}-{state}")
+    if src is None:
+        return None
+    copy_ = _renamed(src, tag)
+    copy_["opacity"] = 1
+    return copy_
+
+
+def _state_for(gx: float, gy: float, part: Part) -> str | None:
+    """The drawing a gaze at [gx, gy] picks: the way it looks most, when it looks aside enough and that is drawn."""
+    if max(abs(gx), abs(gy)) < 0.3:
+        return None
+    d = ("left" if gx < 0 else "right") if abs(gx) >= abs(gy) else ("up" if gy < 0 else "down")
+    return d if d in part.files else None
+
+
+def _look_states(G: dict, av: Avatar, part: Part, rig: str, lid: str, picks: list, fps: float) -> None:
+    """Each gaze shows the part's drawing for its direction (None: its own drawings, blinks and all) from its time
+    until the next gaze's: each span's content sits in a group that comes on at its start, inside one that goes at
+    the next span's start. Before the first gaze the part is as it was. picks: [(at, state or None)]."""
+    if not any(st for _, st in picks):
+        return
+    own = _art(G, av, rig)
+    art = [c for c in G["children"] if c.get("id") in own]
+    if not art:
+        return
+    on = [[0, 0], [PRE, 0], [PRE + SWAP, 1]]
+    off = [[0, 1], [PRE, 1], [PRE + SWAP, 0]]
+    spans = [{"id": f"{lid}-look0-{part.name}", "type": "group", "at": _early(picks[0][0], lid, fps),
+              "opacity": off, "children": art}]
+    for i, (at, state) in enumerate(picks):
+        tag = f"look{i + 1}"
+        got = _shown(G, rig, part, state, tag) if state else None
+        content = [got] if got else [_renamed(c, tag) for c in art]
+        span = {"id": f"{lid}-{tag}-{part.name}", "type": "group", "at": _early(at, lid, fps), "opacity": on,
+                "children": content}
+        if i + 1 < len(picks):
+            span = {"id": f"{lid}-{tag}-{part.name}-end", "type": "group", "at": _early(picks[i + 1][0], lid, fps),
+                    "opacity": off, "children": [span]}
+        spans.append(span)
+    first = G["children"].index(art[0])
+    G["children"] = ([c for c in G["children"][:first] if c not in art] + spans
+                     + [c for c in G["children"][first:] if c not in art])
+
+
+def _expression_state(G: dict, av: Avatar, part: Part, state: str, rig: str, gid: str, at: str, dur) -> None:
+    """While an expression lasts, the part shows its drawing of `state` in place of the others (blinks included);
+    a later expression's state wins over an earlier one's."""
+    got = _shown(G, rig, part, state, gid)
+    if got is None:
+        return
+    show = [[0, 0], [PRE, 0], [PRE + SWAP, 1]]
+    hide = [[0, 1], [PRE, 1], [PRE + SWAP, 0]]
+    if dur:
+        show += [[PRE + dur - SWAP, 1], [PRE + dur, 0]]
+        hide += [[PRE + dur - SWAP, 0], [PRE + dur, 1]]
+    _wrap(G, f"{gid}-hide", at, {"opacity": hide}, _art(G, av, rig))
+    ids = [c.get("id") for c in G["children"]]
+    where = ids.index(f"{gid}-hide") + 1 if f"{gid}-hide" in ids else len(ids)
+    G["children"].insert(where, {"id": f"{gid}-show", "type": "group", "at": at, "opacity": show,
+                                 "children": [got]})
+
+
 def component(p, theme: dict, scene) -> dict:
     """{"use": "avatar", "avatar": FOLDER, "x", "y", "h" or "w", "say", "expressions", "gaze", "gestures"}: the
     avatar as plain layers, centred on x, y at h pixels tall (its own size without h or w), its mouth following the
@@ -1019,7 +1119,7 @@ def component(p, theme: dict, scene) -> dict:
         _mouth(av, mouth, says, exprs, lid, fills, scene)
 
     eyes = [q for q in av.parts.values() if q.kind == "states" and q.look != (0.0, 0.0)]
-    if gazes and not eyes:
+    if gazes and not eyes and not _looking(av):
         raise ValueError(f"layer '{lid}': gaze moves the eyes by their look reach, and no part of the avatar has "
                          "look; give the eyes part \"look\": [x, y] in its avatar.json")
     idle = _idle(av, p, mark.get("idle", {}))
@@ -1027,7 +1127,7 @@ def component(p, theme: dict, scene) -> dict:
         G = _find(body, f"{rig}-{e.name}")
         if G is not None:
             _blinks(G, e, av, lid, says, gests, idle, scene)
-    was = (0.0, 0.0)
+    was, picked = (0.0, 0.0), []
     for i, g in enumerate(gazes):  # each gaze moves the eyes on from the one before, so the moves add up
         try:
             gx, gy = _gaze(g.get("target", "camera"), p, av, k, scene, f"gaze[{i}]")
@@ -1043,6 +1143,11 @@ def component(p, theme: dict, scene) -> dict:
             props = {a: [[0, 0], [PRE, 0], [PRE + MOVE, round(d, 4)]] for a, d in (("x", dx), ("y", dy)) if d}
             _wrap(G, f"{lid}-gaze{i + 1}-{e.name}", at, props, _art(G, av, rig))
         was = (gx, gy)
+        picked.append((g.get("at", 0), gx, gy))
+    for e in _looking(av):
+        G = _find(body, f"{rig}-{e.name}")
+        if G is not None and picked:
+            _look_states(G, av, e, rig, lid, [(at, _state_for(gx, gy, e)) for at, gx, gy in picked], scene.fps)
 
     for i, e in enumerate(exprs):
         pose, wt, dur = av.spec["expressions"][e["name"]], float(e.get("weight", 1)), e.get("dur")
@@ -1052,15 +1157,21 @@ def component(p, theme: dict, scene) -> dict:
             G = _find(body, f"{rig}-{pname}") if pname != "mouth" else None
             if G is None:
                 continue
+            if change.get("state") and wt > 0:
+                _expression_state(G, av, av.parts[pname], change["state"], rig, f"{lid}-expr{i + 1}-{pname}-state",
+                                  at, dur)
             props = {}
             for a, v in change.items():
+                if a == "state":
+                    continue
                 base = 1.0 if a in ("scale", "opacity") else 0.0
                 to = round(base + wt * (v - base), 4)
                 keys = [[0, base], [PRE, base], [PRE + r, to]]
                 if dur:
                     keys += ([[PRE + dur - r, to]] if dur > 2 * r else []) + [[PRE + dur, base]]
                 props[a] = keys
-            _wrap(G, f"{lid}-expr{i + 1}-{pname}", at, props)
+            if props:
+                _wrap(G, f"{lid}-expr{i + 1}-{pname}", at, props)
 
     spans = getattr(scene, "gestures", None)
     for i, g in enumerate(gests):

@@ -628,3 +628,22 @@ def test_a_brand_avatar_in_a_scene_without_a_brand_is_named(tmp_path):
     spec.pop("brand")
     with pytest.raises(Exception, match="'brand:host' is a brand's avatar, and the scene names no brand"):
         k.Scene(spec, tmp_path)
+
+
+@pytest.mark.parametrize("over, message", [
+    ({"expressions": {"x": {"head": {"state": "open"}}}}, "which has none"),
+    ({"expressions": {"x": {"eyes": {"state": "wink"}}}}, "has no state 'wink'"),
+    ({"gestures": {"x": {"dur": 1, "eyes": {"state": "closed"}}}}, "an expression can pick a state"),
+])
+def test_state_mistakes_are_named(tmp_path, over, message):
+    issues = A.validate(make(tmp_path, **over))
+    assert any(message in i["message"] + i["fix"] for i in issues if i["level"] == "error"), issues
+
+
+def test_an_expression_state_shows_that_drawing_in_a_still(tmp_path):
+    make(tmp_path, expressions={"sleepy": {"eyes": {"state": "closed"}}})
+    av = A.load(tmp_path)
+    g = A.layers(av, "a", {"parts": {"eyes": {"state": "closed"}}})
+    eyes = A._find(g, "a-eyes")
+    shown = {c["id"]: c.get("opacity", 1) for c in eyes["children"]}
+    assert shown == {"a-eyes-open": 0, "a-eyes-closed": 1}
