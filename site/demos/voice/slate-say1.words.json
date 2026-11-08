@@ -1,0 +1,63 @@
+{
+ "words": [
+  {
+   "word": "Scene",
+   "start": 0.25,
+   "end": 0.5125
+  },
+  {
+   "word": "one,",
+   "start": 0.5125,
+   "end": 0.85
+  },
+  {
+   "word": "take",
+   "start": 0.925,
+   "end": 1.225
+  },
+  {
+   "word": "one.",
+   "start": 1.225,
+   "end": 1.65
+  },
+  {
+   "word": "Action!",
+   "start": 1.7875,
+   "end": 2.65,
+   "id": "snap"
+  }
+ ],
+ "phones": [
+  {
+   "ipa": "sˈiːn",
+   "start": 0.25,
+   "end": 0.5125
+  },
+  {
+   "ipa": "wˈʌn",
+   "start": 0.5125,
+   "end": 0.85
+  },
+  {
+   "ipa": "tˈAk",
+   "start": 0.925,
+   "end": 1.225
+  },
+  {
+   "ipa": "wˈʌn",
+   "start": 1.225,
+   "end": 1.65
+  },
+  {
+   "ipa": "ˈakʃᵊn",
+   "start": 1.7875,
+   "end": 2.65
+  }
+ ],
+ "made": {
+  "hash": "57bd409b143dbaea",
+  "backend": "kokoro",
+  "version": "kokoro 0.9.4, kinescript-kokoro 0.1.0",
+  "speaker": "bm_george"
+ }
+}

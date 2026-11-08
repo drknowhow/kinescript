@@ -1,0 +1,28 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": "auto", "bg": "$void", "poster": "slate-say2:cut+0.3"},
+  "layers": [
+    {"id": "title", "type": "text", "text": "Drawn in SVG. Coloured by the brand.", "x": "50%", "y": "11%", "size": 56,
+     "weight": 700, "at": "cue-say1.in", "until": "end", "enter": "fade"},
+    {"id": "cue", "use": "avatar", "avatar": "../../examples/avatars/cue", "x": "31%", "y": "64%", "h": 780,
+     "until": "end",
+     "say": [{"text": "Hi, I'm Cue. My mouth is a [[wave]]waveform, and my antenna [[ping]]pings on every cue.",
+              "at": "slate-say1.out+0.3"},
+             {"text": "That's a [[wrap]]wrap.", "at": "slate-say2.out+0.4"}],
+     "expressions": [{"name": "wow", "at": "slate-say2:cut", "dur": 1.0},
+                     {"name": "happy", "at": "cue-say2.in", "dur": 1.8}],
+     "gaze": [{"at": 0, "target": "right"}, {"at": "cue-say1.in", "target": "camera"},
+              {"at": "slate-say2.in", "target": "right"}, {"at": "cue-say2.in", "target": "camera"}],
+     "gestures": [{"name": "wave", "at": "cue-say1.in"}, {"name": "ping", "at": "cue-say1:ping"},
+                  {"name": "bounce", "at": "cue-say2:wrap"}]},
+    {"id": "slate", "use": "avatar", "avatar": "../../examples/avatars/slate", "x": "69%", "y": "60%", "h": 780,
+     "until": "end",
+     "say": [{"text": "Scene one, take one. [[snap]]Action!", "at": 0.4},
+             {"text": "I'm Slate. Every word is a little clap. And when the take is done... [[cut]]cut!",
+              "at": "cue-say1.out+0.3"}],
+     "expressions": [{"name": "cut", "at": "slate-say2:cut", "dur": 1.3},
+                     {"name": "happy", "at": "cue-say2.in", "dur": 1.8}],
+     "gaze": [{"at": 0, "target": "camera"}, {"at": "cue-say1.in", "target": "left"},
+              {"at": "slate-say2.in", "target": "camera"}],
+     "gestures": [{"name": "snap", "at": "slate-say1:snap"}, {"name": "hop", "at": "cue-say2:wrap"}]}
+  ]
+}

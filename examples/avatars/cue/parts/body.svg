@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="750" viewBox="0 0 600 750">
+  <path id="neck" d="M282 470 H318 A12 12 0 0 1 330 482 V538 A12 12 0 0 1 318 550 H282 A12 12 0 0 1 270 538 V482 A12 12 0 0 1 282 470 Z" fill="#000"/>
+  <path id="torso" d="M180 528 H420 A54 54 0 0 1 474 582 V750 H126 V582 A54 54 0 0 1 180 528 Z" fill="#000"/>
+  <path id="chest" d="M282 618 A18 18 0 1 0 318 618 A18 18 0 1 0 282 618 Z" fill="#000"/>
+</svg>

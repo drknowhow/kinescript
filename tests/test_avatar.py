@@ -702,3 +702,36 @@ def test_effect_mistakes_are_named(tmp_path, change, message):
     (folder / "avatar.json").write_text(json.dumps(spec), encoding="utf-8")
     issues = A.validate(folder)
     assert any(message in i["message"] + i["fix"] for i in issues if i["level"] == "error"), issues
+
+
+def test_a_part_named_like_a_sheet_cell_still_draws_on_the_sheet(tmp_path):
+    spec = json.loads((make(tmp_path) / "avatar.json").read_text())
+    spec["parts"]["label"] = spec["parts"].pop("head")
+    for p in spec["parts"].values():
+        if p.get("parent") == "head":
+            p["parent"] = "label"
+    spec["expressions"], spec["gestures"] = {}, {}
+    (tmp_path / "avatar.json").write_text(json.dumps(spec), encoding="utf-8")
+    assert not codes(tmp_path)
+    assert A.sheet(tmp_path, str(tmp_path / "sheet.png"))["out"]
+
+
+@pytest.mark.parametrize("name", ["cue", "maya", "rin", "slate"])
+def test_the_example_avatars_are_valid(name):
+    folder = Path(__file__).parent.parent / "examples" / "avatars" / name
+    assert [i for i in A.validate(folder) if i["level"] == "error"] == []
+
+
+def test_the_drawn_example_avatars_match_their_generator(tmp_path, monkeypatch):
+    import importlib.util
+    root = Path(__file__).parent.parent
+    spec = importlib.util.spec_from_file_location("make_mascots", root / "brand" / "make_mascots.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    monkeypatch.setattr(mod, "OUT", tmp_path)
+    mod.cue()
+    mod.slate()
+    for made in tmp_path.rglob("*"):
+        if made.is_file():
+            kept = root / "examples" / "avatars" / made.relative_to(tmp_path)
+            assert kept.read_text(encoding="utf-8") == made.read_text(encoding="utf-8"), kept

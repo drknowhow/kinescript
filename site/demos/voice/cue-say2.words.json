@@ -1,0 +1,43 @@
+{
+ "words": [
+  {
+   "word": "That's",
+   "start": 0.175,
+   "end": 0.4375
+  },
+  {
+   "word": "a",
+   "start": 0.4375,
+   "end": 0.5
+  },
+  {
+   "word": "wrap.",
+   "start": 0.5,
+   "end": 1.15,
+   "id": "wrap"
+  }
+ ],
+ "phones": [
+  {
+   "ipa": "ðˈæts",
+   "start": 0.175,
+   "end": 0.4375
+  },
+  {
+   "ipa": "ɐ",
+   "start": 0.4375,
+   "end": 0.5
+  },
+  {
+   "ipa": "ɹˈæp",
+   "start": 0.5,
+   "end": 1.15
+  }
+ ],
+ "made": {
+  "hash": "b40d1c997d00cfed",
+  "backend": "kokoro",
+  "version": "kokoro 0.9.4, kinescript-kokoro 0.1.0",
+  "speaker": "am_puck"
+ }
+}

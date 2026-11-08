@@ -11,6 +11,10 @@
   changed; each side's feather stops at what changed.
 - Example: `examples/avatars/rin`, an anime presenter from fifteen generated pictures and four SVG effects, with a
   voiced demo and pose sheet on the Avatars page.
+- Examples: `examples/avatars/cue`, a robot with a waveform mouth, an antenna that pings and five eye drawings, and
+  `examples/avatars/slate`, a clapperboard whose clapper is its jaw and whose board reads CUT on cue. Both are SVG
+  parts drawn by `brand/make_mascots.py` and coloured by palette roles; a two-character demo is on the Avatars page.
+- `kine look FOLDER`: a part named `label` or `cell` no longer breaks the pose sheet (duplicate layer id).
 
 ## 2.1.0 (2026-11-08)
 

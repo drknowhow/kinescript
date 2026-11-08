@@ -1,0 +1,163 @@
+{
+ "words": [
+  {
+   "word": "I'm",
+   "start": 0.225,
+   "end": 0.425
+  },
+  {
+   "word": "Slate.",
+   "start": 0.425,
+   "end": 0.875
+  },
+  {
+   "word": "Every",
+   "start": 0.95,
+   "end": 1.2875
+  },
+  {
+   "word": "word",
+   "start": 1.2875,
+   "end": 1.65
+  },
+  {
+   "word": "is",
+   "start": 1.65,
+   "end": 1.7625
+  },
+  {
+   "word": "a",
+   "start": 1.7625,
+   "end": 1.8125
+  },
+  {
+   "word": "little",
+   "start": 1.8125,
+   "end": 2.1125
+  },
+  {
+   "word": "clap.",
+   "start": 2.1125,
+   "end": 2.7
+  },
+  {
+   "word": "And",
+   "start": 2.8,
+   "end": 2.9375
+  },
+  {
+   "word": "when",
+   "start": 2.9375,
+   "end": 3.0625
+  },
+  {
+   "word": "the",
+   "start": 3.0625,
+   "end": 3.1625
+  },
+  {
+   "word": "take",
+   "start": 3.1625,
+   "end": 3.475
+  },
+  {
+   "word": "is",
+   "start": 3.475,
+   "end": 3.625
+  },
+  {
+   "word": "done...",
+   "start": 3.625,
+   "end": 4.125
+  },
+  {
+   "word": "cut!",
+   "start": 4.2875,
+   "end": 4.925,
+   "id": "cut"
+  }
+ ],
+ "phones": [
+  {
+   "ipa": "ˌIm",
+   "start": 0.225,
+   "end": 0.425
+  },
+  {
+   "ipa": "slˈAt",
+   "start": 0.425,
+   "end": 0.875
+  },
+  {
+   "ipa": "ˈɛvəɹi",
+   "start": 0.95,
+   "end": 1.2875
+  },
+  {
+   "ipa": "wˈɜːd",
+   "start": 1.2875,
+   "end": 1.65
+  },
+  {
+   "ipa": "ɪz",
+   "start": 1.65,
+   "end": 1.7625
+  },
+  {
+   "ipa": "ɐ",
+   "start": 1.7625,
+   "end": 1.8125
+  },
+  {
+   "ipa": "lˈɪtᵊl",
+   "start": 1.8125,
+   "end": 2.1125
+  },
+  {
+   "ipa": "klˈap",
+   "start": 2.1125,
+   "end": 2.7
+  },
+  {
+   "ipa": "ˌand",
+   "start": 2.8,
+   "end": 2.9375
+  },
+  {
+   "ipa": "wˌɛn",
+   "start": 2.9375,
+   "end": 3.0625
+  },
+  {
+   "ipa": "ðə",
+   "start": 3.0625,
+   "end": 3.1625
+  },
+  {
+   "ipa": "tˈAk",
+   "start": 3.1625,
+   "end": 3.475
+  },
+  {
+   "ipa": "ɪz",
+   "start": 3.475,
+   "end": 3.625
+  },
+  {
+   "ipa": "dˈʌn",
+   "start": 3.625,
+   "end": 4.125
+  },
+  {
+   "ipa": "kˈʌt",
+   "start": 4.2875,
+   "end": 4.925
+  }
+ ],
+ "made": {
+  "hash": "920b5755b0999a3f",
+  "backend": "kokoro",
+  "version": "kokoro 0.9.4, kinescript-kokoro 0.1.0",
+  "speaker": "bm_george"
+ }
+}

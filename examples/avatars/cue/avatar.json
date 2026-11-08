@@ -1,0 +1,352 @@
+{
+  "kinescriptAvatar": 1,
+  "name": "Cue",
+  "description": "Kinescript's mascot: a small robot with a screen for a face and the Cue dot as its antenna. Its mouth is a waveform. Drawn by brand/make_mascots.py.",
+  "size": [
+    600,
+    750
+  ],
+  "parts": {
+    "armL": {
+      "src": "parts/arm-left.svg",
+      "parent": "body",
+      "pivot": [
+        111,
+        580
+      ]
+    },
+    "armR": {
+      "src": "parts/arm-right.svg",
+      "parent": "body",
+      "pivot": [
+        489,
+        580
+      ]
+    },
+    "body": {
+      "src": "parts/body.svg",
+      "pivot": [
+        300,
+        750
+      ]
+    },
+    "head": {
+      "src": "parts/head.svg",
+      "parent": "body",
+      "pivot": [
+        300,
+        498
+      ]
+    },
+    "antenna": {
+      "src": "parts/antenna.svg",
+      "parent": "head",
+      "pivot": [
+        300,
+        102
+      ]
+    },
+    "eyes": {
+      "parent": "head",
+      "pivot": [
+        300,
+        315
+      ],
+      "look": [
+        18,
+        10
+      ],
+      "states": {
+        "open": "parts/eyes-open.svg",
+        "closed": "parts/eyes-closed.svg",
+        "happy": "parts/eyes-happy.svg",
+        "wow": "parts/eyes-wow.svg",
+        "error": "parts/eyes-error.svg"
+      }
+    },
+    "mouth": {
+      "parent": "head",
+      "pivot": [
+        300,
+        408
+      ],
+      "shapes": {
+        "X": "parts/mouth-X.svg",
+        "A": "parts/mouth-A.svg",
+        "B": "parts/mouth-B.svg",
+        "C": "parts/mouth-C.svg",
+        "D": "parts/mouth-D.svg",
+        "E": "parts/mouth-E.svg",
+        "F": "parts/mouth-F.svg",
+        "G": "parts/mouth-G.svg",
+        "H": "parts/mouth-H.svg"
+      }
+    },
+    "fx-sparks": {
+      "src": "parts/fx-sparks.svg",
+      "parent": "head",
+      "pivot": [
+        300,
+        240
+      ],
+      "effect": true
+    },
+    "fx-glow": {
+      "src": "parts/fx-glow.svg",
+      "parent": "head",
+      "pivot": [
+        300,
+        102
+      ],
+      "effect": true
+    },
+    "fx-alert": {
+      "src": "parts/fx-alert.svg",
+      "parent": "head",
+      "pivot": [
+        523,
+        200
+      ],
+      "effect": true
+    }
+  },
+  "colors": {
+    "neck": "muted",
+    "torso": "surface",
+    "chest": "accent",
+    "arm": "muted",
+    "stalk": "muted",
+    "shell": "text",
+    "screen": "bg",
+    "antenna": "accent",
+    "eye": "text",
+    "wave": "accent2",
+    "spark": "accent2",
+    "glow": "accent",
+    "alert": "accent"
+  },
+  "expressions": {
+    "happy": {
+      "eyes": {
+        "state": "happy"
+      },
+      "head": {
+        "rotate": -5
+      },
+      "fx-sparks": {}
+    },
+    "wow": {
+      "eyes": {
+        "state": "wow"
+      },
+      "head": {
+        "y": -6
+      },
+      "mouth": "E"
+    },
+    "error": {
+      "eyes": {
+        "state": "error"
+      },
+      "head": {
+        "rotate": 5,
+        "y": 6
+      },
+      "fx-alert": {}
+    },
+    "think": {
+      "head": {
+        "rotate": 6
+      },
+      "eyes": {
+        "y": -8
+      }
+    }
+  },
+  "gestures": {
+    "nod": {
+      "dur": 0.6,
+      "head": {
+        "y": [
+          [
+            0,
+            0
+          ],
+          [
+            0.15,
+            10
+          ],
+          [
+            0.3,
+            0
+          ],
+          [
+            0.45,
+            6
+          ],
+          [
+            0.6,
+            0
+          ]
+        ]
+      }
+    },
+    "shake": {
+      "dur": 0.8,
+      "head": {
+        "rotate": [
+          [
+            0,
+            0
+          ],
+          [
+            0.15,
+            -6
+          ],
+          [
+            0.35,
+            6
+          ],
+          [
+            0.55,
+            -4
+          ],
+          [
+            0.8,
+            0
+          ]
+        ]
+      }
+    },
+    "wave": {
+      "dur": 1.4,
+      "armR": {
+        "rotate": [
+          [
+            0,
+            0
+          ],
+          [
+            0.3,
+            -150
+          ],
+          [
+            0.55,
+            -125
+          ],
+          [
+            0.8,
+            -150
+          ],
+          [
+            1.05,
+            -125
+          ],
+          [
+            1.4,
+            0
+          ]
+        ]
+      }
+    },
+    "ping": {
+      "dur": 0.8,
+      "antenna": {
+        "scale": [
+          [
+            0,
+            1
+          ],
+          [
+            0.15,
+            1.35
+          ],
+          [
+            0.4,
+            1
+          ],
+          [
+            0.8,
+            1
+          ]
+        ]
+      },
+      "fx-glow": {
+        "scale": [
+          [
+            0,
+            0.6
+          ],
+          [
+            0.4,
+            1.3
+          ],
+          [
+            0.8,
+            1.6
+          ]
+        ],
+        "opacity": [
+          [
+            0,
+            0
+          ],
+          [
+            0.1,
+            1
+          ],
+          [
+            0.8,
+            0
+          ]
+        ]
+      }
+    },
+    "bounce": {
+      "dur": 0.7,
+      "body": {
+        "y": [
+          [
+            0,
+            0
+          ],
+          [
+            0.15,
+            10
+          ],
+          [
+            0.35,
+            -26
+          ],
+          [
+            0.55,
+            0
+          ],
+          [
+            0.62,
+            5
+          ],
+          [
+            0.7,
+            0
+          ]
+        ]
+      }
+    }
+  },
+  "idle": {
+    "blink": [
+      2.5,
+      5
+    ],
+    "breath": 0.01,
+    "saccade": [
+      0.8,
+      2.5
+    ]
+  },
+  "voice": {
+    "backend": "kokoro",
+    "speaker": "am_puck"
+  }
+}
