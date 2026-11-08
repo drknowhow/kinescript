@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.1.0 (2026-11-08)
 
 - `kine avatar from-images FOLDER` builds an avatar from generated pictures: a base picture, a blink and mouth
   shapes A to H, each made from the base with an image model. The base's background is keyed out, each variant is
