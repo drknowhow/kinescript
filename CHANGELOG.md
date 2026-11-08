@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- `kine avatar from-images FOLDER` builds an avatar from generated pictures: a base picture, a blink and mouth
+  shapes A to H, each made from the base with an image model. The base's background is keyed out, each variant is
+  lined up with it, and the region it changed becomes a feathered patch over the base. The report names a picture
+  that changed more than its mouth or eyes (`avatar-source-drift`); `--init` writes `PROMPTS.md`, what to generate.
+
 ## 2.0.0 (2026-11-07)
 
 Avatars: characters that talk, drawn or 3D, whose mouths follow the voice.
