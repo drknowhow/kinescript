@@ -178,10 +178,16 @@ def main(argv=None) -> int:
     br.add_argument("--no-browser", action="store_true", help="wizard: do not open a browser")
 
     av = sub.add_parser("avatar", help="check an avatar folder (its avatar.json and part drawings), or start one")
-    av.add_argument("action", choices=["check", "new"], help="check: its problems and what it has; new: copy the "
-                                                             "starter avatar into FOLDER to edit")
-    av.add_argument("folder", help="the folder holding avatar.json, or kine:NAME for a built-in avatar")
+    av.add_argument("action", choices=["check", "new", "from-images"],
+                    help="check: its problems and what it has; new: copy the starter avatar into FOLDER to edit; "
+                         "from-images: build an avatar from generated pictures in FOLDER (base.png, blink.png, "
+                         "mouth-A.png ...)")
+    av.add_argument("folder", help="the folder holding avatar.json, or kine:NAME for a built-in avatar; for "
+                                   "from-images, the folder of pictures")
     av.add_argument("--from", dest="src", default="kine:host", help="new: the avatar to copy (default kine:host)")
+    av.add_argument("--out", help="from-images: the avatar folder to write (default FOLDER/avatar)")
+    av.add_argument("--init", action="store_true",
+                    help="from-images: write source.json and PROMPTS.md (what to generate) into FOLDER")
 
     sub.add_parser("mcp", help="run the MCP server on stdio")
     sub.add_parser("doctor", help="report ffmpeg, GPU and font availability")
@@ -263,6 +269,14 @@ def _run(a) -> int:
         return OK if out["ok"] else ISSUES
     if a.cmd == "avatar":
         from .avatar import new, summary, where
+        if a.action == "from-images":
+            from . import avatar_images as AI
+            try:
+                out = AI.init(a.folder) if a.init else AI.from_images(a.folder, a.out)
+            except ValueError as e:
+                out = {"ok": False, "error": str(e)}
+            _emit(out)
+            return OK if out["ok"] else ISSUES
         if a.action == "new":
             try:
                 out = new(a.folder, a.src)
