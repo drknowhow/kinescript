@@ -1,0 +1,212 @@
+{
+  "kinescriptAvatar": 1,
+  "name": "Maya",
+  "description": "A presenter built by kine avatar from-images from pictures generated with Nano Banana 2.1.",
+  "size": [
+    896,
+    1200
+  ],
+  "parts": {
+    "body": {
+      "src": "parts/body.webp",
+      "pivot": [
+        448.0,
+        1200.0
+      ]
+    },
+    "eyes": {
+      "parent": "body",
+      "pivot": [
+        460.0,
+        421.0
+      ],
+      "states": {
+        "open": "parts/eyes-open.webp",
+        "closed": "parts/eyes-closed.webp",
+        "left": "parts/eyes-left.webp",
+        "right": "parts/eyes-right.webp",
+        "happy": "parts/eyes-happy.webp",
+        "surprise": "parts/eyes-surprise.webp"
+      }
+    },
+    "mouth": {
+      "parent": "body",
+      "pivot": [
+        457.0,
+        663.0
+      ],
+      "shapes": {
+        "X": "parts/mouth-X.webp",
+        "A": "parts/mouth-A.webp",
+        "B": "parts/mouth-B.webp",
+        "C": "parts/mouth-C.webp",
+        "D": "parts/mouth-D.webp",
+        "E": "parts/mouth-E.webp",
+        "F": "parts/mouth-F.webp",
+        "G": "parts/mouth-G.webp",
+        "H": "parts/mouth-H.webp"
+      }
+    }
+  },
+  "expressions": {
+    "happy": {
+      "eyes": {
+        "state": "happy"
+      }
+    },
+    "surprise": {
+      "eyes": {
+        "state": "surprise"
+      }
+    }
+  },
+  "gestures": {
+    "nod": {
+      "dur": 0.6,
+      "body": {
+        "y": [
+          [
+            0,
+            0
+          ],
+          [
+            0.15,
+            14.4
+          ],
+          [
+            0.3,
+            0
+          ],
+          [
+            0.45,
+            8.4
+          ],
+          [
+            0.6,
+            0
+          ]
+        ],
+        "rotate": [
+          [
+            0,
+            0
+          ],
+          [
+            0.15,
+            0.8
+          ],
+          [
+            0.3,
+            0
+          ]
+        ]
+      }
+    },
+    "shake": {
+      "dur": 0.8,
+      "body": {
+        "rotate": [
+          [
+            0,
+            0
+          ],
+          [
+            0.15,
+            -1.6
+          ],
+          [
+            0.35,
+            1.6
+          ],
+          [
+            0.55,
+            -1
+          ],
+          [
+            0.8,
+            0
+          ]
+        ]
+      }
+    },
+    "tilt": {
+      "dur": 1.0,
+      "body": {
+        "rotate": [
+          [
+            0,
+            0
+          ],
+          [
+            0.3,
+            -2.5
+          ],
+          [
+            0.7,
+            -2.5
+          ],
+          [
+            1.0,
+            0
+          ]
+        ]
+      }
+    },
+    "lean": {
+      "dur": 1.2,
+      "body": {
+        "y": [
+          [
+            0,
+            0
+          ],
+          [
+            0.3,
+            24.0
+          ],
+          [
+            0.9,
+            24.0
+          ],
+          [
+            1.2,
+            0
+          ]
+        ],
+        "rotate": [
+          [
+            0,
+            0
+          ],
+          [
+            0.3,
+            1.5
+          ],
+          [
+            0.9,
+            1.5
+          ],
+          [
+            1.2,
+            0
+          ]
+        ]
+      }
+    }
+  },
+  "idle": {
+    "blink": [
+      2.5,
+      5
+    ],
+    "breath": 0.008,
+    "saccade": [
+      0.8,
+      2.5
+    ]
+  },
+  "voice": {
+    "backend": "kokoro",
+    "speaker": "af_heart"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": "auto", "bg": "$void", "poster": "maya-say:look+0.4"},
+  "layers": [
+    {"id": "card", "type": "text", "text": "Pictures in.\nA presenter out.", "x": "70%", "y": "42%", "size": 96,
+     "weight": 800, "at": "maya-say:lined", "until": "end", "enter": {"name": "rise", "dur": 0.4}},
+    {"id": "sub", "type": "text", "text": "kine avatar from-images", "x": "70%", "y": "60%", "size": 44,
+     "font": "IBM Plex Mono", "fill": "$accent2", "at": "maya-say:lined+0.5", "until": "end", "enter": "fade"},
+    {"id": "maya", "use": "avatar", "avatar": "../../examples/avatars/maya", "x": "27%", "y": "56%", "h": 1180,
+     "until": "maya-say.out+2",
+     "say": {"text": "Hi, I'm Maya. I started as fourteen pictures from an image model. Kinescript [[lined]]lined them up, and now I [[talk]]talk, I blink, and I [[look]]look at your work."},
+     "expressions": [{"name": "happy", "at": "maya-say.in", "dur": 1.6},
+                     {"name": "surprise", "at": "maya-say:lined", "dur": 0.8},
+                     {"name": "happy", "at": "maya-say.out", "dur": 1.5}],
+     "gaze": [{"at": 0, "target": "camera"}, {"at": "maya-say:look", "target": "#card"},
+              {"at": "maya-say.out-0.3", "target": "camera"}],
+     "gestures": [{"name": "nod", "at": "maya-say:talk"}, {"name": "tilt", "at": "maya-say.out"}]}
+  ]
+}

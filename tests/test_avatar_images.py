@@ -224,3 +224,29 @@ def test_an_avatar_that_swaps_drawings_renders_the_same_frames_in_any_order(tmp_
     shuffled = Renderer(k.Scene(spec, tmp_path), backend="cpu")
     for n in (25, 6, 14, 3, 19):
         assert np.array_equal(shuffled.frame(n), sequential[n])
+
+
+def test_a_variant_of_another_shape_is_named(tmp_path):
+    square = np.zeros((W, W, 4), np.float32)
+    square[..., 3] = 1
+    got = I.from_images(source(tmp_path / "src", **{"mouth-C": square}))
+    sized = [i for i in got["issues"] if i["code"] == "avatar-source-size"]
+    assert not got["ok"] and len(sized) == 1 and "mouth-C.png" in sized[0]["message"]
+
+
+def test_height_scales_the_avatar_down(tmp_path):
+    src = source(tmp_path / "src")
+    (src / "source.json").write_text(json.dumps({"height": 240}))
+    got = I.from_images(src)
+    assert got["ok"], got["issues"]
+    assert got["size"] == [160, 240] and A.read(src / "avatar")["size"] == [160, 240]
+
+
+def test_webp_parts_keep_their_alpha(tmp_path):
+    src = source(tmp_path / "src")
+    (src / "source.json").write_text(json.dumps({"format": "webp"}))
+    got = I.from_images(src)
+    assert got["ok"], got["issues"]
+    assert A.read(src / "avatar")["parts"]["body"]["src"] == "parts/body.webp"
+    body = I.read_image(src / "avatar" / "parts" / "body.webp")
+    assert body[5, 5, 3] == 0 and body[240, 160, 3] == 1

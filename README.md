@@ -362,6 +362,11 @@ targets by name and whose gestures are its animation clips. `say` gives it a lin
   `kine check` reports a line with no word times, mouth shapes an avatar lacks, and gestures that move the same part
   at once.
 
+`kine avatar from-images FOLDER` builds an avatar from generated pictures: a portrait, then edits of it that change
+only the mouth (nine shapes), the eyes (a blink, looks left and right) or the eyes and brows (expressions). It keys
+out the background, lines each picture up with the portrait and lays what each one changed over it as a patch;
+`--init` writes the prompts. `examples/avatars/maya` was made this way from fourteen Nano Banana 2.1 edits.
+
 `examples/avatar3d.json` is a 3D avatar built from a head that `examples/make_media.py` generates. Drawn avatars cost
 little more to render than still pictures of them (`bench/stress.py avatars-4`). `kine docs avatars` documents the
 format.

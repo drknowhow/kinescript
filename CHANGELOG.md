@@ -6,6 +6,12 @@
   shapes A to H, each made from the base with an image model. The base's background is keyed out, each variant is
   lined up with it, and the region it changed becomes a feathered patch over the base. The report names a picture
   that changed more than its mouth or eyes (`avatar-source-drift`); `--init` writes `PROMPTS.md`, what to generate.
+  `look-left.png` (right, up, down) and `expr-NAME.png` become eye drawings a gaze picks and expressions; a green or
+  blue background is chroma keyed with its spill removed; `source.json` takes `height` and `"format": "webp"`; a
+  picture of another shape is named (`avatar-source-size`).
+- An expression can pick one of a part's drawings (`{"eyes": {"state": "happy"}}`), shown while it lasts. Eyes with
+  `left`, `right`, `up` or `down` drawings and no `look` show the one a gaze points to.
+- `examples/avatars/maya`: a realistic presenter made with `from-images`, and a demo of her on the Avatars page.
 
 ## 2.0.0 (2026-11-07)
 
