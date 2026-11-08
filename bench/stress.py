@@ -541,6 +541,73 @@ def still_8k() -> dict:
     return s
 
 
+AVATARS = [("kine:host", 640), (MEDIA / "head", 480), ("kine:host", 640), (MEDIA / "head", 480)]
+
+
+def _hums(n: int, dur: float = 8.0) -> tuple[str, list]:
+    """A stand-in voice for speaker n: a hum for each of its words, about three a second with pauses, as a wav in
+    WORK and the words with their times, so an avatar talks without a speech engine. Returns (path, words)."""
+    from kinescript.media import FFMPEG
+    WORK.mkdir(parents=True, exist_ok=True)
+    words, t, k = [], 0.2 + 0.15 * n, 0
+    while t < dur - 0.6:
+        w = WORDS[(n * 3 + k) % len(WORDS)]
+        end = round(t + 0.12 + 0.04 * len(w), 3)
+        words.append({"word": w, "start": round(t, 3), "end": end})
+        t, k = end + (0.5 if k % 6 == 5 else 0.05), k + 1
+    hum = "+".join(f"between(t,{x['start']},{x['end']})*sin(2*PI*{150 + 20 * n}*t)" for x in words)
+    path = WORK / f"hum{n}.wav"
+    subprocess.run([FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i", f"aevalsrc='0.3*({hum})':s=48000:d={dur}",
+                    str(path)], check=True)
+    return path.as_posix(), words
+
+
+def _avatar_at(n: int) -> dict:
+    src, h = AVATARS[n]
+    return {"id": f"av{n}", "use": "avatar", "avatar": src if isinstance(src, str) else src.as_posix(),
+            "x": f"{12.5 + 25 * n}%", "y": "55%", "h": h}
+
+
+def avatars_4() -> dict:  # four avatars talking at once, two drawn and two 3D, with expressions, gestures and gaze
+    audio, layers = [], []
+    for n in range(4):
+        src, words = _hums(n)
+        audio.append({"id": f"vo{n}", "role": "voice", "src": src, "words": words})
+        layers.append({**_avatar_at(n), "say": f"vo{n}",
+                       "expressions": [{"name": "smile", "at": 1 + n * 0.3, "dur": 2.5}],
+                       "gestures": [{"name": "nod" if n % 2 else "wave", "at": 3 + 0.4 * n},
+                                    {"name": "shake" if n % 2 else "nod", "at": 5.5 + 0.2 * n}],
+                       "gaze": [{"at": 0, "target": "camera"}, {"at": 4, "target": "right" if n < 2 else "left"},
+                                {"at": 6, "target": "camera"}]})
+    return _scene(layers, dur=8, audio=audio)
+
+
+def avatars_4_quiet() -> dict:  # the same four at rest: no speech, idle life, expressions, gestures or gaze
+    s = avatars_4()
+    for L in s["layers"]:
+        for key in ("say", "expressions", "gestures", "gaze"):
+            L.pop(key)
+        L["idle"] = False
+    return s
+
+
+def avatars_4_still() -> dict:  # the same four as pictures: each drawn once at rest, then shown as an image
+    from kinescript import output
+    WORK.mkdir(parents=True, exist_ok=True)
+    layers = []
+    for n in range(4):
+        png = WORK / f"avatar{n}.png"
+        if not png.exists():
+            one = WORK / f"avatar{n}.json"
+            L = {**_avatar_at(n), "x": "50%", "y": "50%", "idle": False}
+            one.write_text(json.dumps(_scene([L], w=700, h=700, dur=1, bg="transparent")), encoding="utf-8")
+            output.still(str(one), 0, str(png))
+        layers.append({"id": f"av{n}", "type": "image", "src": png.as_posix(), "x": f"{12.5 + 25 * n}%", "y": "55%",
+                       "w": 700, "h": 700})
+    audio = [{"id": f"vo{n}", "role": "voice", "src": _hums(n)[0]} for n in range(4)]
+    return _scene(layers, dur=8, audio=audio)
+
+
 # name: (builder, output extension or "png/" or "still", what it stresses)
 SCENES = {
     "layers-2000": (layers_2000, ".mp4", "2000 shapes, keyframed y, staggered fades: per-layer CPU cost"),
@@ -572,6 +639,9 @@ SCENES = {
     "video-grid": (video_grid, ".mp4", "9 decoded clips at once: trims, speeds, loops, punch-in"),
     "sequence-60": (sequence_60, ".mp4", "60 cuts with transitions: decoder reopen per clip"),
     "audio-40": (audio_40, ".mp4", "music bed, voice, 40 panned clicks, ducking, loudness target"),
+    "avatars-4": (avatars_4, ".mp4", "4 avatars talking at once, 2 drawn and 2 3D: mouths, blinks, gestures, gaze"),
+    "avatars-4-quiet": (avatars_4_quiet, ".mp4", "the same 4 avatars at rest: what drawing them costs before they move"),
+    "avatars-4-still": (avatars_4_still, ".mp4", "the same 4 avatars as still pictures, the baseline for avatars-4"),
     "models-30": (models_30, ".mp4", "30 lit primitives at high detail and 3 glTF rockets"),
     "stage-16": (stage_16, ".mp4", "a stage: 12 rings and 4 cards passing through them, merged by depth per pixel"),
     "textured-100k": (textured_100k, ".mp4", "a textured .obj of 102,400 triangles turning under world light and env"),
@@ -735,7 +805,7 @@ def _fmt(row: dict) -> str:
     check = f"{row['errors']}/{row['warnings']}" if "errors" in row else "-"
     ok = {True: "yes", False: "NO", None: "-"}[row.get("frames_ok")]
     status = "ok" if row["ok"] else f"FAIL at {row.get('stage')}: {row.get('error', '')[:70]}"
-    return (f"{row['scene']:13s} {v('frames', 'd'):>6s} {check:>6s} {v('check_s', '.2f'):>7s} {v('render_s', '.2f'):>8s} "
+    return (f"{row['scene']:15s} {v('frames', 'd'):>6s} {check:>6s} {v('check_s', '.2f'):>7s} {v('render_s', '.2f'):>8s} "
             f"{v('fps', '.0f'):>6s} {v('workers', 'd'):>4s} {v('peak_mb', '.0f'):>7s} {v('size_mb', '.2f'):>7s} "
             f"{ok:>6s}  {status}")
 
@@ -756,7 +826,7 @@ def main():
         return
     if a.list:
         for name, (_, ext, what) in SCENES.items():
-            print(f"{name:13s} {ext:6s} {what}")
+            print(f"{name:15s} {ext:6s} {what}")
         return
     unknown = [n for n in a.names if n not in SCENES]
     if unknown:
@@ -766,7 +836,7 @@ def main():
     git = subprocess.run(["git", "describe", "--always", "--dirty"], cwd=ROOT, capture_output=True, text=True).stdout
     print(f"# {git.strip()} · {platform.processor() or platform.machine()} · {os.cpu_count()} threads · "
           f"Python {platform.python_version()} · scale {a.scale}")
-    print(f"{'scene':13s} {'frames':>6s} {'check':>6s} {'check s':>7s} {'render s':>8s} {'fps':>6s} {'wrk':>4s} "
+    print(f"{'scene':15s} {'frames':>6s} {'check':>6s} {'check s':>7s} {'render s':>8s} {'fps':>6s} {'wrk':>4s} "
           f"{'peak MB':>7s} {'out MB':>7s} {'frames':>6s}  status")
     rows = []
     with tempfile.TemporaryDirectory() as tmp:
