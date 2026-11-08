@@ -1,0 +1,17 @@
+{
+  "canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": "auto", "bg": "$void", "poster": "sam-say:make+0.6"},
+  "layers": [
+    {"id": "card", "type": "text", "text": "Make it move.", "x": "68%", "y": "46%", "size": 130, "weight": 800,
+     "at": "sam-say:make", "until": "end", "enter": {"name": "rise", "dur": 0.4}},
+    {"id": "sub", "type": "text", "text": "A glTF head, its mouth and face as morph targets.", "x": "68%",
+     "y": "58%", "size": 40, "fill": "$muted", "at": "sam-say:make+0.5", "until": "end", "enter": "fade"},
+    {"id": "sam", "use": "avatar", "avatar": "../../examples/media/head", "x": "28%", "y": "54%", "h": 860, "until": "sam-say.out+3",
+     "say": {"text": "Hi, I'm Sam. I'm a [[gltf]]glTF head. Write a line, and I'll [[make]]make it move."},
+     "expressions": [{"name": "smile", "at": "sam-say.in", "dur": 1.4},
+                     {"name": "surprise", "at": "sam-say:gltf", "dur": 0.9},
+                     {"name": "smile", "at": "sam-say:make", "weight": 0.8}],
+     "gaze": [{"at": 0, "target": "camera"}, {"at": "sam-say:make-0.2", "target": "#card"},
+              {"at": "sam-say.out", "target": "camera"}],
+     "gestures": [{"name": "nod", "at": "sam-say:write"}]}
+  ]
+}

@@ -1,0 +1,164 @@
+{
+ "words": [
+  {
+   "word": "Hi,",
+   "start": 0.275,
+   "end": 0.475
+  },
+  {
+   "word": "I'm",
+   "start": 0.5125,
+   "end": 0.7125
+  },
+  {
+   "word": "Sam.",
+   "start": 0.7125,
+   "end": 1.125
+  },
+  {
+   "word": "I'm",
+   "start": 1.2,
+   "end": 1.3625
+  },
+  {
+   "word": "a",
+   "start": 1.3625,
+   "end": 1.4625
+  },
+  {
+   "word": "glTF",
+   "start": 1.4625,
+   "end": 2.25,
+   "id": "gltf"
+  },
+  {
+   "word": "head.",
+   "start": 2.25,
+   "end": 2.725
+  },
+  {
+   "word": "Write",
+   "start": 2.8625,
+   "end": 3.0875
+  },
+  {
+   "word": "a",
+   "start": 3.0875,
+   "end": 3.15
+  },
+  {
+   "word": "line,",
+   "start": 3.15,
+   "end": 3.525
+  },
+  {
+   "word": "and",
+   "start": 3.5625,
+   "end": 3.6625
+  },
+  {
+   "word": "I'll",
+   "start": 3.6625,
+   "end": 3.7625
+  },
+  {
+   "word": "make",
+   "start": 3.7625,
+   "end": 3.9375,
+   "id": "make"
+  },
+  {
+   "word": "it",
+   "start": 3.9375,
+   "end": 4.025
+  },
+  {
+   "word": "move.",
+   "start": 4.025,
+   "end": 4.65
+  }
+ ],
+ "phones": [
+  {
+   "ipa": "hˈI",
+   "start": 0.275,
+   "end": 0.475
+  },
+  {
+   "ipa": "ˌIm",
+   "start": 0.5125,
+   "end": 0.7125
+  },
+  {
+   "ipa": "sˈæm",
+   "start": 0.7125,
+   "end": 1.125
+  },
+  {
+   "ipa": "ˌIm",
+   "start": 1.2,
+   "end": 1.3625
+  },
+  {
+   "ipa": "ɐ",
+   "start": 1.3625,
+   "end": 1.4625
+  },
+  {
+   "ipa": "ʤˌiˈɛl tˌiˈɛf",
+   "start": 1.4625,
+   "end": 2.25
+  },
+  {
+   "ipa": "hˈɛd",
+   "start": 2.25,
+   "end": 2.725
+  },
+  {
+   "ipa": "ɹˈIt",
+   "start": 2.8625,
+   "end": 3.0875
+  },
+  {
+   "ipa": "ɐ",
+   "start": 3.0875,
+   "end": 3.15
+  },
+  {
+   "ipa": "lˈIn",
+   "start": 3.15,
+   "end": 3.525
+  },
+  {
+   "ipa": "ænd",
+   "start": 3.5625,
+   "end": 3.6625
+  },
+  {
+   "ipa": "ˌIl",
+   "start": 3.6625,
+   "end": 3.7625
+  },
+  {
+   "ipa": "mˌAk",
+   "start": 3.7625,
+   "end": 3.9375
+  },
+  {
+   "ipa": "ɪt",
+   "start": 3.9375,
+   "end": 4.025
+  },
+  {
+   "ipa": "mˈuv",
+   "start": 4.025,
+   "end": 4.65
+  }
+ ],
+ "made": {
+  "hash": "2a55973208859c36",
+  "backend": "kokoro",
+  "version": "kokoro 0.9.4, kinescript-kokoro 0.1.0",
+  "speaker": "af_heart"
+ }
+}

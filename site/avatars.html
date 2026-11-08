@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Characters that talk · Kinescript</title>
+<meta name="description" content="Kinescript avatars: a drawn or 3D character whose mouth follows the voice, who blinks and breathes on its own, and who smiles, gestures and looks where the scene says.">
+<meta name="theme-color" content="#0a0c10">
+<link rel="canonical" href="https://drknowhow.github.io/kinescript/avatars.html">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Characters that talk · Kinescript">
+<meta property="og:description" content="Kinescript avatars: a drawn or 3D character whose mouth follows the voice, who blinks and breathes on its own, and who smiles, gestures and looks where the scene says.">
+<meta property="og:url" content="https://drknowhow.github.io/kinescript/avatars.html">
+<meta property="og:image" content="https://raw.githubusercontent.com/drknowhow/kinescript/main/docs/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="assets/favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="assets/favicon-180.png">
+<link rel="preload" href="assets/fonts/SpaceGrotesk-Bold.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="feature">
+<a class="skip" href="#main">Skip to content</a>
+<div class="wrap">
+  <header class="top">
+    <a class="home" href="./" aria-label="Kinescript home"><img src="assets/logo-transparent.svg" alt="kinescript" width="834" height="200"></a>
+    <nav aria-label="Pages"><!--build:nav:avatars.html--><a href="timing.html">Timing</a><a href="motion.html">2D</a><a href="depth.html">3D</a><a href="sound.html">Sound</a><a href="edits.html">Edits</a><a href="agents.html">Agents</a><a href="editor.html">Editor</a><a href="brands.html">Brands</a><a href="avatars.html" aria-current="page">Avatars</a><a href="install.html">Install</a><a class="ext" href="https://github.com/drknowhow/kinescript">GitHub</a><!--/build--></nav>
+  </header>
+
+  <main id="main">
+  <section class="page-head" aria-labelledby="page-title">
+    <h1 id="page-title">Characters that talk.</h1>
+    <p class="sub">An avatar is a character drawn once, as SVG parts or as a glTF model, in a folder with an <code>avatar.json</code>. A scene gives it a line, and its mouth follows the words. It blinks, breathes and glances on its own, and smiles, points and looks where the scene says, each on a cue.</p>
+  </section>
+
+  <div class="page-body">
+
+    <article class="demo" id="host-demo">
+      <div class="demo-head">
+        <h2>The built-in host presents a chart</h2>
+        <p><code>"avatar": "kine:host"</code> is the starter: a plain figure in the scene's palette with all nine mouth shapes, speaking with Kokoro. The line is text in the scene; <code>kine voice</code> speaks it, and its marked words cue the chart, the glance at it, the point and the surprise.</p>
+      </div>
+      <figure class="player" data-name="avatar host">
+        <div class="screen"><video src="demos/avatar-host.mp4" poster="demos/avatar-host.jpg" width="960" height="540" autoplay muted loop playsinline controls preload="metadata" aria-label="The built-in host waves, says a line about sales while a bar chart grows beside it, looks at the chart and points at the third quarter, then nods. With sound."></video></div>
+        <div class="deck"><button type="button" data-play>Pause</button><button type="button" data-sound aria-pressed="false">Sound on</button><span class="tc">0.0 s</span></div>
+        <!--build:score:avatar-host--><ol class="score" data-dur="8.65" style="--dur:8.65" aria-label="Timeline of avatar-host.json, 8.65 s"><li><span class="sid">sales</span><span class="track"><span class="bar" data-in="1.725" data-out="8.65" title="sales: 1.725 s to 8.65 s" style="left:19.94%;width:80.06%"><i style="left:1.73%"></i><i style="left:3.47%"></i><i style="left:5.20%"></i></span></span></li><li><span class="sid">host</span><span class="track"><span class="bar" data-in="0" data-out="8.65" title="host: 0 s to 8.65 s" style="left:0.00%;width:100.00%"></span></span></li><li class="snd"><span class="sid">host-say</span><span class="track"><span class="bar" data-in="0" data-out="7.15" title="host-say (voice): 0 s to 7.15 s" style="left:0.00%;width:82.66%"><i style="left:4.20%"></i><i style="left:8.39%"></i><i style="left:10.66%"></i><i style="left:11.89%"></i><i style="left:24.13%"></i><i style="left:30.07%"></i><i style="left:33.57%"></i><i style="left:37.06%"></i><i style="left:41.96%"></i><i style="left:43.52%"></i><i style="left:44.92%"></i><i style="left:48.95%"></i><i style="left:54.55%"></i><i style="left:56.81%"></i><i style="left:58.04%"></i><i style="left:62.42%"></i><i style="left:71.16%"></i><i style="left:75.17%"></i><i style="left:76.92%"></i><i style="left:83.22%"></i><i style="left:84.78%"></i><i style="left:86.90%"></i><i style="left:90.39%"></i></span></span></li><li class="ruler" aria-hidden="true"><span class="sid"></span><span class="track"><span class="t0">0 s</span><span class="t1" style="left:100.00%">8.65 s</span></span></li></ol><!--/build-->
+      </figure>
+      <div class="pane">
+        <div class="pane-head"><a href="demos/avatar-host.json">avatar-host.json</a><span>the whole scene</span></div>
+        <pre class="code"><code><!--build:json:avatar-host--><span class="ln">{</span><span class="ln">  <span class="k">&quot;canvas&quot;</span>: {<span class="k">&quot;w&quot;</span>: <span class="n">1920</span>, <span class="k">&quot;h&quot;</span>: <span class="n">1080</span>, <span class="k">&quot;fps&quot;</span>: <span class="n">30</span>, <span class="k">&quot;duration&quot;</span>: <span class="s">&quot;auto&quot;</span>, <span class="k">&quot;bg&quot;</span>: <span class="s">&quot;$void&quot;</span>, <span class="k">&quot;poster&quot;</span>: <span class="s">&quot;host-say:third&quot;</span>},</span><span class="ln">  <span class="k">&quot;layers&quot;</span>: [</span><span class="ln">    {<span class="k">&quot;use&quot;</span>: <span class="s">&quot;barChart&quot;</span>, <span class="k">&quot;id&quot;</span>: <span class="s">&quot;sales&quot;</span>, <span class="k">&quot;data&quot;</span>: [[<span class="s">&quot;Q1&quot;</span>, <span class="n">42</span>], [<span class="s">&quot;Q2&quot;</span>, <span class="n">58</span>], [<span class="s">&quot;Q3&quot;</span>, <span class="n">91</span>], [<span class="s">&quot;Q4&quot;</span>, <span class="n">64</span>]],</span><span class="ln">     <span class="k">&quot;x&quot;</span>: <span class="s">&quot;66%&quot;</span>, <span class="k">&quot;y&quot;</span>: <span class="s">&quot;52%&quot;</span>, <span class="k">&quot;w&quot;</span>: <span class="n">980</span>, <span class="k">&quot;h&quot;</span>: <span class="n">600</span>, <span class="k">&quot;at&quot;</span>: <span class="c">&quot;host-say:sales&quot;</span>, <span class="k">&quot;until&quot;</span>: <span class="c">&quot;end&quot;</span>},</span><span class="ln">    {<span class="k">&quot;id&quot;</span>: <span class="s">&quot;host&quot;</span>, <span class="k">&quot;use&quot;</span>: <span class="s">&quot;avatar&quot;</span>, <span class="k">&quot;avatar&quot;</span>: <span class="s">&quot;kine:host&quot;</span>, <span class="k">&quot;x&quot;</span>: <span class="s">&quot;20%&quot;</span>, <span class="k">&quot;y&quot;</span>: <span class="s">&quot;58%&quot;</span>, <span class="k">&quot;h&quot;</span>: <span class="n">900</span>,</span><span class="ln">     <span class="k">&quot;until&quot;</span>: <span class="c">&quot;host-say.out+1.5&quot;</span>,</span><span class="ln">     <span class="k">&quot;say&quot;</span>: {<span class="k">&quot;text&quot;</span>: <span class="s">&quot;Hi, I&#x27;m the host. [[sales]]Sales grew all year, and the [[third]]third quarter was the best one. Write the line, and I [[say]]say it.&quot;</span>},</span><span class="ln">     <span class="k">&quot;expressions&quot;</span>: [{<span class="k">&quot;name&quot;</span>: <span class="s">&quot;smile&quot;</span>, <span class="k">&quot;at&quot;</span>: <span class="c">&quot;host-say.in&quot;</span>, <span class="k">&quot;dur&quot;</span>: <span class="n">1.2</span>},</span><span class="ln">                     {<span class="k">&quot;name&quot;</span>: <span class="s">&quot;surprise&quot;</span>, <span class="k">&quot;at&quot;</span>: <span class="c">&quot;host-say:third&quot;</span>, <span class="k">&quot;dur&quot;</span>: <span class="n">1.2</span>},</span><span class="ln">                     {<span class="k">&quot;name&quot;</span>: <span class="s">&quot;happy&quot;</span>, <span class="k">&quot;at&quot;</span>: <span class="c">&quot;host-say:say&quot;</span>}],</span><span class="ln">     <span class="k">&quot;gaze&quot;</span>: [{<span class="k">&quot;at&quot;</span>: <span class="n">0</span>, <span class="k">&quot;target&quot;</span>: <span class="s">&quot;camera&quot;</span>}, {<span class="k">&quot;at&quot;</span>: <span class="c">&quot;host-say:sales-0.2&quot;</span>, <span class="k">&quot;target&quot;</span>: <span class="s">&quot;#sales&quot;</span>},</span><span class="ln">              {<span class="k">&quot;at&quot;</span>: <span class="c">&quot;host-say:say-0.3&quot;</span>, <span class="k">&quot;target&quot;</span>: <span class="s">&quot;camera&quot;</span>}],</span><span class="ln">     <span class="k">&quot;gestures&quot;</span>: [{<span class="k">&quot;name&quot;</span>: <span class="s">&quot;wave&quot;</span>, <span class="k">&quot;at&quot;</span>: <span class="c">&quot;host-say.in&quot;</span>}, {<span class="k">&quot;name&quot;</span>: <span class="s">&quot;point&quot;</span>, <span class="k">&quot;at&quot;</span>: <span class="c">&quot;host-say:third&quot;</span>},</span><span class="ln">                  {<span class="k">&quot;name&quot;</span>: <span class="s">&quot;nod&quot;</span>, <span class="k">&quot;at&quot;</span>: <span class="c">&quot;host-say:say&quot;</span>}]}</span><span class="ln">  ]</span><span class="ln">}</span><!--/build--></code></pre>
+      </div>
+    </article>
+
+    <article class="demo" id="model-demo">
+      <div class="demo-head">
+        <h2>A 3D avatar from a glTF file</h2>
+        <p>Its mouth shapes, blink and expressions are the model's morph targets by name, its gestures are the model's animation clips, and a gaze turns the model. This head is generated by <code>examples/make_media.py</code>, so the example needs no downloaded model.</p>
+      </div>
+      <figure class="player" data-name="avatar 3D">
+        <div class="screen"><video src="demos/avatar-3d.mp4" poster="demos/avatar-3d.jpg" width="960" height="540" autoplay muted loop playsinline controls preload="metadata" aria-label="A round 3D head smiles, says a line, looks surprised on the word glTF, nods, and turns toward the title Make it move as it appears. With sound."></video></div>
+        <div class="deck"><button type="button" data-play>Pause</button><button type="button" data-sound aria-pressed="false">Sound on</button><span class="tc">0.0 s</span></div>
+        <!--build:score:avatar-3d--><ol class="score" data-dur="7.925" style="--dur:7.925" aria-label="Timeline of avatar-3d.json, 7.925 s"><li><span class="sid">card</span><span class="track"><span class="bar" data-in="3.763" data-out="7.925" title="card: 3.763 s to 7.925 s" style="left:47.48%;width:52.52%"></span></span></li><li><span class="sid">sub</span><span class="track"><span class="bar" data-in="4.263" data-out="7.925" title="sub: 4.263 s to 7.925 s" style="left:53.79%;width:46.21%"></span></span></li><li><span class="sid">sam</span><span class="track"><span class="bar" data-in="0" data-out="7.925" title="sam: 0 s to 7.925 s" style="left:0.00%;width:100.00%"></span></span></li><li class="snd"><span class="sid">sam-say</span><span class="track"><span class="bar" data-in="0" data-out="4.925" title="sam-say (voice): 0 s to 4.925 s" style="left:0.00%;width:62.15%"><i style="left:5.58%"></i><i style="left:10.40%"></i><i style="left:14.48%"></i><i style="left:24.37%"></i><i style="left:27.68%"></i><i style="left:29.69%"></i><i style="left:45.69%"></i><i style="left:58.11%"></i><i style="left:62.68%"></i><i style="left:63.96%"></i><i style="left:72.32%"></i><i style="left:74.38%"></i><i style="left:76.41%"></i><i style="left:79.96%"></i><i style="left:81.73%"></i></span></span></li><li class="ruler" aria-hidden="true"><span class="sid"></span><span class="track"><span class="t0">0 s</span><span class="t1" style="left:100.00%">7.925 s</span></span></li></ol><!--/build-->
+      </figure>
+      <div class="pane">
+        <div class="pane-head"><a href="demos/avatar-3d.json">avatar-3d.json</a><span>the whole scene</span></div>
+        <pre class="code"><code><!--build:json:avatar-3d--><span class="ln">{</span><span class="ln">  <span class="k">&quot;canvas&quot;</span>: {<span class="k">&quot;w&quot;</span>: <span class="n">1920</span>, <span class="k">&quot;h&quot;</span>: <span class="n">1080</span>, <span class="k">&quot;fps&quot;</span>: <span class="n">30</span>, <span class="k">&quot;duration&quot;</span>: <span class="s">&quot;auto&quot;</span>, <span class="k">&quot;bg&quot;</span>: <span class="s">&quot;$void&quot;</span>, <span class="k">&quot;poster&quot;</span>: <span class="s">&quot;sam-say:make+0.6&quot;</span>},</span><span class="ln">  <span class="k">&quot;layers&quot;</span>: [</span><span class="ln">    {<span class="k">&quot;id&quot;</span>: <span class="s">&quot;card&quot;</span>, <span class="k">&quot;type&quot;</span>: <span class="s">&quot;text&quot;</span>, <span class="k">&quot;text&quot;</span>: <span class="s">&quot;Make it move.&quot;</span>, <span class="k">&quot;x&quot;</span>: <span class="s">&quot;68%&quot;</span>, <span class="k">&quot;y&quot;</span>: <span class="s">&quot;46%&quot;</span>, <span class="k">&quot;size&quot;</span>: <span class="n">130</span>, <span class="k">&quot;weight&quot;</span>: <span class="n">800</span>,</span><span class="ln">     <span class="k">&quot;at&quot;</span>: <span class="c">&quot;sam-say:make&quot;</span>, <span class="k">&quot;until&quot;</span>: <span class="c">&quot;end&quot;</span>, <span class="k">&quot;enter&quot;</span>: {<span class="k">&quot;name&quot;</span>: <span class="s">&quot;rise&quot;</span>, <span class="k">&quot;dur&quot;</span>: <span class="n">0.4</span>}},</span><span class="ln">    {<span class="k">&quot;id&quot;</span>: <span class="s">&quot;sub&quot;</span>, <span class="k">&quot;type&quot;</span>: <span class="s">&quot;text&quot;</span>, <span class="k">&quot;text&quot;</span>: <span class="s">&quot;A glTF head, its mouth and face as morph targets.&quot;</span>, <span class="k">&quot;x&quot;</span>: <span class="s">&quot;68%&quot;</span>,</span><span class="ln">     <span class="k">&quot;y&quot;</span>: <span class="s">&quot;58%&quot;</span>, <span class="k">&quot;size&quot;</span>: <span class="n">40</span>, <span class="k">&quot;fill&quot;</span>: <span class="s">&quot;$muted&quot;</span>, <span class="k">&quot;at&quot;</span>: <span class="c">&quot;sam-say:make+0.5&quot;</span>, <span class="k">&quot;until&quot;</span>: <span class="c">&quot;end&quot;</span>, <span class="k">&quot;enter&quot;</span>: <span class="s">&quot;fade&quot;</span>},</span><span class="ln">    {<span class="k">&quot;id&quot;</span>: <span class="s">&quot;sam&quot;</span>, <span class="k">&quot;use&quot;</span>: <span class="s">&quot;avatar&quot;</span>, <span class="k">&quot;avatar&quot;</span>: <span class="s">&quot;../../examples/media/head&quot;</span>, <span class="k">&quot;x&quot;</span>: <span class="s">&quot;28%&quot;</span>, <span class="k">&quot;y&quot;</span>: <span class="s">&quot;54%&quot;</span>, <span class="k">&quot;h&quot;</span>: <span class="n">860</span>, <span class="k">&quot;until&quot;</span>: <span class="c">&quot;sam-say.out+3&quot;</span>,</span><span class="ln">     <span class="k">&quot;say&quot;</span>: {<span class="k">&quot;text&quot;</span>: <span class="s">&quot;Hi, I&#x27;m Sam. I&#x27;m a [[gltf]]glTF head. Write a line, and I&#x27;ll [[make]]make it move.&quot;</span>},</span><span class="ln">     <span class="k">&quot;expressions&quot;</span>: [{<span class="k">&quot;name&quot;</span>: <span class="s">&quot;smile&quot;</span>, <span class="k">&quot;at&quot;</span>: <span class="c">&quot;sam-say.in&quot;</span>, <span class="k">&quot;dur&quot;</span>: <span class="n">1.4</span>},</span><span class="ln">                     {<span class="k">&quot;name&quot;</span>: <span class="s">&quot;surprise&quot;</span>, <span class="k">&quot;at&quot;</span>: <span class="c">&quot;sam-say:gltf&quot;</span>, <span class="k">&quot;dur&quot;</span>: <span class="n">0.9</span>},</span><span class="ln">                     {<span class="k">&quot;name&quot;</span>: <span class="s">&quot;smile&quot;</span>, <span class="k">&quot;at&quot;</span>: <span class="c">&quot;sam-say:make&quot;</span>, <span class="k">&quot;weight&quot;</span>: <span class="n">0.8</span>}],</span><span class="ln">     <span class="k">&quot;gaze&quot;</span>: [{<span class="k">&quot;at&quot;</span>: <span class="n">0</span>, <span class="k">&quot;target&quot;</span>: <span class="s">&quot;camera&quot;</span>}, {<span class="k">&quot;at&quot;</span>: <span class="c">&quot;sam-say:make-0.2&quot;</span>, <span class="k">&quot;target&quot;</span>: <span class="s">&quot;#card&quot;</span>},</span><span class="ln">              {<span class="k">&quot;at&quot;</span>: <span class="c">&quot;sam-say.out&quot;</span>, <span class="k">&quot;target&quot;</span>: <span class="s">&quot;camera&quot;</span>}],</span><span class="ln">     <span class="k">&quot;gestures&quot;</span>: [{<span class="k">&quot;name&quot;</span>: <span class="s">&quot;nod&quot;</span>, <span class="k">&quot;at&quot;</span>: <span class="c">&quot;sam-say:write&quot;</span>}]}</span><span class="ln">  ]</span><span class="ln">}</span><!--/build--></code></pre>
+      </div>
+    </article>
+
+    <div class="tool" id="sheet">
+      <div class="tool-head">
+        <h2>Every pose on one sheet: <code>kine look FOLDER</code></h2>
+        <p>An agent cannot watch a mouth move, so the sheet shows each mouth shape (and what a missing one falls back to), the eyes closed and looking aside, each expression, and each gesture where it moves most. A broken pivot or a missing shape shows here before a render. <code>kine avatar check FOLDER</code> lists the same problems as text.</p>
+      </div>
+      <div class="demo-grid even">
+        <figure class="sheet">
+          <a href="media/avatar-sheet.jpg"><img src="media/avatar-sheet.jpg" loading="lazy" alt="The built-in host's pose sheet: neutral, the nine mouth shapes, eyes closed, looking left and right, the five expressions and the six gestures, each in its own labelled cell."></a>
+          <figcaption>The built-in host: nine mouths, five expressions, six gestures.</figcaption>
+        </figure>
+        <figure class="sheet">
+          <a href="media/avatar-sheet-3d.jpg"><img src="media/avatar-sheet-3d.jpg" loading="lazy" alt="The 3D head's pose sheet: the mouth shapes as morph weights, eyes closed, looking left and right, smile and surprise, and the nod and shake clips."></a>
+          <figcaption>The 3D head: the same poses, as morph weights and clips.</figcaption>
+        </figure>
+      </div>
+    </div>
+
+    <dl class="features">
+      <div><dt>Mouths from words</dt><dd>A voice's word times become mouth shapes by spelling rules, with Kokoro's phonemes where it gives them. <code>kine probe --mouth</code> shows the track; <code>kine check</code> says when a line has no word times and the mouth only follows loudness.</dd></div>
+      <div><dt>Idle life</dt><dd>Blinks, breathing and small glances, timed from the layer's id and seed, so every render of a frame is the same. No blink lands as a line starts or at a gesture's peak.</dd></div>
+      <div><dt>Acting on cues</dt><dd><code>expressions</code>, <code>gestures</code> and <code>gaze</code> are lists on the layer, each at a cue such as <code>"host-say:third"</code>. Kinescript checks them; you write them.</dd></div>
+      <div><dt>Your own avatar</dt><dd><code>kine avatar new FOLDER</code> copies the host as SVG parts to redraw. Colours can be palette roles, so an avatar takes the scene's brand, and a brand can name avatars and their voices.</dd></div>
+      <div><dt>Recorded speech</dt><dd><code>say</code> also takes a sound in <code>audio</code>, recorded or spoken, with a words file, so a real voice-over drives the mouth too.</dd></div>
+      <div><dt>Cost</dt><dd>A drawn avatar costs little more than a still picture of it. A 3D head costs what any model of its size costs, moving or not.</dd></div>
+    </dl>
+  </div>
+  <nav class="pager" aria-label="Previous and next pages"><!--build:pager:avatars.html--><a class="prev" href="brands.html"><span>Previous</span>Brands</a><a class="next" href="install.html"><span>Next</span>Install</a><!--/build--></nav>
+  </main>
+
+  <footer>
+    <span class="brand"><img src="assets/mark.svg" alt="" width="200" height="200">Kinescript 2.0.0, MIT licence</span>
+    <nav aria-label="Project links">
+      <a href="https://github.com/drknowhow/kinescript">Source</a>
+      <a href="https://pypi.org/project/kinescript/">PyPI</a>
+      <a href="https://github.com/drknowhow/kinescript/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/drknowhow/kinescript/blob/main/LICENSE">Licence</a>
+    </nav>
+  </footer>
+</div>
+<script src="site.js"></script>
+</body>
+</html>

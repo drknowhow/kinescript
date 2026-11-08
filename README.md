@@ -46,6 +46,7 @@ rendered from.
   grain; optional motion blur.
 - **Components.** `lowerThird`, `titleCard`, `callout`, `focus` (dim everything but a region), `progress`,
   `kinetic`, the charts `barChart`, `lineChart` and `pieChart`, plus your own with `{{param}}` placeholders.
+- **Avatars.** A drawn or glTF character that says a line with its mouth following the words, blinks and breathes on its own, and smiles, gestures and looks on cues ([Avatars](https://github.com/drknowhow/kinescript#avatars)).
 - **Review on the frame.** `kine edit scene.json` opens the scene in the browser: click a layer to change its values or drag it, comment on a layer, a word of the voice or the whole scene, draw on the frame, and the agent reads the notes back ([Editor](https://github.com/drknowhow/kinescript#editor)).
 - **Outputs.** H.264 `.mp4`, ProRes 4444 `.mov` and VP9 `.webm` with alpha for compositing, `.gif`, PNG sequences.
 
@@ -332,6 +333,38 @@ Brands live in a library, `~/.kinescript/brands` (`KINE_BRANDS` moves it):
 
 The wizard, `kine brand` and the `kine_brand` MCP tool make every change through the same code, so an agent can do
 all of it. `kine docs brands` documents the format.
+
+## Avatars
+
+<p align="center"><img src="https://raw.githubusercontent.com/drknowhow/kinescript/main/site/demos/avatar-host.jpg" width="440" alt="The built-in host, a plain figure in an orange shirt, points at a bar chart whose third bar is highest"> <img src="https://raw.githubusercontent.com/drknowhow/kinescript/main/site/demos/avatar-3d.jpg" width="440" alt="A round 3D head with an orange shirt turns toward the title Make it move"></p>
+
+An avatar is a character drawn once, in a folder with an `avatar.json`, that a scene makes talk. A drawn avatar is SVG
+parts on pivots with nine mouth shapes; a 3D one is a glTF file whose mouth shapes, blink and expressions are morph
+targets by name and whose gestures are its animation clips. `say` gives it a line, and its mouth follows the words:
+
+```json
+{"id": "host", "use": "avatar", "avatar": "kine:host", "x": "20%", "y": "58%", "h": 900,
+ "say": {"text": "Sales grew all year, and the [[third]]third quarter was the best one."},
+ "expressions": [{"name": "surprise", "at": "host-say:third", "dur": 1.2}],
+ "gaze": [{"at": 0, "target": "camera"}, {"at": "host-say:third", "target": "#sales"}],
+ "gestures": [{"name": "point", "at": "host-say:third"}]}
+```
+
+- `kine voice` speaks the line and writes its word times and a mouth track (`kine probe --mouth`): shapes from
+  Kokoro's phonemes where it gives them, otherwise from each word's spelling. A recorded voice with a words file
+  works the same way.
+- Expressions, gestures and gaze are lists on the layer, each at a cue. Between them the avatar blinks, breathes and
+  glances, at times taken from its id and seed, so every render of a frame is the same.
+- `"avatar": "kine:host"` is the built-in starter, a plain friendly figure in the scene's palette, with five
+  expressions and six gestures. `kine avatar new avatars/mine` copies it as SVG parts to redraw. A brand can name
+  avatars and their voices (`"avatar": "brand:host"`).
+- `kine look avatars/mine` draws every pose on one sheet, and `kine avatar check` lists a folder's problems.
+  `kine check` reports a line with no word times, mouth shapes an avatar lacks, and gestures that move the same part
+  at once.
+
+`examples/avatar3d.json` is a 3D avatar built from a head that `examples/make_media.py` generates. Drawn avatars cost
+little more to render than still pictures of them (`bench/stress.py avatars-4`). `kine docs avatars` documents the
+format.
 
 ## Install
 

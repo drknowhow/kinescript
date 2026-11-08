@@ -1,5 +1,43 @@
 # Changelog
 
+## 2.0.0 (2026-11-07)
+
+Avatars: characters that talk, drawn or 3D, whose mouths follow the voice.
+
+- An avatar is a folder with an `avatar.json`. A drawn one is SVG, PNG or WebP parts on pivots, each drawn at the
+  avatar's full size, with eyes that blink and look aside and a mouth of nine shapes (X, A to H; B, E to H fall back
+  when missing). `colors` maps SVG piece ids to colours or palette roles. `kine avatar check FOLDER` reports a
+  folder's problems and lists what it has; `kine look FOLDER` draws every pose on one sheet with pivots marked.
+- A scene draws one with `{"use": "avatar", "avatar": "FOLDER"}`, centred on x and y and `h` (or `w`) pixels tall.
+  `say` makes it talk: a line of text (spoken by `kine voice` as the sound `<id>-say`), a sound's id (recorded speech
+  too), or a list of them. Other layers cue from its words, such as `"at": "host-say:render"`.
+- Mouth tracks: `kine voice` writes a `.mouth.json` beside each voice's words file, with shapes from the backend's
+  phonemes where it gives them (Kokoro does) and otherwise from each word's spelling, closing on pauses. With no word
+  times the mouth follows loudness. `kine probe scene.json --mouth vo1` prints a track.
+- `expressions`, `gaze` and `gestures` are lists on the layer, each at a cue or time. An expression comes on over
+  0.2 s and adds to the parts' offsets; gaze moves the eyes to camera, a side, a point or a layer (`"#chart"`); a
+  gesture plays its keys.
+- Idle life: blinks (sometimes double), small glances and breathing, timed from the layer's id and `seed` so every
+  render of a frame is the same, and kept clear of a line's start and a gesture's peak. `"idle": false` stops them.
+- `"avatar": "kine:host"` is the built-in starter: a plain friendly figure whose shirt, hair, brows and outline are
+  palette roles, with all nine mouths, the expressions smile, happy, think, surprise and sad, the gestures nod, shake,
+  tilt, wave, point and shrug, and Kokoro's af_heart voice. `kine avatar new FOLDER` copies it to redraw.
+- Brands can name avatars, with a voice and idle settings for each (`"avatar": "brand:host"`), and the brand wizard
+  has an Avatars tab.
+- 3D avatars: `"model": {"src": "face.glb"}` in place of parts. Mouth shapes, blink and expressions are morph target
+  weights by name, gestures are the model's clips, and a gaze turns the model (`look` sets how far).
+- Model layers take `morphs` (morph target weights by name, keyframed) and `clips` (the file's clips played once over
+  its animation, from a cue, faded in and out). `kine check` names a morph or clip the file lacks.
+- `kine check` reports `mouth-approximate`, `mouth-unknown-words`, `mouth-stale`, `avatar-missing-shape`,
+  `avatar-gaze-target` and `avatar-gesture-overlap`.
+- `kine docs avatars` and `kine docs brands` print those references on their own, and the MCP `kine_docs` tool takes
+  a `topic`; the main reference points to both.
+- `examples/avatar3d.json` and a generated 3D head (`examples/make_media.py`). `bench/stress.py` has `avatars-4`,
+  `avatars-4-quiet` and `avatars-4-still`: on the development machine the drawn avatars render at 1.17x the frame
+  time of still pictures of them, and talking costs 1.05x the same avatars at rest. The 3D heads cost what their
+  triangles cost to draw, moving or not.
+- The site has an Avatars page, the README an Avatars section, and the agent skill a section on avatars.
+
 ## 1.9.0 (2026-11-07)
 
 Brands: define a brand once and every video made with it follows it. The plan and its ten steps are in
