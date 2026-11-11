@@ -300,7 +300,12 @@ def _run(a) -> int:
         from .scene import Scene
         import shutil
         tools = {name: shutil.which(path) for name, path in (("ffmpeg", media.FFMPEG), ("ffprobe", media.FFPROBE))}
-        info = {"version": __version__, **tools, "backend": backend_setting(), "gpu": gpu_context() is not None}
+        from . import gl3d
+        gpu = gpu_context() is not None
+        info = {"version": __version__, **tools, "backend": backend_setting(), "gpu": gpu,
+                "models": "opengl" if gpu and gl3d.ready() else "skia"}
+        if gpu and info["models"] == "skia" and gl3d.setting() != "skia":
+            info["note"] = 'model layers draw faster on OpenGL: pip install "kinescript[gl]"'
         r = Renderer(Scene({"canvas": {"w": 64, "h": 64}, "layers": [{"type": "text", "text": "kine"}]}))
         info["font"] = r._typeface(r.s.theme["font"], 600, False).getFamilyName()
         missing = media.missing_tools()

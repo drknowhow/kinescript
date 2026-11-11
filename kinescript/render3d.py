@@ -11,7 +11,7 @@ import numpy as np
 import skia
 
 from . import color as C
-from . import media, mesh, models, schema, space, svgpath
+from . import gl3d, media, mesh, models, schema, space, svgpath
 from .props import PLACE, PLACE_DEFAULT, compile_prop
 
 MATERIAL = ("fill", "shine", "metal", "rim", "bands", "glow", "texture", "transparency")
@@ -1404,6 +1404,11 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
     amt = 1.0 if grows else amt
     lt, more, env = _lighting(r, L, m, t, scene_t)
     fg = fog(r, scene_t) if r._stage is None else None  # a stage fogs each pixel it shows
+    edging = _edging(r, L, t, scene_t)
+    ex = float(g("explode", 0.0))
+    if gl3d.available(r) and gl3d.fits(mats, texs, glows, ex, edging):
+        order = _fixed(r, L, m, "order", lambda: mesh.build_order(m)) if amt < 1.0 else None
+        return gl3d.draw(r, c, L, m, mats, (lt, more, env), fg, edging, amt, order)
     P, N, T, M = m.P, m.N, m.T, m.M
     U = None  # texture coordinates, when any material has a texture (a file without them: check says no-uvs)
     if any(tx is not None for tx in texs + glows):
@@ -1412,9 +1417,7 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
     if amt < 1.0:
         tid = _fixed(r, L, m, "order", lambda: mesh.build_order(m))[:math.ceil(amt * len(T))]
         T = T[tid]
-    edging = _edging(r, L, t, scene_t)
     ids = np.arange(len(T)) if isinstance(tid, slice) else tid  # the same, kept through the culls for the edges
-    ex = float(g("explode", 0.0))
     if ex > 0 and len(T):
         # Each face flies out along its own normal, some further than others (a fixed per-face hash).
         fn, jitter, extent = _fixed(r, L, m, "explode", lambda: _faces(m))

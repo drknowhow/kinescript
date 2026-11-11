@@ -9,7 +9,8 @@ JSON scenes in, video out.
   with `KINE_BACKEND=cpu`; the README's Install section lists them. The maintainer's venv is `.venv` (Python 3.14):
   `.venv/Scripts/kine`, `.venv/Scripts/python -m pytest`.
 - Engine: `kinescript/` — `timing.py` (cue references), `props.py` (keyframes, tweens, AST-checked expressions),
-  `scene.py` (loading, components, sequences), `render.py` (Skia, GPU via hidden glfw OpenGL context, CPU fallback),
+  `scene.py` (loading, components, sequences), `render.py` (Skia, GPU via hidden glfw OpenGL context, CPU fallback), `render3d.py` (model layers
+  in Skia), `gl3d.py` (model layers on OpenGL via moderngl, on the GPU backend),
   `output.py` (parallel chunked ffmpeg encode + audio mix), `verify.py` (check/look/probe), `mcp.py`, `cli.py`.
 - Frames must stay a pure function of (scene, frame number); `tests/test_core.py::test_frame_is_pure_function_of_index`
   guards it. Do not add state carried between frames.
