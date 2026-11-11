@@ -160,9 +160,9 @@ WALK_ALIAS = {"n": "steps", "count": "steps", "length": "step", "stepLength": "s
 RAYS_ALIAS = {"n": "count", "number": "count", "len": "length", "size": "length", "random": "seed",
               "start": "inner", "from": "inner", "offset": "inner", "r": "inner"}
 
-COMMON = {"id", "type", "at", "dur", "until", "x", "y", "anchor", "opacity", "scale", "scaleX", "scaleY", "rotate",
-          "blur", "blend", "shadow", "fx", "enter", "exit", "emphasis", "hidden", "allowOffscreen", "z", "rotateX",
-          "rotateY",
+COMMON = {"id", "type", "at", "dur", "until", "x", "y", "anchor", "opacity", "wash", "scale", "scaleX", "scaleY",
+          "rotate", "blur", "blend", "shadow", "fx", "enter", "exit", "emphasis", "hidden", "allowOffscreen", "z",
+          "rotateX", "rotateY",
           "backface", "fixed", "sound", "along", "mask", "glow", "outline", "innerShadow", "displace", "pin"}
 # Layer effects: their keys, the key a number (or a colour) stands for, the keys that animate and their aliases.
 LOOKS = {
@@ -326,7 +326,7 @@ COLOR_KEYS = {"fill", "stroke", "emph", "active", "unitFill"}
 # Objects some tools nest animated values under; their keys belong on the layer itself.
 WRAPPERS = {"tween", "tweens", "keyframes", "animate", "animation", "animations", "props", "properties", "style"}
 # Props whose value must be one number (after % and expressions are resolved).
-SCALAR = {"x", "y", "w", "h", "r", "opacity", "scale", "scaleX", "scaleY", "rotate", "blur", "size", "weight",
+SCALAR = {"x", "y", "w", "h", "r", "opacity", "wash", "scale", "scaleX", "scaleY", "rotate", "blur", "size", "weight",
           "strokeWidth", "draw", "drawStart", "zoom", "value", "radius", "dimOutside", "sides", "inner", "x1", "y1",
           "x2", "y2", "bend", "head", "maxWidth", "lineHeight", "letterSpacing", "focusX", "focusY", "speed",
           "unitX", "unitY", "unitRotate", "unitScale", "unitOpacity", "unitBlur", "z", "rotateX", "rotateY", "fov",

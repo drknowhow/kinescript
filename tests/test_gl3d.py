@@ -159,3 +159,15 @@ def test_moving_copies_drawn_in_part_follow_the_build_order_of_each_frame(monkey
     later = r.frame(40)[..., :3]
     assert r.on_gl == {"dots"}
     assert np.array_equal(later, renderer(spec, monkeypatch).frame(40)[..., :3])
+
+
+def test_a_washed_model_and_its_lines_mix_toward_the_paper_on_both_paths(monkeypatch):
+    """wash mixes the drawn model, lines and all, toward the canvas background and keeps it opaque."""
+    plain, washed = scene([ball()]), scene([ball(wash=0.6)])
+    a, b, gl = both(washed, monkeypatch)
+    assert gl == {"ball"}
+    close(a, b)
+    full = renderer(plain, monkeypatch, "skia").frame(0)[..., :3].astype(float)
+    paper = np.array([0xf4, 0xef, 0xe6], float)
+    mask = np.abs(full - paper).max(-1) > 30  # where the ball draws
+    assert np.abs(full[mask] * 0.4 + paper * 0.6 - a[mask]).mean() < 2

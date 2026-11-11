@@ -95,27 +95,33 @@ def test_tour_is_checked():
     assert any(i["level"] == "error" for i in check(nested)["issues"])
 
 
-def test_dim_fades_the_models_a_stop_does_not_focus():
-    def ball(lid, x, fill):
-        return {"id": lid, "type": "model", "x": x, "y": 180, "light": "flat", "shape": "sphere", "r": 40, "fill": fill}
-    spec = scene([ball("a", 220, "#ff0000"), ball("b", 420, "#0000ff"),
+def test_dim_washes_out_the_models_a_stop_does_not_focus():
+    def ball(lid, x, fill, r=40):
+        return {"id": lid, "type": "model", "x": x, "y": 180, "light": "flat", "shape": "sphere", "r": r, "fill": fill}
+    # c sits behind b: a dimmed b must hide it, as an opaque part of the background of the shot does.
+    spec = scene([ball("a", 220, "#ff0000"), ball("c", 420, "#ff0000", 60), ball("b", 420, "#0000ff"),
                   {"use": "tour", "id": "t", "move": 1, "hold": 1.5, "cards": False, "drift": 0, "dim": 0.8,
                    "stops": [{"focus": "a"}, {"focus": "b"}]}])
     s = k.Scene(spec)
     a, b = s.by_id["a"], s.by_id["b"]
-    op = lambda L, T: L.get("opacity", T - L.t_in, T)  # noqa: E731
-    assert (op(a, 0.5), op(b, 0.5)) == pytest.approx((1.0, 0.2))  # stop 1 focuses a
-    assert (op(a, 3.0), op(b, 3.0)) == pytest.approx((0.2, 1.0))  # and stop 2, b, once the camera is there
-    assert 0.2 < op(b, 2.0) < 1.0  # on the way
-    kept = k.Scene(dict(spec, layers=spec["layers"][:2] + [dict(spec["layers"][2], stops=[
+    wash = lambda L, T: L.get("wash", T - L.t_in, T) or 0.0  # noqa: E731
+    assert (wash(a, 0.5), wash(b, 0.5)) == pytest.approx((0.0, 0.8))  # stop 1 focuses a
+    assert (wash(a, 3.0), wash(b, 3.0)) == pytest.approx((0.8, 0.0))  # and stop 2, b, once the camera is there
+    assert 0.0 < wash(b, 2.0) < 0.8  # on the way
+    assert s.by_id["c"].get("opacity", 0.5, 0.5) == 1.0
+    inset = k.Scene(dict(spec, layers=spec["layers"] + [{"id": "box", "type": "group", "fixed": True, "children": [
+        ball("ins", 560, "#00ff00", 20)]}]))
+    assert wash(inset.by_id["ins"], 0.5) == 0.0  # an inset on the screen is not part of the shot the tour dims
+    kept = k.Scene(dict(spec, layers=spec["layers"][:3] + [dict(spec["layers"][3], stops=[
         {"focus": "a", "keep": ["b"]}, {"focus": "b"}])]))
-    assert kept.by_id["b"].get("opacity", 0.5, 0.5) == pytest.approx(1.0)  # kept bright with a
-    assert {i["code"] for i in check(dict(spec, layers=spec["layers"][:2] + [dict(spec["layers"][2], stops=[
+    assert wash(kept.by_id["b"], 0.5) == pytest.approx(0.0)  # kept bright with a
+    assert {i["code"] for i in check(dict(spec, layers=spec["layers"][:3] + [dict(spec["layers"][3], stops=[
         {"focus": "a", "keep": ["bee"]}])]))["issues"] if i["level"] == "error"} == {"tour-focus"}
     r = Renderer(s, backend="cpu")
-    blue = lambda n: int((np.abs(r.frame(n)[..., :3].astype(int) - (0, 0, 255)).max(-1) < 40).sum())  # noqa: E731
-    assert blue(15) == 0 and blue(90) > 1000
+    near = lambda n, rgb: int((np.abs(r.frame(n)[..., :3].astype(int) - rgb).max(-1) < 12).sum())  # noqa: E731
+    assert near(15, (0, 0, 255)) == 0 and near(90, (0, 0, 255)) > 1000
+    assert near(15, (204, 204, 255)) > 1000  # b mixed 80% of the way to the white paper, and none of c through it
     assert np.array_equal(Renderer(k.Scene(spec), backend="cpu").frame(60), r.frame(60))
-    bad = [(i["level"], i["code"]) for i in check(dict(spec, layers=spec["layers"][:2] + [
-        dict(spec["layers"][2], dim=2)]))["issues"]]
+    bad = [(i["level"], i["code"]) for i in check(dict(spec, layers=spec["layers"][:3] + [
+        dict(spec["layers"][3], dim=2)]))["issues"]]
     assert any(lv == "error" for lv, _ in bad)

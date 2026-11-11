@@ -127,7 +127,8 @@ KEYS EVERY LAYER HAS
                 bottomright. Video and shader default to topleft, even with x and y set; an image
                 defaults to topleft without x and to center with it.
   opacity       0..1 (default 1). A group fades as one picture; layers in it with a blend still
-                blend with what is under the group.
+                blend with what is under the group. wash 0..1 [0] mixes a layer toward the canvas bg
+                and keeps it opaque: what sits at the back of a shot.
   scale, scaleX, scaleY   1 = normal size
   rotate        degrees, clockwise
   z, rotateX, rotateY, backface, fixed   depth: see DEPTH AND CAMERA
@@ -1111,8 +1112,9 @@ EXPLAINERS
   note      a callout pinned to the focus while the stop holds.
   move      [1.2] seconds the camera flies between stops, eased by ease [inOutCubic]. The first stop
             starts on its focus, at at [0].
-  dim       [0] 0 to 1: how far the model layers a stop does not focus fade while it holds. A stop's
-            keep lists more layers it leaves bright: {"focus": "golgi", "keep": ["vesicles"]}.
+  dim       [0] 0 to 1: how far the model layers a stop does not focus wash out toward the canvas bg
+            while it holds; they stay opaque, and models in a fixed group (an inset) are left as they are.
+            A stop's keep lists more layers it leaves bright: {"focus": "golgi", "keep": ["vesicles"]}.
   fov       the camera's field of view, which zoom is measured with. The scene's "camera" keeps its
             other keys; the tour writes its target, z and rotateY. check names a focus that is no layer
             (tour-focus).

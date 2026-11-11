@@ -680,6 +680,7 @@ class Renderer:
         self.culled: set[str] = set()  # layers skipped this frame because they cross the camera plane
         self.unlit: set[str] = set()  # models drawn this frame with the key light behind them
         self.fogged: set[str] = set()  # layers drawn this frame wholly hidden by fog
+        self._paper = tuple(render3d._rgb(render3d._fog_colour(scene.bg)))  # what wash mixes a layer toward
         self.inside: set[str] = set()  # models the camera is inside this frame
         self.swim: set[str] = set()  # textured models whose triangles stayed too large to map the image this frame
         self.on_gl: set[str] = set()  # models drawn on OpenGL this frame (gl3d), not by Skia
@@ -1361,9 +1362,13 @@ class Renderer:
         effects = (blur > 0.05 or shadow or fx or (blend and blend != "normal") or L.looks or mods.smear > 0.05
                    or glitch or luma)
         cf = None
-        if fogf > 0.002:
+        washf = max(0.0, min(1.0, float(g("wash") or 0.0)))
+        tints = [f for f in (render3d.fog_filter(fg, fogf) if fogf > 0.002 else None,
+                             render3d.fog_filter((self._paper,), washf) if washf > 0.002 else None) if f is not None]
+        tint = tints[0] if len(tints) == 1 else skia.ColorFilters.Compose(tints[1], tints[0]) if tints else None
+        if tint is not None:
             if not effects and self._one_draw(L):
-                cf = render3d.fog_filter(fg, fogf)  # in the paint of its one draw, like its opacity
+                cf = tint  # in the paint of its one draw, like its opacity
             else:
                 effects = True
         layered = alpha < 0.999 or effects
@@ -1409,9 +1414,9 @@ class Renderer:
                 cm = color_matrix(fx)
                 if cm:
                     paint.setColorFilter(skia.ColorFilters.Matrix(cm))
-            if fogf > 0.002:
-                mist, inner = render3d.fog_filter(fg, fogf), paint.getColorFilter()
-                paint.setColorFilter(skia.ColorFilters.Compose(mist, inner) if inner else mist)
+            if tint is not None:
+                inner = paint.getColorFilter()
+                paint.setColorFilter(skia.ColorFilters.Compose(tint, inner) if inner else tint)
             if blend:
                 paint.setBlendMode(BLENDS.get(blend, skia.BlendMode.kSrcOver))
             if L is self._looking:  # _looked opens the layer, as large as what is drawn now

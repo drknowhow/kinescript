@@ -71,7 +71,7 @@ def expand(raw: dict, scene) -> list[dict]:
         if isinstance(o[k], bool) or not isinstance(o[k], (int, float)) or not 0 <= o[k] < 1e4:
             raise TourError(f"layer '{tid}': tour {k} is {o[k]!r}; it is seconds (drift: degrees), 0 or more")
     if isinstance(o["dim"], bool) or not isinstance(o["dim"], (int, float)) or not 0 <= o["dim"] <= 1:
-        raise TourError(f"layer '{tid}': tour dim is {o['dim']!r}; it is how far other models fade, 0 to 1")
+        raise TourError(f"layer '{tid}': tour dim is {o['dim']!r}; it is how far other models wash out, 0 to 1")
     layers, prev = [], None
     for i, stop in enumerate(stops, 1):
         _check_stop(tid, i, stop)
@@ -204,44 +204,51 @@ def _camera(scene, tid: str, stops: list, o: dict):
     camera.t_out = scene.duration
     scene.camera = camera
     if o["dim"]:
-        _dim(scene, stops, spans, 1.0 - float(o["dim"]))
+        _dim(scene, stops, spans, float(o["dim"]))
 
 
 def _dim(scene, stops: list, spans: list, low: float):
-    """Each model layer a stop does not focus or keep (itself or a group round it) fades to `low` of its opacity
-    while the camera flies there, and back as a stop brightens it: a function of scene time, so frames stay pure."""
+    """Each model layer a stop does not focus or keep (itself or a group round it) washes `low` of the way to the
+    paper while the camera flies there, and back as a stop brightens it. It stays opaque, so nothing behind it shows
+    through. A function of scene time, so frames stay pure."""
     from .props import Prop
     bright = [{_focused(s), *(s.get("keep") or [])} for s in stops]
     for L in scene.by_id.values():
         if L.type != "model":
             continue
-        line, P = set(), L
+        line, P, fixed = set(), L, False
         while P is not None:
             line.add(P.id)
+            fixed = fixed or bool(P.raw.get("fixed"))
             P = P.parent
+        if fixed:  # on the screen over the shot (an inset), not in the space the tour flies through
+            continue
         keys, prev = [], None
         for (t0, arrive), ids in zip(spans, bright):
-            v = 1.0 if ids & line else low
+            v = 0.0 if ids & line else low
             if prev is not None:
                 keys.append((t0, prev))
             keys.append((arrive, v))
             prev = v
-        if all(v == 1.0 for _, v in keys):
+        if all(v == 0.0 for _, v in keys):
             continue
-        L.props["opacity"] = Prop(False, fn=_faded(L.props.get("opacity"), keys))
+        L.props["wash"] = Prop(False, fn=_washed(L.props.get("wash"), keys))
 
 
-def _faded(old, keys: list):
+def _washed(old, keys: list):
+    """The layer's own wash, raised to the tour's by scene time T: 1 - (1 - own) * (1 - tour's)."""
     times = [k[0] for k in keys]
 
     def fn(t, d, T, i=0, *n):
-        base = 1.0 if old is None else (old.value if old.static else old.fn(t, d, T, i, *n))
+        own = 0.0 if old is None else float((old.value if old.static else old.fn(t, d, T, i, *n)) or 0.0)
         j = bisect.bisect_right(times, T)
         if j == 0:
-            return base * keys[0][1]
-        if j == len(keys):
-            return base * keys[-1][1]
-        (a, va), (b, vb) = keys[j - 1], keys[j]
-        u = (T - a) / (b - a) if b > a else 1.0
-        return base * (va + (vb - va) * u * u * (3 - 2 * u))
+            v = keys[0][1]
+        elif j == len(keys):
+            v = keys[-1][1]
+        else:
+            (a, va), (b, vb) = keys[j - 1], keys[j]
+            u = (T - a) / (b - a) if b > a else 1.0
+            v = va + (vb - va) * u * u * (3 - 2 * u)
+        return 1.0 - (1.0 - own) * (1.0 - v)
     return fn

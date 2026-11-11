@@ -479,3 +479,14 @@ def test_blurred_letters_match_their_unbounded_layer(layer, canvas, n, monkeypat
     assert any(b is not None for b in bounds)  # the CPU bounds its blur layers; the GPU does not
     monkeypatch.setattr(Renderer, "_blur_bounds", lambda *a: None)
     assert np.array_equal(bounded, _renderer(spec).frame(n).astype(int))
+
+
+@pytest.mark.parametrize("backend", ["cpu", "gpu"])
+def test_wash_mixes_a_layer_toward_the_paper_whether_it_draws_once_or_in_a_layer(backend):
+    """A rect draws in one call (the wash goes in its paint), a group in an offscreen layer: both mix the same way, and
+    so does a keyed wash."""
+    rect = {"id": "r", "type": "rect", "x": 40, "y": 40, "w": 80, "h": 80, "anchor": "topleft", "fill": "#3050c0"}
+    for layer in (dict(rect, wash=0.5), {"id": "g", "type": "group", "wash": 0.5, "children": [rect]},
+                  dict(rect, wash=[[0, 0], [1, 1]])):
+        f = _renderer(scene([layer], bg="#fbefe2"), backend).frame(15)
+        assert np.abs(f[80, 80, :3].astype(int) - (150, 160, 209)).max() <= 2, (layer["id"], f[80, 80])
