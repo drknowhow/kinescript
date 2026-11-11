@@ -10,15 +10,22 @@ kept while the mesh stays the same, and each frame is two draws:
 Skia then draws the result where render3d would have drawn its own image, so the rest of a frame is unchanged.
 
 A model draws here when the backend is the GPU, moderngl is installed (pip install "kinescript[gl]"), and it uses
-nothing this path does not have: textures (including a model file's), transparency, explode and edges: "all" draw on
-the Skia path, as does --wire. KINE_3D=skia turns this path off; KINE_3D=gl makes it an error when it cannot run.
+nothing this path does not have: transparency, explode and edges: "all" draw on the Skia path, as does --wire.
+KINE_3D=skia turns this path off; KINE_3D=gl makes it an error when it cannot run.
+
+A model with textures (its own or a model file's, and emission textures) draws with a second program, which reads
+each material's picture at every pixel. skia-python does not say which GL texture an image of Skia's is in, so each
+image is copied once, by Skia, into a texture made here, and mipmaps are built for it (_Pictures). A video's or a
+group's next frame is copied into the texture the last one had. A textured model of more than TEX_MATS materials
+or UNITS pictures draws on the Skia path.
 
 A stage's shadow map is drawn here too whenever models can be (sun_map): what casts, through a depth buffer along
 the key light. A model drawn here casts from the buffers it drew from; one Skia drew has its triangles sent.
 
 The two paths differ where they are built differently: edge lines are found per pixel here and along the mesh's edges
-there, triangles that cross the camera plane are clipped here where render3d drops them, and the shadow map keeps the
-nearest caster at each texel here where Skia draws whole triangles far to near."""
+there, triangles that cross the camera plane are clipped here where render3d drops them, the shadow map keeps the
+nearest caster at each texel here where Skia draws whole triangles far to near, and a picture is placed at each
+pixel here where render3d spreads it evenly over triangles it cuts until that is within a pixel of right."""
 from __future__ import annotations
 
 import math
@@ -31,6 +38,8 @@ import skia
 from . import space
 
 MATS = 64  # materials one draw takes: schema.COPY_SLOTS, the most a model with copies has
+TEX_MATS = 32  # materials a textured model's draw takes: each has four more uniforms, and OpenGL 3.3 promises 1024
+UNITS = 16  # pictures a textured model's draw takes: the texture units OpenGL 3.3 promises a fragment shader
 STEP = 6.0  # canvas px a depth must step between pixels a line's width apart for a line to be drawn there
 SETTINGS = ("auto", "skia", "gl")
 _GL_TEXTURE_2D, _GL_RGBA8 = 0x0DE1, 0x8058
@@ -39,7 +48,7 @@ _VERT = """
 #version 330
 in vec3 in_pos;
 in vec3 in_nrm;
-in float in_mat;
+in float in_mat;@decl
 uniform mat4 u_m;   // model space to canvas px (x and y over w), w from the camera's lens
 uniform mat3 u_n;   // model normals into camera space
 uniform vec2 u_px;  // canvas px to clip space: 2 * scale * supersampling over the target's width and height
@@ -53,12 +62,13 @@ void main() {
     gl_Position = vec4(h.x * u_px.x - h.w, h.w - h.y * u_px.y, h.w - 2.0 * NEAR, h.w);
     v_n = u_n * in_nrm;
     v_n2 = normalize(v_n).xy;
-    v_mat = int(in_mat + 0.5);
+    v_mat = int(in_mat + 0.5);@set
     v_fog = u_fog.z > 0.0 ? floor(clamp((h.w * u_fog.w - u_fog.x) / u_fog.y, 0.0, 1.0) * u_fog.z * 255.0 + 0.5)
                             / 255.0 : 0.0;
 }
 """
-# render3d._SKSL with _MORE and _ENV_MAIN, for every material at once.
+# render3d._SKSL with _MORE and _ENV_MAIN, for every material at once. The @ marks are filled by _PLAIN, which gives
+# that, or by _TEXTURED.
 _FRAG = """
 #version 330
 noperspective in vec2 v_n2;
@@ -81,7 +91,7 @@ uniform vec3 envHor;
 uniform vec3 envBot;
 uniform vec3 envDown;
 uniform float envAmt;
-uniform vec3 u_fogCol;
+uniform vec3 u_fogCol;@decl
 layout(location = 0) out vec4 o_col;
 layout(location = 1) out vec4 o_geo;
 void main() {
@@ -97,7 +107,7 @@ void main() {
         f = ceil(f * b.a - 0.25) / b.a;
         s = step(0.45, s) * p.x;
     }
-    vec3 diffuse = b.rgb * (amt.z + amt.x * d * keyCol + amt.y * f * vec3(0.85, 0.9, 1.0)) * (1.0 - 0.75 * p.z);
+    vec3 diffuse = @fill(amt.z + amt.x * d * keyCol + amt.y * f * vec3(0.85, 0.9, 1.0)) * (1.0 - 0.75 * p.z);
     vec3 spec = mix(vec3(1.0), b.rgb, p.z) * s * amt.x * keyCol;
     for (int j = 0; j < u_more; j++) {
         float dj = max(dot(n, u_dir[j]), 0.0);
@@ -106,29 +116,72 @@ void main() {
             dj = ceil(dj * b.a - 0.25) / b.a;
             sj = step(0.45, sj) * p.x;
         }
-        diffuse += b.rgb * dj * u_col[j] * (1.0 - 0.75 * p.z);
+        diffuse += @filldj * u_col[j] * (1.0 - 0.75 * p.z);
         spec += mix(vec3(1.0), b.rgb, p.z) * sj * u_col[j];
     }
     float rim = pow(1.0 - n.z, 3.0) * p.w * amt.w;
-    vec3 lit = diffuse + spec + rim * keyCol;
+    vec3 @sum + rim * keyCol;
     if ((u_flags & 4) != 0) {
         vec3 e = vec3(2.0 * n.z * n.x, 2.0 * n.z * n.y, 2.0 * n.z * n.z - 1.0);
         float up = -dot(e, envDown);
         vec3 sky = up > 0.0 ? mix(envHor, envTop, sqrt(up)) : mix(envHor, envBot, sqrt(-up));
         float sh = clamp((p.x - 0.4 * p.z) / 0.6, 0.0, 1.0);
         float fr = 0.04 + 0.96 * pow(1.0 - n.z, 5.0);
-        lit += mix((envTop + 2.0 * envHor + envBot) * 0.25, sky, sh) * (p.z * b.rgb + (1.0 - p.z) * sh * fr) * envAmt;
+        @env += mix((envTop + 2.0 * envHor + envBot) * 0.25, sky, sh) * (p.z * b.rgb + (1.0 - p.z) * sh * fr) * envAmt;
     }
+@show    o_col = vec4(mix(clamp(lit, 0.0, 1.0), u_fogCol, v_fog), 1.0);
+    o_geo = vec4(normalize(v_n), NEAR * gl_FragCoord.w);
+}
+"""
+# What fills the marks in _VERT and _FRAG for a model without textures: the light on each material's fill.
+_PLAIN = {"decl": ("", ""), "set": "", "fill": "b.rgb * ", "sum": "lit = diffuse + spec", "env": "lit", "show": """
     if ((u_flags & 1) != 0) {
         lit = max(lit, b.rgb * u_glow[v_mat].a);
     }
     if ((u_flags & 2) != 0) {
         lit += u_glow[v_mat].rgb;
     }
-    o_col = vec4(mix(clamp(lit, 0.0, 1.0), u_fogCol, v_fog), 1.0);
-    o_geo = vec4(normalize(v_n), NEAR * gl_FragCoord.w);
-}
-"""
+""".lstrip("\n")}
+# And for one with textures, as render3d._textured combines its passes: each material's picture (its texture times
+# its tint, over its fill) times the light on a white surface, plus the highlights, rim and reflection, plus what the
+# material gives off (its emission texture over its emission colour). A picture is read where the texture
+# coordinates put it in perspective, at the mipmap level their change across the screen picks.
+_TEXTURED = {"decl": ("\nin vec2 in_uv;\nout vec2 v_uv;", """
+in vec2 v_uv;
+uniform vec4 u_look[MATS];   // each material's tint, and the unit its texture is on (-1: none)
+uniform vec4 u_uv[MATS];     // its texture's repeat across and down, then its offset
+uniform vec4 u_shine[MATS];  // the same for its emission texture
+uniform vec4 u_suv[MATS];
+uniform sampler2D u_tex[UNITS];
+uniform vec2 u_fold[UNITS];  // 1 where a unit's picture mirrors as it repeats, across and down
+vec4 picture(float unit, vec4 uv, vec2 dx, vec2 dy) {
+    int k = int(unit + 0.5);
+    vec2 q = v_uv * uv.xy - uv.zw;
+    q = mix(q, 1.0 - abs(mod(q, 2.0) - 1.0), u_fold[k]);
+    dx *= uv.xy * 0.70710678;  // half a mipmap level sharper, as Skia reads its mipmaps
+    dy *= uv.xy * 0.70710678;
+PICK
+}""".rstrip("\n")), "set": "\n    v_uv = in_uv;", "fill": "", "sum": "add = spec", "env": "add", "show": """
+    if ((u_flags & 1) != 0) {
+        diffuse = max(diffuse, vec3(u_glow[v_mat].a));
+    }
+    vec2 dx = dFdx(v_uv);
+    vec2 dy = dFdy(v_uv);
+    vec3 pic = b.rgb;
+    if (u_look[v_mat].a >= 0.0) {
+        vec4 c = picture(u_look[v_mat].a, u_uv[v_mat], dx, dy);
+        pic = c.rgb * u_look[v_mat].rgb + pic * (1.0 - c.a);
+    }
+    vec3 lit = pic * min(diffuse, 2.0) + add;
+    if ((u_flags & 2) != 0) {
+        vec3 e = u_glow[v_mat].rgb;
+        if (u_shine[v_mat].a >= 0.0) {
+            vec4 c = picture(u_shine[v_mat].a, u_suv[v_mat], dx, dy);
+            e = c.rgb * u_shine[v_mat].rgb + e * (1.0 - c.a);
+        }
+        lit += e;
+    }
+""".lstrip("\n")}
 _QUAD = """
 #version 330
 in vec2 in_xy;
@@ -237,6 +290,19 @@ def setting() -> str:
     return v
 
 
+def _program(ctx, fills: dict, mats: int):
+    """The shading program with the marks of _VERT and _FRAG filled from fills, for that many materials."""
+    pick = "".join(f"    if (k == {i}) {{ return textureGrad(u_tex[{i}], q, dx, dy); }}\n" for i in range(UNITS - 1))
+    pick += f"    return textureGrad(u_tex[{UNITS - 1}], q, dx, dy);"
+    out = []
+    for src, decl in zip((_VERT, _FRAG), fills["decl"]):
+        for mark, text in {**fills, "decl": decl}.items():
+            src = src.replace("@" + mark, text)
+        out.append(src.replace("PICK", pick).replace("MATS", str(mats)).replace("UNITS", str(UNITS))
+                   .replace("NEAR", f"{space.NEAR:.6f}"))
+    return ctx.program(vertex_shader=out[0], fragment_shader=out[1])
+
+
 def _state():
     """The moderngl context on the current GL context, with this module's programs, or None without moderngl."""
     if "ctx" not in _STATE:
@@ -247,20 +313,23 @@ def _state():
             return None
         try:  # an OpenGL older than 3.3, or a driver that will not compile these, leaves models on Skia
             ctx = moderngl.create_context(require=330)
-            near = f"{space.NEAR:.6f}"
-            shade = ctx.program(vertex_shader=_VERT.replace("NEAR", near),
-                                fragment_shader=_FRAG.replace("MATS", str(MATS)).replace("NEAR", near))
+            shade = _program(ctx, _PLAIN, MATS)
             edge = ctx.program(vertex_shader=_QUAD, fragment_shader=_EDGE)
             sun = ctx.program(vertex_shader=_SUN_VERT, fragment_shader=_SUN_FRAG)
         except Exception as e:  # noqa: BLE001 - moderngl raises its own Error and plain exceptions alike
             _STATE.update(ctx=None, error=f"{type(e).__name__}: {e}")
             return None
+        try:  # a driver that will not take this one leaves the models with textures on Skia
+            tex = _program(ctx, _TEXTURED, TEX_MATS)
+            tex["u_tex"].value = list(range(UNITS))
+        except Exception:  # noqa: BLE001
+            tex = None
         edge["t_col"].value, edge["t_geo"].value = 0, 1
         quad = ctx.buffer(np.array([-1, -1, 1, -1, -1, 1, 1, 1], "f4"))
         # Skia binds sampler objects of its own; these replace them on the two units read, so a mipmap filter left
         # on a unit cannot make a texture incomplete (texelFetch reads it as 0 then).
         nearest = ctx.sampler(filter=(moderngl.NEAREST, moderngl.NEAREST), repeat_x=False, repeat_y=False)
-        _STATE.update(ctx=ctx, mgl=moderngl, shade=shade, edge=edge, sun=sun, sampler=nearest,
+        _STATE.update(ctx=ctx, mgl=moderngl, shade=shade, tex=tex, edge=edge, sun=sun, sampler=nearest, tiles={},
                       quad=ctx.vertex_array(edge, [(quad, "2f", "in_xy")]))
     return _STATE["ctx"]
 
@@ -286,8 +355,13 @@ def available(r) -> bool:
 
 def fits(mats, texs, glows, explode: float, edging) -> bool:
     """Whether a model with these materials, textures, emission textures, explode and edges draws here."""
-    return (len(mats) <= MATS and explode <= 0 and all(tx is None for tx in texs) and all(g is None for g in glows)
-            and all(mt[8] >= 1 for mt in mats) and (edging is None or edging[2] <= 1.0))
+    if explode > 0 or any(mt[8] < 1 for mt in mats) or (edging is not None and edging[2] > 1.0):
+        return False
+    shown = [tx for tx in (*texs, *glows) if tx is not None]
+    if not shown:
+        return len(mats) <= MATS
+    return (_STATE.get("tex") is not None and len(mats) <= TEX_MATS
+            and len({(id(tx[0]), tx[4]) for tx in shown}) <= UNITS)
 
 
 def _mat(a: np.ndarray) -> bytes:
@@ -314,17 +388,18 @@ def _targets(w: int, h: int):
 
 
 class _Buffers:
-    """One mesh's vertices and triangles on the GPU, and its triangles in build order once a draw needs them."""
+    """One mesh's vertices and triangles on the GPU, its triangles in build order once a draw needs them, and its
+    texture coordinates once a textured draw does."""
 
     def __init__(self, m):
-        ctx, shade = _STATE["ctx"], _STATE["shade"]
+        ctx = _STATE["ctx"]
         self.key = (m.P, m.N, m.M, m.T)
         v = np.concatenate([m.P, m.N, m.M[:, None]], 1).astype("f4")
         self.vbo = ctx.buffer(v.tobytes())
         self.ibo = ctx.buffer(np.ascontiguousarray(m.T, "i4").tobytes())
-        self.vao = ctx.vertex_array(shade, [(self.vbo, "3f 3f 1f", "in_pos", "in_nrm", "in_mat")], self.ibo)
-        self.built = None  # (order, vao, ibo): the triangles in that build order
-        self.cast = None  # (ibo, vao): a vertex array for the shadow map over the triangles in ibo
+        self.built = None  # (order, ibo): the triangles in that build order
+        self.uv = None  # the texture coordinates: a mesh's stay with its triangles
+        self.arrays = {}  # (program, whether in build order): a vertex array
         self.dead = False
 
     def casts(self, m, order) -> bool:
@@ -332,16 +407,6 @@ class _Buffers:
         model that cast a shadow drew."""
         in_order = order is None or (self.built is not None and self.built[0] is order)
         return not self.dead and self.holds(m) and in_order
-
-    def shadow(self, order):
-        """A vertex array for the shadow map's program: the positions, and the triangles (in build order `order`
-        when that is not None)."""
-        ibo = self.ibo if order is None else self.built[2]
-        if self.cast is None or self.cast[0] is not ibo:
-            if self.cast is not None:
-                self.cast[1].release()
-            self.cast = (ibo, _STATE["ctx"].vertex_array(_STATE["sun"], [(self.vbo, "3f 16x", "in_pos")], ibo))
-        return self.cast[1]
 
     def holds(self, m) -> bool:
         return all(a is b for a, b in zip(self.key, (m.P, m.N, m.M, m.T)))
@@ -354,25 +419,122 @@ class _Buffers:
         self.key = (m.P, m.N, m.M, m.T)
         return True
 
-    def in_order(self, m, order: np.ndarray):
-        """A vertex array of m's triangles in build order `order` (render3d keeps one while the mesh holds)."""
-        if self.built is None or self.built[0] is not order:
+    def _drop(self, which):
+        for key in [k for k in self.arrays if which(k)]:
+            self.arrays.pop(key).release()
+
+    def array(self, name: str, m, order=None):
+        """A vertex array for program `name` (shade, tex or sun) over m's triangles: all of them, or in build order
+        `order` (render3d keeps one while the mesh holds)."""
+        ctx = _STATE["ctx"]
+        if order is not None and (self.built is None or self.built[0] is not order):
+            self._drop(lambda k: k[1])
             if self.built is not None:
-                if self.cast is not None and self.cast[0] is self.built[2]:
-                    self.cast[1].release()
-                    self.cast = None
-                for o in self.built[1:]:
-                    o.release()
-            ctx = _STATE["ctx"]
-            ibo = ctx.buffer(np.ascontiguousarray(m.T[order], "i4").tobytes())
-            self.built = (order, ctx.vertex_array(_STATE["shade"], [(self.vbo, "3f 3f 1f", "in_pos", "in_nrm",
-                                                                      "in_mat")], ibo), ibo)
-        return self.built[1]
+                self.built[1].release()
+            self.built = (order, ctx.buffer(np.ascontiguousarray(m.T[order], "i4").tobytes()))
+        if name == "tex" and self.uv is None:
+            # A mesh without texture coordinates shows the first texel of each picture, as it does on Skia.
+            uv = np.zeros((len(m.P), 2), "f4") if m.U is None else np.ascontiguousarray(m.U, "f4")
+            self.uv = ctx.buffer(uv.tobytes())
+        key = (name, order is not None)
+        if key not in self.arrays:
+            content = [(self.vbo, "3f 16x", "in_pos") if name == "sun" else
+                       (self.vbo, "3f 3f 1f", "in_pos", "in_nrm", "in_mat")]
+            if name == "tex":
+                content.append((self.uv, "2f", "in_uv"))
+            self.arrays[key] = ctx.vertex_array(_STATE[name], content, self.ibo if order is None else self.built[1])
+        return self.arrays[key]
 
     def release(self):
-        for o in (self.vao, self.ibo, self.vbo, *(self.built or ())[1:], *(self.cast or ())[1:]):
+        for o in (*self.arrays.values(), self.ibo, self.vbo, *(self.built or ())[1:], *filter(None, [self.uv])):
             o.release()
+        self.arrays = {}
         self.dead = True
+
+
+class _Pictures:
+    """The images a renderer's models show, each copied once into a texture of this module's with mipmaps:
+    skia-python does not say which texture an image of Skia's is in. A copy is kept while some material shows its
+    image; a material's next image (a video's or a group's next frame) takes the texture of the last."""
+
+    def __init__(self):
+        self.shown = {}  # (layer id, material, "look" or "glow"): the image that material showed last
+        self.copies = {}  # id(image): [the image, its texture, how many materials show it]
+        self.spare = []  # textures no material shows
+
+    def take(self, slot: tuple, img: skia.Image):
+        """The texture for img, which the material `slot` shows, and whether img is still to be copied into it."""
+        was = self.shown.get(slot)
+        if was is img:
+            return self.copies[id(img)][1], False
+        self.shown[slot] = img
+        if was is not None:
+            old = self.copies[id(was)]
+            old[2] -= 1
+            if not old[2]:
+                self.spare.append(self.copies.pop(id(was))[1])
+        hit = self.copies.get(id(img))
+        if hit is not None:
+            hit[2] += 1
+            return hit[1], False
+        size = (img.width(), img.height())
+        tex = next((t for t in self.spare if t.size == size), None)
+        if tex is None:
+            tex = _STATE["ctx"].texture(size, 4)
+        else:
+            self.spare.remove(tex)
+        for t in self.spare[:-4]:  # a few are kept: a video's frames take turns in one
+            self.spare.remove(t)
+            t.release()
+        self.copies[id(img)] = [img, tex, 1]
+        return tex, True
+
+    def release(self):
+        for t in (*(hit[1] for hit in self.copies.values()), *self.spare):
+            t.release()
+        self.shown, self.copies, self.spare = {}, {}, []
+
+
+def _pictures(r, L, texs, glows) -> tuple[list, list]:
+    """The pictures model L's materials show, ready to draw: [(texture, tiling)], one for each unit, and each
+    material's unit for its texture and for its emission texture (-1: none). Images not copied yet are, by Skia."""
+    kept = r._gl_pictures
+    if kept is None:
+        kept = r._gl_pictures = _Pictures()
+        weakref.finalize(r, kept.release)
+    units, where, fresh = {}, [], []
+    for kind, txs in (("look", texs), ("glow", glows)):
+        where.append([-1] * len(txs))
+        for i, tx in enumerate(txs):
+            if tx is None:
+                continue
+            tex, new = kept.take((L.id, i, kind), tx[0])
+            if new:
+                bt = skia.GrBackendTexture(*tex.size, skia.GrMipmapped.kNo,
+                                           skia.GrGLTextureInfo(_GL_TEXTURE_2D, tex.glo, _GL_RGBA8))
+                surf = skia.Surface.MakeFromBackendTexture(r.gr, bt, skia.kTopLeft_GrSurfaceOrigin, 0,
+                                                           skia.kRGBA_8888_ColorType, None)
+                surf.getCanvas().drawImage(tx[0], 0, 0, skia.SamplingOptions(),
+                                           skia.Paint(BlendMode=skia.BlendMode.kSrc))
+                fresh.append((surf, tex))
+            where[-1][i] = units.setdefault((tex.glo, tx[4]), (len(units), tex, tx[4]))[0]
+    if fresh:
+        r.gr.resetContext()  # buffers and textures made since Skia last drew are bound where it left its own
+        r.gr.flushAndSubmit(skia.GrSyncCpu.kNo)
+        for _, tex in fresh:
+            tex.build_mipmaps()
+    return [(tex, tile) for _, tex, tile in units.values()], where
+
+
+def _tiled(tile: tuple):
+    """A sampler that repeats across and down where the tiling says "repeat": a mirrored picture is folded by the
+    program, and a clamped one stays on its edge."""
+    key = (tile[0] == "repeat", tile[1] == "repeat")
+    if key not in _STATE["tiles"]:
+        mgl = _STATE["mgl"]
+        _STATE["tiles"][key] = _STATE["ctx"].sampler(filter=(mgl.LINEAR_MIPMAP_LINEAR, mgl.LINEAR), repeat_x=key[0],
+                                                     repeat_y=key[1])
+    return _STATE["tiles"][key]
 
 
 def _release(kept: dict):
@@ -404,13 +566,14 @@ def _set(prog, name: str, value):
             u.value = value
 
 
-def _uniforms(r, mats, lights, fg, view: np.ndarray, ss: int, W: int, H: int):
+def _uniforms(sh, n: int, r, mats, lights, fg, view: np.ndarray, ss: int, W: int, H: int, shines: bool = False):
+    """Set program sh (which takes n materials) for these materials, lights and fog. shines: a material has an
+    emission texture."""
     lt, more, env = lights
-    sh = _STATE["shade"]
     _set(sh, "u_m", _mat(r._m3d))
     _set(sh, "u_n", _mat(np.linalg.inv(view[:3, :3]).T))
     _set(sh, "u_px", (2.0 * r.scale * ss / W, 2.0 * r.scale * ss / H))
-    base, surf, glow = (np.zeros((MATS, 4), "f4") for _ in range(3))
+    base, surf, glow = (np.zeros((n, 4), "f4") for _ in range(3))
     for i, mt in enumerate(mats):
         base[i] = (*mt[0], mt[1])
         surf[i] = mt[2:6]
@@ -418,7 +581,7 @@ def _uniforms(r, mats, lights, fg, view: np.ndarray, ss: int, W: int, H: int):
     _set(sh, "u_base", base.tobytes())
     _set(sh, "u_surf", surf.tobytes())
     _set(sh, "u_glow", glow.tobytes())
-    flags = (1 if any(mt[6] for mt in mats) else 0) | (2 if any(any(mt[7]) for mt in mats) else 0) | \
+    flags = (1 if any(mt[6] for mt in mats) else 0) | (2 if shines or any(any(mt[7]) for mt in mats) else 0) | \
         (4 if env is not None else 0)
     _set(sh, "u_flags", flags)
     for name, v in zip(("keyDir", "fillDir", "keyCol", "amt"), lt):
@@ -441,12 +604,30 @@ def _uniforms(r, mats, lights, fg, view: np.ndarray, ss: int, W: int, H: int):
         _set(sh, "u_fogCol", tuple(col))
 
 
-def draw(r, c: skia.Canvas, L, m, mats, lights, fg, edging, amt: float, order, tracked: bool = False):
+def _shown(sh, looks, units: list, where: list):
+    """Set the textured program for the pictures of _pictures: each material's tint, unit, repeat and offset."""
+    for txs, at, tint, uv in zip(looks, where, ("u_look", "u_shine"), ("u_uv", "u_suv")):
+        a, b = np.zeros((TEX_MATS, 4), "f4"), np.zeros((TEX_MATS, 4), "f4")
+        a[:, 3] = -1.0
+        for i, tx in enumerate(txs):
+            if tx is not None:
+                a[i] = (*(tx[3][:3] if tx[3] is not None else (1.0, 1.0, 1.0)), at[i])
+                b[i] = (*tx[1], *tx[2])
+        _set(sh, tint, a.tobytes())
+        _set(sh, uv, b.tobytes())
+    fold = np.zeros((UNITS, 2), "f4")
+    for k, (tex, tile) in enumerate(units):
+        fold[k] = (tile[0] == "mirror", tile[1] == "mirror")
+    _set(sh, "u_fold", fold.tobytes())
+
+
+def draw(r, c: skia.Canvas, L, m, mats, lights, fg, edging, amt: float, order, tracked: bool = False, looks=None):
     """Draw model L (mesh m, materials mats, lights (key, more, env), fog fg, edges as render3d._edging gives them,
     the first amt of its triangles in build order `order`) on canvas c as render3d.draw would. Returns its projected
     bounds in device pixels, or None. tracked: render3d.draw has worked out what a tracked render reports (the
     model's box, shadow casters, focus reach, and whether the camera is inside it, cuts it or the fog hides it), so
-    only the pixels are drawn here."""
+    only the pixels are drawn here. looks: each material's texture and each one's emission texture, as
+    render3d.model gives them, for a model that has any."""
     from . import render3d
     T = m.T if amt >= 1.0 else m.T[order[:math.ceil(amt * len(m.T))]]
     P = m.P
@@ -508,7 +689,14 @@ def draw(r, c: skia.Canvas, L, m, mats, lights, fg, edging, amt: float, order, t
     reach = math.ceil(rad) + 1
     bx0, bx1 = max(0, x0 * ss - reach), min(W, x1 * ss + reach)  # the first pass's box: the second's, and its taps
     by0, by1 = max(0, H - y1 * ss - reach), min(H, H - y0 * ss + reach)
-    _uniforms(r, mats, lights, fg, view, ss, W, H)
+    if looks is None:
+        sh, units = _STATE["shade"], []
+        _uniforms(sh, MATS, r, mats, lights, fg, view, ss, W, H)
+    else:
+        sh = _STATE["tex"]
+        units, where = _pictures(r, L, *looks)
+        _uniforms(sh, TEX_MATS, r, mats, lights, fg, view, ss, W, H, any(g is not None for g in looks[1]))
+        _shown(sh, looks, units, where)
     first = tg["first"]
     first.viewport = (0, 0, W, H)
     first.scissor = (bx0, by0, bx1 - bx0, by1 - by0)
@@ -518,8 +706,11 @@ def draw(r, c: skia.Canvas, L, m, mats, lights, fg, edging, amt: float, order, t
     ctx.depth_func = "<"
     ctx.front_face = "cw"  # canvas y runs down: render3d's faces toward the camera wind clockwise on the target
     ctx.cull_face = "back"
-    vao = buf.vao if amt >= 1.0 else buf.in_order(m, order)
-    vao.render(mgl.TRIANGLES, vertices=3 * len(T))
+    for k, (tex, tile) in enumerate(units):
+        tex.use(k)
+        _tiled(tile).use(k)
+    buf.array("shade" if looks is None else "tex", m, None if amt >= 1.0 else order).render(mgl.TRIANGLES,
+                                                                                          vertices=3 * len(T))
     ctx.enable_only(0)
     edge = _STATE["edge"]
     _set(edge, "u_box", (bx0, by0, bx1, by1))
@@ -612,9 +803,9 @@ def sun_map(r, casters: list, to_map: np.ndarray, side: int) -> skia.Image:
     loose, n = [], 0
     for P, tris, on in casters:
         if on is not None and on[0].casts(on[1], on[2]):
-            buf, _, order, view = on
+            buf, m, order, view = on
             _set(sun, "u_m", _mat(clip @ view))
-            buf.shadow(order).render(mgl.TRIANGLES, vertices=3 * len(tris))
+            buf.array("sun", m, order).render(mgl.TRIANGLES, vertices=3 * len(tris))
         else:
             loose.append((P, tris + n))
             n += len(P)

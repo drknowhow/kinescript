@@ -14,8 +14,18 @@
   `shadows.json`, `character.json`, `focus.json` and `product.json` no pixel of five sampled frames differs. A frame
   of `character.json` drew in 13 to 16 ms and draws in 3.2 to 3.8 (RTX 5060 Ti, six alternating runs); `shadows.json`
   8.2 to 11.5 and now 3.5 to 3.9; `focus.json` 9.6 to 17.9 and now 4.6 to 5.0; `product.json`, whose three textured
-  models still draw with Skia, 100 to 110 and now 77 to 82. A whole render of `character.json` (6 s) took 2.4 to
-  2.7 s and takes 2.1. With `KINE_3D=skia`, `--wire` and on the CPU backend the map is drawn as before.
+  models drew with Skia until the next change, 100 to 110 and now 77 to 82. A whole render of `character.json` (6 s)
+  took 2.4 to 2.7 s and takes 2.1. With `KINE_3D=skia`, `--wire` and on the CPU backend the map is drawn as before.
+- Textured models draw on OpenGL: a layer's `texture` (an image, a video or a group), a model file's base colour and
+  emission textures, their tint, repeat, offset and tiling. Skia drew them from triangles cut small enough to spread
+  the image evenly, in three passes. OpenGL reads the image at each pixel, from a copy with mipmaps that is made once
+  for a file and once a frame for a video or a group. A frame of `product.json` drew in 75 to 76 ms and draws in 5.6
+  to 6.2 (RTX 5060 Ti, three alternating runs); `textures.json` 15.7 to 16.0 and now 3.4 to 3.7; `screens.json` 5.8
+  and now 2.8 to 3.1. A textured plane that faces the camera is within 3 levels of 255 of Skia's at every pixel.
+  Turned in perspective, the image sits up to a pixel from where Skia put it, which shows along its sharp edges: over
+  five frames of each example the mean difference is 0.03 levels on `product.json`, 0.3 on `textures.json` and 0.2 to
+  0.3 on `screens.json`. `kine check` counts triangles and warns `texture-swim` as before, from the triangles Skia
+  would cut. A textured model of more than 32 materials or 16 images, and one with `transparency`, draws with Skia.
 
 ## 2.3.0 (2026-11-11)
 

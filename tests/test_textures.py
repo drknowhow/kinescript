@@ -100,6 +100,7 @@ def test_materials_taking_turns_in_the_sort_draw_their_pictures_at_once(tmp_path
     """A textured ball in a tilted ring of another material: the sort goes back and forth between the two, and
     each pass draws every picture at once, as drawing each run of a material on its own did."""
     from kinescript import render3d
+    monkeypatch.setenv("KINE_3D", "skia")  # Skia's draws are counted: OpenGL sorts nothing, and draws a model once
     img = quadrants(tmp_path / "q.png", size=256)
     spec = scene([{"id": "m", "type": "model", "x": 160, "y": 90, "light": "studio", "rotateX": 70, "parts": [
         {"shape": "sphere", "r": 50, "texture": {"src": img, "repeat": [3, 2]}},

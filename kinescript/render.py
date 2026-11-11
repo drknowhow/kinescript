@@ -705,6 +705,7 @@ class Renderer:
         self._dev = 1.0  # stage px per device px of the canvas being drawn on (models draw in device px)
         self.tris = 0  # model triangles drawn this frame
         self._gl_meshes = None  # gl3d's buffers for each model layer's mesh, made on first use
+        self._gl_pictures = None  # and its copies of the images their materials show
         self._subframes = None  # motion blur on the GPU: (count, averaging effect, a surface per sub-frame)
         self._under = None  # motion blur on the GPU: the layers every sub-frame shares (_held)
         self._straight = None  # (effect, surface) straightening blurred transparent frames on the GPU
