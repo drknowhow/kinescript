@@ -107,6 +107,11 @@ def test_dim_fades_the_models_a_stop_does_not_focus():
     assert (op(a, 0.5), op(b, 0.5)) == pytest.approx((1.0, 0.2))  # stop 1 focuses a
     assert (op(a, 3.0), op(b, 3.0)) == pytest.approx((0.2, 1.0))  # and stop 2, b, once the camera is there
     assert 0.2 < op(b, 2.0) < 1.0  # on the way
+    kept = k.Scene(dict(spec, layers=spec["layers"][:2] + [dict(spec["layers"][2], stops=[
+        {"focus": "a", "keep": ["b"]}, {"focus": "b"}])]))
+    assert kept.by_id["b"].get("opacity", 0.5, 0.5) == pytest.approx(1.0)  # kept bright with a
+    assert {i["code"] for i in check(dict(spec, layers=spec["layers"][:2] + [dict(spec["layers"][2], stops=[
+        {"focus": "a", "keep": ["bee"]}])]))["issues"] if i["level"] == "error"} == {"tour-focus"}
     r = Renderer(s, backend="cpu")
     blue = lambda n: int((np.abs(r.frame(n)[..., :3].astype(int) - (0, 0, 255)).max(-1) < 40).sum())  # noqa: E731
     assert blue(15) == 0 and blue(90) > 1000

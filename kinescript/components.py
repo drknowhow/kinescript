@@ -543,7 +543,7 @@ COMPONENT_DOCS = {
     "lowerThird": "title, subtitle, x [\"6%\"], y [\"78%\"] (top-left of its accent bar), accent, size [54], "
                   "color, subColor, plate (box colour, or false for none)",
     "titleCard": "title, subtitle, kicker (small line above), x, y [\"50%\"] (centre), size [128], accent, color",
-    "tour": "stops [{focus, zoom, orbit, say, title, body, note, hold}], move, dim, speaker, rate, cards: the "
+    "tour": "stops [{focus, zoom, orbit, say, title, body, note, hold, keep}], move, dim, speaker, rate, cards: the "
             "camera flies to each focus and holds while its line plays, with a card and a pinned label. Top level "
             "only. See kine docs explainers",
     "callout": "x, y (centre of the ring), r [60], label, side [right] (left|right), accent, size, boxColor, pin "

@@ -10,7 +10,7 @@ import math
 from . import space
 
 PARAMS = {"stops", "at", "move", "hold", "pause", "speaker", "rate", "ease", "drift", "cards", "accent", "fov", "dim"}
-STOP = {"focus", "zoom", "orbit", "say", "title", "body", "note", "hold"}
+STOP = {"focus", "zoom", "orbit", "say", "title", "body", "note", "hold", "keep"}
 WORDS_A_SECOND = 2.6  # a voice line's length before kine voice has spoken it
 DEFAULTS = {"move": 1.2, "hold": 2.5, "pause": 0.4, "ease": "inOutCubic", "drift": 4.0, "cards": True, "dim": 0.0}
 
@@ -122,6 +122,15 @@ def _check_stop(tid: str, i: int, stop: dict):
         raise TourError(f"{where}: orbit is {v!r}; it is degrees the camera swings round the focus")
     if stop.get("say") is not None and not (isinstance(stop["say"], str) and stop["say"].strip()):
         raise TourError(f"{where}: say is the words the voice speaks, as text")
+    keep = stop.get("keep")
+    if keep is not None and not (isinstance(keep, list) and all(isinstance(x, str) and x for x in keep)):
+        raise TourError(f"{where}: keep is a list of layer ids that stay bright with the focus when the tour dims")
+
+
+def _focused(stop: dict) -> str:
+    """The id of the layer a stop flies to."""
+    f = stop["focus"]
+    return f if isinstance(f, str) else f["layer"]
 
 
 def _pin(focus) -> dict:
@@ -152,12 +161,13 @@ def _camera(scene, tid: str, stops: list, o: dict):
     fov = float(o.get("fov") or (cam.raw.get("fov") if cam is not None and isinstance(cam.raw.get("fov"), (int, float))
                                  else space.DEFAULT_FOV))
     from .schema import suggest
-    lost = [(i, s["focus"] if isinstance(s["focus"], str) else s["focus"]["layer"]) for i, s in enumerate(stops, 1)]
-    lost = [(i, lid) for i, lid in lost if lid not in scene.by_id]
-    for i, lid in lost:
+    lost = [(i, k, lid) for i, s in enumerate(stops, 1) for k, lid in
+            [("focus", _focused(s))] + [("keep", x) for x in s.get("keep") or []]]
+    lost = [(i, k, lid) for i, k, lid in lost if lid not in scene.by_id]
+    for i, k, lid in lost:
         close = suggest(lid, list(scene.by_id))
-        scene.note("error", "tour-focus", tid, f"tour stop {i}: focus '{lid}' names no layer",
-                   (f"did you mean '{close}'? " if close else "") + "give the layer to fly to that id")
+        scene.note("error", "tour-focus", tid, f"tour stop {i}: {k} '{lid}' names no layer",
+                   (f"did you mean '{close}'? " if close else "") + "give the layer's id")
     if lost:
         return
     f = space.focus(scene.h, fov)
@@ -198,10 +208,10 @@ def _camera(scene, tid: str, stops: list, o: dict):
 
 
 def _dim(scene, stops: list, spans: list, low: float):
-    """Each model layer a stop does not focus (itself or a group round it) fades to `low` of its opacity while the
-    camera flies there, and back as a stop focuses it: a function of scene time, so frames stay pure."""
+    """Each model layer a stop does not focus or keep (itself or a group round it) fades to `low` of its opacity
+    while the camera flies there, and back as a stop brightens it: a function of scene time, so frames stay pure."""
     from .props import Prop
-    focus = [s["focus"] if isinstance(s["focus"], str) else s["focus"]["layer"] for s in stops]
+    bright = [{_focused(s), *(s.get("keep") or [])} for s in stops]
     for L in scene.by_id.values():
         if L.type != "model":
             continue
@@ -210,8 +220,8 @@ def _dim(scene, stops: list, spans: list, low: float):
             line.add(P.id)
             P = P.parent
         keys, prev = [], None
-        for (t0, arrive), f in zip(spans, focus):
-            v = 1.0 if f in line else low
+        for (t0, arrive), ids in zip(spans, bright):
+            v = 1.0 if ids & line else low
             if prev is not None:
                 keys.append((t0, prev))
             keys.append((arrive, v))

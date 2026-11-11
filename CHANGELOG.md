@@ -27,7 +27,7 @@
 - `use: "tour"` makes a guided explainer from a list of stops. Each stop flies the camera to its focus (a layer, or
   a point on one that it follows as the layer turns), zooms and swings round it, and holds while its `say` line
   plays. A stop can also show a `title`/`body` card and a `note` pinned to the focus. `kine voice` speaks the lines,
-  and each stop lasts as long as its line. `dim` fades the models a stop does not focus. `kine docs explainers`
+  and each stop lasts as long as its line. `dim` fades the models a stop does not focus or `keep`. `kine docs explainers`
   documents it, with a complete scene.
 - A camera `target` key may be `{"layer", "at"}`, a point in that layer's own space.
 

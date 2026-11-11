@@ -1093,11 +1093,13 @@ EXPLAINERS
   only) times all of it from a list of stops. The model keys it leans on are cut (open the model up),
   a model's spread (scatter many small parts), tube points, walk and rays (3D curves), all under 3D
   MODELS, and pin (KEYS EVERY LAYER HAS).
-  stops     one or more stops, each {"focus", "zoom", "orbit", "say", "title", "body", "note", "hold"}.
+  stops     one or more stops, each {"focus", "zoom", "orbit", "say", "title", "body", "note", "hold",
+            "keep"}.
             Stop n is a group "<tour>-s<n>" that starts when the one before ends, so "at": "tour-s2.in"
             cues a layer to it.
   focus     a layer id (the camera aims at its middle), or {"layer": "cell", "at": [x, y, z]}: a point
-            in px from that layer's middle before it turns, which the camera follows as the layer moves.
+            in px from where the layer's x and y put it (a model's middle) before it turns, which the
+            camera follows as the layer moves.
   zoom      [1] how many times larger the focus shows than with the camera at rest.
   orbit     degrees the camera swings round the focus while the stop holds. drift [4] adds a slower
             swing, one way at one stop and back at the next, so no stop is a still.
@@ -1109,7 +1111,8 @@ EXPLAINERS
   note      a callout pinned to the focus while the stop holds.
   move      [1.2] seconds the camera flies between stops, eased by ease [inOutCubic]. The first stop
             starts on its focus, at at [0].
-  dim       [0] 0 to 1: how far the model layers a stop does not focus fade while it holds.
+  dim       [0] 0 to 1: how far the model layers a stop does not focus fade while it holds. A stop's
+            keep lists more layers it leaves bright: {"focus": "golgi", "keep": ["vesicles"]}.
   fov       the camera's field of view, which zoom is measured with. The scene's "camera" keeps its
             other keys; the tour writes its target, z and rotateY. check names a focus that is no layer
             (tour-focus).
