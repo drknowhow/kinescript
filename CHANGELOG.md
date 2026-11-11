@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Model layers draw on OpenGL on the GPU backend when moderngl is installed (`pip install "kinescript[gl]"`). A model's
+  mesh goes to the GPU once, and each frame draws it through a depth buffer, shaded by the same formula as before;
+  edge lines are found from each pixel's depth and normal. A cel-shaded scene of 76,632 drawn triangles went from
+  155-193 ms a frame to 5-9 ms (RTX 5060 Ti), and a 14 s clip rendered at 88.6 fps instead of 20.8. Parts of one
+  model that cut through each other now meet at a clean edge instead of a stepped one.
+- A model with a texture (or a model file's emission texture), transparency, explode or `"edges": "all"` still draws
+  with Skia, as do `kine check`, `--wire` and the CPU backend. `KINE_3D=skia` keeps every model on Skia; `KINE_3D=gl`
+  makes it an error when OpenGL cannot run.
+- `kine doctor` reports `"models": "opengl"` or `"skia"`, with a note when a GPU is there but moderngl is not.
+
 ## 2.2.0 (2026-11-08)
 
 - Effect parts: a part with `"effect": true` (and `src`) is hidden until an expression or gesture names it, such as

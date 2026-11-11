@@ -555,12 +555,14 @@ DEPTH AND CAMERA (3D)
             "#7d828c", "bottom": "#23252b", "amount": 1}. Metal reflects it tinted by its fill,
             anything else by its shine, most at grazing angles; shine 0 reflects a blur of it and a
             matte model none. Unset (the default), nothing is reflected. The colours and amount animate.
-  Triangles are sorted far to near within one model, so where two parts of one model cut through
-  each other the seam is stepped: let parts touch rather than cross. Separate layers draw in list
-  order, except in a stage (a group with "sort": "pixel", see DEPTH AND CAMERA), where they meet
-  at a clean edge wherever they cross: put things that cross in a stage as separate layers. A
-  ground shadow in a stage lies on a floor layer in the same plane. check warns past 60,000
-  triangles in a frame.
+  On the GPU with the gl extra (pip install "kinescript[gl]"; kine doctor says "models": "opengl"),
+  a model draws on OpenGL through a depth buffer, and parts of one model that cut through each other
+  meet at a clean edge. Elsewhere (the CPU, and a model with a texture, transparency, explode or
+  "edges": "all") triangles are sorted far to near within one model, so that seam is stepped: let
+  parts touch rather than cross. Separate layers draw in list order, except in a stage (a group
+  with "sort": "pixel", see DEPTH AND CAMERA), where they meet at a clean edge wherever they cross:
+  put things that cross in a stage as separate layers. A ground shadow in a stage lies on a floor
+  layer in the same plane. check warns past 60,000 triangles in a frame.
   A ring around a ball that builds in, turns, and flies apart:
     {"id": "emblem", "type": "model", "x": "50%", "y": "45%", "detail": "high",
      "rotateX": [[0, 64], ["end", 18]], "rotateY": [[0, -30], ["end", 70]],
@@ -941,6 +943,8 @@ COMMANDS
     130  stopped with Ctrl+C
   KINE_BACKEND=cpu draws on the CPU; gpu insists on the GPU (an error when there is none);
   auto, the default, uses the GPU when there is one. Any other value is an error.
+  KINE_3D=skia draws model layers with Skia even when OpenGL could; gl makes it an error when
+  OpenGL cannot run (no GPU or no moderngl); auto, the default, uses OpenGL when it can.
   ffmpeg and ffprobe must be on the PATH: kine names the one it cannot find.
 
 WORKFLOW FOR AGENTS

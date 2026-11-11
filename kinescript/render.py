@@ -682,6 +682,7 @@ class Renderer:
         self.fogged: set[str] = set()  # layers drawn this frame wholly hidden by fog
         self.inside: set[str] = set()  # models the camera is inside this frame
         self.swim: set[str] = set()  # textured models whose triangles stayed too large to map the image this frame
+        self.on_gl: set[str] = set()  # models drawn on OpenGL this frame (gl3d), not by Skia
         self.unfocused = False  # the camera's focus plane was nearer or farther than every layer this frame
         self.slow_dof = False  # a stage blurred per pixel on the CPU this frame
         self.filtered = 0.0  # px blurred by offscreen effects this frame, or their like in work (CPU_BLUR_S)
@@ -700,6 +701,7 @@ class Renderer:
         self._stage = None  # the stage whose child is being drawn
         self._dev = 1.0  # stage px per device px of the canvas being drawn on (models draw in device px)
         self.tris = 0  # model triangles drawn this frame
+        self._gl_meshes = None  # gl3d's buffers for each model layer's mesh, made on first use
         self._subframes = None  # motion blur on the GPU: (count, averaging effect, a surface per sub-frame)
         self._under = None  # motion blur on the GPU: the layers every sub-frame shares (_held)
         self._straight = None  # (effect, surface) straightening blurred transparent frames on the GPU
@@ -957,7 +959,8 @@ class Renderer:
         only they draw, ungraded; `under` is an image of that, which the sub-frame starts from in their place."""
         s = self.s
         self.boxes, self.letters = {}, {}
-        self.culled, self.unlit, self.fogged, self.inside, self.swim = set(), set(), set(), set(), set()
+        self.culled, self.unlit, self.fogged, self.inside, self.swim, self.on_gl = (set(), set(), set(), set(), set(),
+                                                                                 set())
         self.unfocused = self.slow_dof = False
         self.filtered = 0.0
         self._dof, self._span = None, [math.inf, 0.0]
