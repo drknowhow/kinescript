@@ -217,8 +217,10 @@ class Scene:
         self.issues: list[dict] = list(notes or []) + report.issues
         self._raise_errors()
         from . import avatar as avatarlib
+        from . import tour as tourlib
         try:
             spec = avatarlib.say_sounds(spec, base_dir)  # an avatar's lines are voices, as kine voice reads them
+            spec = tourlib.say_sounds(spec)  # and a tour's
         except ValueError as e:
             raise SceneError(str(e)) from e
         branded, problems = brandlib.apply_audio(spec, base_dir)  # the brand's sound defaults, as kine voice reads
@@ -251,6 +253,8 @@ class Scene:
         self.bg = _subst(self.bg, theme)
         self._components = user_comps = _subst(copy.deepcopy(spec.get("components", {})), theme)
         try:
+            toured = bool(tourlib.tours(raw_layers))
+            raw_layers = [x for l in raw_layers for x in (tourlib.expand(l, self) if l in tourlib.tours([l]) else [l])]
             raw_layers = [components.expand(l, user_comps, theme, self) for l in raw_layers]
         except ValueError as e:
             raise SceneError(str(e)) from e
@@ -269,7 +273,8 @@ class Scene:
         self.layers: list[Layer] = []
         self.by_id: dict[str, Layer] = {}
         self._build(raw_layers, None, self.layers)
-        self.camera = self._camera(_subst(spec.get("camera"), theme))
+        # A tour moves the camera, so a scene with one has a camera; its keys are written once the times are known.
+        self.camera = self._camera(_subst(spec.get("camera", {} if toured else None), theme))
         self.light = _subst(spec.get("light"), theme)
         self.lights = _subst(spec.get("lights"), theme)
         self.env = _subst(spec.get("env"), theme)
@@ -1200,6 +1205,11 @@ class Scene:
             if isinstance(k[1], str) and not k[1].startswith("=") and k[1] not in self.by_id:
                 close = schema.suggest(k[1], list(self.by_id))
                 raise ValueError(f"{key} '{k[1]}' is not a layer id or {what}."
+                                 + (f" Did you mean '{close}'?" if close else ""))
+        for k in keys:
+            if isinstance(k[1], dict) and k[1].get("layer") not in self.by_id:
+                close = schema.suggest(str(k[1].get("layer")), list(self.by_id))
+                raise ValueError(f"{key} names layer {k[1].get('layer')!r}, which is not there."
                                  + (f" Did you mean '{close}'?" if close else ""))
         if keys is not v:
             return compile_prop(key, v, self.ctx) if isinstance(v, str) and v.startswith("=") else Prop(True, v)

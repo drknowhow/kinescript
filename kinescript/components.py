@@ -11,6 +11,7 @@ import re
 from pathlib import Path
 
 from . import color as C
+from . import tour as _tourlib
 from .props import FIELD
 
 THEME = {
@@ -516,10 +517,16 @@ NUMBER_PARAMS = {"callout": ("r",), "lowerThird": ("size",),
 BUILTIN = {"lowerThird": _lower_third, "titleCard": _title_card, "callout": _callout, "focus": _focus,
            "progress": _progress, "kinetic": _kinetic, "barChart": _bar_chart, "lineChart": _line_chart,
            "pieChart": _pie_chart, "logo": _logo, "bug": _bug, "sting": _sting, "endCard": _end_card,
-           "avatar": lambda p, th, scene: _avatar(p, th, scene)}
-NEEDS_SCENE = {"logo", "bug", "sting", "endCard", "avatar"}  # builders that read the canvas size or files
+           "avatar": lambda p, th, scene: _avatar(p, th, scene), "tour": lambda p, th, scene: _tour(p)}
+NEEDS_SCENE = {"logo", "bug", "sting", "endCard", "avatar", "tour"}  # builders that read the canvas size or files
 PARAMS["avatar"] = ("avatar", "say", "x", "y", "w", "h", "expressions", "gaze", "gestures", "idle", "seed")
+PARAMS["tour"] = tuple(sorted(_tourlib.PARAMS))  # tour.expand checks them; one list, kept there
 NUMBER_PARAMS["avatar"] = ("w", "h")
+
+
+def _tour(p):
+    """A tour moves the scene's camera, so the scene expands it (tour.expand) and only at its top level."""
+    raise ValueError(f"layer '{p['id']}': a tour moves the camera, so it is a top-level layer, not one in a group")
 
 
 def _avatar(p, th, scene):
@@ -536,6 +543,9 @@ COMPONENT_DOCS = {
     "lowerThird": "title, subtitle, x [\"6%\"], y [\"78%\"] (top-left of its accent bar), accent, size [54], "
                   "color, subColor, plate (box colour, or false for none)",
     "titleCard": "title, subtitle, kicker (small line above), x, y [\"50%\"] (centre), size [128], accent, color",
+    "tour": "stops [{focus, zoom, orbit, say, title, body, note, hold}], move, dim, speaker, rate, cards: the "
+            "camera flies to each focus and holds while its line plays, with a card and a pinned label. Top level "
+            "only. See kine docs explainers",
     "callout": "x, y (centre of the ring), r [60], label, side [right] (left|right), accent, size, boxColor, pin "
                "(a point on a model it follows: {\"layer\": \"cell\", \"at\": [x, y, z]}; x and y then move it "
                "off that point [0])",

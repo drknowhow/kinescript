@@ -1,5 +1,5 @@
 """The scene reference printed by `kine docs` and served to agents by the MCP server, and the longer
-topics (`kine docs avatars`, `kine docs brands`) it points to.
+topics (`kine docs avatars`, `kine docs brands`, `kine docs explainers`) it points to.
 
 Written for small models as well as large ones: rules first, one complete example, every default
 stated, then recipes to copy. Names of motions, eases, shaders and components are filled in from
@@ -606,11 +606,6 @@ DEPTH AND CAMERA (3D)
     {"id": "chrome", "type": "model", "shape": "torus", "r": 200, "tube": 60, "x": "50%", "y": "50%",
      "detail": "high", "fill": "#d9dce1", "metal": 1, "shine": 0.95, "env": "sunset",
      "rotateX": [[0, 70], ["end", 20]], "rotateY": [[0, -30], ["end", 30]]}
-  A cell cut open from the front, with its nucleus cut too:
-    {"id": "cell", "type": "model", "x": "50%", "y": "50%", "rotateY": -30, "rotateX": -15, "bands": 3,
-     "edges": {"width": 3, "color": "#20202a"}, "cut": {"from": "front", "at": [[0.5, 0], [2, 0.5]]},
-     "parts": [{"shape": "sphere", "r": 260, "fill": "#e88a6a"},
-               {"shape": "sphere", "r": 100, "x": 40, "fill": "#7a5cc8"}]}
   A planet whose key light sweeps round it, with a cool light from the right and a ring that glows:
     {"id": "planet", "type": "model", "x": "50%", "y": "50%", "detail": "high", "rotateY": [[0, -20], ["end", 20]],
      "light": {"preset": "dramatic", "azimuth": [[0, -70], ["end", 40]]},
@@ -1089,6 +1084,54 @@ AVATARS
   animation as a layer's clips are; "look": [30, 15] is how many degrees the model turns for a
   full gaze left or right and up or down (default [25, 12]), in 0.3 s. Glances are not for 3D
   avatars. kine check names a morph or clip the model lacks (avatar-morph, avatar-gesture).
+
+""",
+    "explainers": """\
+EXPLAINERS
+  A guided 3D explainer is a model of the subject, a camera that flies from part to part, a voice that
+  says what each part is, a caption card at each stop and a label on the part. A "tour" layer (top level
+  only) times all of it from a list of stops. The model keys it leans on are cut (open the model up),
+  a model's spread (scatter many small parts), tube points, walk and rays (3D curves), all under 3D
+  MODELS, and pin (KEYS EVERY LAYER HAS).
+  stops     one or more stops, each {"focus", "zoom", "orbit", "say", "title", "body", "note", "hold"}.
+            Stop n is a group "<tour>-s<n>" that starts when the one before ends, so "at": "tour-s2.in"
+            cues a layer to it.
+  focus     a layer id (the camera aims at its middle), or {"layer": "cell", "at": [x, y, z]}: a point
+            in px from that layer's middle before it turns, which the camera follows as the layer moves.
+  zoom      [1] how many times larger the focus shows than with the camera at rest.
+  orbit     degrees the camera swings round the focus while the stop holds. drift [4] adds a slower
+            swing, one way at one stop and back at the next, so no stop is a still.
+  say       the stop's voice line. kine voice speaks it as the sound "<tour>-s<n>-v", with the tour's
+            speaker and rate, once the camera has landed. The stop lasts the move, the line and pause
+            [0.4]. Until kine voice has run, check says voice-missing and the length is guessed from the
+            words. A stop without say holds for hold [2.5] after its move.
+  title     with body, a lowerThird card for the stop (cards false leaves them out; accent colours it).
+  note      a callout pinned to the focus while the stop holds.
+  move      [1.2] seconds the camera flies between stops, eased by ease [inOutCubic]. The first stop
+            starts on its focus, at at [0].
+  dim       [0] 0 to 1: how far the model layers a stop does not focus fade while it holds.
+  fov       the camera's field of view, which zoom is measured with. The scene's "camera" keeps its
+            other keys; the tour writes its target, z and rotateY. check names a focus that is no layer
+            (tour-focus).
+  A cell cut open from the front, its parts in the cut, toured in three stops (kine voice, then kine check):
+    {"canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": "auto", "bg": "#f4efe6"},
+     "layers": [
+      {"id": "cell", "type": "model", "x": "50%", "y": "50%", "rotateY": "=-30 + t * 3", "rotateX": -15,
+       "bands": 3, "edges": {"width": 3, "color": "#20202a"},
+       "cut": {"from": "front", "at": [[0, 0], [1.5, 0.5]], "cap": "#f6c9a8"},
+       "parts": [{"shape": "sphere", "r": 300, "fill": "#e88a6a"},
+                 {"shape": "sphere", "r": 110, "x": 40, "fill": "#7a5cc8"},
+                 {"shape": "capsule", "r": 30, "h": 130, "x": -170, "y": 110, "rotate": 40,
+                  "fill": "#f2c14e"},
+                 {"shape": "capsule", "r": 26, "h": 110, "x": 160, "y": -150, "rotate": -30,
+                  "fill": "#f2c14e"}]},
+      {"use": "tour", "id": "tour", "speaker": "af_heart", "stops": [
+        {"focus": "cell", "zoom": 0.9, "title": "An animal cell",
+         "say": "This is an animal cell, cut open to show what is inside."},
+        {"focus": {"layer": "cell", "at": [40, 0, 0]}, "zoom": 2.2, "orbit": 15, "title": "Nucleus",
+         "body": "Holds the DNA", "note": "Nucleus", "say": "The nucleus holds the cell's DNA."},
+        {"focus": {"layer": "cell", "at": [-170, 110, 0]}, "zoom": 3, "title": "Mitochondrion",
+         "note": "Mitochondrion", "say": "Mitochondria turn food into energy the cell can use."}]}]}
 
 """,
     "brands": """\

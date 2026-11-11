@@ -1110,6 +1110,10 @@ class Renderer:
         """A target as a point in canvas px: [x, y] or [x, y, z] (lengths as a layer's x, y and z take them), or a
         layer id: the middle of that layer where its keys and its parents put it at T. Its enter and exit motions
         are left out, so a layer that rises in rises on screen rather than taking the camera with it."""
+        if isinstance(v, dict):  # {"layer", "at"}: a point in that layer's own space, as a pin's
+            at = v.get("at") or (0.0, 0.0, 0.0)
+            m = self._placing(self.s.by_id[v["layer"]], T)[0]
+            return (m @ np.array([*map(float, at), *[0.0] * (3 - len(at)), 1.0]))[:3]
         if not isinstance(v, str):
             v = list(v) + [0.0] * (3 - len(v))
             return np.array([float(length(x, k, self.s.ctx)) for x, k in zip(v, ("x", "y", "z"))])
