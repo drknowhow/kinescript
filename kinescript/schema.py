@@ -128,9 +128,14 @@ ANIMATION_ALIAS = {"clip": "name", "track": "name", "rate": "speed", "timeScale"
                    "offset": "start", "from": "start", "time": "start"}
 MODEL_FILES = (".glb", ".gltf", ".obj")
 # A model's copies: how many, and each one's place and fill (a number or colour, a list in turn, an expression of i).
-REPEAT = {"count", "x", "y", "z", "rotateX", "rotateY", "rotate", "scale", "fill"}
+REPEAT = {"count", "x", "y", "z", "rotateX", "rotateY", "rotate", "scale", "fill", "spread"}
 # A 2D layer's: placed in its own plane, with their own fill, stroke and opacity where the layer has them.
-REPEAT_2D = {"count", "x", "y", "rotate", "scale", "opacity", "fill", "stroke"}
+REPEAT_2D = {"count", "x", "y", "rotate", "scale", "opacity", "fill", "stroke", "spread"}
+SPREAD = {"in", "on", "r", "w", "h", "depth", "seed", "gap", "avoid"}
+SPREAD_ALIAS = {"shape": "in", "within": "in", "inside": "in", "radius": "r", "width": "w", "height": "h",
+                "d": "depth", "spacing": "gap", "minDistance": "gap", "apart": "gap", "exclude": "avoid",
+                "keepOut": "avoid", "random": "seed"}
+SPREAD_ON = {"sphere": "shell", "disc": "ring", "circle": "ring", "shell": "shell", "ring": "ring"}  # "on": ...
 REPEAT_ALIAS = {"n": "count", "copies": "count", "number": "count", "times": "count", "amount": "count",
                 "color": "fill", "colour": "fill", "colors": "fill", "colours": "fill", "rotation": "rotate",
                 "alpha": "opacity", "strokeColor": "stroke", "strokeColors": "stroke", "strokes": "stroke",
@@ -1993,7 +1998,9 @@ def _repeat(raw: dict, rep: Report, lid, t: str):
     elif isinstance(c, bool) or not isinstance(c, int) or not 1 <= c <= MAX_COPIES:
         rep.add("error", "bad-value", lid, f"repeat count is {_show(c)}; it is a whole number from 1 to "
                 f"{MAX_COPIES:,}")
-    for k in sorted(allowed - {"count"}):
+    if "spread" in v:
+        _spread(v, rep, lid, t)
+    for k in sorted(allowed - {"count", "spread"}):
         x = v.get(k)
         if x is None or (isinstance(x, str) and x.startswith("=")):
             continue
@@ -2010,6 +2017,69 @@ def _repeat(raw: dict, rep: Report, lid, t: str):
             what = "a number, a list of numbers taken in turn, or an expression of i such as \"=i * 60\""
         rep.add("error", "bad-value", lid, f"repeat {k} is {_show(x)}; it is {what}",
                 "i is the copy's number from 0, n the count; t, d, p and T are the layer's times")
+
+
+def _spread(v: dict, rep: Report, lid, t: str):
+    """repeat's "spread" scatters the copies, seeded (props.spread): {"in": "sphere", "r": 200, "seed": 1,
+    "gap": 0, "avoid": [{"x", "y", "z", "r"}]}. "on" a sphere or disc is "in" its shell or ring."""
+    from .props import SPREAD_IN
+    sp = v["spread"]
+    example = '"spread": {"in": "sphere", "r": 240, "seed": 3, "gap": 40}'
+    if sp is None or sp is False:
+        del v["spread"]
+        return
+    if not isinstance(sp, dict):
+        rep.add("error", "bad-value", lid, f"repeat spread is {_show(sp)}; it is an object", example)
+        return
+    _keys(sp, SPREAD, SPREAD_ALIAS, rep, lid, "repeat spread: ")
+    if "on" in sp:
+        on = sp.pop("on")
+        if "in" in sp:
+            rep.add("error", "duplicate-key", lid, "repeat spread: both 'in' and 'on' are set", "keep one")
+        elif on in SPREAD_ON:
+            sp["in"] = SPREAD_ON[on]
+        else:
+            rep.add("error", "bad-value", lid, "repeat spread on: " + unknown("shape", on, SPREAD_ON))
+    kind = sp.get("in", "sphere")
+    if kind not in SPREAD_IN:
+        rep.add("error", "bad-value", lid, "repeat spread in: " + unknown("shape", kind, SPREAD_IN), example)
+    elif t != "model" and kind in ("sphere", "shell"):
+        rep.add("error", "bad-value", lid, f"repeat spread in \"{kind}\" scatters in depth; a 2D layer's copies "
+                "lie in its own plane", 'use "disc" or "ring"')
+    for k in ("r", "w", "h", "depth", "gap"):
+        x = sp.get(k)
+        if x is not None and (not _finite(x) or x < 0):
+            rep.add("error", "bad-value", lid, f"repeat spread {k} is {_show(x)}; it is a number of px, 0 or more")
+    seed = sp.get("seed")
+    if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int) or seed < 0):
+        rep.add("error", "bad-value", lid, f"repeat spread seed is {_show(seed)}; it is a whole number, 0 or more",
+                "another seed gives other places")
+    gap, n = sp.get("gap"), v.get("count")
+    if kind in SPREAD_IN and _finite(gap) and gap > 0 and isinstance(n, int) and not isinstance(n, bool) and all(
+            sp.get(k) is None or _finite(sp[k]) for k in ("r", "w", "h", "depth")):
+        r = float(sp.get("r", 200))
+        w = float(sp.get("w", 2 * r))
+        h, d = float(sp.get("h", w)), float(sp.get("depth", w))
+        # Copies scattered one at a time stop fitting at about these shares of the room (random packing).
+        room = {"sphere": 0.38 * 4 / 3 * math.pi * r ** 3 / (math.pi / 6 * gap ** 3),
+                "box": 0.38 * w * h * d / (math.pi / 6 * gap ** 3),
+                "shell": 0.547 * 4 * math.pi * r * r / (math.pi / 4 * gap ** 2),
+                "disc": 0.547 * math.pi * r * r / (math.pi / 4 * gap ** 2),
+                "ring": 0.75 * 2 * math.pi * r / gap}[kind]
+        if n > room:
+            rep.add("warning", "spread-crowded", lid, f"repeat spread: {n} copies {gap:g} px apart do not fit {kind} "
+                    f"(about {int(room)} do); the rest sit closer", "lower count or gap, or make the room bigger")
+    avoid = sp.get("avoid")
+    if avoid is not None:
+        if not isinstance(avoid, list) or not all(isinstance(a, dict) for a in avoid):
+            rep.add("error", "bad-value", lid, f"repeat spread avoid is {_show(avoid)}; it is a list of balls to "
+                    "keep out of", '"avoid": [{"x": 40, "y": 0, "z": 0, "r": 120}]')
+        else:
+            for a in avoid:
+                _keys(a, {"x", "y", "z", "r"}, {"radius": "r"}, rep, lid, "repeat spread avoid: ")
+                for k, x in a.items():
+                    if k in ("x", "y", "z", "r") and not _finite(x):
+                        rep.add("error", "bad-value", lid, f"repeat spread avoid {k} is {_show(x)}; it is a number")
 
 
 PARTICLE_SHAPE_ALIAS = {"dot": "circle", "disc": "circle", "disk": "circle", "box": "square", "strip": "rect",

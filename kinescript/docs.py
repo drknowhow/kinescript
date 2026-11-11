@@ -153,6 +153,12 @@ KEYS EVERY LAYER HAS
                 one picture. A shape's copies draw in one loop: 10,000 circles, each moved by two
                 expressions, render at 1080p at about 40 fps on an RTX 5060 Ti. Captions do not
                 repeat; a model's repeat is under 3D MODELS.
+                "spread" scatters the copies instead of placing each by hand: {"in": "disc", "r":
+                300, "seed": 4, "gap": 40, "avoid": [{"x": 0, "y": 0, "r": 120}]} puts each copy at a
+                place in a circle of radius r ("ring": on it, "box": w x h), gap px from the others
+                and out of each ball in avoid. The same seed gives the same places; another seed
+                others. x and y, when given, move each copy from its place: "y": "=sin(t + i) * 6"
+                bobs them. check warns spread-crowded when gap leaves too little room for count.
   shadow        {"x": 0, "y": 6, "blur": 16, "color": "#00000099"}   (those are the defaults)
   fx            {"brightness": 0, "contrast": 1, "saturate": 1, "hue": 0, "exposure": 0,
                  "temperature": 0, "tint": 0, "gray": 0, "invert": 0}. brightness adds to every
@@ -488,7 +494,10 @@ DEPTH AND CAMERA (3D)
             is, and its fill recolours what the layer's fill would. Keys that read no time are worked
             out once. A model draws at most 64 colours: past that, each copy takes the nearest kept
             one (check warns repeat-colours). Copies cost what that many triangles cost: use "detail":
-            "low" for many.
+            "low" for many. "spread" (see repeat under KEYS EVERY LAYER HAS) takes "in": "sphere" (inside
+            a ball of radius r), "shell" (on its surface; "on": "sphere" says the same) and a box's
+            "depth", and places copies in z too: {"count": 40, "spread": {"in": "sphere", "r": 240,
+            "seed": 3, "gap": 36}, "rotate": "=i * 47"}.
   src       a model file: .glb or .gltf (glTF 2.0), or .obj with its .mtl. Colours, shine and metal
             come from the file; a fill on the layer recolours all of it. It fits inside w and/or h
             keeping its shape, else its longest side is 300 px. Node transforms, skins (up to four
@@ -538,9 +547,9 @@ DEPTH AND CAMERA (3D)
   cut       {"from": "front", "at": 0.5, "cap": "#fbefdf"}: a cutaway. A flat cut comes in from
             one side (front | back | left | right | top | bottom; the front faces the camera before
             the model turns) and takes off that share of the model, 0 to 1, measured across all its
-            parts. The cut face is filled where the cut goes through a part, in the cap colour, or
-            in each part's own colour without cap; a part inside another shows its own cut face,
-            and a hole (a torus's middle) stays open. at and cap animate: "at": [[0, 0], [1.5, 0.5]]
+            parts. The cut face is filled where the cut goes through a part: the outermost in the
+            cap colour (its part's own without cap), and a part inside another in its own colour, so
+            a nucleus shows in a cell. A hole (a torus's middle) stays open. at and cap animate: "at": [[0, 0], [1.5, 0.5]]
             opens it. Each copy of a repeat is cut. Put the parts a cut goes through in one model:
             separate models cut at one place show their cut faces in the same plane.
   draw      0..1, or "enter": "build": triangles appear from the bottom up.

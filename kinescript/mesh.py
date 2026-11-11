@@ -282,8 +282,9 @@ def cut(m: Mesh, axis: int, side: float, at: float, cap: int | None = None) -> t
     is `at` of the mesh's size along the axis in from its low end (side 1) or its high end (side -1), and what
     lies between that end and the plane goes. Triangles across the plane are cut along it. The cap fills each
     closed line the plane traces round a part, less the lines inside it, so a part inside another shows its own
-    cut face and a hollow stays open. It is flat, faces the end taken off, and takes material slot `cap`, or each
-    part's own when cap is None. A surface that does not close (a plane, an open lathe line) gets no cap.
+    cut face and a hollow stays open. It is flat and faces the end taken off. The outermost faces take material
+    slot `cap` (each part's own when cap is None), and a part inside another its own. A surface that does not
+    close (a plane, an open lathe line) gets no cap.
     Returns the mesh and how many triangles of the cap end it."""
     if not len(m.T) or at <= 0:
         return m, 0
@@ -392,7 +393,8 @@ def _caps(P: np.ndarray, lines: np.ndarray, mats: np.ndarray, axis: int, side: f
         tri[flip] = tri[flip][:, [0, 2, 1]]
         pts.append(X)
         tris.append(tri + base)
-        mat.append(np.full(len(Q), mt if slot is None else slot, np.int32))
+        outer = not any(i in inside[j] for j in range(len(rings)))
+        mat.append(np.full(len(Q), slot if slot is not None and outer else mt, np.int32))
         base += len(Q)
     if not pts:
         return empty

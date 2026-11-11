@@ -65,8 +65,10 @@ def test_a_cut_leaves_a_hollow_open_and_fills_each_solid():
     area = 0.5 * np.linalg.norm(np.cross(b - a, c - a), axis=1)
     assert area[slot == 0].sum() == pytest.approx(np.pi * (1 - 0.16), rel=0.03)
     assert area[slot == 1].sum() == pytest.approx(np.pi * 0.16, rel=0.03)
-    m, n = mesh.cut(both, *mesh.SIDES["front"], 0.5, cap=2)
-    assert set(m.M[m.T[len(m.T) - n:].ravel()]) == {2}
+    m, n = mesh.cut(both, *mesh.SIDES["front"], 0.5, cap=2)  # the cap colour on the outer face, not the inner
+    slot = m.M[m.T[len(m.T) - n:, 0]]
+    assert area[slot == 2].sum() == pytest.approx(np.pi * (1 - 0.16), rel=0.03)
+    assert area[slot == 1].sum() == pytest.approx(np.pi * 0.16, rel=0.03)
 
 
 def test_no_cut_and_a_whole_cut():
