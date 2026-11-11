@@ -494,10 +494,10 @@ DEPTH AND CAMERA (3D)
             is, and its fill recolours what the layer's fill would. Keys that read no time are worked
             out once. A model draws at most 64 colours: past that, each copy takes the nearest kept
             one (check warns repeat-colours). Copies cost what that many triangles cost: use "detail":
-            "low" for many. "spread" (see repeat under KEYS EVERY LAYER HAS) takes "in": "sphere" (inside
-            a ball of radius r), "shell" (on its surface; "on": "sphere" says the same) and a box's
-            "depth", and places copies in z too: {"count": 40, "spread": {"in": "sphere", "r": 240,
-            "seed": 3, "gap": 36}, "rotate": "=i * 47"}.
+            "low" for many. A model's "spread" (see repeat under KEYS EVERY LAYER HAS) also takes
+            "in": "sphere" (inside a ball of radius r), "shell" (on its surface; "on": "sphere" says
+            the same) and a box's "depth", and places copies in z too: {"count": 40, "spread":
+            {"in": "sphere", "r": 240, "seed": 3, "gap": 36}, "rotate": "=i * 47"}.
   src       a model file: .glb or .gltf (glTF 2.0), or .obj with its .mtl. Colours, shine and metal
             come from the file; a fill on the layer recolours all of it. It fits inside w and/or h
             keeping its shape, else its longest side is 300 px. Node transforms, skins (up to four
