@@ -11,11 +11,14 @@ Skia then draws the result where render3d would have drawn its own image, so the
 
 A model draws here when the backend is the GPU, moderngl is installed (pip install "kinescript[gl]"), and it uses
 nothing this path does not have: textures (including a model file's), transparency, explode and edges: "all" draw on
-the Skia path, as do `kine check` (it measures the frame on that path) and --wire. KINE_3D=skia turns this path off;
-KINE_3D=gl makes it an error when it cannot run.
+the Skia path, as does --wire. KINE_3D=skia turns this path off; KINE_3D=gl makes it an error when it cannot run.
+
+A stage's shadow map is drawn here too whenever models can be (sun_map): what casts, through a depth buffer along
+the key light. A model drawn here casts from the buffers it drew from; one Skia drew has its triangles sent.
 
 The two paths differ where they are built differently: edge lines are found per pixel here and along the mesh's edges
-there, and triangles that cross the camera plane are clipped here where render3d drops them."""
+there, triangles that cross the camera plane are clipped here where render3d drops them, and the shadow map keeps the
+nearest caster at each texel here where Skia draws whole triangles far to near."""
 from __future__ import annotations
 
 import math
@@ -192,6 +195,32 @@ void main() {
 }
 """
 
+# A stage's shadow map: what casts, seen along the key light. u_m takes a vertex to the map's clip space across and
+# up, and to how near the light it is (0.001 farthest, 0.999 nearest, as stage._sun stores it) in z; the depth test
+# keeps the nearest at each texel.
+_SUN_VERT = """
+#version 330
+in vec3 in_pos;
+uniform mat4 u_m;
+out float v_d;
+void main() {
+    vec4 h = u_m * vec4(in_pos, 1.0);
+    v_d = h.z;
+    gl_Position = vec4(h.xy, 1.0 - 2.0 * h.z, 1.0);
+}
+"""
+_SUN_FRAG = """
+#version 330
+in float v_d;
+out vec4 o_col;
+void main() {  // stage.py's _PACK
+    float d = floor(clamp(v_d, 0.0, 1.0) * 16777215.0 + 0.5);
+    float hi = floor(d / 65536.0);
+    float mid = floor((d - hi * 65536.0) / 256.0);
+    o_col = vec4(hi / 255.0, mid / 255.0, (d - hi * 65536.0 - mid * 256.0) / 255.0, 1.0);
+}
+"""
+
 _STATE: dict = {}  # the moderngl context and its programs, made once per process: None when it cannot be
 _TARGETS: dict = {}  # render targets by size, the last two kept
 
@@ -222,6 +251,7 @@ def _state():
             shade = ctx.program(vertex_shader=_VERT.replace("NEAR", near),
                                 fragment_shader=_FRAG.replace("MATS", str(MATS)).replace("NEAR", near))
             edge = ctx.program(vertex_shader=_QUAD, fragment_shader=_EDGE)
+            sun = ctx.program(vertex_shader=_SUN_VERT, fragment_shader=_SUN_FRAG)
         except Exception as e:  # noqa: BLE001 - moderngl raises its own Error and plain exceptions alike
             _STATE.update(ctx=None, error=f"{type(e).__name__}: {e}")
             return None
@@ -230,7 +260,7 @@ def _state():
         # Skia binds sampler objects of its own; these replace them on the two units read, so a mipmap filter left
         # on a unit cannot make a texture incomplete (texelFetch reads it as 0 then).
         nearest = ctx.sampler(filter=(moderngl.NEAREST, moderngl.NEAREST), repeat_x=False, repeat_y=False)
-        _STATE.update(ctx=ctx, mgl=moderngl, shade=shade, edge=edge, sampler=nearest,
+        _STATE.update(ctx=ctx, mgl=moderngl, shade=shade, edge=edge, sun=sun, sampler=nearest,
                       quad=ctx.vertex_array(edge, [(quad, "2f", "in_xy")]))
     return _STATE["ctx"]
 
@@ -294,6 +324,24 @@ class _Buffers:
         self.ibo = ctx.buffer(np.ascontiguousarray(m.T, "i4").tobytes())
         self.vao = ctx.vertex_array(shade, [(self.vbo, "3f 3f 1f", "in_pos", "in_nrm", "in_mat")], self.ibo)
         self.built = None  # (order, vao, ibo): the triangles in that build order
+        self.cast = None  # (ibo, vao): a vertex array for the shadow map over the triangles in ibo
+        self.dead = False
+
+    def casts(self, m, order) -> bool:
+        """Whether these still hold mesh m, and its triangles in build order `order` if that is not None: what a
+        model that cast a shadow drew."""
+        in_order = order is None or (self.built is not None and self.built[0] is order)
+        return not self.dead and self.holds(m) and in_order
+
+    def shadow(self, order):
+        """A vertex array for the shadow map's program: the positions, and the triangles (in build order `order`
+        when that is not None)."""
+        ibo = self.ibo if order is None else self.built[2]
+        if self.cast is None or self.cast[0] is not ibo:
+            if self.cast is not None:
+                self.cast[1].release()
+            self.cast = (ibo, _STATE["ctx"].vertex_array(_STATE["sun"], [(self.vbo, "3f 16x", "in_pos")], ibo))
+        return self.cast[1]
 
     def holds(self, m) -> bool:
         return all(a is b for a, b in zip(self.key, (m.P, m.N, m.M, m.T)))
@@ -310,6 +358,9 @@ class _Buffers:
         """A vertex array of m's triangles in build order `order` (render3d keeps one while the mesh holds)."""
         if self.built is None or self.built[0] is not order:
             if self.built is not None:
+                if self.cast is not None and self.cast[0] is self.built[2]:
+                    self.cast[1].release()
+                    self.cast = None
                 for o in self.built[1:]:
                     o.release()
             ctx = _STATE["ctx"]
@@ -319,8 +370,9 @@ class _Buffers:
         return self.built[1]
 
     def release(self):
-        for o in (self.vao, self.ibo, self.vbo, *(self.built or ())[1:]):
+        for o in (self.vao, self.ibo, self.vbo, *(self.built or ())[1:], *(self.cast or ())[1:]):
             o.release()
+        self.dead = True
 
 
 def _release(kept: dict):
@@ -408,7 +460,9 @@ def draw(r, c: skia.Canvas, L, m, mats, lights, fg, edging, amt: float, order, t
         if (eye > lo3).all() and (eye < hi3).all() and render3d._within(eye, P, T):
             r.inside.add(L.id)
         if r._stage is not None and r._stage.casters is not None:
-            r._stage.cast(P @ view[:3, :3].T + view[:3, 3], T)
+            # The shadow map draws these triangles from the buffers this draw fills, while they still hold them.
+            r._stage.cast(P @ view[:3, :3].T + view[:3, 3], T,
+                          (_buffers(r, L, m), m, None if amt >= 1.0 else order, view))
     # The box's corners bound where the mesh can be on screen while all of them are ahead of the camera (w is
     # linear, and a box seen in perspective covers its corners' outline). These bounds place the passes; check and
     # --boxes take the model's box from render3d.draw.
@@ -505,8 +559,69 @@ def draw(r, c: skia.Canvas, L, m, mats, lights, fg, edging, amt: float, order, t
     return bounds
 
 
-def _image(r, tex, w: int, h: int) -> skia.Image:
-    """Texture tex as a Skia image, its first row at the bottom as GL keeps it."""
+def _image(r, tex, w: int, h: int, origin=skia.kBottomLeft_GrSurfaceOrigin) -> skia.Image:
+    """Texture tex as a Skia image, its first row at the bottom as GL keeps it (or at the top, with that origin)."""
     bt = skia.GrBackendTexture(w, h, skia.GrMipmapped.kNo, skia.GrGLTextureInfo(_GL_TEXTURE_2D, tex.glo, _GL_RGBA8))
-    return skia.Image.MakeFromTexture(r.gr, bt, skia.kBottomLeft_GrSurfaceOrigin, skia.kRGBA_8888_ColorType,
-                                      skia.kPremul_AlphaType)
+    return skia.Image.MakeFromTexture(r.gr, bt, origin, skia.kRGBA_8888_ColorType, skia.kPremul_AlphaType)
+
+
+def _loose(P: np.ndarray, tris: np.ndarray):
+    """A vertex array for the shadow map's program over corners P and triangles tris, which no model's buffers
+    hold: sent through two buffers kept for that."""
+    ctx = _STATE["ctx"]
+    v, i = np.ascontiguousarray(P, "f4").tobytes(), np.ascontiguousarray(tris, "i4").tobytes()
+    kept = _STATE.get("loose")
+    if kept is None or kept[0].size < len(v) or kept[1].size < len(i):
+        if kept is not None:
+            for o in kept[::-1]:
+                o.release()
+        vbo, ibo = (ctx.buffer(reserve=max(len(b) * 3 // 2, 1 << 16), dynamic=True) for b in (v, i))
+        kept = _STATE["loose"] = (vbo, ibo, ctx.vertex_array(_STATE["sun"], [(vbo, "3f", "in_pos")], ibo))
+    else:
+        kept[0].orphan()
+        kept[1].orphan()
+    kept[0].write(v)
+    kept[1].write(i)
+    return kept[2]
+
+
+def sun_map(r, casters: list, to_map: np.ndarray, side: int) -> skia.Image:
+    """A stage's shadow map, `side` texels square: the triangles of casters (as Stage.cast keeps them) that are
+    turned from the key light, each texel holding the nearest of them to the light, packed as stage.py packs a
+    depth. to_map takes camera space to the map: texels across it and from its first row to its last, and nearness
+    (0.001 to 0.999) in z. A caster drawn here comes from the buffers its draw filled, while they hold what it drew;
+    any other is sent as it is."""
+    mgl, ctx, sun = _STATE["mgl"], _STATE["ctx"], _STATE["sun"]
+    r.gr.flushAndSubmit(skia.GrSyncCpu.kNo)  # a stage drawn before this one may still be to read the last map
+    tg = _STATE.get("sun_target")
+    if tg is None or tg[0].size != (side, side):
+        tex, depth = ctx.texture((side, side), 4), ctx.depth_renderbuffer((side, side))
+        tg = _STATE["sun_target"] = (tex, depth, ctx.framebuffer([tex], depth))
+    fbo = tg[2]
+    fbo.viewport = (0, 0, side, side)
+    fbo.scissor = None
+    fbo.use()
+    fbo.clear(0.0, 0.0, 0.0, 0.0, depth=1.0)
+    ctx.enable_only(mgl.DEPTH_TEST | mgl.CULL_FACE)
+    ctx.depth_func = "<"
+    # Across and up the map with the light behind the viewer, a triangle turned from the light runs clockwise.
+    ctx.front_face = "cw"
+    ctx.cull_face = "back"
+    clip = np.diag([2.0 / side, 2.0 / side, 1.0, 1.0]) @ to_map
+    clip[:2, 3] -= 1.0
+    loose, n = [], 0
+    for P, tris, on in casters:
+        if on is not None and on[0].casts(on[1], on[2]):
+            buf, _, order, view = on
+            _set(sun, "u_m", _mat(clip @ view))
+            buf.shadow(order).render(mgl.TRIANGLES, vertices=3 * len(tris))
+        else:
+            loose.append((P, tris + n))
+            n += len(P)
+    if loose:
+        vao = _loose(np.concatenate([p for p, _ in loose]), np.concatenate([t for _, t in loose]))
+        _set(sun, "u_m", _mat(clip))
+        vao.render(mgl.TRIANGLES, vertices=3 * sum(len(t) for _, t in loose))
+    ctx.enable_only(0)
+    r.gr.resetContext()
+    return _image(r, tg[0], side, side, skia.kTopLeft_GrSurfaceOrigin)

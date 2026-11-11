@@ -8,6 +8,14 @@
   36 to 53 s and takes 5.3 to 5.7 (RTX 5060 Ti, alternating runs on a busy machine); on a 70 s tour of 24 models
   sampled every 2 s, 183 s and now 22; `kine look --boxes` of that tour, 33 to 52 s and now 9 to 14. `--wire` still
   draws with Skia.
+- A stage's shadow map is drawn on OpenGL wherever its models can be: what casts goes through a depth buffer along
+  the key light, from the buffers the models were drawn from. Skia drew it from every caster's triangles, sorted
+  and handed over a point at a time, which cost more than drawing the models. The shadows are the same: on
+  `shadows.json`, `character.json`, `focus.json` and `product.json` no pixel of five sampled frames differs. A frame
+  of `character.json` drew in 13 to 16 ms and draws in 3.2 to 3.8 (RTX 5060 Ti, six alternating runs); `shadows.json`
+  8.2 to 11.5 and now 3.5 to 3.9; `focus.json` 9.6 to 17.9 and now 4.6 to 5.0; `product.json`, whose three textured
+  models still draw with Skia, 100 to 110 and now 77 to 82. A whole render of `character.json` (6 s) took 2.4 to
+  2.7 s and takes 2.1. With `KINE_3D=skia`, `--wire` and on the CPU backend the map is drawn as before.
 
 ## 2.3.0 (2026-11-11)
 

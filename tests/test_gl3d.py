@@ -1,11 +1,12 @@
-"""Model layers on OpenGL (gl3d): which models draw there, that they match the Skia path, stages, a partial draw,
-moving copies, repeatability, what check and --boxes read, and KINE_3D. The drawing tests need the GPU backend and moderngl, and skip without
-them (CI runs on the CPU)."""
+"""Model layers on OpenGL (gl3d): which models draw there, that they match the Skia path, stages and their shadow
+maps, a partial draw, moving copies, repeatability, what check and --boxes read, and KINE_3D. The drawing tests need
+the GPU backend and moderngl, and skip without them (CI runs on the CPU)."""
 import numpy as np
 import pytest
+import skia
 
 import kinescript as k
-from kinescript import gl3d
+from kinescript import gl3d, stage
 from kinescript.render import Renderer
 
 
@@ -207,3 +208,161 @@ def test_check_sees_the_pixels_a_render_draws(monkeypatch):
     assert r.on_gl == {"ring", "ball", "b2"}
     close(a, b, mean=0.2, far=0.005)
     assert (np.abs(b - np.array([0xf4, 0xef, 0xe6])).max(-1) > 30).mean() > 0.1  # the models are in the frame
+
+
+class _SkiaMap:
+    """gl3d as stage.py sees it, with the shadow map left to Skia: what a stage drew before OpenGL made the map."""
+
+    def __getattr__(self, name):
+        return getattr(gl3d, name)
+
+    def available(self, r):
+        return False
+
+
+def lit(kids, shadows=True, x=160, w=300):
+    """A stage of kids over a floor w wide."""
+    floor = {"id": f"floor{x}", "type": "rect", "w": w, "h": 300, "y": 40, "rotateX": 90, "fill": "#808080"}
+    return {"id": f"st{x}", "type": "group", "x": x, "y": 110, "sort": "pixel", "shadows": shadows,
+            "children": kids + [floor]}
+
+
+def lit_scene(stages, **more):
+    """Stages seen from above, the key light from the left."""
+    spec = scene(stages, bg="#000000")
+    spec.update({"light": {"azimuth": -70, "elevation": 40, "follow": "world"}, "camera": {"rotateX": 35}}, **more)
+    return spec
+
+
+def nearness(image) -> np.ndarray:
+    """A shadow map's texels as numbers: 0 where nothing casts, up to 1 nearest the light."""
+    px = image.toarray(colorType=skia.kRGBA_8888_ColorType).astype(np.int64)
+    return ((px[..., 0] << 16) | (px[..., 1] << 8) | px[..., 2]) / 16777215.0
+
+
+def cast(monkeypatch) -> list:
+    """Count what gl3d.sun_map draws from here on: [casters from a model's buffers, casters sent loose, maps]."""
+    n, real_map, real_shadow = [0, 0, 0], gl3d.sun_map, gl3d._Buffers.shadow
+
+    def sun_map(r, casters, *a):
+        before = n[0]
+        out = real_map(r, casters, *a)
+        n[1] += len(casters) - (n[0] - before)
+        n[2] += 1
+        return out
+
+    def shadow(self, order):
+        n[0] += 1
+        return real_shadow(self, order)
+    monkeypatch.setattr(gl3d, "sun_map", sun_map)
+    monkeypatch.setattr(gl3d._Buffers, "shadow", shadow)
+    return n
+
+
+def shadowed(spec, monkeypatch, n=0, skia_map=False):
+    """Frame n with its models on OpenGL, the shadow map there too or (skia_map) left to Skia, and the renderer."""
+    with monkeypatch.context() as m:
+        if skia_map:
+            m.setattr(stage, "gl3d", _SkiaMap())
+        r = renderer(spec, monkeypatch)
+        return r.frame(n)[..., :3].astype(int), r
+
+
+def same_shadows(a, b, bare):
+    """Frames a and b hold the same shadows, and there are shadows: a few pixels may differ, where two ways of
+    filling a triangle put a shadow's edge a texel apart."""
+    d = np.abs(a - b).max(-1)
+    dark = ((bare - b).min(-1) > 20).sum()
+    assert dark > 200 and (d > 8).sum() < 0.01 * dark, ((d > 8).sum(), dark)
+
+
+def test_a_shadow_map_drawn_on_opengl_casts_the_shadows_skias_does(monkeypatch):
+    """A whole model and one drawn in part (from their buffers) and a transparent one (on the Skia path, so sent
+    loose) cast onto a floor and each other: the frame is the one the Skia-drawn map gives."""
+    kids = [ball(x=-70, y=-25, r=28), ring(x=10, y=-30, r=34, tube=10, rotateX=20, draw=[[0, 0.3], [2, 1, "linear"]]),
+            ball(id="glass", x=85, y=-10, r=20, transparency=0.3, edges=None)]
+    spec = lit_scene([lit(kids)])
+    count = cast(monkeypatch)
+    for n in (0, 30):
+        a, _ = shadowed(spec, monkeypatch, n, skia_map=True)
+        assert count == [0, 0, 0]
+        b, r = shadowed(spec, monkeypatch, n)
+        assert r.on_gl == {"ball", "ring"} and count == [2, 1, 1]
+        same_shadows(a, b, shadowed(lit_scene([lit(kids, shadows=None)]), monkeypatch, n)[0])
+        count[:] = [0, 0, 0]
+
+
+def test_each_stage_and_each_sub_frame_reads_its_own_shadow_map(monkeypatch):
+    """Two shadowed stages in a frame, and a frame of several sub-frames (motion blur): one texture holds every map,
+    and each is read before the next is drawn into it. With transparent models, which Skia draws, no OpenGL model
+    comes between the two maps."""
+    def stages(shadows, glass):
+        look = {"transparency": 0.2, "edges": None} if glass else {}
+        return [lit([ball(id="a", x=-40, y=-30, r=22, z=[[0, -60], [2, 60, "linear"]], **look)], shadows, 80, 150),
+                lit([ring(id="b", x=-35, y=-34, r=24, tube=8, rotateX=25, rotateY=[[0, 0], [2, 200, "linear"]],
+                          **look)], shadows, 240, 150)]
+    count = cast(monkeypatch)
+    for glass, more in ((False, {}), (True, {}), (False, {"motionBlur": {"samples": 4, "shutter": 0.9}})):
+        a, _ = shadowed(lit_scene(stages(True, glass), **more), monkeypatch, 20, skia_map=True)
+        b, r = shadowed(lit_scene(stages(True, glass), **more), monkeypatch, 20)
+        assert count[2] == (8 if more else 2) and r.on_gl == (set() if glass else {"a", "b"})
+        bare = shadowed(lit_scene(stages(None, glass), **more), monkeypatch, 20)[0]
+        same_shadows(a[:, :160], b[:, :160], bare[:, :160])  # each stage's half of the frame
+        same_shadows(a[:, 160:], b[:, 160:], bare[:, 160:])
+        count[:] = [0, 0, 0]
+
+
+def test_a_caster_is_drawn_from_its_own_corners_once_its_buffers_hold_others(monkeypatch):
+    """Moving copies write each frame's corners into the same buffers. What a model cast at one frame, mapped after
+    the buffers have taken another frame's corners, is still what it cast: sent loose, as the map made at the time."""
+    dots = {"id": "dots", "type": "model", "shape": "sphere", "r": 16, "y": -30, "fill": "#c03070",
+            "repeat": {"count": 5, "x": "=i * 44 - 88", "z": "=sin(t * 3 + i) * 90"}}
+    kept, real, count = [], gl3d.sun_map, cast(monkeypatch)
+    counted = gl3d.sun_map
+
+    def sun_map(r, casters, to_map, side):
+        out = counted(r, casters, to_map, side)
+        kept.append((list(casters), to_map, nearness(out)))
+        return out
+    monkeypatch.setattr(gl3d, "sun_map", sun_map)
+    r = renderer(lit_scene([lit([dots])]), monkeypatch)
+    r.frame(0)
+    r.frame(25)
+    assert count == [2, 0, 2]
+    (casters, to_map, then), (_, _, later) = kept
+    again = nearness(real(r, casters, to_map, stage.SUN))
+    assert count == [2, 0, 2]  # nothing more from the buffers
+    moved = (np.abs(then - later) > 1e-3).mean()
+    assert moved > 0.02 and (np.abs(then - again) > 1e-3).mean() < 0.02 * moved
+
+
+def test_check_and_a_render_draw_the_same_shadows(monkeypatch):
+    """A tracked render casts from the triangles render3d finds, sent loose, and its stage is at 1x."""
+    spec = lit_scene([lit([ball(x=-40, y=-25, r=28), ring(x=50, y=-30, r=30, tube=9, rotateX=20)])])
+    count = cast(monkeypatch)
+    a, _ = shadowed(spec, monkeypatch)
+    assert count == [2, 0, 1]
+    b, r, _ = tracked(spec, monkeypatch, "auto", 0)
+    assert r.on_gl == {"ball", "ring"} and count == [2, 2, 2]
+    bare, _ = shadowed(lit_scene([lit(spec["layers"][0]["children"][:2], shadows=None)]), monkeypatch)
+    assert ((bare - b).min(-1) > 20).sum() > 300
+    close(a, b, mean=0.3, far=0.005)
+
+
+def test_a_shadowed_frame_is_the_same_whatever_was_drawn_before_it(monkeypatch):
+    spec = lit_scene([lit([ball(x=-40, y=-25, r=28, z=[[0, -80], [2, 80, "linear"]]),
+                           ring(x=50, y=-30, r=30, tube=9, rotateX=[[0, 0], [2, 300, "linear"]])])])
+    r = renderer(spec, monkeypatch)
+    first = r.frame(30)
+    for n in (0, 59, 12):
+        r.frame(n)
+    assert np.array_equal(first, r.frame(30))
+    assert np.array_equal(first, renderer(spec, monkeypatch).frame(30))
+
+
+def test_skia_draws_the_shadow_map_when_opengl_is_off(monkeypatch):
+    spec = lit_scene([lit([ball(x=-40, y=-25, r=28)])])
+    count = cast(monkeypatch)
+    renderer(spec, monkeypatch, "skia").frame(0)
+    Renderer(k.Scene(spec), backend="cpu").frame(0)
+    assert count == [0, 0, 0]
