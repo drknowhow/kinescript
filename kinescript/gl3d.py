@@ -244,7 +244,7 @@ def ready() -> bool:
 def available(r) -> bool:
     """Whether this renderer draws its models on OpenGL when they allow it."""
     want = setting()
-    if want == "skia" or r.track or r.wire:
+    if want == "skia" or r.wire:
         return False
     ok = r.backend == "gpu" and r.gr is not None and _state() is not None
     if want == "gl" and not ok:
@@ -389,10 +389,12 @@ def _uniforms(r, mats, lights, fg, view: np.ndarray, ss: int, W: int, H: int):
         _set(sh, "u_fogCol", tuple(col))
 
 
-def draw(r, c: skia.Canvas, L, m, mats, lights, fg, edging, amt: float, order):
+def draw(r, c: skia.Canvas, L, m, mats, lights, fg, edging, amt: float, order, tracked: bool = False):
     """Draw model L (mesh m, materials mats, lights (key, more, env), fog fg, edges as render3d._edging gives them,
     the first amt of its triangles in build order `order`) on canvas c as render3d.draw would. Returns its projected
-    bounds in device pixels, or None."""
+    bounds in device pixels, or None. tracked: render3d.draw has worked out what a tracked render reports (the
+    model's box, shadow casters, focus reach, and whether the camera is inside it, cuts it or the fog hides it), so
+    only the pixels are drawn here."""
     from . import render3d
     T = m.T if amt >= 1.0 else m.T[order[:math.ceil(amt * len(m.T))]]
     P = m.P
@@ -401,31 +403,32 @@ def draw(r, c: skia.Canvas, L, m, mats, lights, fg, edging, amt: float, order):
         return None
     view = np.linalg.inv(r._lens) @ r._m3d
     lo3, hi3 = render3d._fixed(r, L, m, "box", lambda: (P.min(0), P.max(0)))
-    eye = np.linalg.solve(view, [0.0, 0.0, -1.0 / r._lens[3, 2], 1.0])[:3]
-    if (eye > lo3).all() and (eye < hi3).all() and render3d._within(eye, P, T):
-        r.inside.add(L.id)
-    if r._stage is not None and r._stage.casters is not None:
-        r._stage.cast(P @ view[:3, :3].T + view[:3, 3], T)
+    if not tracked:
+        eye = np.linalg.solve(view, [0.0, 0.0, -1.0 / r._lens[3, 2], 1.0])[:3]
+        if (eye > lo3).all() and (eye < hi3).all() and render3d._within(eye, P, T):
+            r.inside.add(L.id)
+        if r._stage is not None and r._stage.casters is not None:
+            r._stage.cast(P @ view[:3, :3].T + view[:3, 3], T)
     # The box's corners bound where the mesh can be on screen while all of them are ahead of the camera (w is
-    # linear, and a box seen in perspective covers its corners' outline). Only check and --boxes read the bounds,
-    # and they draw on the Skia path.
+    # linear, and a box seen in perspective covers its corners' outline). These bounds place the passes; check and
+    # --boxes take the model's box from render3d.draw.
     box = np.array([[(lo3, hi3)[i >> k & 1][k] for k in range(3)] for i in range(8)])
     hom = box @ r._m3d[:3, :3].T + r._m3d[:3, 3]
     w = box @ r._m3d[3, :3] + r._m3d[3, 3]
     ahead = w.min() >= space.NEAR
-    if not ahead or r._focused is not None or fg is not None:  # these need each vertex's w
+    if not ahead or fg is not None or (r._focused is not None and not tracked):  # these need each vertex's w
         wv = P @ r._m3d[3, :3] + r._m3d[3, 3]
         if amt < 1.0:
             wv = wv[np.unique(T)]
         if wv.max() < space.NEAR:
             return None
-        if wv.min() < space.NEAR:
+        if wv.min() < space.NEAR and not tracked:
             r.culled.add(L.id)  # GL clips what crosses the camera plane; render3d leaves those triangles out
-        if r._focused is not None:
+        if r._focused is not None and not tracked:
             r._reach(wv)
         if fg is not None:
             fv = render3d.fogged(fg, wv)
-            if fv.min() >= 0.999:
+            if fv.min() >= 0.999 and not tracked:
                 r.fogged.add(L.id)
             if fv.max() <= 0.002:
                 fg = None
@@ -440,7 +443,9 @@ def draw(r, c: skia.Canvas, L, m, mats, lights, fg, edging, amt: float, order):
         x0, y0, x1, y1 = 0, 0, r.w, r.h
     if x1 <= x0 or y1 <= y0:
         return bounds
-    ss = r._model_surface()[1]
+    # A tracked render (check, --boxes) keeps its Skia models and stages at 1x with multisampling; these targets
+    # have none, so they stay at 2x and are scaled down as they are drawn.
+    ss = max(2, r._model_surface()[1])
     W, H = r.w * ss, r.h * ss
     mgl, ctx = _STATE["mgl"], _STATE["ctx"]
     tg = _targets(W, H)
@@ -485,8 +490,9 @@ def draw(r, c: skia.Canvas, L, m, mats, lights, fg, edging, amt: float, order):
         render3d._ground(r, c, L.raw["ground"], P, P if amt >= 1.0 else P[T.ravel()], fg, lights[0][0])
     if r._stage is not None and r._stage.child is L:
         dep = _image(r, tg["outd"], W, H)
-        r._stage.kidd.getCanvas().drawImageRect(dep, region, region, skia.SamplingOptions(),
-                                                skia.Paint(BlendMode=skia.BlendMode.kSrc))
+        d = r._dev  # the stage's px per device px: ss in a render, where this copies each texel
+        r._stage.kidd.getCanvas().drawImageRect(dep, region, skia.Rect(x0 * d, y0 * d, x1 * d, y1 * d),
+                                                skia.SamplingOptions(), skia.Paint(BlendMode=skia.BlendMode.kSrc))
     img = _image(r, tg["out"], W, H)
     c.save()
     c.resetMatrix()

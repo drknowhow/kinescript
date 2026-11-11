@@ -1,5 +1,5 @@
 """Model layers on OpenGL (gl3d): which models draw there, that they match the Skia path, stages, a partial draw,
-moving copies, repeatability, and KINE_3D. The drawing tests need the GPU backend and moderngl, and skip without
+moving copies, repeatability, what check and --boxes read, and KINE_3D. The drawing tests need the GPU backend and moderngl, and skip without
 them (CI runs on the CPU)."""
 import numpy as np
 import pytest
@@ -24,10 +24,10 @@ def ring(**kw):
                  "fill": "#e2683c", "shine": 0.6}, **kw)
 
 
-def renderer(spec, monkeypatch, mode="auto"):
+def renderer(spec, monkeypatch, mode="auto", **kw):
     monkeypatch.setenv("KINE_3D", mode)
     try:
-        r = Renderer(k.Scene(spec), backend="gpu")
+        r = Renderer(k.Scene(spec), backend="gpu", **kw)
     except RuntimeError:
         pytest.skip("no GPU")
     if mode != "skia" and not gl3d.available(r):
@@ -171,3 +171,39 @@ def test_a_washed_model_and_its_lines_mix_toward_the_paper_on_both_paths(monkeyp
     paper = np.array([0xf4, 0xef, 0xe6], float)
     mask = np.abs(full - paper).max(-1) > 30  # where the ball draws
     assert np.abs(full[mask] * 0.4 + paper * 0.6 - a[mask]).mean() < 2
+
+
+def tracked(spec, monkeypatch, mode, n):
+    """Frame n as check and --boxes draw it, the renderer, and what they read from it afterwards."""
+    renderer(spec, monkeypatch, mode)  # skips where a render would not draw on OpenGL either
+    r = Renderer(k.Scene(spec), backend="gpu", track=True)
+    px = r.frame(n)[..., :3].astype(int)
+    return px, r, (r.boxes, r.tris, r.culled, r.inside, r.fogged, r.unlit)
+
+
+def test_check_reads_the_same_from_models_drawn_on_opengl(monkeypatch):
+    """A lined model, a stage with a flat layer in it, and models off the canvas, across the camera and past the
+    fog: the boxes, the triangle count and the sets check warns from are the Skia path's, to the last digit."""
+    spec = scene([{"id": "st", "type": "group", "sort": "pixel", "children": [
+                      ring(), ball(x=200), {"id": "card", "type": "rect", "x": 90, "y": 60, "w": 80, "h": 50,
+                                            "fill": "#33323a"}]},
+                  ball(id="grows", x=60, y=60, w=60, draw=[[0, 0], [2, 1, "linear"]]),
+                  ball(id="off", x=900), ball(id="near", z=1100, w=400), ball(id="far", x=40, y=200, z=-9000)],
+                 duration=2)
+    spec.update(camera={"rotateX": 8}, fog={"near": 1500, "far": 6000})
+    for n in (0, 20, 45):
+        _, a, seen_a = tracked(spec, monkeypatch, "skia", n)
+        _, b, seen_b = tracked(spec, monkeypatch, "auto", n)
+        assert not a.on_gl and b.on_gl >= {"ring", "ball", "far"}
+        assert seen_a == seen_b
+    assert "grows" in b.on_gl and b.tris and "far" in b.fogged and "near" in b.culled
+
+
+def test_check_sees_the_pixels_a_render_draws(monkeypatch):
+    """Tracked, a stage and its Skia layers stay at 1x while OpenGL keeps 2x: the frame is the render's."""
+    spec = scene([{"id": "st", "type": "group", "sort": "pixel", "children": [ring(), ball(x=200)]}, ball(id="b2", x=70)])
+    a = renderer(spec, monkeypatch).frame(10)[..., :3].astype(int)
+    b, r, _ = tracked(spec, monkeypatch, "auto", 10)
+    assert r.on_gl == {"ring", "ball", "b2"}
+    close(a, b, mean=0.2, far=0.005)
+    assert (np.abs(b - np.array([0xf4, 0xef, 0xe6])).max(-1) > 30).mean() > 0.1  # the models are in the frame

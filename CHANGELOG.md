@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- `kine check` and `kine look --boxes` draw models on OpenGL wherever a render does; they drew every model with
+  Skia. The boxes, the triangle count and the warnings come from the same triangles as before and are unchanged,
+  and check now measures contrast on the pixels a render makes. On a 14 s scene of ten models `kine check` took
+  36 to 53 s and takes 5.3 to 5.7 (RTX 5060 Ti, alternating runs on a busy machine); on a 70 s tour of 24 models
+  sampled every 2 s, 183 s and now 22; `kine look --boxes` of that tour, 33 to 52 s and now 9 to 14. `--wire` still
+  draws with Skia.
+
 ## 2.3.0 (2026-11-11)
 
 - Model layers draw on OpenGL on the GPU backend when moderngl is installed (`pip install "kinescript[gl]"`). A model's
