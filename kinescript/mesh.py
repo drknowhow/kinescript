@@ -729,54 +729,163 @@ def lathe(lines: list[tuple[np.ndarray, bool]], seg: int, piece: float, crease: 
     return cat(meshes) if meshes else _EMPTY
 
 
-def tube(lines: list[tuple[np.ndarray, bool]], r: float, around: int, grow: float = 1.0) -> Mesh:
-    """A round tube of radius r along lines in the xy plane (each (n, 2) points, y down, and whether it closes),
-    in `around` pieces round, with round ends where a line ends. grow, from 0 to 1, draws the first share of the
-    lines' whole length, the lines in turn, ending round where it stops."""
-    lens = [np.hypot(*np.diff(np.r_[q, q[:1]] if c else q, axis=0).T) for q, c in lines]
+# A tube's lines in space when it has no d, read in this order, and the defaults of a walk's and rays' keys.
+ROUTES = ("points", "walk", "rays")
+WALK = {"steps": 60, "step": 10, "seed": 0, "within": 0, "turn": 30}
+RAYS = {"count": 12, "length": 100, "inner": 0, "seed": 0}
+
+
+def tube(lines: list[tuple[np.ndarray, bool]], r: float, around: int, grow: float = 1.0,
+         together: bool = False) -> Mesh:
+    """A round tube of radius r along lines (each (n, 2) points in the xy plane, y down, or (n, 3) in space, and
+    whether it closes), in `around` pieces round, with round ends where a line ends. Its rings are carried along
+    each line without twisting (_carried). grow, from 0 to 1, draws the first share of the lines' whole length,
+    the lines in turn, ending round where it stops; with together, that share of every line at once."""
+    lines = [(np.c_[q, np.zeros(len(q))] if q.shape[1] == 2 else np.asarray(q, float), c) for q, c in lines]
+    lens = [np.linalg.norm(np.diff(np.r_[q, q[:1]] if c else q, axis=0), axis=1) for q, c in lines]
     total = sum(float(n.sum()) for n in lens)
-    left = max(0.0, min(1.0, grow)) * total
+    g = max(0.0, min(1.0, grow))
+    left = g * total
     al = np.linspace(0, 2 * np.pi, around + 1)
     ca, sa = np.cos(al)[None, :, None], np.sin(al)[None, :, None]
-    z = np.array([0.0, 0.0, 1.0])
     meshes, before = [], 0.0
     for (q, closed), n in zip(lines, lens):
+        start = before
+        if together:
+            left = g * float(n.sum())
+            before += float(n.sum())
         if left <= 1e-9 or total <= 0:
+            if together:
+                continue
             break
         pts, s = (np.r_[q, q[:1]] if closed else q), np.r_[0.0, np.cumsum(n)]
         if left < s[-1] - 1e-9:  # it stops on this line
             k = int(np.searchsorted(s, left))
             f = (left - s[k - 1]) / max(float(n[k - 1]), 1e-12)
             pts, s, closed = np.r_[pts[:k], [pts[k - 1] + f * (pts[k] - pts[k - 1])]], np.r_[s[:k], left], False
-        left -= s[-1]
+        if not together:
+            left -= s[-1]
         keep = np.r_[True, np.diff(s) > 1e-9]
-        pts, s = pts[keep], s[keep] + before
-        before = s[-1]
+        pts, s = pts[keep], s[keep] + start
+        if not together:
+            before = s[-1]
         if len(pts) < 2:
             continue
         d = np.diff(pts, axis=0)
-        d /= np.hypot(*d.T)[:, None]
+        d /= np.linalg.norm(d, axis=1)[:, None]
         t_in, t_out = (np.r_[d[-1:], d], np.r_[d, d[:1]]) if closed else (np.r_[d[:1], d], np.r_[d, d[-1:]])
         t = t_in + t_out
-        back = np.hypot(*t.T) < 1e-6  # doubling straight back
+        back = np.linalg.norm(t, axis=1) < 1e-6  # doubling straight back
         t[back] = t_out[back]
-        t /= np.hypot(*t.T)[:, None]
+        t /= np.linalg.norm(t, axis=1)[:, None]
         miter = 1.0 / np.maximum((t * t_out).sum(1), 0.3)  # a bend keeps the tube's width across it
-        side = np.c_[-t[:, 1], t[:, 0], np.zeros(len(t))]
-        t3, c3 = np.c_[t, np.zeros(len(t))], np.c_[pts, np.zeros(len(pts))]
-        radial = ca * side[:, None] + sa * z
-        P = [c3[:, None] + r * (ca * (miter[:, None, None] * side[:, None]) + sa * z)]
+        side, up = _carried(pts, t, closed)
+        bend = t_out - t_in  # the way the line turns, across it: the ring stretches that way at a bend
+        bl = np.linalg.norm(bend, axis=1, keepdims=True)
+        bend = np.where(bl > 1e-9, bend / np.maximum(bl, 1e-12), 0.0)[:, None]
+        radial = ca * side[:, None] + sa * up[:, None]
+        stretch = (miter[:, None, None] - 1) * (radial * bend).sum(-1, keepdims=True) * bend
+        P = [pts[:, None] + r * (radial + stretch)]
         N, S = [radial], [np.repeat(s[:, None], around + 1, 1)]
         if not closed:  # round ends: rings shrinking to a point past each end
             ph = np.linspace(0, np.pi / 2, max(2, around // 4) + 1)[1:, None, None]
             for end, sign in ((0, -1.0), (-1, 1.0)):
                 f = ph if sign > 0 else ph[::-1]
                 rad = radial[end][None]
-                ring = (c3[end] + sign * t3[end] * r * np.sin(f) + r * np.cos(f) * rad,
-                        np.cos(f) * rad + sign * np.sin(f) * t3[end], np.full((len(f), around + 1), s[end]))
+                ring = (pts[end] + sign * t[end] * r * np.sin(f) + r * np.cos(f) * rad,
+                        np.cos(f) * rad + sign * np.sin(f) * t[end], np.full((len(f), around + 1), s[end]))
                 for rows, part in zip((P, N, S), ring):
                     rows.insert(0 if sign < 0 else len(rows), part)
         P, N, S = np.concatenate(P), np.concatenate(N), np.concatenate(S)
         U = np.stack([S / max(total, 1e-9), np.broadcast_to(al / (2 * np.pi), S.shape)], -1)
         meshes.append(_orient(P.reshape(-1, 3), N.reshape(-1, 3), _grid(len(P) - 1, around), U.reshape(-1, 2)))
     return cat(meshes) if meshes else _EMPTY
+
+
+def _carried(pts: np.ndarray, t: np.ndarray, closed: bool) -> tuple[np.ndarray, np.ndarray]:
+    """A tube's ring directions at each point of a line with tangents t: side, then up = t x side, carried from
+    point to point without turning about the line (double reflection: Wang et al., "Computation of rotation
+    minimizing frames", 2008). It starts with side across the line in the xy plane, so a line in that plane keeps
+    up along z. Round a closed line the frame comes back turned; that turn is spread along it so the ends meet."""
+    n = len(t)
+    side = np.zeros((n, 3))
+    s0 = np.cross([0.0, 0.0, 1.0] if abs(t[0, 2]) < 0.9 else [1.0, 0.0, 0.0], t[0])
+    side[0] = s0 / np.linalg.norm(s0)
+    for i in range(n - 1):
+        v1 = pts[i + 1] - pts[i]
+        c1 = float(v1 @ v1)
+        if c1 < 1e-18:
+            side[i + 1] = side[i]
+            continue
+        rl = side[i] - (2 / c1) * float(v1 @ side[i]) * v1
+        tl = t[i] - (2 / c1) * float(v1 @ t[i]) * v1
+        v2 = t[i + 1] - tl
+        c2 = float(v2 @ v2)
+        side[i + 1] = rl if c2 < 1e-18 else rl - (2 / c2) * float(v2 @ rl) * v2
+    if closed and n > 2:
+        a = math.atan2(float(np.cross(side[-1], side[0]) @ t[0]), float(side[-1] @ side[0]))
+        if abs(a) > 1e-9:
+            run = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(pts, axis=0), axis=1))]
+            turn = (a * run / max(run[-1], 1e-12))[:, None]
+            side = side * np.cos(turn) + np.cross(t, side) * np.sin(turn)
+    side -= (side * t).sum(1, keepdims=True) * t
+    side /= np.maximum(np.linalg.norm(side, axis=1, keepdims=True), 1e-12)
+    return side, np.cross(t, side)
+
+
+def smooth(q: np.ndarray, closed: bool, seg: float) -> np.ndarray:
+    """Points about seg apart on a Catmull-Rom curve through the points q (n, 3), round to the start if closed."""
+    if len(q) < 3:
+        return q
+    ext = np.r_[q[-1:], q, q[:2]] if closed else np.r_[2 * q[:1] - q[1:2], q, 2 * q[-1:] - q[-2:-1]]
+    out = []
+    for i in range(len(q) if closed else len(q) - 1):
+        p0, p1, p2, p3 = ext[i:i + 4]
+        k = max(1, math.ceil(float(np.linalg.norm(p2 - p1)) / seg))
+        u = (np.arange(k) / k)[:, None]
+        out.append(0.5 * (2 * p1 + (p2 - p0) * u + (2 * p0 - 5 * p1 + 4 * p2 - p3) * u * u
+                          + (3 * p1 - p0 - 3 * p2 + p3) * u ** 3))
+    if not closed:
+        out.append(q[-1:])
+    return np.concatenate(out)
+
+
+def walk(steps: int, step: float, seed: int, within: float, turn: float, start) -> np.ndarray:
+    """(steps + 1, 3) points of a seeded random walk from start: each step `step` long and turned up to `turn`
+    degrees from the last, kept within `within` of the start (0: anywhere) by turning back off that ball."""
+    rng = np.random.Generator(np.random.PCG64(int(seed)))
+    o = np.asarray(start, float)
+    p, d = o.copy(), rng.normal(size=3)
+    d /= np.linalg.norm(d)
+    pts = [p.copy()]
+    for _ in range(int(steps)):
+        a = rng.normal(size=3)
+        a -= (a @ d) * d
+        a /= max(float(np.linalg.norm(a)), 1e-12)
+        ang = math.radians(turn) * float(rng.random())
+        d = d * math.cos(ang) + a * math.sin(ang)
+        if within > 0:
+            out = p + d * step - o
+            if np.linalg.norm(out) > within and d @ out > 0:  # it would leave: turn back off the wall
+                nrm = out / np.linalg.norm(out)
+                d = d - 2 * (d @ nrm) * nrm
+        p = p + d * step
+        if within > 0 and np.linalg.norm(p - o) > within:
+            p = o + (p - o) * (within / np.linalg.norm(p - o))
+        pts.append(p.copy())
+    return np.array(pts)
+
+
+def rays(count: int, length, inner: float, seed: int, start) -> list[np.ndarray]:
+    """count straight lines out from start, spread evenly in every direction (a Fibonacci sphere turned by the
+    seed), each from `inner` out to inner + its length: a number, or [least, most] picked by the seed."""
+    rng = np.random.Generator(np.random.PCG64(int(seed)))
+    i = np.arange(count) + 0.5
+    phi, th = np.arccos(1 - 2 * i / count), math.pi * (1 + 5 ** 0.5) * i
+    dirs = np.c_[np.cos(th) * np.sin(phi), np.sin(th) * np.sin(phi), np.cos(phi)]
+    q, rr = np.linalg.qr(rng.normal(size=(3, 3)))
+    dirs = dirs @ (q * np.sign(np.diag(rr))).T
+    lo, hi = (length, length) if isinstance(length, (int, float)) else (length[0], length[1])
+    ln = lo + (hi - lo) * rng.random(count)
+    o = np.asarray(start, float)
+    return [np.stack([o + d * inner, o + d * (inner + float(n))]) for d, n in zip(dirs, ln)]

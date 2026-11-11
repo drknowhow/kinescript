@@ -112,7 +112,7 @@ TEXT_PATH_ALIGN = {"start": "start", "left": "start", "center": "center", "centr
                    "end": "end", "right": "end"}
 PART = MATERIAL | {"shape", "w", "h", "depth", "r", "tube", "x", "y", "z", "rotateX", "rotateY", "rotate", "scale",
                    "text", "size", "font", "weight", "italic", "letterSpacing", "lineHeight", "d", "strokeWidth",
-                   "bevel", "profile"}
+                   "bevel", "profile", "points", "walk", "rays", "smooth", "closed"}
 MODEL_ALIAS = {"radius": "r", "thickness": "tube", "geometry": "shape", "primitive": "shape", "extrude": "depth",
                "extrusion": "depth", "chamfer": "bevel",
                "mesh": "shape", "gloss": "shine", "glossiness": "shine", "shininess": "shine",
@@ -153,11 +153,17 @@ CUT = {"from", "at", "cap"}
 CUT_ALIAS = {"side": "from", "direction": "from", "depth": "at", "amount": "at", "share": "at", "color": "cap",
              "colour": "cap", "fill": "cap", "capColor": "cap"}
 CUT_FROM_ALIAS = {"near": "front", "far": "back", "above": "top", "up": "top", "below": "bottom", "down": "bottom"}
+# A tube's lines in space (mesh.ROUTES): a seeded random walk, and rays out from the middle.
+WALK_ALIAS = {"n": "steps", "count": "steps", "length": "step", "stepLength": "step", "random": "seed",
+              "radius": "within", "bound": "within", "bounds": "within", "r": "within", "wander": "turn",
+              "angle": "turn", "bend": "turn"}
+RAYS_ALIAS = {"n": "count", "number": "count", "len": "length", "size": "length", "random": "seed",
+              "start": "inner", "from": "inner", "offset": "inner", "r": "inner"}
 
 COMMON = {"id", "type", "at", "dur", "until", "x", "y", "anchor", "opacity", "scale", "scaleX", "scaleY", "rotate",
           "blur", "blend", "shadow", "fx", "enter", "exit", "emphasis", "hidden", "allowOffscreen", "z", "rotateX",
           "rotateY",
-          "backface", "fixed", "sound", "along", "mask", "glow", "outline", "innerShadow", "displace"}
+          "backface", "fixed", "sound", "along", "mask", "glow", "outline", "innerShadow", "displace", "pin"}
 # Layer effects: their keys, the key a number (or a colour) stands for, the keys that animate and their aliases.
 LOOKS = {
     "glow": ({"color", "size", "amount"}, "size", ("size", "amount"),
@@ -172,6 +178,9 @@ LOOKS = {
 LOOK_PROPS = {f"{look} {k}" for look, (_, _, keys, _) in LOOKS.items() for k in keys}
 MODEL_OWN = {"glow", "outline"}  # on a model, its material's glow and its edges (MODEL_ALIAS), as before
 MASK = {"layer", "mode", "feather"}
+PIN = {"layer", "at"}  # a point in another layer's own space that this one is placed at, on the canvas
+PIN_ALIAS = {"id": "layer", "on": "layer", "target": "layer", "model": "layer", "to": "layer", "point": "at",
+             "position": "at", "offset": "at", "spot": "at"}
 MASK_ALIAS = {"id": "layer", "source": "layer", "src": "layer", "matte": "layer", "type": "mode",
               "softness": "feather", "soft": "feather", "blur": "feather", "edge": "feather"}
 MASK_MODES = ("alpha", "luma", "alphaInvert", "lumaInvert")
@@ -329,7 +338,7 @@ REQUIRED = {"text": ("text",), "image": ("src", "frames", "sheet"), "video": ("s
             "model": ("shape", "parts", "src"), "particles": ("rate", "burst", "preset")}
 # Keys whose value is an object of their own: never a tween, even with a "from" key (a light's direction).
 OBJECTS = {"light", "lights", "env", "ground", "shadow", "shadows", "box", "fx", "uniforms", "sound", "enter", "exit",
-           "cut",
+           "cut", "walk", "rays", "pin",
            "emphasis",
            "parts", "transition", "texture", "edges", "animation", "morphs", "clips", "repeat", "along", "rough", "mask",
            "glow", "outline", "innerShadow", "displace", "textPath"}
@@ -1054,6 +1063,7 @@ def _layer(raw, rep: Report, path: str, comps: dict):
     _effects(raw, rep, lid)
     _emphasis(raw, rep, lid)
     _mask(raw, rep, lid)
+    _pin(raw, rep, lid)
     _looks(raw, rep, lid, t)
     _layer_sound(raw, rep, lid)
     _repeat(raw, rep, lid, t)
@@ -1241,6 +1251,33 @@ def _mask(raw: dict, rep: Report, lid):
     elif not (_finite(f) and f >= 0):
         rep.add("error", "bad-value", lid, f"mask feather is {_show(f)}; it is how many px the mask's edge fades "
                 "over, 0 or more", example)
+
+
+def _pin(raw: dict, rep: Report, lid):
+    """pin: the id of a layer, or {"layer", "at"} with at a point [x, y] or [x, y, z] in its own space; made into
+    the object. Whether that layer is there and this one is at the top level is Scene._check_pins's."""
+    v = raw.get("pin")
+    if v is None or v is False:
+        raw.pop("pin", None)
+        return
+    example = '"pin": {"layer": "cell", "at": [40, -30, 60]}'
+    if isinstance(v, str):
+        raw["pin"] = v = {"layer": v}
+    if not isinstance(v, dict):
+        rep.add("error", "bad-value", lid, f"pin is {_show(v)}; it is the id of a layer, or an object", example)
+        return
+    _keys(v, PIN, PIN_ALIAS, rep, lid, "pin: ")
+    m = v.get("layer")
+    if isinstance(m, str) and m.strip().lstrip("#"):
+        v["layer"] = m.strip().lstrip("#")
+    else:
+        rep.add("error", "bad-value" if "layer" in v else "missing-key", lid, "pin names no layer"
+                + (f": layer is {_show(m)}" if "layer" in v else "") + "; give it the id of the layer to pin to",
+                example)
+    at = v.get("at")
+    if at is not None and not (isinstance(at, list) and len(at) in (2, 3) and all(map(_finite, at))):
+        rep.add("error", "bad-value", lid, f"pin at is {_show(at)}; it is a point [x, y, z] in px from the middle of "
+                "the layer it pins to, before that layer turns", example)
 
 
 COMBINES = {"rect", "circle", "ellipse", "polygon", "path", "line", "arrow", "text", "counter", "group"}
@@ -1796,19 +1833,31 @@ def _turned(obj: dict, rep: Report, lid, where: str = ""):
 
 def _outline(obj: dict, rep: Report, lid, where: str = ""):
     """Text, path, tube and lathe shapes need their outline; a number in `d` is a depth (d is the path data
-    here). A tube without d is a cylinder, as it was read before tubes ran along a path."""
+    here). A tube runs along d, or in space through points, a walk or rays (mesh.ROUTES); one with none of them is
+    a cylinder, as it was read before tubes ran along a path."""
+    from .mesh import ROUTES
     d = obj.get("d")
     if isinstance(d, (int, float)) and not isinstance(d, bool) and "depth" not in obj:
         obj["depth"] = obj.pop("d")
         rep.add("info", "renamed-key", lid, f"{where}'d' read as 'depth'", "write 'depth'")
     shape = obj.get("shape")
-    if shape == "tube" and not isinstance(obj.get("d"), str):
+    given = ["d"] * isinstance(obj.get("d"), str) + [k for k in ROUTES if obj.get(k) is not None]
+    if shape == "tube" and not given:
         obj["shape"] = shape = "cylinder"
         rep.add("info", "renamed-value", lid, f"{where}shape 'tube' without d read as 'cylinder'",
-                "a tube runs along SVG path data: \"d\": \"M-200 0 C-100 -150 100 150 200 0\"; write cylinder for "
-                "a straight one")
+                "a tube runs along SVG path data (\"d\": \"M-200 0 C-100 -150 100 150 200 0\"), or in space "
+                "through points, a walk or rays; write cylinder for a straight one")
     if shape == "tube":
-        _path_data(obj["d"], f"{where}d", rep, lid)
+        if len(given) > 1:
+            rep.add("warning", "ignored-key", lid, f"{where}a tube runs along one of d, points, walk and rays; it has "
+                    f"{', '.join(given)} and runs along {given[0]}", f"drop {', '.join(given[1:])}")
+        if given[0] == "d":
+            _path_data(obj["d"], f"{where}d", rep, lid)
+        else:
+            _route(obj, given[0], rep, lid, where)
+    elif shape is not None and (extra := [k for k in ROUTES if obj.get(k) is not None]):
+        rep.add("warning", "ignored-key", lid, f"{where}{', '.join(extra)} shape a tube; shape '{shape}' ignores "
+                "them", "use \"shape\": \"tube\"")
     _turned(obj, rep, lid, where)
     if shape == "text" and not str(obj.get("text", "")).strip():
         rep.add("error", "missing-key", lid, f"{where}a text model needs 'text'",
@@ -1882,6 +1931,49 @@ def _edges(raw: dict, rep: Report, lid):
         _colour(v["color"], "edges color", rep, lid)
     elif v.get("color") is not None and not _tweens(v["color"], colour=True):
         rep.add("error", "bad-value", lid, f"edges color is {_show(v['color'])}; it takes a colour, or keyframes")
+
+
+def _route(obj: dict, kind: str, rep: Report, lid, where: str):
+    """A tube's points ([x, y] or [x, y, z] each, two or more), walk ({"steps", "step", "seed", "within",
+    "turn"} or a number of steps) or rays ({"count", "length", "inner", "seed"} or a count)."""
+    from .mesh import RAYS, WALK
+    v = obj[kind]
+    if kind == "points":
+        if not (isinstance(v, list) and len(v) >= 2 and all(
+                isinstance(p, (list, tuple)) and len(p) in (2, 3) and all(map(_finite, p)) for p in v)):
+            rep.add("error", "bad-value", lid, f"{where}points is {_show(v)}; it takes two or more [x, y, z] points",
+                    '"points": [[-120, 0, 0], [0, -60, 40], [120, 0, 0]]')
+        elif len({len(p) for p in v}) > 1:
+            rep.add("error", "bad-value", lid, f"{where}points mixes [x, y] and [x, y, z]; give every point the "
+                    "same number of values")
+        return
+    own, alias = (WALK, WALK_ALIAS) if kind == "walk" else (RAYS, RAYS_ALIAS)
+    lead, most = ("steps", 2000) if kind == "walk" else ("count", 500)
+    example = ('"walk": {"steps": 80, "step": 8, "within": 90, "turn": 35, "seed": 2}' if kind == "walk" else
+               '"rays": {"count": 24, "length": [40, 90], "inner": 30, "seed": 1}')
+    if _finite(v) and not isinstance(v, float):
+        v = obj[kind] = {lead: v}
+    if not isinstance(v, dict):
+        rep.add("error", "bad-value", lid, f"{where}{kind} is {_show(v)}; it takes an object, or a whole number of "
+                f"{lead}", example)
+        return
+    _keys(v, set(own), alias, rep, lid, f"{where}{kind}: ")
+    for k, least in ((lead, 1), ("seed", 0)):
+        n = v.get(k)
+        if n is not None and not (_finite(n) and n == int(n) and n >= least):
+            rep.add("error", "bad-value", lid, f"{where}{kind} {k} is {_show(n)}; it takes a whole number, {least} or "
+                    "more", example)
+        elif k == lead and n is not None and n > most:
+            rep.add("error", "bad-value", lid, f"{where}{kind} {k} is {_show(n)}; it takes at most {most}",
+                    "split it into parts")
+    _numbers(v, [k for k in own if k not in (lead, "seed", "length")], f"{where}{kind} ", rep, lid, least=0)
+    ln = v.get("length")
+    if ln is not None and not ((_finite(ln) and ln >= 0) or (isinstance(ln, list) and len(ln) == 2 and all(
+            _finite(x) and x >= 0 for x in ln) and ln[0] <= ln[1])):
+        rep.add("error", "bad-value", lid, f"{where}rays length is {_show(ln)}; it takes a number, or [least, most]",
+                example)
+    if kind == "walk" and v.get("step") == 0:
+        rep.add("error", "bad-value", lid, f"{where}walk step is 0, so the walk does not move", example)
 
 
 def _cut(raw: dict, rep: Report, lid):

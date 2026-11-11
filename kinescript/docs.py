@@ -141,6 +141,9 @@ KEYS EVERY LAYER HAS
                 not). feather blurs the mask's edge, in px. The mask layer draws only as a mask, on its
                 own clock, placed by its own x and y in the group, so it can move over a layer that
                 holds still. Video inside a word is a video layer masked by a text layer.
+  pin           puts a top-level layer, each frame, where a point on another layer shows: "pin": {"layer":
+                "cell", "at": [40, -30, 60]} (px from its middle before it turns; "cell" alone: the middle);
+                x and y move it off the point. Hidden behind the camera (check: pin-offscreen). A callout takes it.
   repeat        copies of the layer, up to 10,000: {"count": 60, "rotate": "=i * 6", "x": "=cos(i *
                 0.1047) * 300", "y": "=sin(i * 0.1047) * 300", "fill": "=hsl(i * 6)", "opacity": 0.8}.
                 A copy is the layer moved by its x, y, rotate and scale in the layer's own space, so
@@ -447,7 +450,12 @@ DEPTH AND CAMERA (3D)
             "profile": [[0, -120], [70, -120], [40, 0], [90, 120], [0, 120]].
   tube      shape "tube" runs a round tube of radius r [12] along d (SVG path data, fitted to w and/or
             h as a path shape's), round at its ends: 3D lines and routes. draw grows it along its
-            length (other shapes show bottom to top). Without d, "tube" is read as a cylinder.
+            length (other shapes show bottom to top). Instead of d, in depth from the model's middle:
+            "points": [[x, y, z], ...] (smooth: true curves through them, closed: true joins the ends);
+            "walk": {"steps" [60], "step" [10] px, "turn" [30] degrees, "within" [0: anywhere] px, "seed"}:
+            a seeded random walk, smooth unless smooth is false; or "rays": {"count" [12], "length" [100]
+            or [least, most], "inner" [0] px out, "seed"}: lines out every way, grown together. These do
+            not animate. With none of d, points, walk or rays, "tube" is read as a cylinder.
   text      shape "text" pushes letters out in depth: text ("\n" breaks lines), size [120],
             weight [600], font, italic, letterSpacing, lineHeight, depth [size x 0.2], bevel [0]
             (px of 45-degree edge). Centred on x, y. Each new text, size, depth or bevel value
@@ -496,8 +504,8 @@ DEPTH AND CAMERA (3D)
             one (check warns repeat-colours). Copies cost what that many triangles cost: use "detail":
             "low" for many. A model's "spread" (see repeat under KEYS EVERY LAYER HAS) also takes
             "in": "sphere" (inside a ball of radius r), "shell" (on its surface; "on": "sphere" says
-            the same) and a box's "depth", and places copies in z too: {"count": 40, "spread":
-            {"in": "sphere", "r": 240, "seed": 3, "gap": 36}, "rotate": "=i * 47"}.
+            the same) and a box's "depth", and places copies in z too: {"count": 40, "spread": {"in":
+            "sphere", "r": 240, "seed": 3, "gap": 36}, "rotate": "=i * 47"}.
   src       a model file: .glb or .gltf (glTF 2.0), or .obj with its .mtl. Colours, shine and metal
             come from the file; a fill on the layer recolours all of it. It fits inside w and/or h
             keeping its shape, else its longest side is 300 px. Node transforms, skins (up to four

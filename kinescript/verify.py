@@ -786,6 +786,11 @@ def check(src, step: float = 0.25, safe: float = 0.05, brand_strict: bool = Fals
             msg = ("the triangles of this model that cross the camera plane are not drawn"
                    if scene.by_id[lid].type == "model" else "layer crosses the camera plane, so it is not drawn")
             add("warning", "behind-camera", lid, T, msg, "lower its z, or move the camera back (a higher camera z)")
+        for lid in r.pinned_off:
+            pin = scene.by_id[lid].raw["pin"]
+            add("warning", "pin-offscreen", lid, T, f"its pin, a point on '{pin['layer']}', is off the canvas or "
+                "behind the camera here, so the layer is placed off it or not drawn",
+                "move the pin's point (at), or keep that layer in view")
         for lid in r.fogged:
             add("warning", "fog-hides", lid, T, "this layer lies past the fog's far distance, so it shows only the "
                 "fog's colour", "bring it nearer, or move fog far back")

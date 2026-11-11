@@ -28,8 +28,9 @@ STRUCT = {"id", "type", "at", "dur", "until", "enter", "exit", "emphasis", "chil
           "backface", "fixed", "sort", "shape", "detail", "parts", "light", "span", "sound", "voice",
           "fadeIn", "fadeOut", "sequence", "animation", "morphs", "clips", "repeat", "profile", "along", "dash", "rough", "mask",
           "glow", "outline", "innerShadow", "displace", "frames", "sheet", "fps", "pixelated", "textPath",
-          "textStyle"}
-PART_STRUCT = {"shape", "texture", "text", "font", "d", "italic", "profile"}  # a part's keys that never animate
+          "textStyle", "walk", "rays", "pin"}
+PART_STRUCT = {"shape", "texture", "text", "font", "d", "italic", "profile", "points", "walk", "rays", "smooth",
+               "closed"}  # a part's keys that never animate
 # Property defaults by name; everything not listed defaults to None.
 DEFAULTS = {"x": 0.0, "y": 0.0, "opacity": 1.0, "scale": 1.0, "scaleX": 1.0, "scaleY": 1.0, "rotate": 0.0,
             "blur": 0.0, "draw": 1.0, "zoom": 1.0, "z": 0.0, "rotateX": 0.0, "rotateY": 0.0}
@@ -278,6 +279,7 @@ class Scene:
         self.audio = self._build_audio()
         self._check_media()
         self._check_masks()
+        self._check_pins()
         self._raise_errors()
         try:
             self.duration = self.timeline.solve(cv.get("duration"))
@@ -638,6 +640,27 @@ class Scene:
                 self.note("error", "bad-mask", layer.id, f"'{layer.id}' is masked by '{layer.mask[0].id}', which is "
                           "masked in turn by the layers it masks, so none of them could be drawn",
                           "take the mask off one of them")
+
+    def _check_pins(self):
+        """A pin names another layer, not one the pinned layer holds, and is on a top-level layer: it places that
+        layer on the canvas, where its point lands (Renderer._pinned)."""
+        for layer in self.all_layers():
+            spec = layer.raw.get("pin")
+            if not isinstance(spec, dict) or not isinstance(spec.get("layer"), str):
+                continue
+            pid = spec["layer"]
+            p = self.by_id.get(pid)
+            if layer.parent is not None:
+                self.note("error", "bad-pin", layer.id, f"pin places a layer on the canvas, and '{layer.id}' is in "
+                          f"group '{layer.parent.id}'", f"move '{layer.id}' to the top level, or pin the group")
+            elif p is None:
+                close = schema.suggest(pid, list(self.by_id))
+                self.note("error", "pin-unknown", layer.id, f"pin '{pid}' names no layer",
+                          (f"did you mean '{close}'? " if close else "") + "give the layer to pin to that id")
+            elif any(x is layer for x in _lineage(p)):
+                self.note("error", "bad-pin", layer.id, f"pin '{pid}' is " + (
+                    "the layer itself" if p is layer else f"inside '{layer.id}', which the pin would move"),
+                    "pin to another layer")
 
     def _check_surface(self, layer: Layer, gid: str):
         """A "#groupId" texture on model `layer` names a group that does not hold the model."""

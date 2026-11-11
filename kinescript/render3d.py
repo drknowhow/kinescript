@@ -626,13 +626,42 @@ def _swept(r, shape: str, num, raw, detail: str, slot=None, grow: float = 1.0) -
             return mesh.lathe(lines, 2 * around, 3 * max(1.0, min(10.0, extent * 0.04)) / k)
         return _kept(r, slot, key, turned)
     w, h, grow = num("w", None), num("h", None), round(max(0.0, min(1.0, grow)), 4)
+    rad = max(0.1, round(float(num("r", 12)), 2))
+    spaced = raw.get("d") is None and next((key for key in mesh.ROUTES if raw.get(key) is not None), None)
+    if spaced:
+        route = ("tube", spaced, _hashable(raw[spaced]), raw.get("smooth"), raw.get("closed") is True, k)
+        return _kept(r, slot, route + (rad, grow), lambda: mesh.tube(
+            _traced(r, route, lambda: _route(spaced, raw[spaced], raw, k)), rad, around, grow, spaced == "rays"))
     route = ("tube", str(raw.get("d", "")), w, h, k)
 
     def along():
         path, extent = _svg_path(num, raw, stroke=False)
         return mesh.polylines(path, max(1.0, min(10.0, extent * 0.04)) / k)
-    rad = max(0.1, round(float(num("r", 12)), 2))
     return _kept(r, slot, route + (rad, grow), lambda: mesh.tube(_traced(r, route, along), rad, around, grow))
+
+
+def _route(kind: str, v, raw, k: float) -> list[tuple[np.ndarray, bool]]:
+    """A tube's lines in the model's own space, where they are given (not centred or fitted to w and h): through
+    points ([x, y] or [x, y, z] each), a seeded random walk from the origin, or rays out from it. smooth draws a
+    curve through the points; a walk is smooth unless smooth is false."""
+    if kind == "rays":
+        o = dict(mesh.RAYS, **v) if isinstance(v, dict) else dict(mesh.RAYS, count=v)
+        return [(q, False) for q in mesh.rays(int(o["count"]), o["length"], float(o["inner"]), int(o["seed"]),
+                                              (0, 0, 0))]
+    if kind == "walk":
+        o = dict(mesh.WALK, **v) if isinstance(v, dict) else dict(mesh.WALK, steps=v)
+        q, closed = mesh.walk(int(o["steps"]), float(o["step"]), int(o["seed"]), float(o["within"]),
+                              float(o["turn"]), (0, 0, 0)), False
+        smooth = raw.get("smooth") is not False
+    else:
+        q = np.asarray(v, float)
+        q = np.c_[q, np.zeros(len(q))] if q.shape[1] == 2 else q
+        closed, smooth = raw.get("closed") is True, raw.get("smooth") is True
+        if closed and len(q) > 3 and np.allclose(q[0], q[-1]):
+            q = q[:-1]
+    if smooth:
+        q = mesh.smooth(q, closed, max(1.0, min(10.0, float(np.ptp(q, axis=0).max()) * 0.04)) / k)
+    return [(q, closed)]
 
 
 def _shape(r, shape: str, num, raw, detail: str, slot=None, grow: float = 1.0) -> mesh.Mesh:
