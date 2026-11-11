@@ -102,8 +102,9 @@ A dot that rides a dashed route as it draws on:
 
 ## 3D
 
-Depth and models are drawn by the same Skia renderer as everything else, with no extra dependency. Scenes that use
-no depth draw exactly as before.
+Depth and models are drawn by the same Skia renderer as everything else, with no extra dependency. On a GPU with
+the `gl` extra, model layers draw on OpenGL through a depth buffer instead, from the same JSON. Scenes that use no
+depth draw exactly as before.
 
 - **Camera and depth on any layer.** Every layer takes `z`, `rotateX`, `rotateY` and `backface`. A top-level
   `camera` pans, dollies, orbits and rolls with perspective, looks at and follows a `target` point or layer, can
@@ -140,6 +141,16 @@ no depth draw exactly as before.
   `animation` plays a glTF file's clips on the layer's clock: node movement, morph target weights and skins, with
   `speed`, `loop` and `start`. `ground` puts a soft shadow under any model, straight down or, with
   `"from": "light"`, cast along its key light.
+- **Cutaways.** `"cut": {"from": "front", "at": 0.5, "cap": "#f2c94c"}` takes one side off a model up to `at`
+  (animatable) and closes the opening with a flat face; a part inside another shows its own colour on the cut.
+  `repeat` with `"spread"` scatters seeded copies in a disc, on a ring, in a box, in a ball or on its shell, kept
+  `gap` apart and out of the balls in `avoid`. A `tube` can run in depth, through `points`, along a seeded `walk`,
+  or as `rays` from its middle.
+- **Guided tours.** `"pin": {"layer": "cell", "at": [x, y, z]}` keeps a layer, such as a `callout`, on a point of a
+  turning model. `use: "tour"` turns a list of stops into an explainer: the camera flies to each stop's `focus`,
+  zooms and swings round it while its `say` line plays, with an optional `title`/`body` card and a pinned `note`.
+  Each stop lasts as long as its line. `dim` washes out the models a stop does not focus or `keep`, and `wash`
+  does the same for any layer by hand. `kine docs explainers` documents it, with a complete scene.
 
 A 3D title that builds in and turns to face the camera:
 
@@ -220,7 +231,7 @@ An agent cannot watch a video, so Kinescript gives it things it can read:
 
 | Command | What the agent gets |
 |---|---|
-| `kine docs [TOPIC]` | the scene reference, short enough to keep in context; `avatars` and `brands` are topics of their own |
+| `kine docs [TOPIC]` | the scene reference, short enough to keep in context; `avatars`, `brands` and `explainers` are topics of their own |
 | `kine check scene.json` | every problem at once as JSON, each with its layer, time range and a fix |
 | `kine look scene.json --boxes` | one PNG of many labelled frames, with every layer outlined and the top-level ones named |
 | `kine look scene.json --wire --depth` | the same frames with every model's triangles drawn over them, and each stage's depth image, nearer brighter |
@@ -391,8 +402,8 @@ kine doctor        # ffmpeg path, GPU availability, default font
 ```
 
 On a GPU, `pip install "kinescript[gl]"` adds moderngl, and model layers draw on OpenGL. On an RTX 5060 Ti that drew a
-cel-shaded test scene of 76,000 triangles at least 20 times faster, and parts of one model that cross meet cleanly.
-Without it they draw with Skia.
+cel-shaded test scene of 76,000 triangles in 5 to 9 ms a frame instead of 155 to 193, and parts of one model that
+cross meet cleanly. Without it they draw with Skia.
 
 From a checkout: `pip install -e .`
 
@@ -546,10 +557,12 @@ Within one process, such as the MCP server, the workers stay warm for two minute
   CPU fills slowly: a blur over a whole 1080p layer takes about 0.44 s, and a split text whose letters blur as they
   enter blurs a layer for each letter (up to 179 s a frame for `bench/stress.py`'s `text-split`). `kine check` warns
   `slow-effects` when a frame's effects pass 0.25 s.
-- 3D is drawn by Skia with a depth sort, not a GL pipeline: models cast shadows on each other only inside a stage,
-  and a skinned vertex follows at most four joints. Separate layers hide each other per pixel only inside a
-  stage, and parts of one model that cut through each other meet at a stepped seam. A textured model is drawn
-  solid whatever its `transparency`. Draco-compressed model files need the `draco` extra.
+- Models cast shadows on each other only inside a stage, separate layers hide each other per pixel only inside a
+  stage, and a skinned vertex follows at most four joints. Without the `gl` extra, or for a model OpenGL does not
+  draw (textured, transparent, exploding or `"edges": "all"`, and always in `kine check`, `--wire` and on the CPU
+  backend), triangles are sorted by depth in Skia, so parts of one model that cut through each other meet at a
+  stepped seam. A textured model is drawn solid whatever its `transparency`. Draco-compressed model files need the
+  `draco` extra.
 - Audio is mixing and levelling (trim, gain over time, fades, speed, loop, pan, role levels, ducking, a loudness
   target), with no effects such as EQ, compression of single sounds or reverb.
 - Kinescript does not speak by itself: `kine voice` needs a plugin or a command. The Kokoro plugin times words

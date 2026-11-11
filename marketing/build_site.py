@@ -53,7 +53,7 @@ PAGES = [
     ("motion.html", "2D", "Paths, masks and morphs",
      "Motion along paths, masks, morphing shapes, kinetic type, particles and charts.", "demos/kinetic.jpg"),
     ("depth.html", "3D", "Depth on any layer",
-     "A camera, lit models, extruded text and glTF files, drawn by the same renderer.", "demos/product.jpg"),
+     "A camera, lit models, cutaways, guided tours, extruded text and glTF files.", "demos/product.jpg"),
     ("sound.html", "Sound", "A voice from a line of text",
      "Voice-over spoken from the scene's text, words that cue the picture, and a levelled mix.", "demos/voice.jpg"),
     ("edits.html", "Edits", "Cuts, transitions and captions",

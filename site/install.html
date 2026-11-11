@@ -41,7 +41,7 @@
           <pre class="code out"><code>pip install kinescript
 kine doctor</code></pre>
         </div>
-        <p class="note">Needs Python 3.10 or newer and ffmpeg on your <code>PATH</code>. <code>kine doctor</code> prints the ffmpeg path, whether a GPU context opened, and the default font. Space Grotesk and IBM Plex Mono ship with the package, so default text looks the same on every machine. For voice-over from text, add a <a href="sound.html">voice plugin</a>: <code>kinescript-kokoro</code>, <code>kinescript-chatterbox</code> or <code>kinescript-elevenlabs</code>.</p>
+        <p class="note">Needs Python 3.10 or newer and ffmpeg on your <code>PATH</code>. <code>kine doctor</code> prints the ffmpeg path, whether a GPU context opened, and the default font. Space Grotesk and IBM Plex Mono ship with the package, so default text looks the same on every machine. On a GPU, <code>pip install "kinescript[gl]"</code> draws <a href="depth.html">model layers</a> on OpenGL. For voice-over from text, add a <a href="sound.html">voice plugin</a>: <code>kinescript-kokoro</code>, <code>kinescript-chatterbox</code> or <code>kinescript-elevenlabs</code>.</p>
       </div>
       <div>
         <div class="pane">
@@ -102,7 +102,7 @@ kine still scene.json --at poster -o poster.jpg</code></pre>
   </main>
 
   <footer>
-    <span class="brand"><img src="assets/mark.svg" alt="" width="200" height="200">Kinescript 2.2.0, MIT licence</span>
+    <span class="brand"><img src="assets/mark.svg" alt="" width="200" height="200">Kinescript 2.3.0, MIT licence</span>
     <nav aria-label="Project links">
       <a href="https://github.com/drknowhow/kinescript">Source</a>
       <a href="https://pypi.org/project/kinescript/">PyPI</a>

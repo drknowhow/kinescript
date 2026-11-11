@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Depth on any layer · Kinescript</title>
-<meta name="description" content="3D in Kinescript: a camera with depth of field, lit models and materials, extruded text and paths, and glTF and OBJ files, drawn by the same Skia renderer.">
+<meta name="description" content="3D in Kinescript: a camera with depth of field, lit models and materials, cutaways, guided tours, extruded text and paths, and glTF and OBJ files, drawn by Skia or, on a GPU, OpenGL.">
 <meta name="theme-color" content="#0a0c10">
 <link rel="canonical" href="https://drknowhow.github.io/kinescript/depth.html">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Depth on any layer · Kinescript">
-<meta property="og:description" content="3D in Kinescript: a camera with depth of field, lit models and materials, extruded text and paths, and glTF and OBJ files, drawn by the same Skia renderer.">
+<meta property="og:description" content="3D in Kinescript: a camera with depth of field, lit models and materials, cutaways, guided tours, extruded text and paths, and glTF and OBJ files, drawn by Skia or, on a GPU, OpenGL.">
 <meta property="og:url" content="https://drknowhow.github.io/kinescript/depth.html">
 <meta property="og:image" content="https://raw.githubusercontent.com/drknowhow/kinescript/main/docs/og.png">
 <meta name="twitter:card" content="summary_large_image">
@@ -29,7 +29,7 @@
   <main id="main">
   <section class="page-head" aria-labelledby="page-title">
     <h1 id="page-title">Depth on any layer.</h1>
-    <p class="sub">3D is drawn by the same Skia renderer as everything else, with no extra dependency. Scenes that use no depth draw exactly as before.</p>
+    <p class="sub">3D is drawn by the same Skia renderer as everything else, with no extra dependency. On a GPU, the <code>gl</code> extra draws model layers on OpenGL through a depth buffer, from the same JSON. Scenes that use no depth draw exactly as before.</p>
   </section>
 
   <div class="page-body">
@@ -40,8 +40,10 @@
       <div><dt>Textures</dt><dd>An image, a video that plays on the model, or a group of layers drawn on it at each frame's time, wrapped round any shape with <code>repeat</code> and <code>offset</code>.</dd></div>
       <div><dt>Extruded text and paths</dt><dd>Letters in any font, shaped as a text layer is so Arabic joins and right-to-left runs read in order, and SVG path data, filled or stroked, pushed out to a <code>depth</code> with an optional <code>bevel</code>.</dd></div>
       <div><dt>Model files</dt><dd><code>.glb</code>, <code>.gltf</code> and <code>.obj</code> with their colours, textures, emission, transparency, metal and roughness, and a soft <code>ground</code> shadow under any model. <code>animation</code> plays a glTF file's clips, skins and morph targets on the layer's clock. Meshopt-compressed files are read as they are, Draco-compressed ones with the <code>draco</code> extra.</dd></div>
+      <div><dt>Cutaways</dt><dd><code>cut</code> takes one side off a model, as far as an animated <code>at</code>, and closes the opening with a flat <code>cap</code>; a part inside another shows its own colour on the cut. <code>repeat</code> with <code>spread</code> scatters seeded copies in a disc, ring, box, ball or shell, and a <code>tube</code> runs in depth through <code>points</code>, along a seeded <code>walk</code> or as <code>rays</code>.</dd></div>
+      <div><dt>Guided tours</dt><dd><code>use: "tour"</code> turns a list of stops into an explainer: the camera flies to each stop's focus and swings round it while its voice line plays, with a caption card and a note pinned to the part. Each stop lasts as long as its line, and <code>dim</code> washes out the models it does not focus. <code>pin</code> keeps any layer on a point of a turning model. <code>kine docs explainers</code> has a complete scene.</dd></div>
     </dl>
-    <p class="note">Triangles are sorted by depth within each model rather than drawn through a depth buffer: separate layers hide each other per pixel only inside a stage, and parts of one model that cut through each other meet at a stepped seam.</p>
+    <p class="note">With the <code>gl</code> extra on a GPU, each model draws through a depth buffer, so its crossing parts meet at a clean edge; a cel-shaded test scene of 76,000 triangles drew in 5 to 9 ms a frame instead of 155 to 193 (RTX 5060 Ti). Without it, and for textured, transparent and exploding models, triangles are sorted by depth in Skia, and crossing parts meet at a stepped seam. Either way, separate layers hide each other per pixel only inside a stage.</p>
 
     <article class="demo" id="card-flip">
       <div class="demo-head">
@@ -155,7 +157,7 @@
   </main>
 
   <footer>
-    <span class="brand"><img src="assets/mark.svg" alt="" width="200" height="200">Kinescript 2.2.0, MIT licence</span>
+    <span class="brand"><img src="assets/mark.svg" alt="" width="200" height="200">Kinescript 2.3.0, MIT licence</span>
     <nav aria-label="Project links">
       <a href="https://github.com/drknowhow/kinescript">Source</a>
       <a href="https://pypi.org/project/kinescript/">PyPI</a>

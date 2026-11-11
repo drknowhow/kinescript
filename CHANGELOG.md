@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.3.0 (2026-11-11)
 
 - Model layers draw on OpenGL on the GPU backend when moderngl is installed (`pip install "kinescript[gl]"`). A model's
   mesh goes to the GPU once, and each frame draws it through a depth buffer, shaded by the same formula as before;
