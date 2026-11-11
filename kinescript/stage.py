@@ -12,7 +12,7 @@ import math
 import numpy as np
 import skia
 
-from . import render3d, space
+from . import gl3d, render3d, space
 
 QMAX = 1.0 / space.NEAR  # the largest 1/w a drawn point has
 CHILDREN = 16  # check warns past this many children: each one is drawn and merged on its own
@@ -335,10 +335,11 @@ class Stage:
             cv.drawVertices(v, self.paint, skia.BlendMode.kDst)
 
     # ---- shadows ------------------------------------------------------------------------------------------------
-    def cast(self, P: np.ndarray, tris: np.ndarray):
-        """Keep a model's triangles, corners P in camera space, to cast shadows if the stage has them."""
+    def cast(self, P: np.ndarray, tris: np.ndarray, on=None):
+        """Keep a model's triangles, corners P in camera space, to cast shadows if the stage has them. on: what
+        gl3d.sun_map needs to draw them from the buffers a model drawn on OpenGL filled."""
         if self.casters is not None and len(tris):
-            self.casters.append((P, tris))
+            self.casters.append((P, tris, on))
 
     def _sun(self, r, T: float, spec) -> dict | None:
         """Draw the shadow map: how near the key light each triangle the models cast is, seen along the light
@@ -350,9 +351,29 @@ class Stage:
         su = np.cross([0.0, 1.0, 0.0] if abs(sl[1]) < 0.9 else [1.0, 0.0, 0.0], sl)
         su /= np.linalg.norm(su)
         sv = np.cross(sl, su)
-        P = np.concatenate([p for p, _ in self.casters])
-        start = np.cumsum([0] + [len(p) for p, _ in self.casters[:-1]])
-        tris = np.concatenate([t + o for (_, t), o in zip(self.casters, start)])
+        spec = spec if isinstance(spec, dict) else {}
+        soft = max(0.0, float(spec.get("soft", 4.0)))
+        cam = [1 / r.scale, r.s.w / 2, r.s.h / 2, -1.0 / r._lens[3, 2]]
+
+        def found(a0, b0, per, d0, dr, image=None) -> dict:
+            return {"su": su, "sv": sv, "sl": sl, "a0": a0, "b0": b0, "per": per, "tap": soft * per / 2, "d0": d0,
+                    "dr": dr, "bias": 2 / per + 0.5 * soft + 1.0, "opacity": float(spec.get("opacity", 0.5)),
+                    "cam": cam, "map": image}
+        if self.gpu and gl3d.available(r):
+            # On OpenGL: the same map, fitted round the same corners, with a depth test where Skia draws the
+            # triangles in order of distance; the faces turned from the light are the ones it keeps.
+            ends = np.array([[(v.min(), v.max()) for v in (p @ su, p @ sv, p @ sl)] for p, _, _ in self.casters])
+            (a_lo, b_lo, d0), (a_hi, b_hi, d_hi) = ends[..., 0].min(0), ends[..., 1].max(0)
+            per = (SUN - 4) / max(float(a_hi - a_lo), float(b_hi - b_lo), 1.0)
+            a0, b0, dr = a_lo - 2 / per, b_lo - 2 / per, max(float(d_hi - d0), 1.0)
+            to_map = np.eye(4)
+            to_map[0, :3], to_map[0, 3] = su * per, -a0 * per
+            to_map[1, :3], to_map[1, 3] = sv * per, -b0 * per
+            to_map[2, :3], to_map[2, 3] = sl * (0.998 / dr), 0.001 - 0.998 * d0 / dr
+            return found(a0, b0, per, d0, dr, gl3d.sun_map(r, self.casters, to_map, SUN))
+        P = np.concatenate([p for p, _, _ in self.casters])
+        start = np.cumsum([0] + [len(p) for p, _, _ in self.casters[:-1]])
+        tris = np.concatenate([t + o for (_, t, _), o in zip(self.casters, start)])
         # Only the faces turned from the light: a lit surface then lies well in front of what the map holds, and
         # does not shadow itself in stripes (a turned face is unlit by its shading anyway).
         e1, e2 = P[tris[:, 1]] - P[tris[:, 0]], P[tris[:, 2]] - P[tris[:, 0]]
@@ -374,18 +395,14 @@ class Stage:
         cv.clear(skia.ColorTRANSPARENT)
         tris = tris[np.argsort(d[tris].mean(1), kind="stable")]  # farthest from the light first
         self._values(cv, np.stack([(a - a0) * per, (b - b0) * per], 1), 0.001 + 0.998 * (d - d0) / dr, tris)
-        spec = spec if isinstance(spec, dict) else {}
-        soft = max(0.0, float(spec.get("soft", 4.0)))
-        return {"su": su, "sv": sv, "sl": sl, "a0": a0, "b0": b0, "per": per, "tap": soft * per / 2, "d0": d0,
-                "dr": dr, "bias": 2 / per + 0.5 * soft + 1.0, "opacity": float(spec.get("opacity", 0.5)),
-                "cam": [1 / r.scale, r.s.w / 2, r.s.h / 2, -1.0 / r._lens[3, 2]]}
+        return found(a0, b0, per, d0, dr)
 
     def _sun_gpu(self, colour: skia.Shader, depth: skia.Shader, sun: dict) -> skia.Shader:
         b = skia.RuntimeShaderBuilder(_effect("sun"))
         b.setChild("acc", colour)
         b.setChild("accd", depth)
-        b.setChild("sun", self.sun.makeImageSnapshot().makeShader(skia.TileMode.kDecal, skia.TileMode.kDecal,
-                                                                  skia.SamplingOptions()))
+        image = sun["map"] if sun["map"] is not None else self.sun.makeImageSnapshot()  # gl3d's map, or Skia's
+        b.setChild("sun", image.makeShader(skia.TileMode.kDecal, skia.TileMode.kDecal, skia.SamplingOptions()))
         b.setUniform("cam", sun["cam"])
         for k in ("su", "sv", "sl"):
             b.setUniform(k, sun[k].tolist())
