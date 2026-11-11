@@ -144,6 +144,10 @@ EDGES_ALIAS = {"colour": "color", "thickness": "width", "size": "width", "stroke
 SHADOWS = {"opacity", "soft"}
 SHADOWS_ALIAS = {"alpha": "opacity", "strength": "opacity", "softness": "soft", "blur": "soft"}
 GROUND_ALIAS = {"alpha": "opacity", "strength": "opacity", "softness": "blur", "radius": "blur", "level": "y"}
+CUT = {"from", "at", "cap"}
+CUT_ALIAS = {"side": "from", "direction": "from", "depth": "at", "amount": "at", "share": "at", "color": "cap",
+             "colour": "cap", "fill": "cap", "capColor": "cap"}
+CUT_FROM_ALIAS = {"near": "front", "far": "back", "above": "top", "up": "top", "below": "bottom", "down": "bottom"}
 
 COMMON = {"id", "type", "at", "dur", "until", "x", "y", "anchor", "opacity", "scale", "scaleX", "scaleY", "rotate",
           "blur", "blend", "shadow", "fx", "enter", "exit", "emphasis", "hidden", "allowOffscreen", "z", "rotateX",
@@ -199,7 +203,7 @@ TYPES: dict[str, set[str]] = {
                                                                               "draw", "light", "lights", "env",
                                                                               "src", "ground", "edges",
                                                                               "animation", "morphs", "clips",
-                                                                              "repeat"},
+                                                                              "repeat", "cut"},
     "particles": PT.OWN | {"text", "font", "weight", "src", "w", "h", "r"},
     "svg": {"src", "w", "h", "parts", "clip", "speed", "loop", "timeRemap", "repeat"},
 }
@@ -320,6 +324,7 @@ REQUIRED = {"text": ("text",), "image": ("src", "frames", "sheet"), "video": ("s
             "model": ("shape", "parts", "src"), "particles": ("rate", "burst", "preset")}
 # Keys whose value is an object of their own: never a tween, even with a "from" key (a light's direction).
 OBJECTS = {"light", "lights", "env", "ground", "shadow", "shadows", "box", "fx", "uniforms", "sound", "enter", "exit",
+           "cut",
            "emphasis",
            "parts", "transition", "texture", "edges", "animation", "morphs", "clips", "repeat", "along", "rough", "mask",
            "glow", "outline", "innerShadow", "displace", "textPath"}
@@ -1874,6 +1879,40 @@ def _edges(raw: dict, rep: Report, lid):
         rep.add("error", "bad-value", lid, f"edges color is {_show(v['color'])}; it takes a colour, or keyframes")
 
 
+def _cut(raw: dict, rep: Report, lid):
+    """`cut` is {"from", "at", "cap"}: the side it comes in from (mesh.SIDES), how far across (0 to 1, may
+    animate) and the cap's colour (may animate), or true for each part's own."""
+    from .mesh import SIDES
+    v = raw.get("cut")
+    if v is None or v is False:
+        return
+    if not isinstance(v, dict):
+        rep.add("error", "bad-value", lid, f"cut is {_show(v)}; it takes an object",
+                '"cut": {"from": "front", "at": 0.5, "cap": "#fbefdf"}')
+        return
+    _keys(v, CUT, CUT_ALIAS, rep, lid, "cut: ")
+    side = v.get("from", "front")
+    if isinstance(side, str) and side.lower() in CUT_FROM_ALIAS:
+        v["from"] = CUT_FROM_ALIAS[side.lower()]
+        rep.add("info", "renamed-key", lid, f"cut from '{side}' read as '{v['from']}'", f"write '{v['from']}'")
+    elif side not in SIDES:
+        rep.add("error", "bad-value", lid, "cut from: " + unknown("side", side, SIDES),
+                "the side the cut comes in from; the front faces the camera before the model turns")
+    a = v.get("at", 0.5)
+    if not _tweens(a) or isinstance(a, str) and not a.startswith("="):
+        rep.add("error", "bad-value", lid, f"cut at is {_show(a)}; it takes a number from 0 to 1, or keyframes",
+                "0 cuts nothing, 0.5 takes off half, 1 all of it")
+    elif isinstance(a, (int, float)) and not 0 <= a <= 1:
+        rep.add("error", "bad-value", lid, f"cut at is {_show(a)}; it must be from 0 to 1",
+                "0 cuts nothing, 0.5 takes off half, 1 all of it")
+    cap = v.get("cap")
+    if isinstance(cap, str):
+        _colour(cap, "cut cap", rep, lid)
+    elif cap is not None and cap is not True and not _tweens(cap, colour=True):
+        rep.add("error", "bad-value", lid, f"cut cap is {_show(cap)}; it takes a colour, keyframes of colours, or "
+                "true for each part's own colour")
+
+
 def _see_through(raw: dict, rep: Report, lid):
     """A model with a texture draws solid: its passes are combined per pixel, the nearest face's alone."""
     parts = [p for p in raw.get("parts") or [] if isinstance(p, dict)] if isinstance(raw.get("parts"), list) else []
@@ -2217,6 +2256,7 @@ def _model(raw: dict, rep: Report, lid):
     _outline(raw, rep, lid)
     _texture(raw, rep, lid)
     _edges(raw, rep, lid)
+    _cut(raw, rep, lid)
     _see_through(raw, rep, lid)
     if raw.get("src") and raw.get("shape"):
         rep.add("warning", "ignored-key", lid, f"shape '{raw['shape']}' is ignored: the model comes from src",

@@ -62,7 +62,7 @@ def _issues(r: dict) -> list[dict]:
 
 def test_model_examples_in_docs_pass_check_with_no_rewrites():
     models = [json.loads(o) for o in _objects(_section("3D MODELS"))]
-    assert {m["id"] for m in models} == {"emblem", "title3d", "product", "planet", "chrome"}
+    assert {m["id"] for m in models} == {"emblem", "title3d", "product", "planet", "chrome", "cell"}
     for m in models:
         if m.get("src"):  # the sample model examples/make_media.py writes
             m["src"] = str(ROOT / "examples" / "media" / m["src"]).replace("\\", "/")

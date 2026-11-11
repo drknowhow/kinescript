@@ -535,6 +535,14 @@ DEPTH AND CAMERA (3D)
             Where parts of one model touch, a line along the seam can come out stepped, as the faces
             there do.
   explode   0..1: faces fly out along their normals.
+  cut       {"from": "front", "at": 0.5, "cap": "#fbefdf"}: a cutaway. A flat cut comes in from
+            one side (front | back | left | right | top | bottom; the front faces the camera before
+            the model turns) and takes off that share of the model, 0 to 1, measured across all its
+            parts. The cut face is filled where the cut goes through a part, in the cap colour, or
+            in each part's own colour without cap; a part inside another shows its own cut face,
+            and a hole (a torus's middle) stays open. at and cap animate: "at": [[0, 0], [1.5, 0.5]]
+            opens it. Each copy of a repeat is cut. Put the parts a cut goes through in one model:
+            separate models cut at one place show their cut faces in the same plane.
   draw      0..1, or "enter": "build": triangles appear from the bottom up.
   light     top level, or on one model: studio (default) | soft | dramatic | flat (no shading),
             or {"preset": "studio", "key": 0.85, "fill": 0.25, "ambient": 0.22, "rim": 0.35,
@@ -581,6 +589,11 @@ DEPTH AND CAMERA (3D)
     {"id": "chrome", "type": "model", "shape": "torus", "r": 200, "tube": 60, "x": "50%", "y": "50%",
      "detail": "high", "fill": "#d9dce1", "metal": 1, "shine": 0.95, "env": "sunset",
      "rotateX": [[0, 70], ["end", 20]], "rotateY": [[0, -30], ["end", 30]]}
+  A cell cut open from the front, with its nucleus cut too:
+    {"id": "cell", "type": "model", "x": "50%", "y": "50%", "rotateY": -30, "rotateX": -15, "bands": 3,
+     "edges": {"width": 3, "color": "#20202a"}, "cut": {"from": "front", "at": [[0.5, 0], [2, 0.5]]},
+     "parts": [{"shape": "sphere", "r": 260, "fill": "#e88a6a"},
+               {"shape": "sphere", "r": 100, "x": 40, "fill": "#7a5cc8"}]}
   A planet whose key light sweeps round it, with a cool light from the right and a ring that glows:
     {"id": "planet", "type": "model", "x": "50%", "y": "50%", "detail": "high", "rotateY": [[0, -20], ["end", 20]],
      "light": {"preset": "dramatic", "azimuth": [[0, -70], ["end", 40]]},

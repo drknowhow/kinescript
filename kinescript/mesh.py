@@ -226,7 +226,9 @@ def edges(P: np.ndarray, T: np.ndarray) -> tuple:
     points are one face, so a face drawn back to back (a double-sided plane) counts once. Returns each vertex's
     point, each triangle's face (-1 for one with two corners at a point), each face's first triangle, and per
     edge its two points, the faces either side (the second is the face count past a border) and whether the
-    second face runs along the edge the way the first does (a mesh wound against itself there)."""
+    second face runs along the edge the way the first does (a mesh wound against itself there). An edge three or
+    more faces meet at (where a cut part's face meets the faces of the part round it) has its first face both
+    sides, so it draws no line: which two of them face each other is not known."""
     span = float(np.ptp(P, axis=0).max()) if len(P) else 0.0
     q = np.round((P - P.min(0)) / (span or 1.0) * 1e6).astype(np.int64) if len(P) else np.zeros((0, 3), np.int64)
     _, weld = np.unique((q[:, 0] * 1000003 + q[:, 1]) * 1000003 + q[:, 2], return_inverse=True)
@@ -244,10 +246,11 @@ def edges(P: np.ndarray, T: np.ndarray) -> tuple:
     o = np.argsort(key, kind="stable")
     key, a, b, f = key[o], a[o], b[o], f[o]
     s = np.flatnonzero(np.r_[True, key[1:] != key[:-1]]) if len(key) else np.zeros(0, np.int64)
-    two = np.r_[s[1:], len(key)] - s >= 2  # a second face along this edge (any past it are left out)
+    count = np.r_[s[1:], len(key)] - s
+    two = count >= 2  # a second face along this edge
     nxt = np.minimum(s + 1, max(len(key) - 1, 0))
-    sides = np.stack([f[s], np.where(two, f[nxt], len(first))], 1)
-    return weld, face, first, np.stack([a[s], b[s]], 1), sides, two & (a[nxt] == a[s])
+    sides = np.stack([f[s], np.where(count > 2, f[s], np.where(two, f[nxt], len(first)))], 1)
+    return weld, face, first, np.stack([a[s], b[s]], 1), sides, (count == 2) & (a[nxt] == a[s])
 
 
 def tiled(e: tuple, n: int, nt: int) -> tuple:
@@ -266,6 +269,134 @@ def tiled(e: tuple, n: int, nt: int) -> tuple:
 def build_order(m: Mesh) -> np.ndarray:
     """Triangle indices bottom to top, the order `draw` and the build motion reveal them in."""
     return np.argsort(-m.P[m.T, 1].mean(1), kind="stable")
+
+
+# The side a cut comes in from: the axis across it (0 x, 1 y, 2 z) and 1 from the axis's low end, -1 its high one.
+# y runs down and z toward the camera.
+SIDES = {"front": (2, -1.0), "back": (2, 1.0), "left": (0, 1.0), "right": (0, -1.0), "top": (1, 1.0),
+         "bottom": (1, -1.0)}
+
+
+def cut(m: Mesh, axis: int, side: float, at: float, cap: int | None = None) -> tuple[Mesh, int]:
+    """Mesh m with one end taken off by a plane across `axis` (0 x, 1 y, 2 z), and the opening closed. The plane
+    is `at` of the mesh's size along the axis in from its low end (side 1) or its high end (side -1), and what
+    lies between that end and the plane goes. Triangles across the plane are cut along it. The cap fills each
+    closed line the plane traces round a part, less the lines inside it, so a part inside another shows its own
+    cut face and a hollow stays open. It is flat, faces the end taken off, and takes material slot `cap`, or each
+    part's own when cap is None. A surface that does not close (a plane, an open lathe line) gets no cap.
+    Returns the mesh and how many triangles of the cap end it."""
+    if not len(m.T) or at <= 0:
+        return m, 0
+    lo, hi = float(m.P[:, axis].min()), float(m.P[:, axis].max())
+    if hi - lo <= 1e-9:
+        return m, 0
+    c = lo + at * (hi - lo) if side > 0 else hi - at * (hi - lo)
+    f = (m.P[:, axis] - c) * side  # above 0: kept
+    f = np.where(np.abs(f) < 1e-7 * float(np.ptp(m.P, axis=0).max()), 0.0, f)  # on the plane: kept, and cut at
+    keep = f >= 0
+    k = keep[m.T].sum(1)
+    cross = np.flatnonzero((k == 1) | (k == 2))
+    whole = m.T[k == 3]
+    if not len(cross):
+        return _used(m, whole), 0
+    one = k[cross] == 1  # one corner kept (a smaller triangle), else two (a four-sided piece, two triangles)
+    Tc = m.T[cross]
+    odd = np.where(one, np.argmax(keep[Tc], 1), np.argmin(keep[Tc], 1))
+    o, p, q = np.take_along_axis(Tc, (odd[:, None] + np.arange(3)) % 3, 1).T  # odd corner first, wound as before
+    n0, n = len(m.P), len(cross)
+    key = np.r_[np.minimum(o, p) * n0 + np.maximum(o, p), np.minimum(o, q) * n0 + np.maximum(o, q)]
+    uk, inv = np.unique(key.astype(np.int64), return_inverse=True)  # one point per edge the plane crosses
+    inv = inv.ravel()
+    a, b = uk // n0, uk % n0
+    at_end = (f[a] == 0) | (f[b] == 0)  # crossed at a corner on the plane: that corner
+    idx = np.where(f[a] == 0, a, b).astype(np.int64)
+    a, b = a[~at_end], b[~at_end]
+    idx[~at_end] = n0 + np.arange(len(a))
+    s = (f[a] / (f[a] - f[b]))[:, None]
+    nn = m.N[a] + s * (m.N[b] - m.N[a])
+    nn /= np.maximum(np.linalg.norm(nn, axis=1, keepdims=True), 1e-12)
+    P, N = np.r_[m.P, m.P[a] + s * (m.P[b] - m.P[a])], np.r_[m.N, nn]
+    M = np.r_[m.M, m.M[np.where(keep[a], a, b)]]
+    U = None if m.U is None else np.r_[m.U, m.U[a] + s * (m.U[b] - m.U[a])]
+    A, B = idx[inv[:n]], idx[inv[n:]]
+    T = np.concatenate([whole, np.stack([o, A, B], 1)[one], np.stack([A, p, q], 1)[~one],
+                        np.stack([A, q, B], 1)[~one]]).astype(np.int32)
+    T = T[(T[:, 0] != T[:, 1]) & (T[:, 1] != T[:, 2]) & (T[:, 2] != T[:, 0])]  # none of no size, at plane corners
+    # The line the plane traces, each piece run the way the border of the surface left runs.
+    lines = np.where(one[:, None], np.stack([A, B], 1), np.stack([B, A], 1))
+    Pc, Tcap, Mc = _caps(P, lines, m.M[np.where(one, o, p)], axis, side, c, cap)
+    if len(Tcap):
+        nc = np.zeros(3)
+        nc[axis] = -side
+        T = np.r_[T, Tcap + len(P)].astype(np.int32)
+        P, N = np.r_[P, Pc], np.r_[N, np.tile(nc, (len(Pc), 1))]
+        M = np.r_[M, Mc]
+        U = None if U is None else np.r_[U, np.zeros((len(Pc), 2))]
+    return _used(Mesh(P, N, T, M.astype(np.int32), U), T), len(Tcap)
+
+
+def _used(m: Mesh, T: np.ndarray) -> Mesh:
+    """m with triangles T and only the points they use."""
+    used, back = np.unique(T, return_inverse=True)
+    return Mesh(m.P[used], m.N[used], back.reshape(-1, 3).astype(np.int32), m.M[used],
+                None if m.U is None else m.U[used])
+
+
+def _caps(P: np.ndarray, lines: np.ndarray, mats: np.ndarray, axis: int, side: float, c: float,
+          slot: int | None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The flat faces closing a cut (see cut): points, triangles into them and each point's material. lines are
+    the pieces of the plane's trace as pairs of indices into P, each run the way the border of the surface left
+    runs, and mats each piece's material."""
+    empty = (np.zeros((0, 3)), np.zeros((0, 3), np.int64), np.zeros(0, np.int32))
+    if not len(lines):
+        return empty
+    u, v = (axis + 1) % 3, (axis + 2) % 3  # the plane's own axes, in turn after the cut one, so area is signed
+    span = float(np.ptp(P, axis=0).max()) or 1.0
+    q = np.round((P[lines.ravel()] - P.min(0)) / span * 1e6).astype(np.int64)
+    ids = np.unique(q, axis=0, return_inverse=True)[1].ravel().reshape(-1, 2)  # ends at one place are one point
+    good = ids[:, 0] != ids[:, 1]
+    ids, lines, mats = ids[good], lines[good], mats[good]
+    start: dict[int, int] = {}
+    for i, s0 in enumerate(ids[:, 0].tolist()):
+        start.setdefault(s0, i)
+    seen, loops = np.zeros(len(ids), bool), []
+    for i in range(len(ids)):
+        run, j = [], i
+        while j is not None and not seen[j]:
+            seen[j] = True
+            run.append(j)
+            j = start.get(int(ids[j, 1]))
+        if j == i and len(run) >= 3:  # back where it began: a closed line
+            loops.append(run)
+    rings = [(P[lines[run, 0]][:, [u, v]], int(mats[run[0]])) for run in loops]
+    rings = [(g, mt) for g, mt in rings if abs(_area(g)) > 1e-9 * span * span]
+    if not rings:
+        return empty
+    lo, hi = [g.min(0) for g, _ in rings], [g.max(0) for g, _ in rings]
+    inside = [[j for j in range(len(rings)) if j != i and (lo[i] <= lo[j]).all() and (hi[j] <= hi[i]).all()
+               and _contains(rings[i][0], rings[j][0][0])] for i in range(len(rings))]  # the lines within line i
+    pts, tris, mat, base = [], [], [], 0
+    for i, (g, mt) in enumerate(rings):
+        if side * _area(g) <= 0:  # run the other way round: a hollow's inner wall, whose inside stays open
+            continue
+        holes = [j for j in inside[i] if not any(j in inside[k] for k in inside[i])]
+        Q, _, tri = shape2d([g] + [rings[j][0] for j in holes])
+        if not len(tri):
+            continue
+        Q, tri = _refine(Q, tri, span / 24)  # small pieces, as an extruded face's, for the painter's sort
+        X = np.zeros((len(Q), 3))
+        X[:, u], X[:, v], X[:, axis] = Q[:, 0], Q[:, 1], c
+        a, b, d = X[tri[:, 0]], X[tri[:, 1]], X[tri[:, 2]]
+        tri = tri.copy()
+        flip = np.cross(b - a, d - a)[:, axis] * side > 0  # each wound to face the end taken off
+        tri[flip] = tri[flip][:, [0, 2, 1]]
+        pts.append(X)
+        tris.append(tri + base)
+        mat.append(np.full(len(Q), mt if slot is None else slot, np.int32))
+        base += len(Q)
+    if not pts:
+        return empty
+    return np.concatenate(pts), np.concatenate(tris), np.concatenate(mat)
 
 
 # ---- extruded outlines (text and SVG paths) -----------------------------------------------------------
