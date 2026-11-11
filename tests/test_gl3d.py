@@ -1,6 +1,6 @@
 """Model layers on OpenGL (gl3d): which models draw there, that they match the Skia path, stages and their shadow
-maps, a partial draw, moving copies, textures, repeatability, what check and --boxes read, and KINE_3D. The drawing
-tests need the GPU backend and moderngl, and skip without them (CI runs on the CPU)."""
+maps, a partial draw, moving copies, textures, see-through materials, repeatability, what check and --boxes read,
+and KINE_3D. The drawing tests need the GPU backend and moderngl, and skip without them (CI runs on the CPU)."""
 import numpy as np
 import pytest
 import skia
@@ -145,7 +145,8 @@ def test_what_fits_on_opengl():
     assert gl3d.fits([mat], [None], [None], 0.0, lines)
     assert gl3d.fits([mat] * gl3d.MATS, [None] * gl3d.MATS, [None] * gl3d.MATS, 0.0, None)
     assert not gl3d.fits([mat] * (gl3d.MATS + 1), [None] * 65, [None] * 65, 0.0, None)
-    assert not gl3d.fits([clear], [None], [None], 0.0, None)
+    assert gl3d.fits([clear], [None], [None], 0.0, None)
+    assert not gl3d.fits([mat, clear], [None] * 2, [None] * 2, 0.0, lines)  # lines behind it would not be found
     assert not gl3d.fits([mat], [None], [None], 0.3, None)
     assert not gl3d.fits([mat], [None], [None], 0.0, (2.0, [0, 0, 0], 2.0))  # edges: "all"
 
@@ -276,10 +277,10 @@ def same_shadows(a, b, bare):
 
 
 def test_a_shadow_map_drawn_on_opengl_casts_the_shadows_skias_does(monkeypatch):
-    """A whole model and one drawn in part (from their buffers) and a transparent one (on the Skia path, so sent
-    loose) cast onto a floor and each other: the frame is the one the Skia-drawn map gives."""
+    """A whole model and one drawn in part (from their buffers) and a see-through one with edge lines (on the Skia
+    path, so sent loose) cast onto a floor and each other: the frame is the one the Skia-drawn map gives."""
     kids = [ball(x=-70, y=-25, r=28), ring(x=10, y=-30, r=34, tube=10, rotateX=20, draw=[[0, 0.3], [2, 1, "linear"]]),
-            ball(id="glass", x=85, y=-10, r=20, transparency=0.3, edges=None)]
+            ball(id="glass", x=85, y=-10, r=20, transparency=0.3)]
     spec = lit_scene([lit(kids)])
     count = cast(monkeypatch)
     for n in (0, 30):
@@ -293,10 +294,10 @@ def test_a_shadow_map_drawn_on_opengl_casts_the_shadows_skias_does(monkeypatch):
 
 def test_each_stage_and_each_sub_frame_reads_its_own_shadow_map(monkeypatch):
     """Two shadowed stages in a frame, and a frame of several sub-frames (motion blur): one texture holds every map,
-    and each is read before the next is drawn into it. With transparent models, which Skia draws, no OpenGL model
-    comes between the two maps."""
+    and each is read before the next is drawn into it. With see-through models with edge lines, which Skia draws,
+    no OpenGL model comes between the two maps."""
     def stages(shadows, glass):
-        look = {"transparency": 0.2, "edges": None} if glass else {}
+        look = {"transparency": 0.2, "edges": {"width": 2}} if glass else {}
         return [lit([ball(id="a", x=-40, y=-30, r=22, z=[[0, -60], [2, 60, "linear"]], **look)], shadows, 80, 150),
                 lit([ring(id="b", x=-35, y=-34, r=24, tube=8, rotateX=25, rotateY=[[0, 0], [2, 200, "linear"]],
                           **look)], shadows, 240, 150)]
@@ -567,7 +568,7 @@ def test_what_a_textured_models_program_does_not_take_draws_with_skia(tmp_path, 
     assert not gl3d.fits([mat] * (gl3d.TEX_MATS + 1), [one] + [None] * gl3d.TEX_MATS, [None] * 33, 0.0, None)
     assert gl3d.fits([mat] * 8, [tx(i) for i in range(8)], [tx(i) for i in range(8)], 0.0, None)
     assert not gl3d.fits([mat] * 9, [tx(i) for i in range(9)], [tx(i) for i in range(8)] + [None], 0.0, None)
-    assert not gl3d.fits([mat], [one], [None], 0.3, None) and not gl3d.fits([mat[:8] + (0.6,)], [one], [None], 0.0, None)
+    assert not gl3d.fits([mat], [one], [None], 0.3, None)
     monkeypatch.setattr(gl3d, "UNITS", 1)  # one picture a draw
     r.frame(0)
     assert r.on_gl == {"ball"}
@@ -576,3 +577,107 @@ def test_what_a_textured_models_program_does_not_take_draws_with_skia(tmp_path, 
     monkeypatch.setitem(gl3d._STATE, "tex", None)  # a driver that would not take the program
     r.frame(0)
     assert r.on_gl == {"ball"}
+
+
+# ---- see-through materials ----
+
+def glass(**kw):
+    """A see-through torus, turned so that its far side shows through the near one."""
+    return dict({"id": "glass", "type": "model", "shape": "torus", "r": 70, "tube": 28, "x": 160, "y": 120,
+                 "rotateX": 60, "rotateY": 25, "fill": "#7b5cff", "shine": 0.8, "rim": 0.9, "transparency": 0.6}, **kw)
+
+
+def case(**kw):
+    """A see-through box with a solid ball in it and a see-through one beside it."""
+    return dict({"id": "glass", "type": "model", "x": 150, "y": 120, "rotateY": 30, "rotateX": -15, "parts": [
+        {"shape": "cube", "w": 110, "fill": "#9fd3ff", "transparency": 0.75, "shine": 0.9},
+        {"shape": "sphere", "r": 30, "fill": "#ff633f"},
+        {"shape": "sphere", "r": 22, "x": 100, "fill": "#b9f45d", "transparency": 0.3}]}, **kw)
+
+
+def test_a_see_through_model_matches_the_skia_path(tmp_path, monkeypatch):
+    """Drawn far to near over what is behind, its far side lit from inside: a torus seen through itself, a box with
+    a solid ball in it, a plane (whose back is its other face: drawn once), a file's one-sided square from behind,
+    a file's square that is red on one side and blue on the other, from each side, then in toon bands, glowing,
+    under an environment, in fog, and as it goes from solid to see-through."""
+    square = dict(quad(tmp_path, "sq.glb", None, pbrMetallicRoughness={"baseColorFactor": [0.9, 0.3, 0.2, 1]}),
+                  id="glass", transparency=0.5, rotateY=150, rotateX=20)
+    P, N = [[-1, 1, 0], [1, 1, 0], [1, -1, 0], [-1, -1, 0]], [[0, 0, 1]] * 4
+    sides = write_gltf(tmp_path / "sides.glb", [(P, [[0, 3, 2], [0, 2, 1]], N, 0), (P, [[0, 2, 3], [0, 1, 2]], N, 1)],
+                       materials=[{"pbrMetallicRoughness": {"baseColorFactor": c, "metallicFactor": 0},
+                                   "alphaMode": "BLEND"} for c in ([0.9, 0.1, 0.1, 0.6], [0.1, 0.1, 0.9, 0.6])],
+                       binary=True)
+    sides = {"id": "glass", "type": "model", "src": sides, "w": 150, "x": 160, "y": 120, "rotateX": 15}
+    fading = glass(transparency=[[0, 0], [2, 0.8, "linear"]])
+    for spec, n in ((scene([glass()]), 0), (scene([case()]), 0), (scene([square]), 0),
+                    (scene([dict(sides, rotateY=25)]), 0), (scene([dict(sides, rotateY=205)]), 0),
+                    (scene([glass(shape="plane", w=160, h=110, rotateX=20, rotateY=140)]), 0),
+                    (scene([glass(bands=3, glow=0.5)]), 0), (dict(scene([case()]), env="studio"), 0),
+                    (dict(scene([case(z=-600)]), fog={"near": 600, "far": 2400}), 0),
+                    (scene([fading]), 0), (scene([fading]), 15)):
+        a, b, gl = both(spec, monkeypatch, n)
+        assert gl == {"glass"}
+        same(a, b, (spec["layers"][0], n), levels=2)
+
+
+def test_see_through_models_drawn_in_part_and_in_copies_match_the_skia_path(monkeypatch):
+    part = glass(draw=[[0, 0.2], [2, 1, "linear"]])
+    pane = glass(shape="plane", w=160, h=110, rotateX=20, rotateY=140, draw=[[0, 0.2], [2, 1, "linear"]])
+    dots = glass(r=16, tube=7, repeat={"count": 5, "x": "=i * 56 - 112", "rotateY": "=t * 90 + i * 40"})
+    for layer in (part, pane, dots):
+        for n in (10, 40):
+            a, b, gl = both(scene([layer]), monkeypatch, n)
+            assert gl == {"glass"}
+            same(a, b, n, levels=2)
+
+
+def test_a_see_through_model_in_a_stage_merges_and_casts_as_on_the_skia_path(monkeypatch):
+    """A card through a see-through ring in a stage: each pixel takes the nearer of the two, by the depth of the
+    ring's nearest surface. And its shadow on a floor."""
+    card = {"id": "card", "type": "rect", "x": 160, "y": 120, "w": 60, "h": 150, "fill": "#33323a", "rotateY": 60}
+    spec = scene([{"id": "st", "type": "group", "sort": "pixel", "children": [glass(rotateX=75), card]}])
+    a, b, gl = both(spec, monkeypatch)
+    assert gl == {"glass"}
+    close(a, b, mean=0.3, far=0.002)
+    lone = both(scene([glass(rotateX=75), card]), monkeypatch)[1]
+    assert (np.abs(b - lone).max(-1) > 40).mean() > 0.005  # the card passes behind part of the ring
+    kids = [glass(x=-20, y=-40, r=30, tube=12)]
+    count = cast(monkeypatch)
+    a = shadowed(lit_scene([lit(kids)]), monkeypatch, skia_map=True)[0]
+    b, r = shadowed(lit_scene([lit(kids)]), monkeypatch)
+    assert r.on_gl == {"glass"} and count == [1, 0, 1]
+    same_shadows(a, b, shadowed(lit_scene([lit(kids, shadows=None)]), monkeypatch)[0])
+
+
+def test_what_draws_a_see_through_model(tmp_path, monkeypatch):
+    """With edge lines it draws with Skia: OpenGL finds lines on the nearest surface, and those of what shows
+    through would go. A textured model draws solid whatever its transparency, on OpenGL as with Skia."""
+    r = renderer(scene([case(edges={"width": 2})]), monkeypatch)
+    r.frame(0)
+    assert r.on_gl == set()
+    solid = card(picture(tmp_path / "p.png"), rotateY=30)
+    a, b, gl = both(scene([dict(solid, transparency=0.6)]), monkeypatch)
+    assert gl == {"card"}
+    assert np.array_equal(b, renderer(scene([solid]), monkeypatch).frame(0)[..., :3])
+    close(a, b, mean=0.8, far=0.004)
+
+
+def test_a_see_through_frame_is_the_same_whatever_was_drawn_before_it(monkeypatch):
+    spec = scene([glass(x=100, rotateY=[[0, 0], [2, 300, "linear"]]),
+                  case(id="case", x=230, rotateY=[[0, 0], [2, -200, "linear"]], transparency=[[0, 0], [1, 0.5]])])
+    r = renderer(spec, monkeypatch)
+    first = r.frame(30).copy()
+    for n in (0, 59, 12):
+        r.frame(n)
+    assert r.on_gl == {"glass", "case"}
+    assert np.array_equal(first, r.frame(30))
+    assert np.array_equal(first, renderer(spec, monkeypatch).frame(30))
+
+
+def test_check_reads_a_see_through_model_as_from_the_skia_path(monkeypatch):
+    spec = scene([glass(), case(id="case", x=240, scale=0.6)])
+    _, a, seen_a = tracked(spec, monkeypatch, "skia", 0)
+    px, b, seen_b = tracked(spec, monkeypatch, "auto", 0)
+    assert not a.on_gl and b.on_gl == {"glass", "case"}
+    assert seen_a == seen_b
+    assert np.array_equal(renderer(spec, monkeypatch).frame(0)[..., :3], px)

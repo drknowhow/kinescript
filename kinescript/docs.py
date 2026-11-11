@@ -583,12 +583,12 @@ DEPTH AND CAMERA (3D)
             matte model none. Unset (the default), nothing is reflected. The colours and amount animate.
   On the GPU with the gl extra (pip install "kinescript[gl]"; kine doctor says "models": "opengl"),
   a model draws on OpenGL through a depth buffer, and parts of one model that cut through each other
-  meet at a clean edge. Elsewhere (the CPU; a model with transparency, explode or "edges": "all"; a
-  textured one of over 32 materials or 16 images) triangles are sorted far to near within one model,
-  so that seam is stepped: let parts touch rather than cross. Separate layers draw in list order,
-  except in a stage (a group with "sort": "pixel", see DEPTH AND CAMERA), where they meet at a clean
-  edge wherever they cross: put things that cross in a stage as separate layers. A ground shadow in
-  a stage lies on a floor layer in the same plane. check warns past 60,000 triangles in a frame.
+  meet at a clean edge. Elsewhere (the CPU; a model with explode, "edges": "all", or transparency
+  and edges; a textured one of over 32 materials or 16 images) triangles are sorted far to near
+  within one model, so that seam is stepped: let parts touch rather than cross. Separate layers draw
+  in list order, except in a stage (a group with "sort": "pixel", see DEPTH AND CAMERA), where they
+  meet at a clean edge wherever they cross: put things that cross in a stage as separate layers. A
+  ground shadow in a stage lies on a floor layer in the same plane. check warns past 60,000 triangles a frame.
   A ring around a ball that builds in, turns, and flies apart:
     {"id": "emblem", "type": "model", "x": "50%", "y": "45%", "detail": "high",
      "rotateX": [[0, 64], ["end", 18]], "rotateY": [[0, -30], ["end", 70]],

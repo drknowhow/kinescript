@@ -10,8 +10,13 @@ kept while the mesh stays the same, and each frame is two draws:
 Skia then draws the result where render3d would have drawn its own image, so the rest of a frame is unchanged.
 
 A model draws here when the backend is the GPU, moderngl is installed (pip install "kinescript[gl]"), and it uses
-nothing this path does not have: transparency, explode and edges: "all" draw on the Skia path, as does --wire.
-KINE_3D=skia turns this path off; KINE_3D=gl makes it an error when it cannot run.
+nothing this path does not have: explode, edges: "all" and a see-through model with edge lines draw on the Skia path,
+as does --wire. KINE_3D=skia turns this path off; KINE_3D=gl makes it an error when it cannot run.
+
+A model's see-through materials are left out of the first draw and drawn after it, over what is there: the triangles
+render3d would draw (those turned away too, lit from inside), sorted far to near each frame, tested against the depth
+buffer and not written to it. Edge lines are found from the nearest surface, so the lines of what shows through a
+see-through part would be lost: such a model stays on the Skia path.
 
 A model with textures (its own or a model file's, and emission textures) draws with a second program, which reads
 each material's picture at every pixel. skia-python does not say which GL texture an image of Skia's is in, so each
@@ -97,7 +102,7 @@ layout(location = 1) out vec4 o_geo;
 void main() {
     vec4 b = u_base[v_mat];
     vec4 p = u_surf[v_mat];
-    vec2 n2 = v_n2;
+    vec2 n2 = gl_FrontFacing ? v_n2 : -v_n2;  // a see-through face turned away is lit from inside
     vec3 n = normalize(vec3(n2, sqrt(max(0.0, 1.0 - dot(n2, n2)))));
     float d = max(dot(n, keyDir), 0.0);
     float f = max(dot(n, fillDir), 0.0);
@@ -130,16 +135,31 @@ void main() {
         @env += mix((envTop + 2.0 * envHor + envBot) * 0.25, sky, sh) * (p.z * b.rgb + (1.0 - p.z) * sh * fr) * envAmt;
     }
 @show    o_col = vec4(mix(clamp(lit, 0.0, 1.0), u_fogCol, v_fog), 1.0);
-    o_geo = vec4(normalize(v_n), NEAR * gl_FragCoord.w);
-}
+    o_geo = vec4(normalize(gl_FrontFacing ? v_n : -v_n), NEAR * gl_FragCoord.w);
+@last}
 """
-# What fills the marks in _VERT and _FRAG for a model without textures: the light on each material's fill.
-_PLAIN = {"decl": ("", ""), "set": "", "fill": "b.rgb * ", "sum": "lit = diffuse + spec", "env": "lit", "show": """
+# What fills the marks in _VERT and _FRAG for a model without textures: the light on each material's fill. Its
+# see-through materials are left out of the first draw (u_pass 0) and drawn after it, far to near: over what is
+# there, the colour times the opacity (u_pass 1), then, for a stage, as the nearest surface (u_pass 2).
+_PLAIN = {"decl": ("""
+uniform float u_alpha[MATS];  // each material's opacity: 1 - its transparency
+uniform int u_pass;
+flat out float v_a;""", "\nuniform int u_pass;\nflat in float v_a;"), "set": """
+    v_a = u_alpha[v_mat];
+    if (u_pass == 0 && v_a < 1.0) {
+        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    }""", "fill": "b.rgb * ", "sum": "lit = diffuse + spec", "env": "lit", "show": """
     if ((u_flags & 1) != 0) {
         lit = max(lit, b.rgb * u_glow[v_mat].a);
     }
     if ((u_flags & 2) != 0) {
         lit += u_glow[v_mat].rgb;
+    }
+""".lstrip("\n"), "last": """
+    if (u_pass == 1) {
+        o_col *= v_a;
+    } else if (u_pass == 2) {
+        o_col = o_geo;
     }
 """.lstrip("\n")}
 # And for one with textures, as render3d._textured combines its passes: each material's picture (its texture times
@@ -181,7 +201,7 @@ PICK
         }
         lit += e;
     }
-""".lstrip("\n")}
+""".lstrip("\n"), "last": ""}
 _QUAD = """
 #version 330
 in vec2 in_xy;
@@ -355,11 +375,12 @@ def available(r) -> bool:
 
 def fits(mats, texs, glows, explode: float, edging) -> bool:
     """Whether a model with these materials, textures, emission textures, explode and edges draws here."""
-    if explode > 0 or any(mt[8] < 1 for mt in mats) or (edging is not None and edging[2] > 1.0):
+    if explode > 0 or (edging is not None and edging[2] > 1.0):
         return False
     shown = [tx for tx in (*texs, *glows) if tx is not None]
     if not shown:
-        return len(mats) <= MATS
+        # Edge lines are found from the nearest surface: those of what shows through a see-through one would go.
+        return len(mats) <= MATS and (edging is None or all(mt[8] >= 1 for mt in mats))
     return (_STATE.get("tex") is not None and len(mats) <= TEX_MATS
             and len({(id(tx[0]), tx[4]) for tx in shown}) <= UNITS)
 
@@ -371,7 +392,8 @@ def _mat(a: np.ndarray) -> bytes:
 
 def _targets(w: int, h: int):
     """Frame-sized render targets: the first pass's colour, normal and 1/w (float) and depth buffer, and the second
-    pass's colour and packed depth, made once for each size."""
+    pass's colour and packed depth, made once for each size. tint and near are the first pass's colour and its
+    normal and 1/w, each alone with the depth buffer: what see-through triangles are drawn into."""
     hit = _TARGETS.pop((w, h), None)
     if hit is None:
         ctx = _STATE["ctx"]
@@ -379,7 +401,9 @@ def _targets(w: int, h: int):
                                ctx.texture((w, h), 4))
         depth = ctx.depth_renderbuffer((w, h))
         hit = {"col": col, "geo": geo, "out": out, "outd": outd, "depth": depth,
-               "first": ctx.framebuffer([col, geo], depth), "second": ctx.framebuffer([out, outd])}
+               "first": ctx.framebuffer([col, geo], depth), "second": ctx.framebuffer([out, outd]),
+               "tint": ctx.framebuffer([col], depth), "near": ctx.framebuffer([geo], depth)}
+        hit["tint"].depth_mask = False  # see-through triangles hide nothing: they are drawn far to near
         while len(_TARGETS) >= 2:
             for v in _TARGETS.pop(next(iter(_TARGETS))).values():
                 v.release()
@@ -399,6 +423,7 @@ class _Buffers:
         self.ibo = ctx.buffer(np.ascontiguousarray(m.T, "i4").tobytes())
         self.built = None  # (order, ibo): the triangles in that build order
         self.uv = None  # the texture coordinates: a mesh's stay with its triangles
+        self.picked = None  # a buffer for the triangles a frame picks (some)
         self.arrays = {}  # (program, whether in build order): a vertex array
         self.dead = False
 
@@ -445,8 +470,22 @@ class _Buffers:
             self.arrays[key] = ctx.vertex_array(_STATE[name], content, self.ibo if order is None else self.built[1])
         return self.arrays[key]
 
+    def some(self, name: str, tris: np.ndarray):
+        """A vertex array for program `name` over these triangles of the mesh, until the next call."""
+        data = np.ascontiguousarray(tris, "i4").tobytes()
+        if self.picked is None:
+            self.picked = _STATE["ctx"].buffer(reserve=self.ibo.size, dynamic=True)
+        self.picked.orphan()
+        self.picked.write(data)
+        key = (name, "some")
+        if key not in self.arrays:
+            self.arrays[key] = _STATE["ctx"].vertex_array(_STATE[name], [(self.vbo, "3f 3f 1f", "in_pos", "in_nrm",
+                                                                         "in_mat")], self.picked)
+        return self.arrays[key]
+
     def release(self):
-        for o in (*self.arrays.values(), self.ibo, self.vbo, *(self.built or ())[1:], *filter(None, [self.uv])):
+        for o in (*self.arrays.values(), self.ibo, self.vbo, *(self.built or ())[1:],
+                  *filter(None, [self.uv, self.picked])):
             o.release()
         self.arrays = {}
         self.dead = True
@@ -604,6 +643,24 @@ def _uniforms(sh, n: int, r, mats, lights, fg, view: np.ndarray, ss: int, W: int
         _set(sh, "u_fogCol", tuple(col))
 
 
+def _see_through(r, L, m, T: np.ndarray, ids, mats) -> np.ndarray:
+    """The triangles among T (triangles ids of mesh m) that see-through materials draw, as render3d.draw picks and
+    orders them: those turned to the camera, and those turned away (which show through the near ones) unless they
+    are the back of a face drawn back to back, far to near."""
+    from . import render3d
+    clear = np.array([mt[8] < 1 for mt in mats])[m.M[T[:, 0]]]
+    if not clear.any():
+        return T[:0]
+    hom = m.P @ r._m3d[[0, 1, 3], :3].T + r._m3d[[0, 1, 3], 3]  # x and y times w, and w
+    front = np.linalg.det(hom[T]) > 0  # the sign of the area on screen, also for a triangle the camera plane cuts
+    face = render3d._topology(r, L, m)[1][ids]
+    seen = np.zeros(int(face.max()) + 2, bool)
+    seen[face[front]] = True
+    near, far = np.flatnonzero(clear & front), np.flatnonzero(clear & ~front & ~seen[face])
+    pick = T[np.r_[near, far]]
+    return pick[np.argsort(-hom[:, 2][pick].sum(1), kind="stable")]
+
+
 def _shown(sh, looks, units: list, where: list):
     """Set the textured program for the pictures of _pictures: each material's tint, unit, repeat and offset."""
     for txs, at, tint, uv in zip(looks, where, ("u_look", "u_shine"), ("u_uv", "u_suv")):
@@ -689,9 +746,13 @@ def draw(r, c: skia.Canvas, L, m, mats, lights, fg, edging, amt: float, order, t
     reach = math.ceil(rad) + 1
     bx0, bx1 = max(0, x0 * ss - reach), min(W, x1 * ss + reach)  # the first pass's box: the second's, and its taps
     by0, by1 = max(0, H - y1 * ss - reach), min(H, H - y0 * ss + reach)
+    glass = T[:0]  # the triangles of see-through materials: a textured model draws solid, as on Skia
     if looks is None:
         sh, units = _STATE["shade"], []
         _uniforms(sh, MATS, r, mats, lights, fg, view, ss, W, H)
+        _set(sh, "u_alpha", np.array([mt[8] for mt in mats] + [1.0] * (MATS - len(mats)), "f4").tobytes())
+        _set(sh, "u_pass", 0)
+        glass = _see_through(r, L, m, T, slice(None) if amt >= 1.0 else order[:len(T)], mats)
     else:
         sh = _STATE["tex"]
         units, where = _pictures(r, L, *looks)
@@ -711,6 +772,16 @@ def draw(r, c: skia.Canvas, L, m, mats, lights, fg, edging, amt: float, order, t
         _tiled(tile).use(k)
     buf.array("shade" if looks is None else "tex", m, None if amt >= 1.0 else order).render(mgl.TRIANGLES,
                                                                                           vertices=3 * len(T))
+    if len(glass):
+        some = buf.some("shade", glass)
+        staged = r._stage is not None and r._stage.child is L  # a stage merges by the nearest surface's depth
+        for name, flags in (("tint", mgl.DEPTH_TEST | mgl.BLEND), ("near", mgl.DEPTH_TEST))[:2 if staged else 1]:
+            tg[name].viewport = first.viewport
+            tg[name].use()
+            ctx.enable_only(flags)
+            ctx.blend_func = (mgl.ONE, mgl.ONE_MINUS_SRC_ALPHA)
+            _set(sh, "u_pass", 1 if name == "tint" else 2)
+            some.render(mgl.TRIANGLES, vertices=glass.size)
     ctx.enable_only(0)
     edge = _STATE["edge"]
     _set(edge, "u_box", (bx0, by0, bx1, by1))
