@@ -1458,6 +1458,19 @@ def _quads(a: np.ndarray, b: np.ndarray, half: float, wa, wb) -> tuple[np.ndarra
     return xy, np.stack([wa, wb, wb, wa], 1).ravel()
 
 
+def _seen(r, X: np.ndarray, Y: np.ndarray, w: np.ndarray, T: np.ndarray, lines, half: float) -> tuple[list, np.ndarray]:
+    """The bounds in device pixels of triangles T (corners at canvas X, Y) and of the edge lines `lines` (as _lines
+    gives them, `half` px either side), and the w of every point bounded: what draw finds for what it draws."""
+    used = _compact(T, len(X))[0]
+    x, y, wv = X[used], Y[used], w[used]
+    if lines is not None and len(lines[0]):
+        va, vb = lines[:2]
+        xy, wq = _quads(np.stack([X[va], Y[va]], 1), np.stack([X[vb], Y[vb]], 1), half, w[va], w[vb])
+        x, y, wv = np.r_[x, xy[:, 0]], np.r_[y, xy[:, 1]], np.r_[wv, wq]
+    x, y = x * r.scale, y * r.scale
+    return [float(x.min()), float(y.min()), float(x.max()), float(y.max())], wv
+
+
 def _combined(emit: bool = False) -> skia.RuntimeEffect:
     key = "combine emit" if emit else "combine"
     if key not in _EFFECTS:
@@ -1476,7 +1489,8 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
     fg = fog(r, scene_t) if r._stage is None else None  # a stage fogs each pixel it shows
     edging = _edging(r, L, t, scene_t)
     ex = float(g("explode", 0.0))
-    if gl3d.available(r) and gl3d.fits(mats, texs, glows, ex, edging):
+    on_gl = gl3d.available(r) and gl3d.fits(mats, texs, glows, ex, edging)
+    if on_gl and not r.track:
         order = _fixed(r, L, m, "order", lambda: mesh.build_order(m)) if amt < 1.0 else None
         return gl3d.draw(r, c, L, m, mats, (lt, more, env), fg, edging, amt, order)
     P, N, T, M = m.P, m.N, m.T, m.M
@@ -1538,6 +1552,19 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
         caps = None if caps is None else caps[front]
     if not len(T):
         return None
+    if on_gl:
+        # check and --boxes: OpenGL draws the pixels, while the box, the triangle count and fog-hides come from the
+        # triangles and lines this path would draw, so they are the same with and without OpenGL.
+        bounds, wv = _seen(r, X, Y, w, T, lines, 0.0 if edging is None else edging[0] / 2)
+        r.tris += len(T)
+        if min(r.w, math.ceil(bounds[2]) + 2) <= max(0, math.floor(bounds[0]) - 2) or \
+                min(r.h, math.ceil(bounds[3]) + 2) <= max(0, math.floor(bounds[1]) - 2):
+            return bounds
+        if fg is not None and fogged(fg, wv).min() >= 0.999:
+            r.fogged.add(L.id)
+        order = _fixed(r, L, m, "order", lambda: mesh.build_order(m)) if amt < 1.0 else None
+        gl3d.draw(r, c, L, m, mats, (lt, more, env), fg, edging, amt, order, tracked=True)
+        return bounds
     if U is not None:
         P, N, M, U, T = _unswim(r, L, P, N, M, U, T, [tx if tx is not None else gl for tx, gl in zip(texs, glows)])
         hom = P @ r._m3d[:3, :3].T + r._m3d[:3, 3]

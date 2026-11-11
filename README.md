@@ -559,8 +559,8 @@ Within one process, such as the MCP server, the workers stay warm for two minute
   `slow-effects` when a frame's effects pass 0.25 s.
 - Models cast shadows on each other only inside a stage, separate layers hide each other per pixel only inside a
   stage, and a skinned vertex follows at most four joints. Without the `gl` extra, or for a model OpenGL does not
-  draw (textured, transparent, exploding or `"edges": "all"`, and always in `kine check`, `--wire` and on the CPU
-  backend), triangles are sorted by depth in Skia, so parts of one model that cut through each other meet at a
+  draw (textured, transparent, exploding or `"edges": "all"`, and always with `--wire` and on the CPU backend),
+  triangles are sorted by depth in Skia, so parts of one model that cut through each other meet at a
   stepped seam. A textured model is drawn solid whatever its `transparency`. Draco-compressed model files need the
   `draco` extra.
 - Audio is mixing and levelling (trim, gain over time, fades, speed, loop, pan, role levels, ducking, a loudness
