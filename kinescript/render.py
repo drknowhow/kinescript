@@ -680,9 +680,12 @@ class Renderer:
         self.culled: set[str] = set()  # layers skipped this frame because they cross the camera plane
         self.unlit: set[str] = set()  # models drawn this frame with the key light behind them
         self.fogged: set[str] = set()  # layers drawn this frame wholly hidden by fog
+        self._paper = tuple(render3d._rgb(render3d._fog_colour(scene.bg)))  # what wash mixes a layer toward
         self.inside: set[str] = set()  # models the camera is inside this frame
         self.swim: set[str] = set()  # textured models whose triangles stayed too large to map the image this frame
         self.on_gl: set[str] = set()  # models drawn on OpenGL this frame (gl3d), not by Skia
+        self.pinned_off: set[str] = set()  # layers whose pin landed off the canvas or behind the camera this frame
+        self._cams: tuple | None = None  # this frame's (world, fixed) camera matrices, in 3D scenes
         self.unfocused = False  # the camera's focus plane was nearer or farther than every layer this frame
         self.slow_dof = False  # a stage blurred per pixel on the CPU this frame
         self.filtered = 0.0  # px blurred by offscreen effects this frame, or their like in work (CPU_BLUR_S)
@@ -961,6 +964,7 @@ class Renderer:
         self.boxes, self.letters = {}, {}
         self.culled, self.unlit, self.fogged, self.inside, self.swim, self.on_gl = (set(), set(), set(), set(), set(),
                                                                                  set())
+        self.pinned_off = set()
         self.unfocused = self.slow_dof = False
         self.filtered = 0.0
         self._dof, self._span = None, [math.inf, 0.0]
@@ -992,13 +996,14 @@ class Renderer:
         if self.footage and self._videos:
             last, self._on = self._on, on
             self._prime(on, AHEAD if last is not None and 0 < on - last <= AHEAD else 0.0)
-        cams = self._cameras(T) if s.is3d else None
+        cams = self._cams = self._cameras(T) if s.is3d else None
         for layer in layers:
             if self._stopped:
                 break
             m = None
             if cams is not None:
-                fixed = layer.raw.get("fixed", layer.type == "captions")
+                # A pinned layer is placed on the canvas where its point lands, so the camera has moved it already.
+                fixed = layer.raw.get("fixed", layer.type == "captions" or layer.raw.get("pin") is not None)
                 if s.camera is not None and not fixed:
                     m = cams[0]
                 elif layer.id in s.depth:
@@ -1106,10 +1111,22 @@ class Renderer:
         """A target as a point in canvas px: [x, y] or [x, y, z] (lengths as a layer's x, y and z take them), or a
         layer id: the middle of that layer where its keys and its parents put it at T. Its enter and exit motions
         are left out, so a layer that rises in rises on screen rather than taking the camera with it."""
+        if isinstance(v, dict):  # {"layer", "at"}: a point in that layer's own space, as a pin's
+            at = v.get("at") or (0.0, 0.0, 0.0)
+            m = self._placing(self.s.by_id[v["layer"]], T)[0]
+            return (m @ np.array([*map(float, at), *[0.0] * (3 - len(at)), 1.0]))[:3]
         if not isinstance(v, str):
             v = list(v) + [0.0] * (3 - len(v))
             return np.array([float(length(x, k, self.s.ctx)) for x, k in zip(v, ("x", "y", "z"))])
         L = self.s.by_id[v]
+        m, t, g = self._placing(L, T)
+        box = self._box(L, t, T, g)
+        mid = (0.0, 0.0) if box is None else (box[0] + box[2] / 2, box[1] + box[3] / 2)
+        return (m @ np.array([mid[0], mid[1], 0.0, 1.0]))[:3]
+
+    def _placing(self, L: Layer, T: float) -> tuple:
+        """The matrix from L's own space into the canvas's (before the camera) by its keys and its parents' at T,
+        without enter and exit motions; with L's time and value getter."""
         m = np.eye(4)
         for A in reversed(list(_lineage(L))):
             t = min(max(T - A.t_in, 0.0), A.dur)
@@ -1118,9 +1135,26 @@ class Renderer:
             m = (m @ space.translate(float(g("x")), float(g("y"))) @ space.tilt(float(g("z")), float(g("rotateX")),
                  float(g("rotateY"))) @ space.rotate_z(float(g("rotate")))
                  @ space.scale(sc * float(g("scaleX")), sc * float(g("scaleY"))))
-        box = self._box(L, t, T, g)
-        mid = (0.0, 0.0) if box is None else (box[0] + box[2] / 2, box[1] + box[3] / 2)
-        return (m @ np.array([mid[0], mid[1], 0.0, 1.0]))[:3]
+        return m, t, g
+
+    def _pinned(self, pin, T: float) -> tuple[float, float] | None:
+        """Where a pin lands on the canvas at T: the point `at` ([x, y] or [x, y, z]; a model's px from its middle,
+        before it turns) in layer `layer`'s own space, a layer id alone its middle, placed by that layer's keys and
+        its parents' (not their enter and exit motions) and seen through the camera it is drawn with. None while it
+        is behind the camera."""
+        lid, at = (pin, (0.0, 0.0, 0.0)) if isinstance(pin, str) else (pin["layer"], pin.get("at") or (0.0, 0.0))
+        L = self.s.by_id[lid]
+        q = self._placing(L, T)[0] @ np.array([*map(float, at), *[0.0] * (3 - len(at)), 1.0])
+        cams, top = self._cams, list(_lineage(L))[-1]
+        if cams is not None:
+            fixed = top.raw.get("fixed", top.type == "captions" or top.raw.get("pin") is not None)
+            cam = cams[0] if self.s.camera is not None and not fixed else cams[1] if top.id in self.s.depth else None
+            if cam is not None:
+                q = cam @ q
+                if q[3] < space.NEAR:
+                    return None
+                return float(q[0] / q[3]), float(q[1] / q[3])
+        return float(q[0]), float(q[1])
 
     def _shake(self, cam: Layer, T: float, fov: float):
         """The camera's handheld turn at T, in degrees (rx, ry, rz): smooth noise of the scene time, `speed` wobbles
@@ -1237,6 +1271,14 @@ class Renderer:
             return
         box = self._box(L, t, T, g)
         x, y, rot, sc, sx, sy, blur = L.placed(t, T)
+        pin = L.raw.get("pin")
+        if pin is not None:
+            at = self._pinned(pin, T)
+            if at is None or not (0 <= at[0] <= self.s.w and 0 <= at[1] <= self.s.h):
+                self.pinned_off.add(L.id)
+            if at is None:
+                return
+            x, y = float(x) + at[0], float(y) + at[1]
         x, y = float(x) + mods.dx, float(y) + mods.dy
         rot = float(rot) + mods.rotate
         if L.along is not None:
@@ -1320,9 +1362,13 @@ class Renderer:
         effects = (blur > 0.05 or shadow or fx or (blend and blend != "normal") or L.looks or mods.smear > 0.05
                    or glitch or luma)
         cf = None
-        if fogf > 0.002:
+        washf = max(0.0, min(1.0, float(g("wash") or 0.0)))
+        tints = [f for f in (render3d.fog_filter(fg, fogf) if fogf > 0.002 else None,
+                             render3d.fog_filter((self._paper,), washf) if washf > 0.002 else None) if f is not None]
+        tint = tints[0] if len(tints) == 1 else skia.ColorFilters.Compose(tints[1], tints[0]) if tints else None
+        if tint is not None:
             if not effects and self._one_draw(L):
-                cf = render3d.fog_filter(fg, fogf)  # in the paint of its one draw, like its opacity
+                cf = tint  # in the paint of its one draw, like its opacity
             else:
                 effects = True
         layered = alpha < 0.999 or effects
@@ -1368,9 +1414,9 @@ class Renderer:
                 cm = color_matrix(fx)
                 if cm:
                     paint.setColorFilter(skia.ColorFilters.Matrix(cm))
-            if fogf > 0.002:
-                mist, inner = render3d.fog_filter(fg, fogf), paint.getColorFilter()
-                paint.setColorFilter(skia.ColorFilters.Compose(mist, inner) if inner else mist)
+            if tint is not None:
+                inner = paint.getColorFilter()
+                paint.setColorFilter(skia.ColorFilters.Compose(tint, inner) if inner else tint)
             if blend:
                 paint.setBlendMode(BLENDS.get(blend, skia.BlendMode.kSrcOver))
             if L is self._looking:  # _looked opens the layer, as large as what is drawn now

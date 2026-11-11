@@ -120,7 +120,8 @@ def _spec(scene, base) -> tuple[dict, Path]:
         base = p.parent
     from . import brand
     from . import avatar
-    spec = avatar.say_sounds(schema.normalize(spec)[0], base)  # an avatar's lines, as voices
+    from . import tour
+    spec = tour.say_sounds(avatar.say_sounds(schema.normalize(spec)[0], base))  # an avatar's and a tour's lines
     return brand.apply_audio(spec, base)[0], base  # the brand's voice defaults, as the scene
 
 

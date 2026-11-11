@@ -1,5 +1,5 @@
 """The scene reference printed by `kine docs` and served to agents by the MCP server, and the longer
-topics (`kine docs avatars`, `kine docs brands`) it points to.
+topics (`kine docs avatars`, `kine docs brands`, `kine docs explainers`) it points to.
 
 Written for small models as well as large ones: rules first, one complete example, every default
 stated, then recipes to copy. Names of motions, eases, shaders and components are filled in from
@@ -127,7 +127,8 @@ KEYS EVERY LAYER HAS
                 bottomright. Video and shader default to topleft, even with x and y set; an image
                 defaults to topleft without x and to center with it.
   opacity       0..1 (default 1). A group fades as one picture; layers in it with a blend still
-                blend with what is under the group.
+                blend with what is under the group. wash 0..1 [0] mixes a layer toward the canvas bg
+                and keeps it opaque: what sits at the back of a shot.
   scale, scaleX, scaleY   1 = normal size
   rotate        degrees, clockwise
   z, rotateX, rotateY, backface, fixed   depth: see DEPTH AND CAMERA
@@ -141,6 +142,9 @@ KEYS EVERY LAYER HAS
                 not). feather blurs the mask's edge, in px. The mask layer draws only as a mask, on its
                 own clock, placed by its own x and y in the group, so it can move over a layer that
                 holds still. Video inside a word is a video layer masked by a text layer.
+  pin           puts a top-level layer, each frame, where a point on another layer shows: "pin": {"layer":
+                "cell", "at": [40, -30, 60]} (px from its middle before it turns; "cell" alone: the middle);
+                x and y move it off the point. Hidden behind the camera (check: pin-offscreen). A callout takes it.
   repeat        copies of the layer, up to 10,000: {"count": 60, "rotate": "=i * 6", "x": "=cos(i *
                 0.1047) * 300", "y": "=sin(i * 0.1047) * 300", "fill": "=hsl(i * 6)", "opacity": 0.8}.
                 A copy is the layer moved by its x, y, rotate and scale in the layer's own space, so
@@ -153,6 +157,12 @@ KEYS EVERY LAYER HAS
                 one picture. A shape's copies draw in one loop: 10,000 circles, each moved by two
                 expressions, render at 1080p at about 40 fps on an RTX 5060 Ti. Captions do not
                 repeat; a model's repeat is under 3D MODELS.
+                "spread" scatters the copies instead of placing each by hand: {"in": "disc", "r":
+                300, "seed": 4, "gap": 40, "avoid": [{"x": 0, "y": 0, "r": 120}]} puts each copy at a
+                place in a circle of radius r ("ring": on it, "box": w x h), gap px from the others
+                and out of each ball in avoid. The same seed gives the same places; another seed
+                others. x and y, when given, move each copy from its place: "y": "=sin(t + i) * 6"
+                bobs them. check warns spread-crowded when gap leaves too little room for count.
   shadow        {"x": 0, "y": 6, "blur": 16, "color": "#00000099"}   (those are the defaults)
   fx            {"brightness": 0, "contrast": 1, "saturate": 1, "hue": 0, "exposure": 0,
                  "temperature": 0, "tint": 0, "gray": 0, "invert": 0}. brightness adds to every
@@ -441,7 +451,12 @@ DEPTH AND CAMERA (3D)
             "profile": [[0, -120], [70, -120], [40, 0], [90, 120], [0, 120]].
   tube      shape "tube" runs a round tube of radius r [12] along d (SVG path data, fitted to w and/or
             h as a path shape's), round at its ends: 3D lines and routes. draw grows it along its
-            length (other shapes show bottom to top). Without d, "tube" is read as a cylinder.
+            length (other shapes show bottom to top). Instead of d, in depth from the model's middle:
+            "points": [[x, y, z], ...] (smooth: true curves through them, closed: true joins the ends);
+            "walk": {"steps" [60], "step" [10] px, "turn" [30] degrees, "within" [0: anywhere] px, "seed"}:
+            a seeded random walk, smooth unless smooth is false; or "rays": {"count" [12], "length" [100]
+            or [least, most], "inner" [0] px out, "seed"}: lines out every way, grown together. These do
+            not animate. With none of d, points, walk or rays, "tube" is read as a cylinder.
   text      shape "text" pushes letters out in depth: text ("\n" breaks lines), size [120],
             weight [600], font, italic, letterSpacing, lineHeight, depth [size x 0.2], bevel [0]
             (px of 45-degree edge). Centred on x, y. Each new text, size, depth or bevel value
@@ -488,7 +503,10 @@ DEPTH AND CAMERA (3D)
             is, and its fill recolours what the layer's fill would. Keys that read no time are worked
             out once. A model draws at most 64 colours: past that, each copy takes the nearest kept
             one (check warns repeat-colours). Copies cost what that many triangles cost: use "detail":
-            "low" for many.
+            "low" for many. A model's "spread" (see repeat under KEYS EVERY LAYER HAS) also takes
+            "in": "sphere" (inside a ball of radius r), "shell" (on its surface; "on": "sphere" says
+            the same) and a box's "depth", and places copies in z too: {"count": 40, "spread": {"in":
+            "sphere", "r": 240, "seed": 3, "gap": 36}, "rotate": "=i * 47"}.
   src       a model file: .glb or .gltf (glTF 2.0), or .obj with its .mtl. Colours, shine and metal
             come from the file; a fill on the layer recolours all of it. It fits inside w and/or h
             keeping its shape, else its longest side is 300 px. Node transforms, skins (up to four
@@ -535,6 +553,14 @@ DEPTH AND CAMERA (3D)
             Where parts of one model touch, a line along the seam can come out stepped, as the faces
             there do.
   explode   0..1: faces fly out along their normals.
+  cut       {"from": "front", "at": 0.5, "cap": "#fbefdf"}: a cutaway. A flat cut comes in from
+            one side (front | back | left | right | top | bottom; the front faces the camera before
+            the model turns) and takes off that share of the model, 0 to 1, measured across all its
+            parts. The cut face is filled where the cut goes through a part: the outermost in the
+            cap colour (its part's own without cap), and a part inside another in its own colour, so
+            a nucleus shows in a cell. A hole (a torus's middle) stays open. at and cap animate: "at": [[0, 0], [1.5, 0.5]]
+            opens it. Each copy of a repeat is cut. Put the parts a cut goes through in one model:
+            separate models cut at one place show their cut faces in the same plane.
   draw      0..1, or "enter": "build": triangles appear from the bottom up.
   light     top level, or on one model: studio (default) | soft | dramatic | flat (no shading),
             or {"preset": "studio", "key": 0.85, "fill": 0.25, "ambient": 0.22, "rim": 0.35,
@@ -1059,6 +1085,58 @@ AVATARS
   animation as a layer's clips are; "look": [30, 15] is how many degrees the model turns for a
   full gaze left or right and up or down (default [25, 12]), in 0.3 s. Glances are not for 3D
   avatars. kine check names a morph or clip the model lacks (avatar-morph, avatar-gesture).
+
+""",
+    "explainers": """\
+EXPLAINERS
+  A guided 3D explainer is a model of the subject, a camera that flies from part to part, a voice that
+  says what each part is, a caption card at each stop and a label on the part. A "tour" layer (top level
+  only) times all of it from a list of stops. The model keys it leans on are cut (open the model up),
+  a model's spread (scatter many small parts), tube points, walk and rays (3D curves), all under 3D
+  MODELS, and pin (KEYS EVERY LAYER HAS).
+  stops     one or more stops, each {"focus", "zoom", "orbit", "say", "title", "body", "note", "hold",
+            "keep"}.
+            Stop n is a group "<tour>-s<n>" that starts when the one before ends, so "at": "tour-s2.in"
+            cues a layer to it.
+  focus     a layer id (the camera aims at its middle), or {"layer": "cell", "at": [x, y, z]}: a point
+            in px from where the layer's x and y put it (a model's middle) before it turns, which the
+            camera follows as the layer moves.
+  zoom      [1] how many times larger the focus shows than with the camera at rest.
+  orbit     degrees the camera swings round the focus while the stop holds. drift [4] adds a slower
+            swing, one way at one stop and back at the next, so no stop is a still.
+  say       the stop's voice line. kine voice speaks it as the sound "<tour>-s<n>-v", with the tour's
+            speaker and rate, once the camera has landed. The stop lasts the move, the line and pause
+            [0.4]. Until kine voice has run, check says voice-missing and the length is guessed from the
+            words. A stop without say holds for hold [2.5] after its move.
+  title     with body, a lowerThird card for the stop (cards false leaves them out; accent colours it).
+  note      a callout pinned to the focus while the stop holds.
+  move      [1.2] seconds the camera flies between stops, eased by ease [inOutCubic]. The first stop
+            starts on its focus, at at [0].
+  dim       [0] 0 to 1: how far the model layers a stop does not focus wash out toward the canvas bg
+            while it holds; they stay opaque, and models in a fixed group (an inset) are left as they are.
+            A stop's keep lists more layers it leaves bright: {"focus": "golgi", "keep": ["vesicles"]}.
+  fov       the camera's field of view, which zoom is measured with. The scene's "camera" keeps its
+            other keys; the tour writes its target, z and rotateY. check names a focus that is no layer
+            (tour-focus).
+  A cell cut open from the front, its parts in the cut, toured in three stops (kine voice, then kine check):
+    {"canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": "auto", "bg": "#f4efe6"},
+     "layers": [
+      {"id": "cell", "type": "model", "x": "50%", "y": "50%", "rotateY": "=-30 + t * 3", "rotateX": -15,
+       "bands": 3, "edges": {"width": 3, "color": "#20202a"},
+       "cut": {"from": "front", "at": [[0, 0], [1.5, 0.5]], "cap": "#f6c9a8"},
+       "parts": [{"shape": "sphere", "r": 300, "fill": "#e88a6a"},
+                 {"shape": "sphere", "r": 110, "x": 40, "fill": "#7a5cc8"},
+                 {"shape": "capsule", "r": 30, "h": 130, "x": -170, "y": 110, "rotate": 40,
+                  "fill": "#f2c14e"},
+                 {"shape": "capsule", "r": 26, "h": 110, "x": 160, "y": -150, "rotate": -30,
+                  "fill": "#f2c14e"}]},
+      {"use": "tour", "id": "tour", "speaker": "af_heart", "stops": [
+        {"focus": "cell", "zoom": 0.9, "title": "An animal cell",
+         "say": "This is an animal cell, cut open to show what is inside."},
+        {"focus": {"layer": "cell", "at": [40, 0, 0]}, "zoom": 2.2, "orbit": 15, "title": "Nucleus",
+         "body": "Holds the DNA", "note": "Nucleus", "say": "The nucleus holds the cell's DNA."},
+        {"focus": {"layer": "cell", "at": [-170, 110, 0]}, "zoom": 3, "title": "Mitochondrion",
+         "note": "Mitochondrion", "say": "Mitochondria turn food into energy the cell can use."}]}]}
 
 """,
     "brands": """\

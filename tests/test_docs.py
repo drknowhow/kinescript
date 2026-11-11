@@ -135,13 +135,30 @@ def test_contrast_warning_names_the_shape_behind_but_not_the_background():
                  default_fill])
 
 
+def test_explainer_example_passes_check_once_it_is_spoken(tmp_path):
+    spec = json.loads(_objects(reference("explainers"))[0])
+    r = check(spec)
+    assert {i["code"] for i in r["issues"]} == {"voice-missing"}, r["issues"]  # kine voice comes first
+    import wave
+    for n in (1, 2, 3):  # as kine voice would leave them, but silent
+        (tmp_path / "voice").mkdir(exist_ok=True)
+        with wave.open(str(tmp_path / "voice" / f"tour-s{n}-v.wav"), "wb") as w:
+            w.setnchannels(1), w.setsampwidth(2), w.setframerate(24000)
+            w.writeframes(b"\0\0" * 48000)
+    f = tmp_path / "explainer.json"
+    f.write_text(json.dumps(spec))
+    r = check(str(f))
+    # Silent lines, and on the CPU backend the cards' shadows cost time: nothing about the example itself.
+    assert r["ok"] and {i["code"] for i in r["issues"]} <= {"voice-stale", "audio-silent", "slow-effects"}, r["issues"]
+
+
 def test_avatars_and_brands_are_topics_the_reference_points_to():
     main = reference()
-    for topic in ("avatars", "brands"):
+    for topic in ("avatars", "brands", "explainers"):
         text = reference(topic)
         assert text.startswith(topic.upper() + "\n") and text not in main
         assert f"kine docs {topic}" in main and text in reference("all")
     assert len(main.splitlines()) < 1000  # short enough to keep in context
-    assert max(len(line) for t in ("avatars", "brands") for line in reference(t).splitlines()) <= 108
+    assert max(len(line) for t in ("avatars", "brands", "explainers") for line in reference(t).splitlines()) <= 108
     from kinescript.mcp import call
     assert call("kine_docs", {"topic": "avatars"})[0]["text"] == reference("avatars")

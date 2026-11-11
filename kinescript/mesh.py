@@ -226,7 +226,9 @@ def edges(P: np.ndarray, T: np.ndarray) -> tuple:
     points are one face, so a face drawn back to back (a double-sided plane) counts once. Returns each vertex's
     point, each triangle's face (-1 for one with two corners at a point), each face's first triangle, and per
     edge its two points, the faces either side (the second is the face count past a border) and whether the
-    second face runs along the edge the way the first does (a mesh wound against itself there)."""
+    second face runs along the edge the way the first does (a mesh wound against itself there). An edge three or
+    more faces meet at (where a cut part's face meets the faces of the part round it) has its first face both
+    sides, so it draws no line: which two of them face each other is not known."""
     span = float(np.ptp(P, axis=0).max()) if len(P) else 0.0
     q = np.round((P - P.min(0)) / (span or 1.0) * 1e6).astype(np.int64) if len(P) else np.zeros((0, 3), np.int64)
     _, weld = np.unique((q[:, 0] * 1000003 + q[:, 1]) * 1000003 + q[:, 2], return_inverse=True)
@@ -244,10 +246,11 @@ def edges(P: np.ndarray, T: np.ndarray) -> tuple:
     o = np.argsort(key, kind="stable")
     key, a, b, f = key[o], a[o], b[o], f[o]
     s = np.flatnonzero(np.r_[True, key[1:] != key[:-1]]) if len(key) else np.zeros(0, np.int64)
-    two = np.r_[s[1:], len(key)] - s >= 2  # a second face along this edge (any past it are left out)
+    count = np.r_[s[1:], len(key)] - s
+    two = count >= 2  # a second face along this edge
     nxt = np.minimum(s + 1, max(len(key) - 1, 0))
-    sides = np.stack([f[s], np.where(two, f[nxt], len(first))], 1)
-    return weld, face, first, np.stack([a[s], b[s]], 1), sides, two & (a[nxt] == a[s])
+    sides = np.stack([f[s], np.where(count > 2, f[s], np.where(two, f[nxt], len(first)))], 1)
+    return weld, face, first, np.stack([a[s], b[s]], 1), sides, (count == 2) & (a[nxt] == a[s])
 
 
 def tiled(e: tuple, n: int, nt: int) -> tuple:
@@ -266,6 +269,136 @@ def tiled(e: tuple, n: int, nt: int) -> tuple:
 def build_order(m: Mesh) -> np.ndarray:
     """Triangle indices bottom to top, the order `draw` and the build motion reveal them in."""
     return np.argsort(-m.P[m.T, 1].mean(1), kind="stable")
+
+
+# The side a cut comes in from: the axis across it (0 x, 1 y, 2 z) and 1 from the axis's low end, -1 its high one.
+# y runs down and z toward the camera.
+SIDES = {"front": (2, -1.0), "back": (2, 1.0), "left": (0, 1.0), "right": (0, -1.0), "top": (1, 1.0),
+         "bottom": (1, -1.0)}
+
+
+def cut(m: Mesh, axis: int, side: float, at: float, cap: int | None = None) -> tuple[Mesh, int]:
+    """Mesh m with one end taken off by a plane across `axis` (0 x, 1 y, 2 z), and the opening closed. The plane
+    is `at` of the mesh's size along the axis in from its low end (side 1) or its high end (side -1), and what
+    lies between that end and the plane goes. Triangles across the plane are cut along it. The cap fills each
+    closed line the plane traces round a part, less the lines inside it, so a part inside another shows its own
+    cut face and a hollow stays open. It is flat and faces the end taken off. The outermost faces take material
+    slot `cap` (each part's own when cap is None), and a part inside another its own. A surface that does not
+    close (a plane, an open lathe line) gets no cap.
+    Returns the mesh and how many triangles of the cap end it."""
+    if not len(m.T) or at <= 0:
+        return m, 0
+    lo, hi = float(m.P[:, axis].min()), float(m.P[:, axis].max())
+    if hi - lo <= 1e-9:
+        return m, 0
+    c = lo + at * (hi - lo) if side > 0 else hi - at * (hi - lo)
+    f = (m.P[:, axis] - c) * side  # above 0: kept
+    f = np.where(np.abs(f) < 1e-7 * float(np.ptp(m.P, axis=0).max()), 0.0, f)  # on the plane: kept, and cut at
+    keep = f >= 0
+    k = keep[m.T].sum(1)
+    cross = np.flatnonzero((k == 1) | (k == 2))
+    whole = m.T[k == 3]
+    if not len(cross):
+        return _used(m, whole), 0
+    one = k[cross] == 1  # one corner kept (a smaller triangle), else two (a four-sided piece, two triangles)
+    Tc = m.T[cross]
+    odd = np.where(one, np.argmax(keep[Tc], 1), np.argmin(keep[Tc], 1))
+    o, p, q = np.take_along_axis(Tc, (odd[:, None] + np.arange(3)) % 3, 1).T  # odd corner first, wound as before
+    n0, n = len(m.P), len(cross)
+    key = np.r_[np.minimum(o, p) * n0 + np.maximum(o, p), np.minimum(o, q) * n0 + np.maximum(o, q)]
+    uk, inv = np.unique(key.astype(np.int64), return_inverse=True)  # one point per edge the plane crosses
+    inv = inv.ravel()
+    a, b = uk // n0, uk % n0
+    at_end = (f[a] == 0) | (f[b] == 0)  # crossed at a corner on the plane: that corner
+    idx = np.where(f[a] == 0, a, b).astype(np.int64)
+    a, b = a[~at_end], b[~at_end]
+    idx[~at_end] = n0 + np.arange(len(a))
+    s = (f[a] / (f[a] - f[b]))[:, None]
+    nn = m.N[a] + s * (m.N[b] - m.N[a])
+    nn /= np.maximum(np.linalg.norm(nn, axis=1, keepdims=True), 1e-12)
+    P, N = np.r_[m.P, m.P[a] + s * (m.P[b] - m.P[a])], np.r_[m.N, nn]
+    M = np.r_[m.M, m.M[np.where(keep[a], a, b)]]
+    U = None if m.U is None else np.r_[m.U, m.U[a] + s * (m.U[b] - m.U[a])]
+    A, B = idx[inv[:n]], idx[inv[n:]]
+    T = np.concatenate([whole, np.stack([o, A, B], 1)[one], np.stack([A, p, q], 1)[~one],
+                        np.stack([A, q, B], 1)[~one]]).astype(np.int32)
+    T = T[(T[:, 0] != T[:, 1]) & (T[:, 1] != T[:, 2]) & (T[:, 2] != T[:, 0])]  # none of no size, at plane corners
+    # The line the plane traces, each piece run the way the border of the surface left runs.
+    lines = np.where(one[:, None], np.stack([A, B], 1), np.stack([B, A], 1))
+    Pc, Tcap, Mc = _caps(P, lines, m.M[np.where(one, o, p)], axis, side, c, cap)
+    if len(Tcap):
+        nc = np.zeros(3)
+        nc[axis] = -side
+        T = np.r_[T, Tcap + len(P)].astype(np.int32)
+        P, N = np.r_[P, Pc], np.r_[N, np.tile(nc, (len(Pc), 1))]
+        M = np.r_[M, Mc]
+        U = None if U is None else np.r_[U, np.zeros((len(Pc), 2))]
+    return _used(Mesh(P, N, T, M.astype(np.int32), U), T), len(Tcap)
+
+
+def _used(m: Mesh, T: np.ndarray) -> Mesh:
+    """m with triangles T and only the points they use."""
+    used, back = np.unique(T, return_inverse=True)
+    return Mesh(m.P[used], m.N[used], back.reshape(-1, 3).astype(np.int32), m.M[used],
+                None if m.U is None else m.U[used])
+
+
+def _caps(P: np.ndarray, lines: np.ndarray, mats: np.ndarray, axis: int, side: float, c: float,
+          slot: int | None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The flat faces closing a cut (see cut): points, triangles into them and each point's material. lines are
+    the pieces of the plane's trace as pairs of indices into P, each run the way the border of the surface left
+    runs, and mats each piece's material."""
+    empty = (np.zeros((0, 3)), np.zeros((0, 3), np.int64), np.zeros(0, np.int32))
+    if not len(lines):
+        return empty
+    u, v = (axis + 1) % 3, (axis + 2) % 3  # the plane's own axes, in turn after the cut one, so area is signed
+    span = float(np.ptp(P, axis=0).max()) or 1.0
+    q = np.round((P[lines.ravel()] - P.min(0)) / span * 1e6).astype(np.int64)
+    ids = np.unique(q, axis=0, return_inverse=True)[1].ravel().reshape(-1, 2)  # ends at one place are one point
+    good = ids[:, 0] != ids[:, 1]
+    ids, lines, mats = ids[good], lines[good], mats[good]
+    start: dict[int, int] = {}
+    for i, s0 in enumerate(ids[:, 0].tolist()):
+        start.setdefault(s0, i)
+    seen, loops = np.zeros(len(ids), bool), []
+    for i in range(len(ids)):
+        run, j = [], i
+        while j is not None and not seen[j]:
+            seen[j] = True
+            run.append(j)
+            j = start.get(int(ids[j, 1]))
+        if j == i and len(run) >= 3:  # back where it began: a closed line
+            loops.append(run)
+    rings = [(P[lines[run, 0]][:, [u, v]], int(mats[run[0]])) for run in loops]
+    rings = [(g, mt) for g, mt in rings if abs(_area(g)) > 1e-9 * span * span]
+    if not rings:
+        return empty
+    lo, hi = [g.min(0) for g, _ in rings], [g.max(0) for g, _ in rings]
+    inside = [[j for j in range(len(rings)) if j != i and (lo[i] <= lo[j]).all() and (hi[j] <= hi[i]).all()
+               and _contains(rings[i][0], rings[j][0][0])] for i in range(len(rings))]  # the lines within line i
+    pts, tris, mat, base = [], [], [], 0
+    for i, (g, mt) in enumerate(rings):
+        if side * _area(g) <= 0:  # run the other way round: a hollow's inner wall, whose inside stays open
+            continue
+        holes = [j for j in inside[i] if not any(j in inside[k] for k in inside[i])]
+        Q, _, tri = shape2d([g] + [rings[j][0] for j in holes])
+        if not len(tri):
+            continue
+        Q, tri = _refine(Q, tri, span / 24)  # small pieces, as an extruded face's, for the painter's sort
+        X = np.zeros((len(Q), 3))
+        X[:, u], X[:, v], X[:, axis] = Q[:, 0], Q[:, 1], c
+        a, b, d = X[tri[:, 0]], X[tri[:, 1]], X[tri[:, 2]]
+        tri = tri.copy()
+        flip = np.cross(b - a, d - a)[:, axis] * side > 0  # each wound to face the end taken off
+        tri[flip] = tri[flip][:, [0, 2, 1]]
+        pts.append(X)
+        tris.append(tri + base)
+        outer = not any(i in inside[j] for j in range(len(rings)))
+        mat.append(np.full(len(Q), slot if slot is not None and outer else mt, np.int32))
+        base += len(Q)
+    if not pts:
+        return empty
+    return np.concatenate(pts), np.concatenate(tris), np.concatenate(mat)
 
 
 # ---- extruded outlines (text and SVG paths) -----------------------------------------------------------
@@ -596,54 +729,163 @@ def lathe(lines: list[tuple[np.ndarray, bool]], seg: int, piece: float, crease: 
     return cat(meshes) if meshes else _EMPTY
 
 
-def tube(lines: list[tuple[np.ndarray, bool]], r: float, around: int, grow: float = 1.0) -> Mesh:
-    """A round tube of radius r along lines in the xy plane (each (n, 2) points, y down, and whether it closes),
-    in `around` pieces round, with round ends where a line ends. grow, from 0 to 1, draws the first share of the
-    lines' whole length, the lines in turn, ending round where it stops."""
-    lens = [np.hypot(*np.diff(np.r_[q, q[:1]] if c else q, axis=0).T) for q, c in lines]
+# A tube's lines in space when it has no d, read in this order, and the defaults of a walk's and rays' keys.
+ROUTES = ("points", "walk", "rays")
+WALK = {"steps": 60, "step": 10, "seed": 0, "within": 0, "turn": 30}
+RAYS = {"count": 12, "length": 100, "inner": 0, "seed": 0}
+
+
+def tube(lines: list[tuple[np.ndarray, bool]], r: float, around: int, grow: float = 1.0,
+         together: bool = False) -> Mesh:
+    """A round tube of radius r along lines (each (n, 2) points in the xy plane, y down, or (n, 3) in space, and
+    whether it closes), in `around` pieces round, with round ends where a line ends. Its rings are carried along
+    each line without twisting (_carried). grow, from 0 to 1, draws the first share of the lines' whole length,
+    the lines in turn, ending round where it stops; with together, that share of every line at once."""
+    lines = [(np.c_[q, np.zeros(len(q))] if q.shape[1] == 2 else np.asarray(q, float), c) for q, c in lines]
+    lens = [np.linalg.norm(np.diff(np.r_[q, q[:1]] if c else q, axis=0), axis=1) for q, c in lines]
     total = sum(float(n.sum()) for n in lens)
-    left = max(0.0, min(1.0, grow)) * total
+    g = max(0.0, min(1.0, grow))
+    left = g * total
     al = np.linspace(0, 2 * np.pi, around + 1)
     ca, sa = np.cos(al)[None, :, None], np.sin(al)[None, :, None]
-    z = np.array([0.0, 0.0, 1.0])
     meshes, before = [], 0.0
     for (q, closed), n in zip(lines, lens):
+        start = before
+        if together:
+            left = g * float(n.sum())
+            before += float(n.sum())
         if left <= 1e-9 or total <= 0:
+            if together:
+                continue
             break
         pts, s = (np.r_[q, q[:1]] if closed else q), np.r_[0.0, np.cumsum(n)]
         if left < s[-1] - 1e-9:  # it stops on this line
             k = int(np.searchsorted(s, left))
             f = (left - s[k - 1]) / max(float(n[k - 1]), 1e-12)
             pts, s, closed = np.r_[pts[:k], [pts[k - 1] + f * (pts[k] - pts[k - 1])]], np.r_[s[:k], left], False
-        left -= s[-1]
+        if not together:
+            left -= s[-1]
         keep = np.r_[True, np.diff(s) > 1e-9]
-        pts, s = pts[keep], s[keep] + before
-        before = s[-1]
+        pts, s = pts[keep], s[keep] + start
+        if not together:
+            before = s[-1]
         if len(pts) < 2:
             continue
         d = np.diff(pts, axis=0)
-        d /= np.hypot(*d.T)[:, None]
+        d /= np.linalg.norm(d, axis=1)[:, None]
         t_in, t_out = (np.r_[d[-1:], d], np.r_[d, d[:1]]) if closed else (np.r_[d[:1], d], np.r_[d, d[-1:]])
         t = t_in + t_out
-        back = np.hypot(*t.T) < 1e-6  # doubling straight back
+        back = np.linalg.norm(t, axis=1) < 1e-6  # doubling straight back
         t[back] = t_out[back]
-        t /= np.hypot(*t.T)[:, None]
+        t /= np.linalg.norm(t, axis=1)[:, None]
         miter = 1.0 / np.maximum((t * t_out).sum(1), 0.3)  # a bend keeps the tube's width across it
-        side = np.c_[-t[:, 1], t[:, 0], np.zeros(len(t))]
-        t3, c3 = np.c_[t, np.zeros(len(t))], np.c_[pts, np.zeros(len(pts))]
-        radial = ca * side[:, None] + sa * z
-        P = [c3[:, None] + r * (ca * (miter[:, None, None] * side[:, None]) + sa * z)]
+        side, up = _carried(pts, t, closed)
+        bend = t_out - t_in  # the way the line turns, across it: the ring stretches that way at a bend
+        bl = np.linalg.norm(bend, axis=1, keepdims=True)
+        bend = np.where(bl > 1e-9, bend / np.maximum(bl, 1e-12), 0.0)[:, None]
+        radial = ca * side[:, None] + sa * up[:, None]
+        stretch = (miter[:, None, None] - 1) * (radial * bend).sum(-1, keepdims=True) * bend
+        P = [pts[:, None] + r * (radial + stretch)]
         N, S = [radial], [np.repeat(s[:, None], around + 1, 1)]
         if not closed:  # round ends: rings shrinking to a point past each end
             ph = np.linspace(0, np.pi / 2, max(2, around // 4) + 1)[1:, None, None]
             for end, sign in ((0, -1.0), (-1, 1.0)):
                 f = ph if sign > 0 else ph[::-1]
                 rad = radial[end][None]
-                ring = (c3[end] + sign * t3[end] * r * np.sin(f) + r * np.cos(f) * rad,
-                        np.cos(f) * rad + sign * np.sin(f) * t3[end], np.full((len(f), around + 1), s[end]))
+                ring = (pts[end] + sign * t[end] * r * np.sin(f) + r * np.cos(f) * rad,
+                        np.cos(f) * rad + sign * np.sin(f) * t[end], np.full((len(f), around + 1), s[end]))
                 for rows, part in zip((P, N, S), ring):
                     rows.insert(0 if sign < 0 else len(rows), part)
         P, N, S = np.concatenate(P), np.concatenate(N), np.concatenate(S)
         U = np.stack([S / max(total, 1e-9), np.broadcast_to(al / (2 * np.pi), S.shape)], -1)
         meshes.append(_orient(P.reshape(-1, 3), N.reshape(-1, 3), _grid(len(P) - 1, around), U.reshape(-1, 2)))
     return cat(meshes) if meshes else _EMPTY
+
+
+def _carried(pts: np.ndarray, t: np.ndarray, closed: bool) -> tuple[np.ndarray, np.ndarray]:
+    """A tube's ring directions at each point of a line with tangents t: side, then up = t x side, carried from
+    point to point without turning about the line (double reflection: Wang et al., "Computation of rotation
+    minimizing frames", 2008). It starts with side across the line in the xy plane, so a line in that plane keeps
+    up along z. Round a closed line the frame comes back turned; that turn is spread along it so the ends meet."""
+    n = len(t)
+    side = np.zeros((n, 3))
+    s0 = np.cross([0.0, 0.0, 1.0] if abs(t[0, 2]) < 0.9 else [1.0, 0.0, 0.0], t[0])
+    side[0] = s0 / np.linalg.norm(s0)
+    for i in range(n - 1):
+        v1 = pts[i + 1] - pts[i]
+        c1 = float(v1 @ v1)
+        if c1 < 1e-18:
+            side[i + 1] = side[i]
+            continue
+        rl = side[i] - (2 / c1) * float(v1 @ side[i]) * v1
+        tl = t[i] - (2 / c1) * float(v1 @ t[i]) * v1
+        v2 = t[i + 1] - tl
+        c2 = float(v2 @ v2)
+        side[i + 1] = rl if c2 < 1e-18 else rl - (2 / c2) * float(v2 @ rl) * v2
+    if closed and n > 2:
+        a = math.atan2(float(np.cross(side[-1], side[0]) @ t[0]), float(side[-1] @ side[0]))
+        if abs(a) > 1e-9:
+            run = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(pts, axis=0), axis=1))]
+            turn = (a * run / max(run[-1], 1e-12))[:, None]
+            side = side * np.cos(turn) + np.cross(t, side) * np.sin(turn)
+    side -= (side * t).sum(1, keepdims=True) * t
+    side /= np.maximum(np.linalg.norm(side, axis=1, keepdims=True), 1e-12)
+    return side, np.cross(t, side)
+
+
+def smooth(q: np.ndarray, closed: bool, seg: float) -> np.ndarray:
+    """Points about seg apart on a Catmull-Rom curve through the points q (n, 3), round to the start if closed."""
+    if len(q) < 3:
+        return q
+    ext = np.r_[q[-1:], q, q[:2]] if closed else np.r_[2 * q[:1] - q[1:2], q, 2 * q[-1:] - q[-2:-1]]
+    out = []
+    for i in range(len(q) if closed else len(q) - 1):
+        p0, p1, p2, p3 = ext[i:i + 4]
+        k = max(1, math.ceil(float(np.linalg.norm(p2 - p1)) / seg))
+        u = (np.arange(k) / k)[:, None]
+        out.append(0.5 * (2 * p1 + (p2 - p0) * u + (2 * p0 - 5 * p1 + 4 * p2 - p3) * u * u
+                          + (3 * p1 - p0 - 3 * p2 + p3) * u ** 3))
+    if not closed:
+        out.append(q[-1:])
+    return np.concatenate(out)
+
+
+def walk(steps: int, step: float, seed: int, within: float, turn: float, start) -> np.ndarray:
+    """(steps + 1, 3) points of a seeded random walk from start: each step `step` long and turned up to `turn`
+    degrees from the last, kept within `within` of the start (0: anywhere) by turning back off that ball."""
+    rng = np.random.Generator(np.random.PCG64(int(seed)))
+    o = np.asarray(start, float)
+    p, d = o.copy(), rng.normal(size=3)
+    d /= np.linalg.norm(d)
+    pts = [p.copy()]
+    for _ in range(int(steps)):
+        a = rng.normal(size=3)
+        a -= (a @ d) * d
+        a /= max(float(np.linalg.norm(a)), 1e-12)
+        ang = math.radians(turn) * float(rng.random())
+        d = d * math.cos(ang) + a * math.sin(ang)
+        if within > 0:
+            out = p + d * step - o
+            if np.linalg.norm(out) > within and d @ out > 0:  # it would leave: turn back off the wall
+                nrm = out / np.linalg.norm(out)
+                d = d - 2 * (d @ nrm) * nrm
+        p = p + d * step
+        if within > 0 and np.linalg.norm(p - o) > within:
+            p = o + (p - o) * (within / np.linalg.norm(p - o))
+        pts.append(p.copy())
+    return np.array(pts)
+
+
+def rays(count: int, length, inner: float, seed: int, start) -> list[np.ndarray]:
+    """count straight lines out from start, spread evenly in every direction (a Fibonacci sphere turned by the
+    seed), each from `inner` out to inner + its length: a number, or [least, most] picked by the seed."""
+    rng = np.random.Generator(np.random.PCG64(int(seed)))
+    i = np.arange(count) + 0.5
+    phi, th = np.arccos(1 - 2 * i / count), math.pi * (1 + 5 ** 0.5) * i
+    dirs = np.c_[np.cos(th) * np.sin(phi), np.sin(th) * np.sin(phi), np.cos(phi)]
+    q, rr = np.linalg.qr(rng.normal(size=(3, 3)))
+    dirs = dirs @ (q * np.sign(np.diag(rr))).T
+    lo, hi = (length, length) if isinstance(length, (int, float)) else (length[0], length[1])
+    ln = lo + (hi - lo) * rng.random(count)
+    o = np.asarray(start, float)
+    return [np.stack([o + d * inner, o + d * (inner + float(n))]) for d, n in zip(dirs, ln)]

@@ -32,7 +32,7 @@ ENVS = {"studio": {"top": "#f6f3ec", "horizon": "#7d828c", "bottom": "#23252b"},
         "sunset": {"top": "#33407a", "horizon": "#ff9b5e", "bottom": "#2a1c26"},
         "night": {"top": "#0a0f24", "horizon": "#34477a", "bottom": "#050608"},
         "chrome": {"top": "#ffffff", "horizon": "#15171c", "bottom": "#9a9da3"}}
-FIXED = {"preset", "from", "follow", "type"}  # light keys that do not tween
+FIXED = {"preset", "from", "follow", "type"}  # light (and cut) keys that do not tween
 DOF_MAX = 48.0  # the most a layer or a stage pixel blurs out of focus (sigma, px)
 SWIM = 1.0  # px a textured triangle's image may lie from where perspective puts it before the triangle is cut
 TILE = {"repeat": skia.TileMode.kRepeat, "mirror": skia.TileMode.kMirror, "clamp": skia.TileMode.kClamp}
@@ -626,13 +626,42 @@ def _swept(r, shape: str, num, raw, detail: str, slot=None, grow: float = 1.0) -
             return mesh.lathe(lines, 2 * around, 3 * max(1.0, min(10.0, extent * 0.04)) / k)
         return _kept(r, slot, key, turned)
     w, h, grow = num("w", None), num("h", None), round(max(0.0, min(1.0, grow)), 4)
+    rad = max(0.1, round(float(num("r", 12)), 2))
+    spaced = raw.get("d") is None and next((key for key in mesh.ROUTES if raw.get(key) is not None), None)
+    if spaced:
+        route = ("tube", spaced, _hashable(raw[spaced]), raw.get("smooth"), raw.get("closed") is True, k)
+        return _kept(r, slot, route + (rad, grow), lambda: mesh.tube(
+            _traced(r, route, lambda: _route(spaced, raw[spaced], raw, k)), rad, around, grow, spaced == "rays"))
     route = ("tube", str(raw.get("d", "")), w, h, k)
 
     def along():
         path, extent = _svg_path(num, raw, stroke=False)
         return mesh.polylines(path, max(1.0, min(10.0, extent * 0.04)) / k)
-    rad = max(0.1, round(float(num("r", 12)), 2))
     return _kept(r, slot, route + (rad, grow), lambda: mesh.tube(_traced(r, route, along), rad, around, grow))
+
+
+def _route(kind: str, v, raw, k: float) -> list[tuple[np.ndarray, bool]]:
+    """A tube's lines in the model's own space, where they are given (not centred or fitted to w and h): through
+    points ([x, y] or [x, y, z] each), a seeded random walk from the origin, or rays out from it. smooth draws a
+    curve through the points; a walk is smooth unless smooth is false."""
+    if kind == "rays":
+        o = dict(mesh.RAYS, **v) if isinstance(v, dict) else dict(mesh.RAYS, count=v)
+        return [(q, False) for q in mesh.rays(int(o["count"]), o["length"], float(o["inner"]), int(o["seed"]),
+                                              (0, 0, 0))]
+    if kind == "walk":
+        o = dict(mesh.WALK, **v) if isinstance(v, dict) else dict(mesh.WALK, steps=v)
+        q, closed = mesh.walk(int(o["steps"]), float(o["step"]), int(o["seed"]), float(o["within"]),
+                              float(o["turn"]), (0, 0, 0)), False
+        smooth = raw.get("smooth") is not False
+    else:
+        q = np.asarray(v, float)
+        q = np.c_[q, np.zeros(len(q))] if q.shape[1] == 2 else q
+        closed, smooth = raw.get("closed") is True, raw.get("smooth") is True
+        if closed and len(q) > 3 and np.allclose(q[0], q[-1]):
+            q = q[:-1]
+    if smooth:
+        q = mesh.smooth(q, closed, max(1.0, min(10.0, float(np.ptp(q, axis=0).max()) * 0.04)) / k)
+    return [(q, closed)]
 
 
 def _shape(r, shape: str, num, raw, detail: str, slot=None, grow: float = 1.0) -> mesh.Mesh:
@@ -818,6 +847,8 @@ def model(r, L, g, t: float = 0.0, T: float = 0.0, grow: float = 1.0) -> tuple[m
         if hit is None or len(hit[0]) != len(meshes) or any(a is not b for a, b in zip(hit[0], meshes)):
             hit = r._models[("cat", L.id)] = (meshes, mesh.cat(meshes))
         m = hit[1]
+    if L.raw.get("cut"):
+        m, keys = _cut(r, L, m, keys, t, T)
     if L.copies is not None:
         m, keys = _copies(r, L, m, keys, t, T)
     accent = r.s.theme.get("accent", "#ff633f")
@@ -825,6 +856,36 @@ def model(r, L, g, t: float = 0.0, T: float = 0.0, grow: float = 1.0) -> tuple[m
     mats = [_material(lambda k, d=None, o=o: o.get(k, root(k, d)), o.get("emit")) for o in keys]
     glows = [_texture(r, o.get("emitTexture")) if L.raw.get("texture") is not False else None for o in keys]
     return m, mats, [_texture(r, o.get("texture", L.raw.get("texture")), L, t, T) for o in keys], glows
+
+
+def _cut(r, L, m, keys: list, t: float, T: float) -> tuple[mesh.Mesh, list]:
+    """The model with its "cut" at its time t (scene time T): {"from", "at", "cap"}, mesh.cut's plane coming in
+    from the side named (mesh.SIDES; the front faces the camera before the model turns), `at` of the way
+    across, and the cap a colour of its own or each part's. Copies are each cut. The cut mesh is kept while m
+    and the cut hold."""
+    v = at(r._lit, r.s.ctx, L.raw["cut"], t, L.dur, T)
+    k, side = mesh.SIDES[str(v.get("from", "front"))]
+    share = min(1.0, max(0.0, float(v.get("at", 0.5))))
+    slot = None
+    if isinstance(v.get("cap"), (str, tuple, list)):
+        slot, keys = len(keys), keys + [{"fill": v["cap"], "texture": None, "emitTexture": None}]
+    want = (k, side, share, slot)
+    hit = r._models.get(("cut", L.id))
+    if hit is None or hit[0] is not m.P or hit[1] is not m.T or hit[2] != want:
+        hit = r._models[("cut", L.id)] = (m.P, m.T, want, *mesh.cut(m, k, side, share, slot))
+    return hit[3], keys
+
+
+def _caps(r, L, m) -> np.ndarray | None:
+    """Which triangles of the model's mesh m are the cap of its cut (the last of the cut mesh's), or None. A cap
+    the camera sees is in front of the rest of its model, so the Skia path draws it after the rest; not for
+    copies, whose caps are each in front of their own copy only."""
+    hit = r._models.get(("cut", L.id)) if L.raw.get("cut") and L.copies is None else None
+    if hit is None or hit[3] is not m or not hit[4]:
+        return None
+    caps = np.zeros(len(m.T), bool)
+    caps[len(m.T) - hit[4]:] = True
+    return caps
 
 
 def _copies(r, L, m, keys: list, t: float, T: float) -> tuple[mesh.Mesh, list]:
@@ -1306,13 +1367,14 @@ def _edging(r, L, t: float, T: float) -> tuple | None:
             math.cos(math.radians(angle)) if angle > 0 else 2.0)
 
 
-def _lines(r, L, m, T, ids, front, w, cos: float, exact: bool) -> tuple:
+def _lines(r, L, m, T, ids, front, w, cos: float, exact: bool, caps=None) -> tuple:
     """The edges of triangles T (the mesh's triangles ids) to draw a line along, where `front` says which face
     the camera: creases whose faces turn more than the angle (cos, its cosine) and the outline, where a face
     toward the camera meets one away from it or none. Returns each line's two vertices, taken from a face toward
     the camera (an exploded face takes its lines with it), and its place in the sort: after every face at either
     end, so a line is hidden only by what is in front of it. exact: by the sort's own key; else by each face's
-    nearest corner, for triangles _unswim is to cut."""
+    nearest corner, for triangles _unswim is to cut. caps (_caps, per triangle of T), when given, are drawn after
+    every other face: a line along a cap's edge goes after them all, any other is placed by the other faces."""
     weld, face, first, ends, sides, same = _topology(r, L, m)
     c = r._models.get(("copies", L.id)) if L.copies is not None else None
     if c is not None and c[2] is m:  # a copy turns and scales its faces together: its creases are the one's
@@ -1334,8 +1396,16 @@ def _lines(r, L, m, T, ids, front, w, cos: float, exact: bool) -> tuple:
     vb = T[rw, np.argmax(pts == ends[e, 1:], 1)]
     ww = w[T[rows]]
     top = np.full(int(weld.max()) + 1, -np.inf)
-    np.maximum.at(top, weld[m.T[ids[rows]]].ravel(), np.repeat(-ww.sum(1) if exact else -3 * ww.min(1), 3))
-    return va, vb, np.maximum(top[ends[e, 0]], top[ends[e, 1]])
+    keys = -ww.sum(1) if exact else -3 * ww.min(1)
+    if caps is not None:
+        keys = np.where(caps[rows], -np.inf, keys)
+    np.maximum.at(top, weld[m.T[ids[rows]]].ravel(), np.repeat(keys, 3))
+    after = np.maximum(top[ends[e, 0]], top[ends[e, 1]])
+    if caps is not None:
+        on = np.zeros(len(first) + 1, bool)
+        on[fid[caps[rows]]] = True
+        after = np.where(on[sides[e, 0]] | on[sides[e, 1]], np.inf, after)
+    return va, vb, after
 
 
 def _creases(m, topo: tuple) -> np.ndarray:
@@ -1446,8 +1516,11 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
     X, Y = hom[:, 0] / d, hom[:, 1] / d
     x, y = X[T], Y[T]  # each triangle's corners
     front = (x[:, 1] - x[:, 0]) * (y[:, 2] - y[:, 0]) - (y[:, 1] - y[:, 0]) * (x[:, 2] - x[:, 0]) > 0
-    lines = None if edging is None or not front.any() else _lines(r, L, m, T, ids, front, w, edging[2], U is None)
     clear = np.array([mt[8] < 1 for mt in mats]) if U is None else np.zeros(len(mats), bool)
+    caps = _caps(r, L, m) if U is None and not clear.any() and ex <= 0 else None
+    caps = None if caps is None else caps[ids]
+    lines = None if edging is None or not front.any() else _lines(r, L, m, T, ids, front, w, edging[2], U is None,
+                                                                  caps)
     if clear.any():
         # A see-through face turned away shows through the near ones: drawn too, lit from inside, unless it is the
         # back of a face drawn back to back (a plane), which would show twice. A copy of its corners with the
@@ -1462,6 +1535,7 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
         T = np.r_[T[front], (n + np.arange(len(idx), dtype=T.dtype)).reshape(-1, 3)]
     else:
         T = T[front]
+        caps = None if caps is None else caps[front]
     if not len(T):
         return None
     if U is not None:
@@ -1471,6 +1545,8 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
         d = np.where(np.abs(w) < 1e-9, 1e-9, w)
         X, Y = hom[:, 0] / d, hom[:, 1] / d
     key = -w[T].sum(1)
+    if caps is not None and caps.any():  # a cap the camera sees after the rest of its model
+        key = np.where(caps, key + (key.max() - key.min() + 1.0), key)
     order = np.argsort(key, kind="stable")
     T, key = T[order], key[order]
     r.tris += len(T)

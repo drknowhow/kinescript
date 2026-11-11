@@ -19,6 +19,8 @@ import re
 from bisect import bisect_right
 from typing import Any, Callable
 
+import numpy as np
+
 from . import color as C
 from . import ease as E
 
@@ -392,6 +394,67 @@ PLACE_DEFAULT = {k: (1.0 if k == "scale" else 0.0) for k in PLACE}
 COPY_PAINT = ("fill", "stroke")  # a copy's own colours, in place of the layer's
 COPY_KEYS = (*PLACE, *COPY_PAINT, "opacity")
 _MOVES = {"t", "p", "T"}  # an expression reading none of these gives each copy the same value at every frame
+SPREAD_IN = ("sphere", "shell", "box", "disc", "ring")  # what repeat's "spread" scatters copies in (or on)
+SPREAD_TRIES = 30  # places tried for each copy that must keep a gap or keep out of somewhere
+
+
+def spread(spec: dict, n: int) -> np.ndarray:
+    """(n, 3) places for n copies scattered by a repeat's "spread": {"in", "r", "w", "h", "depth", "seed", "gap",
+    "avoid"}. in: sphere (inside a ball of radius r), shell (on its surface), box (w x h x depth), disc (inside a
+    circle of radius r in the layer's plane) or ring (on that circle). The same seed gives the same places on
+    every machine. gap keeps copies' centres that far apart and avoid ([{"x", "y", "z", "r"}]) out of those
+    balls; a copy with no room among SPREAD_TRIES tries takes the one that came nearest."""
+    rng = np.random.Generator(np.random.PCG64(int(spec.get("seed", 1))))
+    kind = spec.get("in") or {"sphere": "shell", "disc": "ring", "circle": "ring"}.get(spec.get("on"), "sphere")
+    r = float(spec.get("r", 200))
+    w = float(spec.get("w", 2 * r))
+    h, d = float(spec.get("h", w)), float(spec.get("depth", w))
+    gap = float(spec.get("gap", 0) or 0)
+    avoid = [(np.array([float(a.get("x", 0)), float(a.get("y", 0)), float(a.get("z", 0))]), float(a.get("r", 0)))
+             for a in spec.get("avoid") or []]
+
+    def draw(k: int) -> np.ndarray:
+        if kind == "box":
+            return (rng.random((k, 3)) - 0.5) * (w, h, d)
+        if kind in ("disc", "ring"):
+            a = rng.random(k) * 2 * math.pi
+            rad = r * (np.sqrt(rng.random(k)) if kind == "disc" else np.ones(k))
+            return np.stack([rad * np.cos(a), rad * np.sin(a), np.zeros(k)], 1)
+        v = rng.normal(size=(k, 3))
+        v /= np.maximum(np.linalg.norm(v, axis=1, keepdims=True), 1e-12)
+        return v * r * (np.cbrt(rng.random(k))[:, None] if kind == "sphere" else 1.0)
+
+    def room(c: np.ndarray, near: list) -> np.ndarray:
+        """How far each candidate c is inside what it must keep out of (0 or less: it fits)."""
+        over = np.zeros(len(c))
+        for o, ra in avoid:
+            over = np.maximum(over, ra - np.linalg.norm(c - o, axis=1))
+        if near:
+            q = np.asarray(near)
+            over = np.maximum(over, gap - np.sqrt(((c[:, None] - q[None]) ** 2).sum(-1)).min(1))
+        return over
+
+    if gap <= 0 and not avoid:
+        return draw(n)
+    out, cells = np.zeros((n, 3)), {}
+    size = max(gap, 1e-9)
+    for i in range(n):
+        c = draw(SPREAD_TRIES)
+        near = []
+        if gap > 0:
+            key = np.floor(c / size).astype(np.int64)
+            for kx, ky, kz in {tuple(x) for x in key}:
+                for dx in (-1, 0, 1):
+                    for dy in (-1, 0, 1):
+                        for dz in (-1, 0, 1):
+                            near.extend(cells.get((kx + dx, ky + dy, kz + dz), ()))
+        over = room(c, near)
+        ok = np.flatnonzero(over <= 0)
+        p = c[ok[0]] if len(ok) else c[np.argmin(over)]
+        out[i] = p
+        if gap > 0:
+            cells.setdefault(tuple(np.floor(p / size).astype(np.int64)), []).append(p)
+    return out
 
 
 class Copies:
@@ -401,10 +464,12 @@ class Copies:
     (copy i takes item i, round again), or an expression over i (the copy, from 0), n and the layer's t, d, p and
     T. Keys that do not change over time are worked out once, so a still grid of 1000 copies costs nothing a
     frame."""
-    __slots__ = ("n", "keys", "env", "still")
+    __slots__ = ("n", "keys", "env", "still", "places")
 
     def __init__(self, raw: dict, ctx: Ctx):
         self.n = int(raw.get("count", 1))
+        # "spread": each copy's place, under the x, y and z the keys give (spread)
+        self.places = None if not raw.get("spread") else [list(map(float, c)) for c in spread(raw["spread"], self.n).T]
         self.env = dict(EXPR_ENV, W=ctx.w, H=ctx.h, fps=ctx.fps, n=self.n)
         self.keys: dict[str, tuple] = {}  # key -> ("expr", code, moves) | ("list", values) | ("const", value)
         self.still: dict[str, list] = {}
@@ -468,6 +533,16 @@ class Copies:
                 if k not in self.still:
                     self.still[k] = self._column(k, t, d, T)
                 cols[k] = self.still[k]
+        if self.places is not None:
+            for k, base in zip(("x", "y", "z"), self.places):
+                if k not in cols:
+                    cols[k] = base
+                elif cols[k] is self.still.get(k):  # a key that holds: the sum, worked out once
+                    if ("spread", k) not in self.still:
+                        self.still[("spread", k)] = [a + b for a, b in zip(base, cols[k])]
+                    cols[k] = self.still[("spread", k)]
+                else:
+                    cols[k] = [a + b for a, b in zip(base, cols[k])]
         return cols
 
     def at(self, t: float, d: float, T: float = 0.0) -> tuple[dict[str, list], list | None]:

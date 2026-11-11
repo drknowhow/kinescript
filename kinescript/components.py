@@ -11,6 +11,7 @@ import re
 from pathlib import Path
 
 from . import color as C
+from . import tour as _tourlib
 from .props import FIELD
 
 THEME = {
@@ -133,6 +134,8 @@ def _callout(p, th):
                      "align": "left" if side == "right" else "right",
                      "box": {"fill": p.get("boxColor", th["paper"]), "pad": [14, 22], "radius": 10},
                      "at": 0.25, "enter": {"name": "pop", "dur": 0.45}, "exit": "fade"})
+    if p.get("pin") is not None:  # x and y move it off the point it is pinned to
+        return {"type": "group", "pin": p["pin"], "x": p.get("x", 0), "y": p.get("y", 0), "children": kids}
     return {"type": "group", "x": p.get("x", "50%"), "y": p.get("y", "50%"), "children": kids}
 
 
@@ -491,7 +494,7 @@ def _end_card(p, th, scene=None):
 # Parameters a builder reads only in some branches (so a single call may not touch them).
 PARAMS = {"lowerThird": ("title", "subtitle", "x", "y", "accent", "size", "plate", "color", "subColor"),
           "titleCard": ("title", "subtitle", "kicker", "size", "accent", "color", "x", "y"),
-          "callout": ("x", "y", "r", "label", "side", "accent", "size", "boxColor"),
+          "callout": ("x", "y", "r", "label", "side", "accent", "size", "boxColor", "pin"),
           "focus": ("x", "y", "w", "h", "dim", "accent", "radius"),
           "progress": ("color", "h", "y"),
           "kinetic": ("words", "every", "size", "motion", "color", "x", "y"),
@@ -514,10 +517,16 @@ NUMBER_PARAMS = {"callout": ("r",), "lowerThird": ("size",),
 BUILTIN = {"lowerThird": _lower_third, "titleCard": _title_card, "callout": _callout, "focus": _focus,
            "progress": _progress, "kinetic": _kinetic, "barChart": _bar_chart, "lineChart": _line_chart,
            "pieChart": _pie_chart, "logo": _logo, "bug": _bug, "sting": _sting, "endCard": _end_card,
-           "avatar": lambda p, th, scene: _avatar(p, th, scene)}
-NEEDS_SCENE = {"logo", "bug", "sting", "endCard", "avatar"}  # builders that read the canvas size or files
+           "avatar": lambda p, th, scene: _avatar(p, th, scene), "tour": lambda p, th, scene: _tour(p)}
+NEEDS_SCENE = {"logo", "bug", "sting", "endCard", "avatar", "tour"}  # builders that read the canvas size or files
 PARAMS["avatar"] = ("avatar", "say", "x", "y", "w", "h", "expressions", "gaze", "gestures", "idle", "seed")
+PARAMS["tour"] = tuple(sorted(_tourlib.PARAMS))  # tour.expand checks them; one list, kept there
 NUMBER_PARAMS["avatar"] = ("w", "h")
+
+
+def _tour(p):
+    """A tour moves the scene's camera, so the scene expands it (tour.expand) and only at its top level."""
+    raise ValueError(f"layer '{p['id']}': a tour moves the camera, so it is a top-level layer, not one in a group")
 
 
 def _avatar(p, th, scene):
@@ -534,7 +543,12 @@ COMPONENT_DOCS = {
     "lowerThird": "title, subtitle, x [\"6%\"], y [\"78%\"] (top-left of its accent bar), accent, size [54], "
                   "color, subColor, plate (box colour, or false for none)",
     "titleCard": "title, subtitle, kicker (small line above), x, y [\"50%\"] (centre), size [128], accent, color",
-    "callout": "x, y (centre of the ring), r [60], label, side [right] (left|right), accent, size, boxColor",
+    "tour": "stops [{focus, zoom, orbit, say, title, body, note, hold, keep}], move, dim, speaker, rate, cards: the "
+            "camera flies to each focus and holds while its line plays, with a card and a pinned label. Top level "
+            "only. See kine docs explainers",
+    "callout": "x, y (centre of the ring), r [60], label, side [right] (left|right), accent, size, boxColor, pin "
+               "(a point on a model it follows: {\"layer\": \"cell\", \"at\": [x, y, z]}; x and y then move it "
+               "off that point [0])",
     "focus": "x, y, w, h (top-left and size of the region to highlight), dim [0.55], accent, radius",
     "progress": "color, h [8], y [\"100%\"] (a bar along the bottom edge that fills over the whole scene)",
     "kinetic": "words [list], every [0.6] (seconds per word), size [180], motion [pop], color, x, y [\"50%\"] (centre)",
@@ -559,7 +573,7 @@ COMPONENT_DOCS = {
            "takes logo's parameters",
 }
 _PASS = ("id", "at", "dur", "until", "enter", "exit", "emphasis", "opacity", "scale", "rotate", "hidden", "z",
-         "rotateX", "rotateY", "fixed", "sound")
+         "rotateX", "rotateY", "fixed", "sound", "pin")
 
 # The parameters a brand's "components" part may set for each built-in: looks, never layout or timing.
 STYLE_PARAMS = {"lowerThird": ("accent", "plate", "color", "subColor"), "titleCard": ("accent", "color"),

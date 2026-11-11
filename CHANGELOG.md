@@ -11,6 +11,27 @@
   with Skia, as do `kine check`, `--wire` and the CPU backend. `KINE_3D=skia` keeps every model on Skia; `KINE_3D=gl`
   makes it an error when OpenGL cannot run.
 - `kine doctor` reports `"models": "opengl"` or `"skia"`, with a note when a GPU is there but moderngl is not.
+- A model's `"cut": {"from", "at", "cap"}` takes off one side (front, back, left, right, top or bottom) up to `at`
+  (0 to 1, animatable) and closes the opening with a flat face. A hollow stays open, and a part inside another shows
+  its own colour on the cut while the outer face takes `cap`. The cut is mesh geometry, so OpenGL and Skia draw it
+  alike, as do copies.
+- `repeat` takes `"spread"`: seeded places in a disc, on a ring or in a box (any layer), and for a model in a ball
+  or on its shell, kept `gap` px apart and out of the balls in `avoid`. The same seed gives the same places on every
+  run, and each copy's own `x`, `y` and `z` move it about its place.
+- A tube can run in depth: through `"points"` (`smooth`, `closed`), along a seeded random `"walk"`, or as `"rays"`
+  out from its middle, which `draw` grows together. Rings are carried along the line without twisting, so a tube
+  along `d` is the same mesh as before.
+- `"pin": {"layer": "cell", "at": [x, y, z]}` places a top-level layer each frame where that point on another layer
+  is on screen, through that layer's keys, its parents' and the camera. `use: "callout"` takes it, for labels that
+  follow a turning model. `kine check` warns `pin-offscreen` when the point leaves the canvas.
+- `use: "tour"` makes a guided explainer from a list of stops. Each stop flies the camera to its focus (a layer, or
+  a point on one that it follows as the layer turns), zooms and swings round it, and holds while its `say` line
+  plays. A stop can also show a `title`/`body` card and a `note` pinned to the focus. `kine voice` speaks the lines,
+  and each stop lasts as long as its line. `dim` washes out the models a stop does not focus or `keep`.
+  `kine docs explainers` documents it, with a complete scene.
+- A camera `target` key may be `{"layer", "at"}`, a point in that layer's own space.
+- `wash` (0 to 1, animates) mixes any layer toward the canvas background and keeps it opaque, so what sits at the
+  back of a shot recedes without the layers behind it showing through.
 
 ## 2.2.0 (2026-11-08)
 
