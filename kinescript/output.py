@@ -824,9 +824,16 @@ def _workers(scene: Scene, frames: int, cpu: int, fmt: str = "mp4") -> int:
         return max(1, min(cpu - 1, 8, frames // int(scene.fps * 1.5) or 1))
     layers = list(scene.all_layers())
     if any(L.type == "model" for L in layers):
-        # Model frames spend their time in numpy and in building Skia's vertex lists, not on the GPU,
-        # so they spread over processes: examples/model.json (180 frames, ~11k triangles drawn a
-        # frame) took 4.2 s with one worker, 2.3 s with six and 2.2 s with eight (2026-10-30).
+        # OpenGL draws the models now, and a model frame still leaves the CPU its meshes, the stage's merges and
+        # the frame to encode, so model scenes spread over processes. Measured again on 2026-11-12, one process
+        # against the six this picks. With the processes already up (`kine mcp` keeps them), six were faster on
+        # every scene of 180 frames or more: examples/model.json 1.7 to 1.9 s against 1.2, fog.json 2.2 to 2.3
+        # against 0.8, a 420-frame scene of ten models 2.2 to 2.6 against 1.5 to 1.7, 600 frames of a tour of 24
+        # models 6.5 to 8.5 against 3.4 to 4.2. From a cold start (`kine render`) the processes take about half a
+        # second to come up, which a render of under 2.4 s does not win back: shapes.json 1.3 to 1.4 s against 1.6
+        # to 2.0, the ten models 2.3 to 2.4 against 2.5 to 2.9. A longer one does: fog.json 2.4 to 2.5 against 1.6
+        # to 1.7, the tour's 2108 frames 18.5 to 20.2 against 13.6. The 2D rule below (one process up to 250
+        # frames) would save that half second cold and lose more warm.
         return max(1, min(6, frames // 30))
     video = any(L.type in ("video", "sequence") for L in layers)
     return max(1, min(4, frames // (500 if video else 250)))
