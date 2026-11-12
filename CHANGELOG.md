@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Text split into letters, words or lines draws the units that are only moved, faded or recoloured as runs of
+  placed glyphs: one call for each stretch of units that share a colour and an opacity. Every unit was drawn on
+  its own, with the canvas saved, shifted and put back round it. A unit that is turned, scaled, blurred, wiped,
+  glitched, stroked or laid on a path is drawn in its turn as before, and so is one that moves under a gradient.
+  A scene of 40 lines split into 3,248 letters drew a settled frame in 13.9 to 14.1 ms and draws it in 7.8 to 7.9
+  (RTX 5060 Ti, three alternating runs of 60 consecutive frames). The frames in which its letters enter are no
+  faster, about 155 ms each: every entering letter is blurred in a layer of its own. On the GPU 434 of 444 frames
+  of the stress scene and 35 examples are the same to the last pixel; the other ten are frames of
+  `examples/3d.json`, text under a camera, where 2 to 207 pixels differ by one level. On the CPU all 62 frames
+  compared are the same.
 - A model's copies (`repeat`) that move are placed by OpenGL: one copy's mesh is drawn once for each, from a matrix,
   an offset and a colour of its own. They were merged into one mesh on the CPU and sent to the GPU again every frame.
   A frame of 400 rings that turn drew in 21.1 to 21.7 ms and draws in 1.1 (RTX 5060 Ti, three alternating runs of 60
