@@ -14,17 +14,24 @@ kine check scene.json
 
 ## Install
 
-Kokoro needs Python 3.10 to 3.12 and PyTorch. Into the same environment as Kinescript:
+On Python 3.10 to 3.12, into the same environment as Kinescript (this brings PyTorch):
 
 ```bash
 pip install kinescript-kokoro
 ```
 
-From a checkout of [Kinescript](https://github.com/drknowhow/kinescript), `pip install ./plugins/kinescript-kokoro`
-does the same.
+On Python 3.13, the plugin runs the same model on onnxruntime instead, with no PyTorch. misaki, the library that
+turns Kokoro's English text into phonemes, declares Python below 3.13 but runs on it, so pip needs a flag:
 
-Kinescript itself runs on newer Pythons than Kokoro. If yours is one, install the plugin into another Python
-and point `KINE_VOICE_CMD` at it; `kine voice` sends it the lines as JSON on stdin and never through a shell:
+```bash
+pip install --ignore-requires-python kinescript-kokoro
+```
+
+From a checkout of [Kinescript](https://github.com/drknowhow/kinescript), `pip install ./plugins/kinescript-kokoro`
+does the same (with the flag on 3.13).
+
+Or install the plugin into another Python and point `KINE_VOICE_CMD` at it; `kine voice` sends it the lines as
+JSON on stdin and never through a shell:
 
 ```bash
 python3.12 -m venv ~/kokoro-env
@@ -68,13 +75,35 @@ text to change how one word is said. It looks up names it doesn't know in espeak
 The words file, captions and word ids keep the word as written (`Kokoro.`, id `kokoro`), and `[[go]]`
 marks work around it. Keep each link to one word: misaki joins `[New York](...)` into a single timed word.
 
+## Engines
+
+Two engines run the same model, Kokoro-82M v1.0, with the same voices, the same pronunciation controls and the
+same word times. `KOKORO_ENGINE=torch` or `KOKORO_ENGINE=onnx` picks one; without it, the plugin uses `torch`
+when the `kokoro` package is installed and `onnx` otherwise.
+
+- **torch** calls the `kokoro` package (Python 3.10 to 3.12, PyTorch).
+- **onnx** runs [kokoro-onnx](https://github.com/thewh1teagle/kokoro-onnx)'s export of the model on onnxruntime.
+  The first run downloads `kokoro-v1.0.onnx` (310 MB) and `voices-v1.0.bin` (27 MB, all 54 voices) from that
+  project's `model-files-v1.1` release into `~/.cache/kinescript-kokoro` (`KOKORO_ONNX_DIR` moves it;
+  `KOKORO_ONNX_MODEL` and `KOKORO_ONNX_VOICES` name files already on disk). It speaks English voices only, and a
+  `.pt` file as a speaker needs the torch engine.
+
+On the ten lines of a 2¼-minute explainer, the onnx engine gave every word the same start and end time as the
+torch engine, to the sample, and installed in about 840 MB against 1.7 GB. The export is built with Kokoro's
+ONNX-friendly STFT, whose output differs from PyTorch's: as exported, the voice is about 3 dB louder below 1 kHz
+and 2 dB quieter above it. The plugin replaces three of the export's weight tensors when it loads the model, after
+which the onnx and torch engines differ no more than two torch runs do. `KOKORO_ONNX_STFT=export` keeps the
+export's weights. The measurements are in
+[oaustegard/experiments, kokoro-onnx-kinescript](https://github.com/oaustegard/experiments/tree/main/kokoro-onnx-kinescript).
+
 ## Device
 
 It runs on the GPU when the installed PyTorch was built for it, and on the CPU otherwise (a GPU newer than the
 PyTorch build, such as an RTX 50 series card with a CUDA 12.4 build, would fail on the first line).
-`KOKORO_DEVICE=cpu` or `KOKORO_DEVICE=cuda` picks one.
+`KOKORO_DEVICE=cpu` or `KOKORO_DEVICE=cuda` picks one. The onnx engine runs on the CPU.
 
 ## Not affiliated
 
-This plugin is not affiliated with or endorsed by the makers of Kokoro; it calls the `kokoro` package, whose own
-licence applies to it and to its voices.
+This plugin is not affiliated with or endorsed by the makers of Kokoro or kokoro-onnx; it calls the `kokoro`
+package or runs kokoro-onnx's export, whose own licences apply to them and to the voices. The onnx engine's
+chunking and word-timing functions follow `kokoro/pipeline.py` (Apache-2.0).

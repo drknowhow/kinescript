@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- kinescript-kokoro 0.2.0 runs on Python 3.13, with no PyTorch. Where the `kokoro` package is not installed
+  (it needs Python 3.12 or older), it runs the same model, Kokoro-82M v1.0, on onnxruntime: kokoro-onnx's export,
+  downloaded on first use, with misaki still turning text into phonemes, so `[word](/phonemes/)` links, stress and
+  number flags work as before. `KOKORO_ENGINE=torch` or `onnx` picks one. On the ten lines of a 2¼-minute
+  explainer, every word's start and end matched the torch engine's to the sample, and the install was about 840 MB
+  against 1.7 GB. The export's STFT differs from PyTorch's (the voice about 3 dB louder below 1 kHz and 2 dB
+  quieter above it); the plugin replaces three of its weight tensors at load time, after which the two engines
+  differ no more than two torch runs do. On 3.13, install with `pip install --ignore-requires-python
+  kinescript-kokoro`: misaki declares Python below 3.13 but runs on it.
+
 ## 2.5.1 (2026-11-12)
 
 - `kine docs` leaves depth, the camera and model layers to a topic of their own, `kine docs 3d` (`kine_docs`
