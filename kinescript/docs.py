@@ -1,5 +1,5 @@
 """The scene reference printed by `kine docs` and served to agents by the MCP server, and the longer
-topics (`kine docs avatars`, `kine docs brands`, `kine docs explainers`) it points to.
+topics (`kine docs 3d`, `kine docs avatars`, `kine docs brands`, `kine docs explainers`) it points to.
 
 Written for small models as well as large ones: rules first, one complete example, every default
 stated, then recipes to copy. Names of motions, eases, shaders and components are filled in from
@@ -34,7 +34,8 @@ RULES
   5. Layers draw in list order: later layers are on top. Put backgrounds first.
   6. A layer without "dur" or "until" stays until the scene ends. Nothing fades out unless you
      give it an "exit", e.g. "exit": "fade".
-  7. Use only the keys listed here. `kine check` rejects unknown keys and names the right one.
+  7. Use only the keys listed here or in a topic it points you to (kine docs 3d, avatars, brands,
+     explainers). `kine check` rejects unknown keys and names the right one.
   8. After writing a scene, run `kine check scene.json` and fix every error before rendering.
 
 A COMPLETE SCENE (copy it and change it)
@@ -88,9 +89,9 @@ SCENE (top level)
               added once, to the blended frame. Still layers below every moving one are drawn once
               a frame, not once a sub-frame, so list still layers first. Without it, check warns
               "strobe" where a layer moves more than 40 px a frame at 1080p for 5 frames running.
-  camera      moves and turns the view in depth (see DEPTH AND CAMERA).
-  fog         far layers fade into a colour (see DEPTH AND CAMERA).
-  light       how model layers are lit (see 3D MODELS).
+  camera      moves and turns the view in depth (see kine docs 3d).
+  fog         far layers fade into a colour (see kine docs 3d).
+  light       how model layers are lit (see kine docs 3d).
   audio       the list of sounds: voice-over, music, effects (see SOUND).
   mix         loudness, role levels and ducking of the sound (see SOUND).
   components  your own reusable layer groups (see COMPONENTS).
@@ -131,7 +132,7 @@ KEYS EVERY LAYER HAS
                 and keeps it opaque: what sits at the back of a shot.
   scale, scaleX, scaleY   1 = normal size
   rotate        degrees, clockwise
-  z, rotateX, rotateY, backface, fixed   depth: see DEPTH AND CAMERA
+  z, rotateX, rotateY, backface, fixed   depth: see kine docs 3d
   blur          px
   blend         normal | multiply | screen | overlay | add | lighten | darken | softLight |
                 hardLight | colorDodge | colorBurn | difference | exclusion | hue | saturation |
@@ -156,7 +157,7 @@ KEYS EVERY LAYER HAS
                 once. The layer's own keys, enter, exit, effects and mask act on all its copies as
                 one picture. A shape's copies draw in one loop: 10,000 circles, each moved by two
                 expressions, render at 1080p at about 40 fps on an RTX 5060 Ti. Captions do not
-                repeat; a model's repeat is under 3D MODELS.
+                repeat; a model's repeat is in kine docs 3d.
                 "spread" scatters the copies instead of placing each by hand: {"in": "disc", "r":
                 300, "seed": 4, "gap": 40, "avoid": [{"x": 0, "y": 0, "r": 120}]} puts each copy at a
                 place in a circle of radius r ("ring": on it, "box": w x h), gap px from the others
@@ -300,7 +301,7 @@ LAYER TYPES (defaults in brackets)
             iResolution, iProgress (0..1) and your uniforms are declared for you.
             Fills the canvas unless you give w and h.
   model     a lit 3D solid, 3D text, an extruded SVG path or a model file: shape, src or parts
-            (see 3D MODELS).
+            (see kine docs 3d).
   particles an emitter: rate (particles a second; keyframes taper it) and burst (how many leave at
             once at the layer's start, or [[time, count], ...]), or a preset (confetti|sparks|snow|
             dust|bubbles) whose keys the layer's own replace: {"type": "particles", "preset":
@@ -355,264 +356,12 @@ LAYER TYPES (defaults in brackets)
             other layer keys apply to the whole cut.
 
 DEPTH AND CAMERA (3D)
-  Any layer can move and turn in depth. x is right, y is down and z is toward the viewer, in px,
-  as in CSS. A scene that uses depth is seen through a camera; at z 0 everything keeps its size.
-  z           px toward the viewer. Near layers grow; far ones (negative z) shrink and drift less
-              when the camera moves.
-  rotateX     degrees: positive tips the top edge away.
-  rotateY     degrees: positive turns the right edge away. Past 90 you see the back, mirrored.
-  backface    visible (default) | hidden: hidden skips the layer while its back faces the camera.
-  fixed       true: a top-level layer ignores the camera's moves (captions are fixed).
-  sort        on a group: "depth" draws its children far to near each frame, not in list order.
-              "pixel" makes the group a stage: each child is drawn on its own and at each pixel the
-              nearest one shows, so models and cards pass through each other with a clean edge. A
-              model is as deep as its triangles; any other child lies flat in its own plane (a group
-              child too). Each child costs a merge (check warns past 16), and a blend inside a stage
-              has nothing under it. Stages do not nest.
-  shadows     on a stage: true or {"opacity": 0.5, "soft": 3}. The stage's models cast shadows from
-              the scene's key light onto every child, models and flat layers alike: a rect turned 90
-              on rotateX is a floor that takes them. opacity is how much a shadow darkens, soft its
-              edge in px. Flat layers do not cast, and a surface turned from the light takes none.
-  camera      top level. Every key animates, and all default to 0 except fov:
-              {"x": 0, "y": 0, "z": 0, "rotateX": 0, "rotateY": 0, "rotate": 0, "fov": 40}
-              x and y pan (px). z moves the camera back; negative moves it in. rotateY orbits it
-              right around the canvas centre, rotateX up over it (looking down), rotate rolls it.
-              fov (5..150) sets how strong perspective looks; it does not change size at z 0.
-              target: what the camera looks at and orbits in place of the canvas centre, framed as z 0
-              is (in the middle, at its own size): a point [x, y, z] in px, or a layer id, which the
-              camera follows (its keys and its parents', not its enter and exit motions). x and y still
-              pan from it. Keyframes between points and ids pan across: [[0, "logo"], [2, "title"]].
-              shake: px, or {"amount": 8, "speed": 1.5, "seed": 0}: a handheld wobble, smooth noise that
-              turns the view by up to about amount px, speed times a second. amount animates.
-              aperture and focus: depth of field. aperture is px of blur per 1000 px from the focus
-              plane (12 is gentle, 40 strong); far layers blur up to aperture times the focus distance
-              over 1000, near ones more, as a lens does, never past 48 px. focus is a z (px toward the
-              camera from what it looks at; 0, the default, is the target or z 0) or a layer id, and
-              keyframes between them pull focus: [[0, "cup"], [2, "title"]]. Both animate. A flat layer
-              or a model blurs whole, by the depth of its middle; a stage blurs each pixel by its own
-              depth, which on the CPU is slow (check warns: slow-depth-of-field).
-              check warns (camera-inside-model) when the camera is inside a model, and
-              (focus-on-nothing) when the focus plane is nearer or farther than every layer.
-  Camera moves:
-    orbit       "target": "hero", "rotateY": [[0, -40], ["end", 40]]
-    crane       "y": [[0, 0], ["end", -300]] rises with the view; add "rotateX": [[0, 0], ["end", 30]] to
-                swing up over the target, looking down
-    push-in     "z": [[0, 0], ["end", -400]]
-    dolly zoom  "fov": [[0, 20], ["end", 70]]: z 0 keeps its size while the far layers fall away, since
-                fov already moves the camera to keep z 0 framed
-    handheld    "shake": 6, on top of any of these
-    rack focus  "aperture": 24, "focus": [[0.5, "cup"], [2, "title", "inOutSine"]]
-  fog         top level: true, or {"color": "#0a0c10", "near": 1500, "far": 6000, "amount": 1}.
-              Up to near px from the camera is clear; from there to far px everything mixes into
-              color, up to amount. z 0 is (h / 2) / tan(fov / 2) px from the camera: 1484 at 1080p
-              and fov 40. Defaults: color is the canvas bg (a gradient's first stop), near is z 0's
-              distance and far 4 times it. A model mixes at each vertex, any other layer by the
-              depth of its middle, and a stage at each pixel. All four keys animate. check warns
-              (fog-hides) when a layer lies wholly past far.
-  Motions: flip turns in on the vertical axis (deg [90]), flip-up on the horizontal axis, tumble
-  spins in from depth, push comes forward from depth (dist [600]). With "split" each unit flips.
-  Layers still draw in list order, so put far layers first, or use a group with "sort": "depth".
-  A card that turns over: rotateY on the group, and each side hides its back:
-    {"id": "card", "type": "group", "x": "50%", "y": "50%", "rotateY": [[0.5, 0], [1.5, 180]], "children": [
-     {"id": "card-front", "type": "group", "anchor": "center", "w": 560, "h": 150, "radius": 28,
-      "fill": "#f2f0e8", "backface": "hidden", "children": [
-      {"id": "card-front-text", "type": "text", "text": "front", "size": 64, "fill": "#0a0c10"}]},
-     {"id": "card-back", "type": "group", "anchor": "center", "w": 560, "h": 150, "radius": 28,
-      "fill": "#ff633f", "rotateY": 180, "backface": "hidden", "children": [
-      {"id": "card-back-text", "type": "text", "text": "back", "size": 64, "fill": "#0a0c10"}]}]}
-  A whole scene: the camera pushes in and swings round layers at three depths; the note stays put:
-    {"canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 4},
-     "camera": {"z": [[0, 300], ["end", -100]], "rotateY": [[0, -12], ["end", 10]]},
-     "layers": [
-      {"id": "far", "type": "rect", "x": "50%", "y": "50%", "z": -600, "w": 1600, "h": 900, "radius": 40,
-       "fill": "#151922"},
-      {"id": "title", "type": "text", "text": "Depth", "x": "50%", "y": "45%", "size": 140, "weight": 800,
-       "split": "chars", "enter": {"name": "flip", "stagger": 0.05}},
-      {"id": "near", "type": "circle", "x": "78%", "y": "72%", "z": 250, "r": 60, "fill": "#ff633f"},
-      {"id": "note", "type": "text", "text": "fixed to the screen", "x": "50%", "y": "88%", "size": 40,
-       "fixed": true}]}
-  A ring through a panel, in a stage:
-    {"id": "stage", "type": "group", "x": "50%", "y": "50%", "sort": "pixel", "children": [
-     {"id": "ring", "type": "model", "shape": "torus", "r": 200, "tube": 40, "rotateY": 70,
-      "rotateX": [[0, 0], ["end", 30]]},
-     {"id": "panel", "type": "rect", "w": 560, "h": 320, "radius": 28, "fill": "#f2f0e8"}]}
-
-3D MODELS
-  A model layer is a lit solid in the space of DEPTH AND CAMERA, so z, rotateX, rotateY, rotate,
-  scale and the camera apply to it. x and y place its centre.
-  shape     cube (w [200], h and depth [= w], r [0] rounds its edges and corners) | sphere (r [100]) |
-            cylinder (r [80], h [200]) | cone (r [90], h [200], tip up) | capsule (r [60], h [240] end
-            to end: a cylinder with round ends) | torus (r [110], tube [r x 0.35], facing you) |
-            plane (w, h; both sides show) | lathe | tube | text | path. Sizes are px and animate.
-  lathe     shape "lathe" turns profile round the vertical axis: [[r, y], ...] points (r out from the
-            axis, y down; closed when the last point is the first) or path data, its x the distance
-            from the axis. Centred on y. A profile that ends off the axis (a cup with no lid) shows
-            both sides; bends sharper than 40 degrees stay sharp. profile does not animate:
-            "profile": [[0, -120], [70, -120], [40, 0], [90, 120], [0, 120]].
-  tube      shape "tube" runs a round tube of radius r [12] along d (SVG path data, fitted to w and/or
-            h as a path shape's), round at its ends: 3D lines and routes. draw grows it along its
-            length (other shapes show bottom to top). Instead of d, in depth from the model's middle:
-            "points": [[x, y, z], ...] (smooth: true curves through them, closed: true joins the ends);
-            "walk": {"steps" [60], "step" [10] px, "turn" [30] degrees, "within" [0: anywhere] px, "seed"}:
-            a seeded random walk, smooth unless smooth is false; or "rays": {"count" [12], "length" [100]
-            or [least, most], "inner" [0] px out, "seed"}: lines out every way, grown together. These do
-            not animate. With none of d, points, walk or rays, "tube" is read as a cylinder.
-  text      shape "text" pushes letters out in depth: text ("\n" breaks lines), size [120],
-            weight [600], font, italic, letterSpacing, lineHeight, depth [size x 0.2], bevel [0]
-            (px of 45-degree edge). Centred on x, y. Each new text, size, depth or bevel value
-            rebuilds the solid, so grow it with scale. Lines are shaped as a text layer's are:
-            Arabic letters join, marks sit on their letters, right-to-left runs read right to left.
-            letterSpacing draws each character on its own, unshaped, and colour emoji have no
-            outline, so they are left out (check warns: unshaped-3d-text).
-  path      shape "path": d (SVG path data, filled nonzero), w and/or h (fits inside them, keeping
-            its shape), depth [a fifth of its larger side], bevel [0], strokeWidth (in d's units:
-            extrudes the stroke, with round ends, for line icons).
-  detail    low | medium (default) | high: how many triangles. A medium sphere has about 2,200.
-  fill      one colour [theme accent]   shine 0..1 [0.4]   metal 0..1 [0]   rim 0..1 [0.5] (edge
-            light)   bands [0] (2 or more: flat toon steps)   glow 0..1 [0] (shows at least fill x
-            glow however it is lit: neon, screens, lamps)   transparency 0..1 [0] (see-through: the far
-            side and what is behind show, faces drawn far to near; a model with a texture draws solid,
-            check warns). These animate. opacity fades the drawn model as a whole, as on any layer.
-  texture   an image (png, jpg, webp, gif, bmp, svg) or video file drawn on the surface, "#groupId", or
-            an object: {"src": "wood.jpg", "repeat": 2 or [across, down], "offset": [across, down]
-            (in images, toward the right and down)}. A video plays on the model's clock, with "loop", "trim" and
-            "speed" as on a video layer. "#groupId" draws that group on the surface at each frame's
-            time, its box (its w and h, else the canvas) filling the image: a UI on a phone's screen.
-            The group is drawn only there, its layers as in a scene without a camera. Once on each
-            cube face and on a plane, upright from in front (on top and underneath, its top is the
-            far edge); round a sphere, cylinder, cone, capsule or lathe with its middle facing you, and
-            flat across a cylinder's or cone's ends; once round a torus and its tube; along a tube and
-            round it; across the front and back of text and path shapes. The fill shows through clear pixels. A part takes the layer's texture unless it
-            sets its own; false draws its fill. repeat and offset do not animate. Skia cuts
-            triangles where perspective would slide the image across them (check warns texture-swim
-            where that is not enough, right in front of the camera) and takes about twice as long as
-            for a plain model; OpenGL (below) places the image at each pixel.
-  parts     [{"shape": "sphere", "r": 30, "x": 0, "y": -120, "z": 0, "rotateX": 0, "rotateY": 0,
-            "rotate": 0, "scale": 1, "fill": "#b9f45d", "shine": 0.9}, ...] placed from the
-            model's centre. Part keys take keyframes and expressions like layer keys, with i the
-            part's number from 0: "rotate": "=t*90" spins one part. The parts merge into one mesh,
-            merged again on the frames where a part moves or changes size. Parts with the same
-            material keys share a material, its values read for the first of them. A part takes
-            the model's material keys it does not set. A model may have shape (or src), parts, or both.
-  repeat    {"count": 100, "x": "=(i % 10 - 4.5) * 50", "z": "=(floor(i / 10) - 4.5) * 50",
-            "y": "=sin(t * 2 + i) * 20", "rotateX", "rotateY", "rotate", "scale", "fill": "=hsl(i * 3.6)"}
-            draws count copies of the model (shape, parts or src, posed), up to 10,000, merged into
-            one mesh that sorts as one model. Each key is a number (fill: a colour), a list taken in
-            turn (copy i takes item i, round again) or an expression of i (the copy, from 0), n (the
-            count) and the layer's t, d, p and T. A copy is placed from the model's centre, as a part
-            is, and its fill recolours what the layer's fill would. Keys that read no time are worked
-            out once. A model draws at most 64 colours: past that, each copy takes the nearest kept
-            one (check warns repeat-colours). Copies cost what that many triangles cost: use "detail":
-            "low" for many. A model's "spread" (see repeat under KEYS EVERY LAYER HAS) also takes
-            "in": "sphere" (inside a ball of radius r), "shell" (on its surface; "on": "sphere" says
-            the same) and a box's "depth", and places copies in z too: {"count": 40, "spread": {"in":
-            "sphere", "r": 240, "seed": 3, "gap": 36}, "rotate": "=i * 47"}.
-  src       a model file: .glb or .gltf (glTF 2.0), or .obj with its .mtl. Colours, shine and metal
-            come from the file; a fill on the layer recolours all of it. It fits inside w and/or h
-            keeping its shape, else its longest side is 300 px. Node transforms, skins (up to four
-            joints a vertex; check warns skin-influences past that) and morph target weights apply,
-            and animation plays the file's clips. A glTF base colour texture (with its TEXCOORD_n)
-            or an .obj map_Kd is drawn as a texture; "texture": false draws its mean colour, and a
-            texture on the layer replaces the file's (check warns no-uvs when the file has no
-            texture coordinates).
-            The light a material gives off (glTF emissiveFactor and emissiveTexture, .mtl Ke and
-            map_Ke) is added to its colour however it is lit. A glTF material with alphaMode BLEND is
-            see-through by its base colour's alpha, an .mtl one by d or Tr. Long triangles are cut to
-            1/24 of its size for the depth sort. Compressed files are read: meshopt
-            (EXT_meshopt_compression, gltfpack -c) and quantized ones as they are; Draco
-            (KHR_draco_mesh_compression) with pip install "kinescript[draco]" (check names the
-            extra when it is missing).
-  animation a clip of the glTF file to play on the layer's clock: its name (kine probe lists them),
-            its number from 0, true for the first, or {"name": "Walk", "speed": 1, "loop": true,
-            "start": 0}. speed 2 plays twice as fast, -1 backwards; start is the seconds into the
-            clip at the layer's start; loop false holds the last pose. Node translation, rotation
-            and scale, morph target weights and skins move (LINEAR, STEP and CUBICSPLINE keys). The
-            model keeps the size and centre of its rest pose, so a clip that walks it moves it. A
-            name the file lacks is an error (unknown-animation) that lists the ones it has.
-  morphs    the glTF file's morph targets by name and their weights, each a number (0 to 1), keys
-            or an expression: {"smile": 1, "blink": [[0, 0], [0.1, 1], [0.2, 0]]}. They set the
-            target over what the file and the animation give it, on the layer's clock. kine probe
-            lists the names (from the mesh's extras.targetNames); a name the file lacks is an error
-            (unknown-morph).
-  clips     the file's clips to play once over its animation, each from at (a cue, or seconds on
-            the layer's clock), faded in and out over 0.15 s: [{"name": "Wave", "at": "vo:hello",
-            "speed": 1, "weight": 1}]. Each channel of a clip moves its node that weight of the way
-            from the pose under it, so a wave plays over a walk; a later clip goes on top.
-  ground    true or {"opacity": 0.5, "blur": px, "y": px, "from": "above"}: a soft shadow on a level
-            floor under the model, as if lit from above, fainter as the model rises. The floor sits at
-            the model's lowest point before it turns, or at y in the layer's parent space (canvas px
-            at the top level): give y when the model moves up and down. "from": "light" casts it along
-            the model's key light instead, so it moves as the light does (none when the light is
-            below the floor). For shadows on other layers, use a stage's shadows.
-  edges     lines along the model: true (creases and the outline, 2 px, theme ink), "all" (every
-            triangle's edges: a wireframe with the lines behind it hidden), or {"width": 2, "color":
-            "#0a0c10", "angle": 30}. A crease is drawn where the faces either side turn by more than
-            angle degrees (0 draws every edge), the outline where a face toward the camera meets one
-            turned away. Lines are width px wide whatever their depth, and hidden by whatever is in
-            front of them. width, color and angle animate: "width": [[0, 0], [1, 2]] draws them in.
-            Where parts of one model touch, a line along the seam can come out stepped, as the faces
-            there do.
-  explode   0..1: faces fly out along their normals.
-  cut       {"from": "front", "at": 0.5, "cap": "#fbefdf"}: a cutaway. A flat cut comes in from
-            one side (front | back | left | right | top | bottom; the front faces the camera before
-            the model turns) and takes off that share of the model, 0 to 1, measured across all its
-            parts. The cut face is filled where the cut goes through a part: the outermost in the
-            cap colour (its part's own without cap), and a part inside another in its own colour, so
-            a nucleus shows in a cell. A hole (a torus's middle) stays open. at and cap animate: "at": [[0, 0], [1.5, 0.5]]
-            opens it. Each copy of a repeat is cut. Put the parts a cut goes through in one model:
-            separate models cut at one place show their cut faces in the same plane.
-  draw      0..1, or "enter": "build": triangles appear from the bottom up.
-  light     top level, or on one model: studio (default) | soft | dramatic | flat (no shading),
-            or {"preset": "studio", "key": 0.85, "fill": 0.25, "ambient": 0.22, "rim": 0.35,
-            "from": "topleft", "color": "#fff4e6"}. from: topleft | top | topright | left | right |
-            front | bottomleft | bottom | bottomright. azimuth (degrees round from the front, toward
-            the right) and elevation (degrees up) replace those parts of from. Every amount, the
-            angles and the colour animate: "azimuth": [[0, -60], ["end", 60]] sweeps the key across.
-            follow: camera (default: the light moves with the camera, so orbiting does not change
-            the shading) | world (it stays in the scene: orbit the camera for a turntable look).
-            check warns (light-behind) when the key is behind a model as the camera sees it.
-  lights    top level, or on one model: up to 3 more lights, [{"from": "right", "color":
-            "#4a7dff", "intensity": 0.6}, {"type": "point", "x": 900, "y": 200, "z": 400,
-            "range": 1000}]. A directional light takes from, azimuth, elevation and follow like the
-            key; a point light sits at x, y, z in canvas px (z toward the viewer) and lights each
-            model from where the model's centre is, at half strength range px away. These animate.
-  env       top level, or on one model: what shiny and metal models reflect, fixed in the world:
-            studio | sunset | night | chrome, or {"preset": "studio", "top": "#f6f3ec", "horizon":
-            "#7d828c", "bottom": "#23252b", "amount": 1}. Metal reflects it tinted by its fill,
-            anything else by its shine, most at grazing angles; shine 0 reflects a blur of it and a
-            matte model none. Unset (the default), nothing is reflected. The colours and amount animate.
-  On the GPU with the gl extra (pip install "kinescript[gl]"; kine doctor says "models": "opengl"),
-  a model draws on OpenGL through a depth buffer, and parts of one model that cut through each other
-  meet at a clean edge. Elsewhere (the CPU; a model with explode, "edges": "all", or transparency
-  and edges; a textured one of over 32 materials or 16 images) triangles are sorted far to near
-  within one model, so that seam is stepped: let parts touch rather than cross. Separate layers draw
-  in list order, except in a stage (a group with "sort": "pixel", see DEPTH AND CAMERA), where they
-  meet at a clean edge wherever they cross: put things that cross in a stage as separate layers. A
-  ground shadow in a stage lies on a floor layer in the same plane. check warns past 60,000 triangles a frame.
-  A ring around a ball that builds in, turns, and flies apart:
-    {"id": "emblem", "type": "model", "x": "50%", "y": "45%", "detail": "high",
-     "rotateX": [[0, 64], ["end", 18]], "rotateY": [[0, -30], ["end", 70]],
-     "enter": {"name": "build", "dur": 1.6}, "explode": [[3, 0], ["end", 1]],
-     "parts": [{"shape": "torus", "r": 250, "tube": 70, "fill": "#ff633f", "metal": 0.45, "shine": 0.7},
-               {"shape": "sphere", "r": 100, "fill": "#b9f45d", "shine": 0.9}]}
-  A 3D title that builds in, turns, and settles:
-    {"id": "title3d", "type": "model", "shape": "text", "text": "LAUNCH", "x": "50%", "y": "50%",
-     "size": 240, "weight": 800, "depth": 70, "bevel": 5, "shine": 0.6,
-     "rotateY": [[0, -40], [2.4, 0, "outCubic"]], "rotateX": [[0, 18], [2.4, 0, "outCubic"]],
-     "enter": {"name": "build", "dur": 1.2}}
-  A product turntable from a model file, on a soft floor shadow:
-    {"id": "product", "type": "model", "src": "rocket.glb", "x": "50%", "y": "46%", "h": 600,
-     "rotateY": [[0, 0], ["end", 360]], "ground": true, "enter": {"name": "build", "dur": 1.6}}
-  A chrome logo reflecting a sunset as it turns:
-    {"id": "chrome", "type": "model", "shape": "torus", "r": 200, "tube": 60, "x": "50%", "y": "50%",
-     "detail": "high", "fill": "#d9dce1", "metal": 1, "shine": 0.95, "env": "sunset",
-     "rotateX": [[0, 70], ["end", 20]], "rotateY": [[0, -30], ["end", 30]]}
-  A planet whose key light sweeps round it, with a cool light from the right and a ring that glows:
-    {"id": "planet", "type": "model", "x": "50%", "y": "50%", "detail": "high", "rotateY": [[0, -20], ["end", 20]],
-     "light": {"preset": "dramatic", "azimuth": [[0, -70], ["end", 40]]},
-     "lights": [{"from": "right", "color": "#4a7dff", "intensity": 0.5}],
-     "parts": [{"shape": "sphere", "r": 150, "fill": "#e8e2d0", "shine": 0.8},
-               {"shape": "torus", "r": 230, "tube": 12, "rotateX": 75, "fill": "#ff633f", "glow": 0.9}]}
+  Any layer can move and turn in depth (z, rotateX, rotateY, backface, fixed), seen through a
+  top-level camera that pans, dollies, orbits and pulls focus, with fog far away. A group can draw
+  its layers far to near ("sort": "depth") or as a stage ("sort": "pixel"), where models cast
+  shadows. A model layer ("type": "model") is a lit 3D solid, 3D text, an extruded SVG path or a
+  .glb, .gltf or .obj file, with lights, textures, cutaways and copies. kine docs 3d (kine_docs
+  topic "3d") is the reference for all of it, with examples: read it before using any of these.
 
 ANIMATING A VALUE (any number or colour key)
   constant     "x": 960
@@ -671,7 +420,7 @@ ENTER AND EXIT
   motions: {motions}
   rise moves up into place, drop moves down, left moves left, right moves right. type is a
   typewriter. draw draws a stroke or path on, and builds a model (build is the same). wipe reveals left to right. snap is a hard cut in
-  with a small settle. flip, flip-up, tumble and push move in depth (see DEPTH AND CAMERA).
+  with a small settle. flip, flip-up, tumble and push move in depth (see kine docs 3d).
   land drops in from above and bounces, each bounce a quarter as high as the one before;
   squash does too, long as it falls and flat as it lands. elastic grows in with a springy
   overshoot, swing hangs from its top edge and swings down to rest, stretch opens sideways from
@@ -980,6 +729,274 @@ WORKFLOW FOR AGENTS
 """
 
 TOPICS = {  # longer references kept out of the main one: kine docs TOPIC
+    "3d": """\
+3D
+  Depth, the camera and model layers. Everything else is in the main reference (kine docs).
+
+DEPTH AND CAMERA (3D)
+  Any layer can move and turn in depth. x is right, y is down and z is toward the viewer, in px,
+  as in CSS. A scene that uses depth is seen through a camera; at z 0 everything keeps its size.
+  z           px toward the viewer. Near layers grow; far ones (negative z) shrink and drift less
+              when the camera moves.
+  rotateX     degrees: positive tips the top edge away.
+  rotateY     degrees: positive turns the right edge away. Past 90 you see the back, mirrored.
+  backface    visible (default) | hidden: hidden skips the layer while its back faces the camera.
+  fixed       true: a top-level layer ignores the camera's moves (captions are fixed).
+  sort        on a group: "depth" draws its children far to near each frame, not in list order.
+              "pixel" makes the group a stage: each child is drawn on its own and at each pixel the
+              nearest one shows, so models and cards pass through each other with a clean edge. A
+              model is as deep as its triangles; any other child lies flat in its own plane (a group
+              child too). Each child costs a merge (check warns past 16), and a blend inside a stage
+              has nothing under it. Stages do not nest.
+  shadows     on a stage: true or {"opacity": 0.5, "soft": 3}. The stage's models cast shadows from
+              the scene's key light onto every child, models and flat layers alike: a rect turned 90
+              on rotateX is a floor that takes them. opacity is how much a shadow darkens, soft its
+              edge in px. Flat layers do not cast, and a surface turned from the light takes none.
+  camera      top level. Every key animates, and all default to 0 except fov:
+              {"x": 0, "y": 0, "z": 0, "rotateX": 0, "rotateY": 0, "rotate": 0, "fov": 40}
+              x and y pan (px). z moves the camera back; negative moves it in. rotateY orbits it
+              right around the canvas centre, rotateX up over it (looking down), rotate rolls it.
+              fov (5..150) sets how strong perspective looks; it does not change size at z 0.
+              target: what the camera looks at and orbits in place of the canvas centre, framed as z 0
+              is (in the middle, at its own size): a point [x, y, z] in px, or a layer id, which the
+              camera follows (its keys and its parents', not its enter and exit motions). x and y still
+              pan from it. Keyframes between points and ids pan across: [[0, "logo"], [2, "title"]].
+              shake: px, or {"amount": 8, "speed": 1.5, "seed": 0}: a handheld wobble, smooth noise that
+              turns the view by up to about amount px, speed times a second. amount animates.
+              aperture and focus: depth of field. aperture is px of blur per 1000 px from the focus
+              plane (12 is gentle, 40 strong); far layers blur up to aperture times the focus distance
+              over 1000, near ones more, as a lens does, never past 48 px. focus is a z (px toward the
+              camera from what it looks at; 0, the default, is the target or z 0) or a layer id, and
+              keyframes between them pull focus: [[0, "cup"], [2, "title"]]. Both animate. A flat layer
+              or a model blurs whole, by the depth of its middle; a stage blurs each pixel by its own
+              depth, which on the CPU is slow (check warns: slow-depth-of-field).
+              check warns (camera-inside-model) when the camera is inside a model, and
+              (focus-on-nothing) when the focus plane is nearer or farther than every layer.
+  Camera moves:
+    orbit       "target": "hero", "rotateY": [[0, -40], ["end", 40]]
+    crane       "y": [[0, 0], ["end", -300]] rises with the view; add "rotateX": [[0, 0], ["end", 30]] to
+                swing up over the target, looking down
+    push-in     "z": [[0, 0], ["end", -400]]
+    dolly zoom  "fov": [[0, 20], ["end", 70]]: z 0 keeps its size while the far layers fall away, since
+                fov already moves the camera to keep z 0 framed
+    handheld    "shake": 6, on top of any of these
+    rack focus  "aperture": 24, "focus": [[0.5, "cup"], [2, "title", "inOutSine"]]
+  fog         top level: true, or {"color": "#0a0c10", "near": 1500, "far": 6000, "amount": 1}.
+              Up to near px from the camera is clear; from there to far px everything mixes into
+              color, up to amount. z 0 is (h / 2) / tan(fov / 2) px from the camera: 1484 at 1080p
+              and fov 40. Defaults: color is the canvas bg (a gradient's first stop), near is z 0's
+              distance and far 4 times it. A model mixes at each vertex, any other layer by the
+              depth of its middle, and a stage at each pixel. All four keys animate. check warns
+              (fog-hides) when a layer lies wholly past far.
+  Motions: flip turns in on the vertical axis (deg [90]), flip-up on the horizontal axis, tumble
+  spins in from depth, push comes forward from depth (dist [600]). With "split" each unit flips.
+  Layers still draw in list order, so put far layers first, or use a group with "sort": "depth".
+  A card that turns over: rotateY on the group, and each side hides its back:
+    {"id": "card", "type": "group", "x": "50%", "y": "50%", "rotateY": [[0.5, 0], [1.5, 180]], "children": [
+     {"id": "card-front", "type": "group", "anchor": "center", "w": 560, "h": 150, "radius": 28,
+      "fill": "#f2f0e8", "backface": "hidden", "children": [
+      {"id": "card-front-text", "type": "text", "text": "front", "size": 64, "fill": "#0a0c10"}]},
+     {"id": "card-back", "type": "group", "anchor": "center", "w": 560, "h": 150, "radius": 28,
+      "fill": "#ff633f", "rotateY": 180, "backface": "hidden", "children": [
+      {"id": "card-back-text", "type": "text", "text": "back", "size": 64, "fill": "#0a0c10"}]}]}
+  A whole scene: the camera pushes in and swings round layers at three depths; the note stays put:
+    {"canvas": {"w": 1920, "h": 1080, "fps": 30, "duration": 4},
+     "camera": {"z": [[0, 300], ["end", -100]], "rotateY": [[0, -12], ["end", 10]]},
+     "layers": [
+      {"id": "far", "type": "rect", "x": "50%", "y": "50%", "z": -600, "w": 1600, "h": 900, "radius": 40,
+       "fill": "#151922"},
+      {"id": "title", "type": "text", "text": "Depth", "x": "50%", "y": "45%", "size": 140, "weight": 800,
+       "split": "chars", "enter": {"name": "flip", "stagger": 0.05}},
+      {"id": "near", "type": "circle", "x": "78%", "y": "72%", "z": 250, "r": 60, "fill": "#ff633f"},
+      {"id": "note", "type": "text", "text": "fixed to the screen", "x": "50%", "y": "88%", "size": 40,
+       "fixed": true}]}
+  A ring through a panel, in a stage:
+    {"id": "stage", "type": "group", "x": "50%", "y": "50%", "sort": "pixel", "children": [
+     {"id": "ring", "type": "model", "shape": "torus", "r": 200, "tube": 40, "rotateY": 70,
+      "rotateX": [[0, 0], ["end", 30]]},
+     {"id": "panel", "type": "rect", "w": 560, "h": 320, "radius": 28, "fill": "#f2f0e8"}]}
+
+3D MODELS
+  A model layer is a lit solid in the space of DEPTH AND CAMERA, so z, rotateX, rotateY, rotate,
+  scale and the camera apply to it. x and y place its centre.
+  shape     cube (w [200], h and depth [= w], r [0] rounds its edges and corners) | sphere (r [100]) |
+            cylinder (r [80], h [200]) | cone (r [90], h [200], tip up) | capsule (r [60], h [240] end
+            to end: a cylinder with round ends) | torus (r [110], tube [r x 0.35], facing you) |
+            plane (w, h; both sides show) | lathe | tube | text | path. Sizes are px and animate.
+  lathe     shape "lathe" turns profile round the vertical axis: [[r, y], ...] points (r out from the
+            axis, y down; closed when the last point is the first) or path data, its x the distance
+            from the axis. Centred on y. A profile that ends off the axis (a cup with no lid) shows
+            both sides; bends sharper than 40 degrees stay sharp. profile does not animate:
+            "profile": [[0, -120], [70, -120], [40, 0], [90, 120], [0, 120]].
+  tube      shape "tube" runs a round tube of radius r [12] along d (SVG path data, fitted to w and/or
+            h as a path shape's), round at its ends: 3D lines and routes. draw grows it along its
+            length (other shapes show bottom to top). Instead of d, in depth from the model's middle:
+            "points": [[x, y, z], ...] (smooth: true curves through them, closed: true joins the ends);
+            "walk": {"steps" [60], "step" [10] px, "turn" [30] degrees, "within" [0: anywhere] px, "seed"}:
+            a seeded random walk, smooth unless smooth is false; or "rays": {"count" [12], "length" [100]
+            or [least, most], "inner" [0] px out, "seed"}: lines out every way, grown together. These do
+            not animate. With none of d, points, walk or rays, "tube" is read as a cylinder.
+  text      shape "text" pushes letters out in depth: text ("\\n" breaks lines), size [120],
+            weight [600], font, italic, letterSpacing, lineHeight, depth [size x 0.2], bevel [0]
+            (px of 45-degree edge). Centred on x, y. Each new text, size, depth or bevel value
+            rebuilds the solid, so grow it with scale. Lines are shaped as a text layer's are:
+            Arabic letters join, marks sit on their letters, right-to-left runs read right to left.
+            letterSpacing draws each character on its own, unshaped, and colour emoji have no
+            outline, so they are left out (check warns: unshaped-3d-text).
+  path      shape "path": d (SVG path data, filled nonzero), w and/or h (fits inside them, keeping
+            its shape), depth [a fifth of its larger side], bevel [0], strokeWidth (in d's units:
+            extrudes the stroke, with round ends, for line icons).
+  detail    low | medium (default) | high: how many triangles. A medium sphere has about 2,200.
+  fill      one colour [theme accent]   shine 0..1 [0.4]   metal 0..1 [0]   rim 0..1 [0.5] (edge
+            light)   bands [0] (2 or more: flat toon steps)   glow 0..1 [0] (shows at least fill x
+            glow however it is lit: neon, screens, lamps)   transparency 0..1 [0] (see-through: the far
+            side and what is behind show, faces drawn far to near; a model with a texture draws solid,
+            check warns). These animate. opacity fades the drawn model as a whole, as on any layer.
+  texture   an image (png, jpg, webp, gif, bmp, svg) or video file drawn on the surface, "#groupId", or
+            an object: {"src": "wood.jpg", "repeat": 2 or [across, down], "offset": [across, down]
+            (in images, toward the right and down)}. A video plays on the model's clock, with "loop", "trim"
+            and "speed" as on a video layer. "#groupId" draws that group on the surface at each frame's
+            time, its box (its w and h, else the canvas) filling the image: a UI on a phone's screen.
+            The group is drawn only there, its layers as in a scene without a camera. Once on each
+            cube face and on a plane, upright from in front (on top and underneath, its top is the
+            far edge); round a sphere, cylinder, cone, capsule or lathe with its middle facing you, and
+            flat across a cylinder's or cone's ends; once round a torus and its tube; along a tube and
+            round it; across the front and back of text and path shapes. The fill shows through clear
+            pixels. A part takes the layer's texture unless it sets its own; false draws its fill. repeat
+            and offset do not animate. Skia cuts
+            triangles where perspective would slide the image across them (check warns texture-swim
+            where that is not enough, right in front of the camera) and takes about twice as long as
+            for a plain model; OpenGL (below) places the image at each pixel.
+  parts     [{"shape": "sphere", "r": 30, "x": 0, "y": -120, "z": 0, "rotateX": 0, "rotateY": 0,
+            "rotate": 0, "scale": 1, "fill": "#b9f45d", "shine": 0.9}, ...] placed from the
+            model's centre. Part keys take keyframes and expressions like layer keys, with i the
+            part's number from 0: "rotate": "=t*90" spins one part. The parts merge into one mesh,
+            merged again on the frames where a part moves or changes size. Parts with the same
+            material keys share a material, its values read for the first of them. A part takes
+            the model's material keys it does not set. A model may have shape (or src), parts, or both.
+  repeat    {"count": 100, "x": "=(i % 10 - 4.5) * 50", "z": "=(floor(i / 10) - 4.5) * 50",
+            "y": "=sin(t * 2 + i) * 20", "rotateX", "rotateY", "rotate", "scale", "fill": "=hsl(i * 3.6)"}
+            draws count copies of the model (shape, parts or src, posed), up to 10,000, merged into
+            one mesh that sorts as one model. Each key is a number (fill: a colour), a list taken in
+            turn (copy i takes item i, round again) or an expression of i (the copy, from 0), n (the
+            count) and the layer's t, d, p and T. A copy is placed from the model's centre, as a part
+            is, and its fill recolours what the layer's fill would. Keys that read no time are worked
+            out once. A model draws at most 64 colours: past that, each copy takes the nearest kept
+            one (check warns repeat-colours). Copies cost what that many triangles cost: use "detail":
+            "low" for many. A model's "spread" (see repeat under KEYS EVERY LAYER HAS) also takes
+            "in": "sphere" (inside a ball of radius r), "shell" (on its surface; "on": "sphere" says
+            the same) and a box's "depth", and places copies in z too: {"count": 40, "spread": {"in":
+            "sphere", "r": 240, "seed": 3, "gap": 36}, "rotate": "=i * 47"}.
+  src       a model file: .glb or .gltf (glTF 2.0), or .obj with its .mtl. Colours, shine and metal
+            come from the file; a fill on the layer recolours all of it. It fits inside w and/or h
+            keeping its shape, else its longest side is 300 px. Node transforms, skins (up to four
+            joints a vertex; check warns skin-influences past that) and morph target weights apply,
+            and animation plays the file's clips. A glTF base colour texture (with its TEXCOORD_n)
+            or an .obj map_Kd is drawn as a texture; "texture": false draws its mean colour, and a
+            texture on the layer replaces the file's (check warns no-uvs when the file has no
+            texture coordinates).
+            The light a material gives off (glTF emissiveFactor and emissiveTexture, .mtl Ke and
+            map_Ke) is added to its colour however it is lit. A glTF material with alphaMode BLEND is
+            see-through by its base colour's alpha, an .mtl one by d or Tr. Long triangles are cut to
+            1/24 of its size for the depth sort. Compressed files are read: meshopt
+            (EXT_meshopt_compression, gltfpack -c) and quantized ones as they are; Draco
+            (KHR_draco_mesh_compression) with pip install "kinescript[draco]" (check names the
+            extra when it is missing).
+  animation a clip of the glTF file to play on the layer's clock: its name (kine probe lists them),
+            its number from 0, true for the first, or {"name": "Walk", "speed": 1, "loop": true,
+            "start": 0}. speed 2 plays twice as fast, -1 backwards; start is the seconds into the
+            clip at the layer's start; loop false holds the last pose. Node translation, rotation
+            and scale, morph target weights and skins move (LINEAR, STEP and CUBICSPLINE keys). The
+            model keeps the size and centre of its rest pose, so a clip that walks it moves it. A
+            name the file lacks is an error (unknown-animation) that lists the ones it has.
+  morphs    the glTF file's morph targets by name and their weights, each a number (0 to 1), keys
+            or an expression: {"smile": 1, "blink": [[0, 0], [0.1, 1], [0.2, 0]]}. They set the
+            target over what the file and the animation give it, on the layer's clock. kine probe
+            lists the names (from the mesh's extras.targetNames); a name the file lacks is an error
+            (unknown-morph).
+  clips     the file's clips to play once over its animation, each from at (a cue, or seconds on
+            the layer's clock), faded in and out over 0.15 s: [{"name": "Wave", "at": "vo:hello",
+            "speed": 1, "weight": 1}]. Each channel of a clip moves its node that weight of the way
+            from the pose under it, so a wave plays over a walk; a later clip goes on top.
+  ground    true or {"opacity": 0.5, "blur": px, "y": px, "from": "above"}: a soft shadow on a level
+            floor under the model, as if lit from above, fainter as the model rises. The floor sits at
+            the model's lowest point before it turns, or at y in the layer's parent space (canvas px
+            at the top level): give y when the model moves up and down. "from": "light" casts it along
+            the model's key light instead, so it moves as the light does (none when the light is
+            below the floor). For shadows on other layers, use a stage's shadows.
+  edges     lines along the model: true (creases and the outline, 2 px, theme ink), "all" (every
+            triangle's edges: a wireframe with the lines behind it hidden), or {"width": 2, "color":
+            "#0a0c10", "angle": 30}. A crease is drawn where the faces either side turn by more than
+            angle degrees (0 draws every edge), the outline where a face toward the camera meets one
+            turned away. Lines are width px wide whatever their depth, and hidden by whatever is in
+            front of them. width, color and angle animate: "width": [[0, 0], [1, 2]] draws them in.
+            Where parts of one model touch, a line along the seam can come out stepped, as the faces
+            there do.
+  explode   0..1: faces fly out along their normals.
+  cut       {"from": "front", "at": 0.5, "cap": "#fbefdf"}: a cutaway. A flat cut comes in from
+            one side (front | back | left | right | top | bottom; the front faces the camera before
+            the model turns) and takes off that share of the model, 0 to 1, measured across all its
+            parts. The cut face is filled where the cut goes through a part: the outermost in the
+            cap colour (its part's own without cap), and a part inside another in its own colour, so
+            a nucleus shows in a cell. A hole (a torus's middle) stays open. at and cap animate: "at": [[0,
+            0], [1.5, 0.5]] opens it. Each copy of a repeat is cut. Put the parts a cut goes through in one
+            model:
+            separate models cut at one place show their cut faces in the same plane.
+  draw      0..1, or "enter": "build": triangles appear from the bottom up.
+  light     top level, or on one model: studio (default) | soft | dramatic | flat (no shading),
+            or {"preset": "studio", "key": 0.85, "fill": 0.25, "ambient": 0.22, "rim": 0.35,
+            "from": "topleft", "color": "#fff4e6"}. from: topleft | top | topright | left | right |
+            front | bottomleft | bottom | bottomright. azimuth (degrees round from the front, toward
+            the right) and elevation (degrees up) replace those parts of from. Every amount, the
+            angles and the colour animate: "azimuth": [[0, -60], ["end", 60]] sweeps the key across.
+            follow: camera (default: the light moves with the camera, so orbiting does not change
+            the shading) | world (it stays in the scene: orbit the camera for a turntable look).
+            check warns (light-behind) when the key is behind a model as the camera sees it.
+  lights    top level, or on one model: up to 3 more lights, [{"from": "right", "color":
+            "#4a7dff", "intensity": 0.6}, {"type": "point", "x": 900, "y": 200, "z": 400,
+            "range": 1000}]. A directional light takes from, azimuth, elevation and follow like the
+            key; a point light sits at x, y, z in canvas px (z toward the viewer) and lights each
+            model from where the model's centre is, at half strength range px away. These animate.
+  env       top level, or on one model: what shiny and metal models reflect, fixed in the world:
+            studio | sunset | night | chrome, or {"preset": "studio", "top": "#f6f3ec", "horizon":
+            "#7d828c", "bottom": "#23252b", "amount": 1}. Metal reflects it tinted by its fill,
+            anything else by its shine, most at grazing angles; shine 0 reflects a blur of it and a
+            matte model none. Unset (the default), nothing is reflected. The colours and amount animate.
+  On the GPU with the gl extra (pip install "kinescript[gl]"; kine doctor says "models": "opengl"),
+  a model draws on OpenGL through a depth buffer, and parts of one model that cut through each other
+  meet at a clean edge. Elsewhere (the CPU; a model with explode, "edges": "all", or transparency
+  and edges; a textured one of over 32 materials or 16 images) triangles are sorted far to near
+  within one model, so that seam is stepped: let parts touch rather than cross. Separate layers draw
+  in list order, except in a stage (a group with "sort": "pixel", see DEPTH AND CAMERA), where they
+  meet at a clean edge wherever they cross: put things that cross in a stage as separate layers. A
+  ground shadow in a stage lies on a floor layer in the same plane. check warns past 60,000 triangles a
+  frame.
+  A ring around a ball that builds in, turns, and flies apart:
+    {"id": "emblem", "type": "model", "x": "50%", "y": "45%", "detail": "high",
+     "rotateX": [[0, 64], ["end", 18]], "rotateY": [[0, -30], ["end", 70]],
+     "enter": {"name": "build", "dur": 1.6}, "explode": [[3, 0], ["end", 1]],
+     "parts": [{"shape": "torus", "r": 250, "tube": 70, "fill": "#ff633f", "metal": 0.45, "shine": 0.7},
+               {"shape": "sphere", "r": 100, "fill": "#b9f45d", "shine": 0.9}]}
+  A 3D title that builds in, turns, and settles:
+    {"id": "title3d", "type": "model", "shape": "text", "text": "LAUNCH", "x": "50%", "y": "50%",
+     "size": 240, "weight": 800, "depth": 70, "bevel": 5, "shine": 0.6,
+     "rotateY": [[0, -40], [2.4, 0, "outCubic"]], "rotateX": [[0, 18], [2.4, 0, "outCubic"]],
+     "enter": {"name": "build", "dur": 1.2}}
+  A product turntable from a model file, on a soft floor shadow:
+    {"id": "product", "type": "model", "src": "rocket.glb", "x": "50%", "y": "46%", "h": 600,
+     "rotateY": [[0, 0], ["end", 360]], "ground": true, "enter": {"name": "build", "dur": 1.6}}
+  A chrome logo reflecting a sunset as it turns:
+    {"id": "chrome", "type": "model", "shape": "torus", "r": 200, "tube": 60, "x": "50%", "y": "50%",
+     "detail": "high", "fill": "#d9dce1", "metal": 1, "shine": 0.95, "env": "sunset",
+     "rotateX": [[0, 70], ["end", 20]], "rotateY": [[0, -30], ["end", 30]]}
+  A planet whose key light sweeps round it, with a cool light from the right and a ring that glows:
+    {"id": "planet", "type": "model", "x": "50%", "y": "50%", "detail": "high", "rotateY": [[0, -20],
+    ["end", 20]],
+     "light": {"preset": "dramatic", "azimuth": [[0, -70], ["end", 40]]},
+     "lights": [{"from": "right", "color": "#4a7dff", "intensity": 0.5}],
+     "parts": [{"shape": "sphere", "r": 150, "fill": "#e8e2d0", "shine": 0.8},
+               {"shape": "torus", "r": 230, "tube": 12, "rotateX": 75, "fill": "#ff633f", "glow": 0.9}]}
+""",
     "avatars": """\
 AVATARS
   An avatar is a character drawn once as parts, in a folder with an avatar.json, that a scene makes

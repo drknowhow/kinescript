@@ -8,7 +8,7 @@ import numpy as np
 import skia
 
 import kinescript as k
-from kinescript.docs import reference
+from kinescript.docs import TOPICS, reference
 from kinescript.verify import check
 
 ROOT = Path(__file__).parents[1]
@@ -29,8 +29,8 @@ def _objects(text: str) -> list[str]:
     return out
 
 
-def _section(name: str) -> str:
-    doc = reference()
+def _section(name: str, doc: str | None = None) -> str:
+    doc = reference() if doc is None else doc
     start = doc.index(name + "\n")
     nxt = re.search(r"\n[A-Z][A-Z ]+(\(|\n)", doc[start + len(name) + 1:])
     return doc[start: start + len(name) + 1 + (nxt.start() if nxt else len(doc))]
@@ -45,7 +45,7 @@ def test_complete_scene_in_docs_passes_check_with_no_rewrites():
 
 
 def test_depth_examples_in_docs_pass_check_with_no_rewrites():
-    objs = [json.loads(o) for o in _objects(_section("DEPTH AND CAMERA (3D)"))]
+    objs = [json.loads(o) for o in _objects(_section("DEPTH AND CAMERA (3D)", reference("3d")))]
     card = next(o for o in objs if o.get("id") == "card")
     staged = next(o for o in objs if o.get("id") == "stage")
     whole = next(o for o in objs if "layers" in o)
@@ -61,7 +61,7 @@ def _issues(r: dict) -> list[dict]:
 
 
 def test_model_examples_in_docs_pass_check_with_no_rewrites():
-    models = [json.loads(o) for o in _objects(_section("3D MODELS"))]
+    models = [json.loads(o) for o in _objects(_section("3D MODELS", reference("3d")))]
     assert {m["id"] for m in models} == {"emblem", "title3d", "product", "planet", "chrome"}
     for m in models:
         if m.get("src"):  # the sample model examples/make_media.py writes
@@ -154,11 +154,22 @@ def test_explainer_example_passes_check_once_it_is_spoken(tmp_path):
 
 def test_avatars_and_brands_are_topics_the_reference_points_to():
     main = reference()
-    for topic in ("avatars", "brands", "explainers"):
+    assert set(TOPICS) == {"3d", "avatars", "brands", "explainers"}
+    for topic in TOPICS:
         text = reference(topic)
         assert text.startswith(topic.upper() + "\n") and text not in main
         assert f"kine docs {topic}" in main and text in reference("all")
-    assert len(main.splitlines()) < 1000  # short enough to keep in context
-    assert max(len(line) for t in ("avatars", "brands", "explainers") for line in reference(t).splitlines()) <= 108
-    from kinescript.mcp import call
-    assert call("kine_docs", {"topic": "avatars"})[0]["text"] == reference("avatars")
+    # Short enough to keep in context: it was 85,406 characters, 26,000 of them 3D, before 3D became a topic.
+    assert len(main.splitlines()) < 800 and len(main) < 65_000
+    assert max(len(line) for t in TOPICS for line in reference(t).splitlines()) <= 108
+    from kinescript.mcp import TOOLS, call
+    for topic in TOPICS:  # the MCP tool offered avatars and brands only, not explainers
+        assert call("kine_docs", {"topic": topic})[0]["text"] == reference(topic)
+    docs_tool = next(t for t in TOOLS if t["name"] == "kine_docs")
+    assert docs_tool["inputSchema"]["properties"]["topic"]["enum"] == [*TOPICS, "all"]
+
+
+def test_the_3d_topic_prints_its_text_as_written():
+    text = reference("3d")
+    # "\n" in the source printed a line break in the middle of this sentence.
+    assert 'text ("\\n" breaks lines), size [120],' in text
