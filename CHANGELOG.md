@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Text split into letters, words or lines draws the units that are only moved, faded or recoloured as runs of
+  placed glyphs: one call for each stretch of units that share a colour and an opacity. Every unit was drawn on
+  its own, with the canvas saved, shifted and put back round it. A unit that is turned, scaled, blurred, wiped,
+  glitched, stroked or laid on a path is drawn in its turn as before, and so is one that moves under a gradient.
+  A scene of 40 lines split into 3,248 letters drew a settled frame in 13.9 to 14.1 ms and draws it in 7.8 to 7.9
+  (RTX 5060 Ti, three alternating runs of 60 consecutive frames). The frames in which its letters enter are no
+  faster, about 155 ms each: every entering letter is blurred in a layer of its own. On the GPU 434 of 444 frames
+  of the stress scene and 35 examples are the same to the last pixel; the other ten are frames of
+  `examples/3d.json`, text under a camera, where 2 to 207 pixels differ by one level. On the CPU all 62 frames
+  compared are the same.
 - A model's copies (`repeat`) that move are placed by OpenGL: one copy's mesh is drawn once for each, from a matrix,
   an offset and a colour of its own. They were merged into one mesh on the CPU and sent to the GPU again every frame.
   A frame of 400 rings that turn drew in 21.1 to 21.7 ms and draws in 1.1 (RTX 5060 Ti, three alternating runs of 60
@@ -12,6 +22,14 @@
   the tour none to three. Copies are merged, and draw exactly as before, when they hold still, while the model is
   drawn in part (`draw`, a `build`), with `transparency`, a `ground` shadow, a point light or a camera `aperture`,
   in a stage that casts shadows, and for `kine check` and `--boxes`.
+- A model's ground shadow is kept between frames. Its outline on the floor is worked out again only when the model's
+  points, where the layer is placed or the light it is cast along change, and its blurred picture is drawn again
+  only then, or when fog leaves it less dark. Skia blurred the outline on the CPU for every model on every frame. A
+  frame of `examples/fog.json`, whose 14 pillars stand still while the camera moves, drew in 30.3 to 30.8 ms and
+  draws in 8.7 to 9.2 (RTX 5060 Ti, three alternating runs of 60 and 90 consecutive frames). The frames are the
+  same to the last pixel: all 180 of `fog.json`, `import.json`, `stage.json`, `lights.json`, `edges.json` and
+  `reflections.json` on the GPU, and a sample of 30 to 45 of the first three on the CPU. A model that moves or
+  turns draws its shadow each frame, as before.
 - A stage's models that follow one another are merged on OpenGL as each is drawn, and the stage is handed what they
   come to as one child. Each model was handed to Skia and merged into the stage on its own. A model joins the run
   before it when it is solid wherever it draws and nothing of its layer comes between it and the stage: it has no

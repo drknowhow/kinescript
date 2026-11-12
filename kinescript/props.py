@@ -320,9 +320,10 @@ def compile_prop(name: str, raw, ctx: Ctx, smooth: bool = False) -> Prop:
                 v = fn(t, d, t / d if d else 0.0, T, i, n)
             except OverflowError:
                 raise ValueError("gives a number too large for a float, not a finite number") from None
-            if isinstance(v, (int, float)) and not isinstance(v, bool) and not _finite(v):
+            number = type(v) is float  # what most give, once for every unit: it has no colour to look for
+            if (number or isinstance(v, (int, float)) and not isinstance(v, bool)) and not _finite(v):
                 raise ValueError(f"gives {_show(v)}, not a finite number")
-            return _norm(v)
+            return v if number else _norm(v)
         return Prop(False, raw, fn=fu)
     if isinstance(raw, str) and raw.startswith("="):
         fn = expr_fn(raw[1:], name, dict(EXPR_ENV, W=ctx.w, H=ctx.h, fps=ctx.fps))

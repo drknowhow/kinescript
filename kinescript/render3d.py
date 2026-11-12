@@ -1031,36 +1031,31 @@ def _within(eye: np.ndarray, P: np.ndarray, T: np.ndarray) -> bool:
     return odd >= 2
 
 
-def _ground(r, c: skia.Canvas, spec, rest: np.ndarray, pts: np.ndarray, fg=None, key=None):
+def _ground(r, c: skia.Canvas, spec, rest: np.ndarray, pts: np.ndarray, fg=None, key=None, who=None):
     """A soft shadow under the model, as if lit from straight above (or with "from": "light", along key, the key
     light's direction in camera space): the footprint of its points on a level floor, darkest where it touches
     and wider and fainter as it rises. The floor lies in the layer's parent space, at the model's lowest point
-    before it turns (`rest`), unless `y` places it."""
+    before it turns (`rest`), unless `y` places it. who: the layer's id. Under it the footprint is kept while the
+    points, what places the layer in its parent and the light are the same, and the blurred picture of it while
+    the fog leaves it as dark too: a model that stands still draws its shadow once, however the camera moves."""
     spec = spec if isinstance(spec, dict) else {}
-    local = np.linalg.solve(r._outer, r._m3d)  # the layer's own transform
-    Q = pts @ local[:3, :3].T + local[:3, 3]
-    low = float(Q[:, 1].max())  # y runs down
-    floor = float(spec["y"]) if "y" in spec else local[1, 3] + rest[:, 1].max() * np.linalg.norm(local[:3, 1])
-    lift = max(0.0, floor - low)
-    xz = Q[:, [0, 2]]
-    span = float(np.ptp(xz, axis=0).max()) or 1.0
+    up = None
     if spec.get("from") == "light" and key is not None:
         up = np.linalg.solve((np.linalg.inv(r._lens) @ r._outer)[:3, :3], key)  # toward the light, parent space
         if up[1] >= 0:
             return  # lit from below the floor
-        step = up[[0, 2]] / -up[1]  # how far along the floor the shadow moves per px of height (y runs down)
-        step *= min(1.0, 5.0 / (np.linalg.norm(step) or 1.0))  # a light under 11 degrees up casts it 5 heights
-        xz = xz - (floor - Q[:, 1])[:, None] * step
-    op, soft = float(spec.get("opacity", 0.5)), float(spec.get("blur", 0.08 * span))
-    # A wide soft shadow of the whole footprint, and a tight dark one of the part within reach of the floor.
-    touch = xz[Q[:, 1] > low - 0.04 * span]
-    shapes = [(_hull(p), sigma, alpha) for p, sigma, alpha in
-              ((xz, soft + 0.3 * lift, 0.55 * op / (1 + 4 * lift / span)),
-               (touch, 0.25 * soft + 0.5 * lift, op * math.exp(-6 * lift / span))) if alpha >= 0.004 and len(p) >= 3]
-    if not shapes:
+    # The layer's own transform is worked out through the camera's, which leaves it different in its last bits
+    # from frame to frame: the footprint is kept by the numbers the transform is made from.
+    made = (r._put, None if up is None else up.tobytes())
+    kept = r._models.get(("ground", who)) if who is not None else None
+    if kept is None or kept[0] is not pts or kept[1] != made:
+        local = np.linalg.solve(r._outer, r._m3d)  # the layer's own transform
+        kept = [pts, made, _footprint(spec, local, rest, pts, up), None, None]  # then its darkness and its picture
+        if who is not None:
+            r._models[("ground", who)] = kept
+    if kept[2] is None:
         return
-    lo = np.min([h.min(0) - 3 * s for h, s, _ in shapes], axis=0)
-    hi = np.max([h.max(0) + 3 * s for h, s, _ in shapes], axis=0)
+    shapes, floor, lo, hi, soft = kept[2]
     # Floor coordinates (x, z) to the parent's space; the unused third column keeps the matrix invertible.
     to = r._outer @ np.array([[1.0, 0, 0, 0], [0, 0, -1, floor], [0, 1, 0, 0], [0, 0, 0, 1]])
     box = np.array([[lo[0], lo[1], 0, 1], [hi[0], lo[1], 0, 1], [lo[0], hi[1], 0, 1], [hi[0], hi[1], 0, 1]])
@@ -1071,21 +1066,23 @@ def _ground(r, c: skia.Canvas, spec, rest: np.ndarray, pts: np.ndarray, fg=None,
     # camera's perspective added 36 ms to a CPU frame of examples/import.json, this adds about 3.
     px = max(1.0, soft / 4)
     w, h = (int(math.ceil(v)) for v in (hi - lo) / px)
-    surf = skia.Surface(max(1, w), max(1, h))
-    cv = surf.getCanvas()
-    cv.scale(1 / px, 1 / px)
-    cv.translate(-lo[0], -lo[1])
-    for hull, sigma, alpha in shapes:
-        path = skia.Path()
-        path.addPoly([skia.Point(*q) for q in hull.tolist()], True)
-        a = round(255 * min(1.0, alpha) * clear)
-        cv.drawPath(path, skia.Paint(AntiAlias=True, Color=skia.ColorSetARGB(a, 0, 0, 0),
-                                     MaskFilter=skia.MaskFilter.MakeBlur(skia.kNormal_BlurStyle, sigma)))
+    dark = [round(255 * min(1.0, alpha) * clear) for _, _, alpha in shapes]
+    if kept[3] != dark:
+        surf = skia.Surface(max(1, w), max(1, h))
+        cv = surf.getCanvas()
+        cv.scale(1 / px, 1 / px)
+        cv.translate(-lo[0], -lo[1])
+        for (hull, sigma, _), a in zip(shapes, dark):
+            path = skia.Path()
+            path.addPoly([skia.Point(*q) for q in hull.tolist()], True)
+            cv.drawPath(path, skia.Paint(AntiAlias=True, Color=skia.ColorSetARGB(a, 0, 0, 0),
+                                         MaskFilter=skia.MaskFilter.MakeBlur(skia.kNormal_BlurStyle, sigma)))
+        kept[3], kept[4] = dark, surf.makeImageSnapshot()
     c.save()
     c.resetMatrix()
     c.scale(r.scale * r._dev, r.scale * r._dev)
     c.concat(space.to_skia(to))
-    c.drawImageRect(surf.makeImageSnapshot(), skia.Rect(*lo, lo[0] + w * px, lo[1] + h * px),
+    c.drawImageRect(kept[4], skia.Rect(*lo, lo[0] + w * px, lo[1] + h * px),
                     skia.SamplingOptions(skia.FilterMode.kLinear))
     c.restore()
     st = r._stage
@@ -1093,6 +1090,34 @@ def _ground(r, c: skia.Canvas, spec, rest: np.ndarray, pts: np.ndarray, fg=None,
         # In a stage the shadow lies on the floor, a little nearer than a floor layer in the same plane.
         corners = box @ to.T
         st.plane(to, corners[:, :2] / corners[:, 3:] * st.k, bias=1 + 1e-5)
+
+
+def _footprint(spec: dict, local: np.ndarray, rest: np.ndarray, pts: np.ndarray, up) -> tuple | None:
+    """What _ground draws for points pts under the layer's own transform local, lit along up (toward the light,
+    in the parent's space) or from straight above: the shadow's shapes (each an outline on the floor, its blur
+    and its darkness before fog), the floor's height, the corners of the floor they cover, and the wide one's
+    blur. None when no shape is dark enough to draw."""
+    Q = pts @ local[:3, :3].T + local[:3, 3]
+    low = float(Q[:, 1].max())  # y runs down
+    floor = float(spec["y"]) if "y" in spec else local[1, 3] + rest[:, 1].max() * np.linalg.norm(local[:3, 1])
+    lift = max(0.0, floor - low)
+    xz = Q[:, [0, 2]]
+    span = float(np.ptp(xz, axis=0).max()) or 1.0
+    if up is not None:
+        step = up[[0, 2]] / -up[1]  # how far along the floor the shadow moves per px of height (y runs down)
+        step *= min(1.0, 5.0 / (np.linalg.norm(step) or 1.0))  # a light under 11 degrees up casts it 5 heights
+        xz = xz - (floor - Q[:, 1])[:, None] * step
+    op, soft = float(spec.get("opacity", 0.5)), float(spec.get("blur", 0.08 * span))
+    # A wide soft shadow of the whole footprint, and a tight dark one of the part within reach of the floor.
+    touch = xz[Q[:, 1] > low - 0.04 * span]
+    shapes = [(_hull(p), sigma, alpha) for p, sigma, alpha in
+              ((xz, soft + 0.3 * lift, 0.55 * op / (1 + 4 * lift / span)),
+               (touch, 0.25 * soft + 0.5 * lift, op * math.exp(-6 * lift / span))) if alpha >= 0.004 and len(p) >= 3]
+    if not shapes:
+        return None
+    lo = np.min([h.min(0) - 3 * s for h, s, _ in shapes], axis=0)
+    hi = np.max([h.max(0) + 3 * s for h, s, _ in shapes], axis=0)
+    return shapes, floor, lo, hi, soft
 
 
 def _fixed(r, L, m, what: str, make):
@@ -1691,7 +1716,7 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
         _vertices(cv, q, T, uv, colors, paint, mode)
     img = surf.makeImageSnapshot()
     if L.raw.get("ground") not in (None, False):
-        _ground(r, c, L.raw["ground"], m.P, foot, fg, lt[0])
+        _ground(r, c, L.raw["ground"], m.P, foot, fg, lt[0], L.id)
     if r._stage is not None and r._stage.child is L:
         r._stage.depth(q, 1.0 / wv, T)
     c.save()

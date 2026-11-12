@@ -698,6 +698,7 @@ class Renderer:
         self._models: dict = {}  # merged parts of each model layer
         self._solids: dict = {}  # outlines and extruded meshes of text and path models
         self._outer = None  # the 3D matrix of the layer being drawn's parent (models put their floor in it)
+        self._put = None  # what places that layer in its parent, whatever the camera does (render3d._ground)
         self._msurf = None  # offscreen that models draw into, antialiased, before compositing
         self._mspare: dict = {}  # more offscreens like it, for the passes of textured models
         self._stages = None  # surfaces of groups with "sort": "pixel" (stage.Stage)
@@ -1301,8 +1302,10 @@ class Renderer:
                 tilt = space.tilt(z, rx, ry)
                 m = m @ tilt
             m = m @ space.rotate_z(rot) @ space.scale(sx, sy)
+            own = (x, y, z, rx, ry, rot, sx, sy)
             if mods.sx != 1 or mods.sy != 1 or mods.hinge:
                 px, py = self._pivot(box, mods)
+                own += (px, py, mods.hinge, mods.sx, mods.sy)
                 m = m @ space.translate(px, py) @ space.rotate_z(mods.hinge) @ space.scale(mods.sx, mods.sy) @ (
                     space.translate(-px, -py))
             if box is not None:
@@ -1335,7 +1338,7 @@ class Renderer:
                     (ax, ay), (bx, by), (cx, cy) = (o[:2] / o[3]).T
                     sc = math.sqrt(abs((bx - ax) * (cy - ay) - (by - ay) * (cx - ax)))
                     defocus = float(render3d.defocus(self._focused, o[3, 0])) / max(sc, 0.05)
-            self._m3d, self._outer = m, outer
+            self._m3d, self._outer, self._put = m, outer, own
             if self._stage is not None and self._stage.child is L:
                 self._stage.m = m
         c.save()
@@ -2744,7 +2747,8 @@ class Renderer:
         c.scale(size[0] / w, size[1] / h)
         ax, ay = ANCHORS.get(G.raw.get("anchor", "topleft"), (0, 0))
         cam = space.camera(w, h, x=-ax * w, y=-ay * h)  # looking at the middle of the box
-        kept = (self.boxes, self._m3d, self._cam, self._focused, self._stage, self._dev, self._lens, self._outer)
+        kept = (self.boxes, self._m3d, self._cam, self._focused, self._stage, self._dev, self._lens, self._outer,
+                self._put)
         self.boxes, self._focused, self._stage, self._dev, self._lens = {}, None, None, 1.0, space.lens(w, h)
         self._insets.add(gid)
         try:
@@ -2762,7 +2766,8 @@ class Renderer:
                 c.restore()
         finally:
             self._insets.discard(gid)
-            self.boxes, self._m3d, self._cam, self._focused, self._stage, self._dev, self._lens, self._outer = kept
+            (self.boxes, self._m3d, self._cam, self._focused, self._stage, self._dev, self._lens, self._outer,
+             self._put) = kept
         return surf.makeImageSnapshot()
 
     def _clip(self, L: Layer, spec: dict, t: float) -> skia.Image | None:
@@ -3357,14 +3362,17 @@ class Renderer:
 
     def _units(self, lay: Layout, font: skia.Font, split) -> list:
         """The runs grouped into the units a split enter moves one by one, in order: (runs, left, right) with each
-        run as (run, its pieces). They are the same on every frame the layout is, so they are kept with it."""
+        run as (run, its pieces, its glyph: the one drawString draws for it, None when it draws several or the run
+        is drawn in pieces). They are the same on every frame the layout is, so they are kept with it."""
         if lay.units is None:
             units: dict[int, list] = {}
             for r in lay.runs:
                 u = r.char0 if split == "chars" else r.word if split == "words" else r.line if split == "lines" else 0
-                units.setdefault(u, []).append((r, self._pieces(font, r.text, r.rtl, r.ctx)))
-            lay.units = [(runs, min(r.x for r, _ in runs),
-                          max(r.x + self._measure(font, r.text, r.rtl, r.ctx) for r, _ in runs))
+                pcs = self._pieces(font, r.text, r.rtl, r.ctx)
+                glyphs = font.textToGlyphs(r.text) if pcs is None else ()
+                units.setdefault(u, []).append((r, pcs, glyphs[0] if len(glyphs) == 1 else None))
+            lay.units = [(runs, min(r.x for r, *_ in runs),
+                          max(r.x + self._measure(font, r.text, r.rtl, r.ctx) for r, *_ in runs))
                          for _, runs in sorted(units.items())]
         return lay.units
 
@@ -3415,6 +3423,19 @@ class Renderer:
         painted = None  # (which colour, alpha) fpaint holds
         onpath = self._on_path(L, t, T, g, lay, font, track) if L.onpath is not None else None
         own = None  # the text's own letters, which a scramble shows for those outside A to Z
+        # A unit that is only moved along the page is drawn where it goes, and the canvas is left as it is. Its runs
+        # of one glyph wait, with those of the units after it, to be drawn together as one run of placed glyphs:
+        # when the paint changes, or a run or a unit comes that is drawn another way.
+        plain = onpath is None and self._capture is None and spaint is None
+        glyphs, places, shared = [], [], None  # the glyphs waiting, where each goes, and the paint they share
+
+        def flush():
+            if glyphs:
+                run = skia.TextBlobBuilder()
+                run.allocRunPos(font, glyphs, places)
+                c.drawTextBlob(run.make(), 0, 0, shared)
+                glyphs.clear()
+                places.clear()
         for ui, (runs, x0, x1) in enumerate(units):
             um = IDENT
             if enter is not None:
@@ -3433,11 +3454,18 @@ class Renderer:
             ublur = um.blur + (max(0.0, float(fb(ui))) if fb else 0)
             uf = ff(ui) if ff else None  # its plain letters' colour
             ucols = cols if uf is None else (uf, emph, act)
-            moved = ux or uy or urot or usc != 1 or um.rx or um.ry or um.dz or um.sx != 1 or um.sy != 1 or um.hinge
+            turned = urot or usc != 1 or um.rx or um.ry or um.dz or um.sx != 1 or um.sy != 1 or um.hinge
+            moved = ux or uy or turned
             wiped = um.wipe and um.reveal < 1 and onpath is None
             uglitch = um.glitch if um.glitch > 0.01 and onpath is None else 0.0
             ublur, ublur_y = ublur + um.smear, ublur  # across and down: a whip smears each unit across
             blurred = ublur > 0.1
+            # only moved along the page, if that (under a gradient not even moved: the gradient would stay behind)
+            still = plain and not (turned or wiped or uglitch or blurred or (moved and gpaint is not None))
+            if still:
+                moved = False  # its runs are put ux, uy further on
+            else:
+                flush()
             if moved or wiped:  # a unit drawn where it lies needs no save and restore: most of them, once they are in
                 c.save()
             if moved:
@@ -3491,11 +3519,11 @@ class Renderer:
             batch: dict = {}  # on a path: (colour, alpha): the letters drawn as they are, and their RSXforms
             mess = um.scramble or mods.scramble  # a unit's own scramble settles its letters, the layer's all of them
             if mess > 0:
-                base, n = (runs[0][0].char0, sum(len(r.text) for r, _ in runs)) if um.scramble else (c00, lay.nchars)
+                base, n = (runs[0][0].char0, sum(len(r[0].text) for r in runs)) if um.scramble else (c00, lay.nchars)
                 if own is None:
                     own = "".join(sorted({ch for r in lay.runs for ch in r.text if ch.isalnum()}))
                 key, step = f"{L.id}/{um.seed if um.scramble else mods.seed}", um.step if um.scramble else mods.step
-            for r, pcs in runs:
+            for r, pcs, glyph in runs:
                 text = r.text
                 if visible_chars is not None:
                     if r.char0 >= visible_chars:
@@ -3512,6 +3540,7 @@ class Renderer:
                 elif r.emph:
                     k = 1
                 if painted != (k, ua, uf):
+                    flush()
                     fpaint.setColor(_argb(ucols[k], ua))
                     if gpaint is not None:
                         gpaint.setAlphaf(ua)
@@ -3525,7 +3554,16 @@ class Renderer:
                 if text != r.text:  # typed so far: a right-to-left word grows from its right edge
                     if r.rtl:
                         x += self._measure(font, r.text, True, r.ctx) - self._measure(font, text, True, r.ctx)
-                    pcs = self._pieces(font, text, r.rtl, r.ctx)
+                    pcs, glyph = self._pieces(font, text, r.rtl, r.ctx), None
+                if still:
+                    if glyph is None:
+                        flush()
+                        self._draw_pieces(c, pcs, text, x + ux, y + uy, font, ink)
+                    else:
+                        glyphs.append(glyph)
+                        places.append((x + ux, y + uy))
+                        shared = ink
+                    continue
                 if self._capture is not None:  # a combining group takes the letters' outlines
                     self._take(c, self._letters(pcs, text, x, y, font))
                     continue
@@ -3550,6 +3588,7 @@ class Renderer:
                 c.restore()
             if moved or wiped:
                 c.restore()
+        flush()
         if visible_chars is not None and L.raw.get("caret") and (int(T * 2) % 2 == 0 or reveal < 1) and (
                 self._capture is None):
             last = None
