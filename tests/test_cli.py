@@ -331,6 +331,17 @@ def test_kine_backend_must_be_one_it_knows(capsys, tmp_path, s, monkeypatch):
         gpu_context()
 
 
+def test_a_render_after_doctor_in_one_process(tmp_path, s):
+    script = ("import sys\nfrom kinescript.cli import main\ns, out = sys.argv[1:]\n"
+              "a = ['render', s, '--to', '0.1', '--scale', '0.25', '-o', out]\n"
+              "sys.exit(main(a) or main(['doctor']) or main(a))")  # the second render was an access violation
+    env = dict(_env(), KINE_BACKEND="auto")  # doctor asks about OpenGL models where there is a GPU
+    p = subprocess.run([sys.executable, "-c", script, s, str(tmp_path / "a.mp4")], capture_output=True, env=env,
+                       timeout=120)
+    assert p.returncode == 0, (p.returncode, p.stderr[-300:])
+    assert p.stdout.count(b'"frames": 3') == 2, p.stdout[-300:]  # both renders finished
+
+
 def test_a_missing_ffmpeg_or_ffprobe_is_named(capsys, tmp_path, s, monkeypatch):
     import wave
     from kinescript import media

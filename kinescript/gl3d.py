@@ -408,31 +408,44 @@ def _state():
     """The moderngl context on the current GL context, with this module's programs, or None without moderngl."""
     if "ctx" not in _STATE:
         try:
-            import moderngl
-        except ImportError:
-            _STATE["ctx"] = None
-            return None
-        try:  # an OpenGL older than 3.3, or a driver that will not compile these, leaves models on Skia
-            ctx = moderngl.create_context(require=330)
-            shade = _program(ctx, _PLAIN, MATS)
-            edge = ctx.program(vertex_shader=_QUAD, fragment_shader=_EDGE)
-            sun = ctx.program(vertex_shader=_SUN_VERT, fragment_shader=_SUN_FRAG)
-        except Exception as e:  # noqa: BLE001 - moderngl raises its own Error and plain exceptions alike
-            _STATE.update(ctx=None, error=f"{type(e).__name__}: {e}")
-            return None
-        try:  # a driver that will not take this one leaves the models with textures on Skia
-            tex = _program(ctx, _TEXTURED, TEX_MATS)
-            tex["u_tex"].value = list(range(UNITS))
-        except Exception:  # noqa: BLE001
-            tex = None
-        edge["t_col"].value, edge["t_geo"].value = 0, 1
-        quad = ctx.buffer(np.array([-1, -1, 1, -1, -1, 1, 1, 1], "f4"))
-        # Skia binds sampler objects of its own; these replace them on the two units read, so a mipmap filter left
-        # on a unit cannot make a texture incomplete (texelFetch reads it as 0 then).
-        nearest = ctx.sampler(filter=(moderngl.NEAREST, moderngl.NEAREST), repeat_x=False, repeat_y=False)
-        _STATE.update(ctx=ctx, mgl=moderngl, shade=shade, tex=tex, edge=edge, sun=sun, sampler=nearest, tiles={},
-                      quad=ctx.vertex_array(edge, [(quad, "2f", "in_xy")]))
+            _make()
+        finally:
+            # Making the programs binds buffers and a vertex array where Skia had bound its own, and Skia goes by
+            # what it remembers binding. A model drawn here tells it when it is done; `kine doctor` asks whether
+            # models can draw here without drawing one, and the next frame Skia drew in that process crashed.
+            from .render import _GL
+            if _GL.get("ctx") is not None:
+                _GL["ctx"].resetContext()
     return _STATE["ctx"]
+
+
+def _make() -> None:
+    """Fill _STATE with the moderngl context and this module's programs, or with a context of None."""
+    try:
+        import moderngl
+    except ImportError:
+        _STATE["ctx"] = None
+        return
+    try:  # an OpenGL older than 3.3, or a driver that will not compile these, leaves models on Skia
+        ctx = moderngl.create_context(require=330)
+        shade = _program(ctx, _PLAIN, MATS)
+        edge = ctx.program(vertex_shader=_QUAD, fragment_shader=_EDGE)
+        sun = ctx.program(vertex_shader=_SUN_VERT, fragment_shader=_SUN_FRAG)
+    except Exception as e:  # noqa: BLE001 - moderngl raises its own Error and plain exceptions alike
+        _STATE.update(ctx=None, error=f"{type(e).__name__}: {e}")
+        return
+    try:  # a driver that will not take this one leaves the models with textures on Skia
+        tex = _program(ctx, _TEXTURED, TEX_MATS)
+        tex["u_tex"].value = list(range(UNITS))
+    except Exception:  # noqa: BLE001
+        tex = None
+    edge["t_col"].value, edge["t_geo"].value = 0, 1
+    quad = ctx.buffer(np.array([-1, -1, 1, -1, -1, 1, 1, 1], "f4"))
+    # Skia binds sampler objects of its own; these replace them on the two units read, so a mipmap filter left
+    # on a unit cannot make a texture incomplete (texelFetch reads it as 0 then).
+    nearest = ctx.sampler(filter=(moderngl.NEAREST, moderngl.NEAREST), repeat_x=False, repeat_y=False)
+    _STATE.update(ctx=ctx, mgl=moderngl, shade=shade, tex=tex, edge=edge, sun=sun, sampler=nearest, tiles={},
+                  quad=ctx.vertex_array(edge, [(quad, "2f", "in_xy")]))
 
 
 def ready() -> bool:
