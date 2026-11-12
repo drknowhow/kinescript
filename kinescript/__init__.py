@@ -13,5 +13,5 @@ if not hasattr(skia.M44, "Rows"):
 from .output import render, still
 from .scene import Scene, SceneError, load
 
-__version__ = "2.5.0"
+__version__ = "2.5.1"
 __all__ = ["Scene", "SceneError", "load", "render", "still", "__version__"]
