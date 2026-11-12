@@ -24,6 +24,10 @@ image is copied once, by Skia, into a texture made here, and mipmaps are built f
 group's next frame is copied into the texture the last one had. A textured model of more than TEX_MATS materials
 or UNITS pictures draws on the Skia path.
 
+A model's copies ("repeat") that move are placed here, one mesh drawn once for each from a matrix, an offset and a
+material slot of its own (draw's `copies`), where render3d merges them into one mesh each frame. That is for a model
+all of whose points nothing else needs: see render3d._placing.
+
 A stage's shadow map is drawn here too whenever models can be (sun_map): what casts, through a depth buffer along
 the key light. A model drawn here casts from the buffers it drew from; one Skia drew has its triangles sent.
 
@@ -63,11 +67,11 @@ noperspective out float v_fog;
 out vec3 v_n;
 flat out int v_mat;
 void main() {
-    vec4 h = u_m * vec4(in_pos, 1.0);
+    vec4 h = u_m * vec4(@pos, 1.0);
     gl_Position = vec4(h.x * u_px.x - h.w, h.w - h.y * u_px.y, h.w - 2.0 * NEAR, h.w);
-    v_n = u_n * in_nrm;
+    v_n = u_n * @nrm;
     v_n2 = normalize(v_n).xy;
-    v_mat = int(in_mat + 0.5);@set
+    v_mat = @mat;@set
     v_fog = u_fog.z > 0.0 ? floor(clamp((h.w * u_fog.w - u_fog.x) / u_fog.y, 0.0, 1.0) * u_fog.z * 255.0 + 0.5)
                             / 255.0 : 0.0;
 }
@@ -148,7 +152,8 @@ flat out float v_a;""", "\nuniform int u_pass;\nflat in float v_a;"), "set": """
     v_a = u_alpha[v_mat];
     if (u_pass == 0 && v_a < 1.0) {
         gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
-    }""", "fill": "b.rgb * ", "sum": "lit = diffuse + spec", "env": "lit", "show": """
+    }""", "pos": "in_pos", "nrm": "in_nrm", "mat": "int(in_mat + 0.5)", "fill": "b.rgb * ",
+          "sum": "lit = diffuse + spec", "env": "lit", "show": """
     if ((u_flags & 1) != 0) {
         lit = max(lit, b.rgb * u_glow[v_mat].a);
     }
@@ -181,7 +186,8 @@ vec4 picture(float unit, vec4 uv, vec2 dx, vec2 dy) {
     dx *= uv.xy * 0.70710678;  // half a mipmap level sharper, as Skia reads its mipmaps
     dy *= uv.xy * 0.70710678;
 PICK
-}""".rstrip("\n")), "set": "\n    v_uv = in_uv;", "fill": "", "sum": "add = spec", "env": "add", "show": """
+}""".rstrip("\n")), "set": "\n    v_uv = in_uv;", "pos": "in_pos", "nrm": "in_nrm", "mat": "int(in_mat + 0.5)",
+             "fill": "", "sum": "add = spec", "env": "add", "show": """
     if ((u_flags & 1) != 0) {
         diffuse = max(diffuse, vec3(u_glow[v_mat].a));
     }
@@ -202,6 +208,18 @@ PICK
         lit += e;
     }
 """.lstrip("\n"), "last": ""}
+# What places a model's copies, in either program: each copy's matrix (by columns) and offset, and the slot it takes
+# among those of a material whose fill the copies set. u_slot holds each material's first slot, and 1 where the
+# copies take their own after it.
+_COPIED = {"pos": "(mat3(i_a, i_b, i_c) * in_pos + i_off)", "nrm": "(mat3(i_a, i_b, i_c) * in_nrm)",
+           "mat": "int(u_slot[int(in_mat + 0.5)].x + u_slot[int(in_mat + 0.5)].y * i_q + 0.5)"}
+_COPIED_DECL = """
+in vec3 i_a;
+in vec3 i_b;
+in vec3 i_c;
+in vec3 i_off;
+in float i_q;
+uniform vec2 u_slot[MATS];"""
 _QUAD = """
 #version 330
 in vec2 in_xy;
@@ -385,6 +403,25 @@ def fits(mats, texs, glows, explode: float, edging) -> bool:
             and len({(id(tx[0]), tx[4]) for tx in shown}) <= UNITS)
 
 
+def copying(textured: bool) -> bool:
+    """Whether a model's copies can be placed here (draw's `copies`): the driver took the program that does it,
+    which is made the first time one is asked for."""
+    name = "tex" if textured else "shade"
+    if name + "_copies" not in _STATE:
+        fills, prog = _TEXTURED if textured else _PLAIN, None
+        if _STATE.get(name) is not None:
+            try:
+                prog = _program(_STATE["ctx"], {**fills, **_COPIED, "decl": (fills["decl"][0] + _COPIED_DECL,
+                                                                             fills["decl"][1])},
+                                TEX_MATS if textured else MATS)
+                if textured:
+                    prog["u_tex"].value = list(range(UNITS))
+            except Exception:  # noqa: BLE001 - then the copies are merged, as they were
+                prog = None
+        _STATE[name + "_copies"] = prog
+    return _STATE[name + "_copies"] is not None
+
+
 def _mat(a: np.ndarray) -> bytes:
     """Matrix a as GLSL reads one: by columns."""
     return np.ascontiguousarray(np.asarray(a, "f4").T).tobytes()
@@ -424,6 +461,7 @@ class _Buffers:
         self.built = None  # (order, ibo): the triangles in that build order
         self.uv = None  # the texture coordinates: a mesh's stay with its triangles
         self.picked = None  # a buffer for the triangles a frame picks (some)
+        self.placed = None  # a buffer for where a frame puts the mesh's copies (copies)
         self.arrays = {}  # (program, whether in build order): a vertex array
         self.dead = False
 
@@ -457,17 +495,39 @@ class _Buffers:
             if self.built is not None:
                 self.built[1].release()
             self.built = (order, ctx.buffer(np.ascontiguousarray(m.T[order], "i4").tobytes()))
-        if name == "tex" and self.uv is None:
-            # A mesh without texture coordinates shows the first texel of each picture, as it does on Skia.
-            uv = np.zeros((len(m.P), 2), "f4") if m.U is None else np.ascontiguousarray(m.U, "f4")
-            self.uv = ctx.buffer(uv.tobytes())
         key = (name, order is not None)
         if key not in self.arrays:
-            content = [(self.vbo, "3f 16x", "in_pos") if name == "sun" else
-                       (self.vbo, "3f 3f 1f", "in_pos", "in_nrm", "in_mat")]
-            if name == "tex":
-                content.append((self.uv, "2f", "in_uv"))
+            content = [(self.vbo, "3f 16x", "in_pos")] if name == "sun" else self._content(name, m)
             self.arrays[key] = ctx.vertex_array(_STATE[name], content, self.ibo if order is None else self.built[1])
+        return self.arrays[key]
+
+    def _content(self, name: str, m) -> list:
+        """What a vertex array for program `name` (shade or tex) reads of each vertex."""
+        content = [(self.vbo, "3f 3f 1f", "in_pos", "in_nrm", "in_mat")]
+        if name == "tex":
+            if self.uv is None:
+                # A mesh without texture coordinates shows the first texel of each picture, as it does on Skia.
+                uv = np.zeros((len(m.P), 2), "f4") if m.U is None else np.ascontiguousarray(m.U, "f4")
+                self.uv = _STATE["ctx"].buffer(uv.tobytes())
+            content.append((self.uv, "2f", "in_uv"))
+        return content
+
+    def copies(self, name: str, m, data: np.ndarray):
+        """A vertex array for the program that places copies for `name` (shade or tex) over all of m's triangles,
+        once for each row of data: a copy's matrix by columns, its offset and its slot (13 numbers), until the
+        next call."""
+        ctx, raw = _STATE["ctx"], np.ascontiguousarray(data, "f4").tobytes()
+        if self.placed is None or self.placed.size < len(raw):
+            self._drop(lambda k: k[1] == "copies")
+            if self.placed is not None:
+                self.placed.release()
+            self.placed = ctx.buffer(reserve=len(raw), dynamic=True)
+        self.placed.orphan()
+        self.placed.write(raw)
+        key = (name, "copies")
+        if key not in self.arrays:
+            content = self._content(name, m) + [(self.placed, "3f 3f 3f 3f 1f/i", "i_a", "i_b", "i_c", "i_off", "i_q")]
+            self.arrays[key] = ctx.vertex_array(_STATE[name + "_copies"], content, self.ibo)
         return self.arrays[key]
 
     def some(self, name: str, tris: np.ndarray):
@@ -485,7 +545,7 @@ class _Buffers:
 
     def release(self):
         for o in (*self.arrays.values(), self.ibo, self.vbo, *(self.built or ())[1:],
-                  *filter(None, [self.uv, self.picked])):
+                  *filter(None, [self.uv, self.picked, self.placed])):
             o.release()
         self.arrays = {}
         self.dead = True
@@ -661,6 +721,31 @@ def _see_through(r, L, m, T: np.ndarray, ids, mats) -> np.ndarray:
     return pick[np.argsort(-hom[:, 2][pick].sum(1), kind="stable")]
 
 
+def _corners(lo, hi) -> np.ndarray:
+    """The eight corners of the box from lo to hi."""
+    return np.array([[(lo, hi)[i >> k & 1][k] for k in range(3)] for i in range(8)])
+
+
+def _in_a_copy(eye: np.ndarray, P: np.ndarray, T: np.ndarray, lo, hi, copies: tuple) -> bool:
+    """Whether the point eye is inside the mesh (P, T, in the box lo to hi) as its copies place it: inside an odd
+    number of them, as render3d._within finds for copies merged into one mesh when each is closed."""
+    from .render3d import _within
+    turn, size, off = copies[:3]
+    ok = size != 0
+    e = ((eye - off[ok])[:, None, :] @ turn[ok])[:, 0, :] / size[ok][:, None]  # eye in each copy's own space
+    near = e[((e > lo) & (e < hi)).all(1)]
+    return sum(_within(q, P, T) for q in near) % 2 == 1
+
+
+def _depths(P: np.ndarray, copies: tuple, row: np.ndarray, k: float) -> np.ndarray:
+    """The least and the greatest of row . p + k over the points of every copy of the mesh with points P."""
+    turn, size, off = copies[:3]
+    along = P @ (row @ turn).T  # each point (down) along each copy's (across) own direction for row
+    lo, hi = along.min(0) * size, along.max(0) * size
+    base = off @ row + k
+    return np.array([(np.minimum(lo, hi) + base).min(), (np.maximum(lo, hi) + base).max()])
+
+
 def _shown(sh, looks, units: list, where: list):
     """Set the textured program for the pictures of _pictures: each material's tint, unit, repeat and offset."""
     for txs, at, tint, uv in zip(looks, where, ("u_look", "u_shine"), ("u_uv", "u_suv")):
@@ -678,13 +763,17 @@ def _shown(sh, looks, units: list, where: list):
     _set(sh, "u_fold", fold.tobytes())
 
 
-def draw(r, c: skia.Canvas, L, m, mats, lights, fg, edging, amt: float, order, tracked: bool = False, looks=None):
+def draw(r, c: skia.Canvas, L, m, mats, lights, fg, edging, amt: float, order, tracked: bool = False, looks=None,
+         copies=None):
     """Draw model L (mesh m, materials mats, lights (key, more, env), fog fg, edges as render3d._edging gives them,
     the first amt of its triangles in build order `order`) on canvas c as render3d.draw would. Returns its projected
     bounds in device pixels, or None. tracked: render3d.draw has worked out what a tracked render reports (the
     model's box, shadow casters, focus reach, and whether the camera is inside it, cuts it or the fog hides it), so
     only the pixels are drawn here. looks: each material's texture and each one's emission texture, as
-    render3d.model gives them, for a model that has any."""
+    render3d.model gives them, for a model that has any. copies: m is one copy of the model, drawn whole once for
+    each of these (render3d._placing): each one's turn (a matrix, n of them), size and offset, then each material's
+    slots (or None: its own) and each copy's among them (or None). The bounds are then of a box round the copies'
+    boxes, which can be wider than the model."""
     from . import render3d
     T = m.T if amt >= 1.0 else m.T[order[:math.ceil(amt * len(m.T))]]
     P = m.P
@@ -692,10 +781,14 @@ def draw(r, c: skia.Canvas, L, m, mats, lights, fg, edging, amt: float, order, t
     if not len(T):
         return None
     view = np.linalg.inv(r._lens) @ r._m3d
-    lo3, hi3 = render3d._fixed(r, L, m, "box", lambda: (P.min(0), P.max(0)))
+    lo3, hi3 = own = render3d._fixed(r, L, m, "box", lambda: (P.min(0), P.max(0)))
+    if copies is not None:
+        each = _corners(*own) @ (copies[0] * copies[1][:, None, None]).transpose(0, 2, 1) + copies[2][:, None, :]
+        lo3, hi3 = each.min((0, 1)), each.max((0, 1))
     if not tracked:
         eye = np.linalg.solve(view, [0.0, 0.0, -1.0 / r._lens[3, 2], 1.0])[:3]
-        if (eye > lo3).all() and (eye < hi3).all() and render3d._within(eye, P, T):
+        if (eye > lo3).all() and (eye < hi3).all() and (
+                render3d._within(eye, P, T) if copies is None else _in_a_copy(eye, P, T, *own, copies)):
             r.inside.add(L.id)
         if r._stage is not None and r._stage.casters is not None:
             # The shadow map draws these triangles from the buffers this draw fills, while they still hold them.
@@ -704,14 +797,17 @@ def draw(r, c: skia.Canvas, L, m, mats, lights, fg, edging, amt: float, order, t
     # The box's corners bound where the mesh can be on screen while all of them are ahead of the camera (w is
     # linear, and a box seen in perspective covers its corners' outline). These bounds place the passes; check and
     # --boxes take the model's box from render3d.draw.
-    box = np.array([[(lo3, hi3)[i >> k & 1][k] for k in range(3)] for i in range(8)])
+    box = _corners(lo3, hi3)
     hom = box @ r._m3d[:3, :3].T + r._m3d[:3, 3]
     w = box @ r._m3d[3, :3] + r._m3d[3, 3]
     ahead = w.min() >= space.NEAR
     if not ahead or fg is not None or (r._focused is not None and not tracked):  # these need each vertex's w
-        wv = P @ r._m3d[3, :3] + r._m3d[3, 3]
-        if amt < 1.0:
-            wv = wv[np.unique(T)]
+        if copies is not None:
+            wv = _depths(P, copies, r._m3d[3, :3], r._m3d[3, 3])
+        else:
+            wv = P @ r._m3d[3, :3] + r._m3d[3, 3]
+            if amt < 1.0:
+                wv = wv[np.unique(T)]
         if wv.max() < space.NEAR:
             return None
         if wv.min() < space.NEAR and not tracked:
@@ -747,17 +843,28 @@ def draw(r, c: skia.Canvas, L, m, mats, lights, fg, edging, amt: float, order, t
     bx0, bx1 = max(0, x0 * ss - reach), min(W, x1 * ss + reach)  # the first pass's box: the second's, and its taps
     by0, by1 = max(0, H - y1 * ss - reach), min(H, H - y0 * ss + reach)
     glass = T[:0]  # the triangles of see-through materials: a textured model draws solid, as on Skia
+    name, most = ("shade", MATS) if looks is None else ("tex", TEX_MATS)
+    sh = _STATE[name if copies is None else name + "_copies"]
     if looks is None:
-        sh, units = _STATE["shade"], []
+        units = []
         _uniforms(sh, MATS, r, mats, lights, fg, view, ss, W, H)
         _set(sh, "u_alpha", np.array([mt[8] for mt in mats] + [1.0] * (MATS - len(mats)), "f4").tobytes())
         _set(sh, "u_pass", 0)
-        glass = _see_through(r, L, m, T, slice(None) if amt >= 1.0 else order[:len(T)], mats)
+        if copies is None:  # copies placed here have no see-through material
+            glass = _see_through(r, L, m, T, slice(None) if amt >= 1.0 else order[:len(T)], mats)
     else:
-        sh = _STATE["tex"]
         units, where = _pictures(r, L, *looks)
         _uniforms(sh, TEX_MATS, r, mats, lights, fg, view, ss, W, H, any(g is not None for g in looks[1]))
         _shown(sh, looks, units, where)
+    if copies is not None:
+        turn, size, off, slots, pick = copies
+        slot = np.zeros((most, 2), "f4")
+        slot[:, 0] = np.arange(most)
+        if slots is not None:
+            slot[:len(slots), 0], slot[:len(slots), 1] = slots[:, 0], slots[:, -1] != slots[:, 0]
+        _set(sh, "u_slot", slot.tobytes())
+        placed = np.concatenate([(turn * size[:, None, None]).transpose(0, 2, 1).reshape(-1, 9), off,
+                                 (np.zeros(len(off)) if pick is None else pick)[:, None]], 1)
     first = tg["first"]
     first.viewport = (0, 0, W, H)
     first.scissor = (bx0, by0, bx1 - bx0, by1 - by0)
@@ -770,8 +877,10 @@ def draw(r, c: skia.Canvas, L, m, mats, lights, fg, edging, amt: float, order, t
     for k, (tex, tile) in enumerate(units):
         tex.use(k)
         _tiled(tile).use(k)
-    buf.array("shade" if looks is None else "tex", m, None if amt >= 1.0 else order).render(mgl.TRIANGLES,
-                                                                                          vertices=3 * len(T))
+    if copies is not None:
+        buf.copies(name, m, placed).render(mgl.TRIANGLES, vertices=3 * len(T), instances=len(placed))
+    else:
+        buf.array(name, m, None if amt >= 1.0 else order).render(mgl.TRIANGLES, vertices=3 * len(T))
     if len(glass):
         some = buf.some("shade", glass)
         staged = r._stage is not None and r._stage.child is L  # a stage merges by the nearest surface's depth

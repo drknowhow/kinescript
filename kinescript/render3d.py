@@ -821,6 +821,13 @@ def model(r, L, g, t: float = 0.0, T: float = 0.0, grow: float = 1.0) -> tuple[m
     """The model's mesh in its own space at its time t (scene time T), its materials, and each material's texture
     and emission texture (a model file's) or None. "texture": false on the layer turns both off. A tube shape
     draws the first `grow` share of its length."""
+    m, mats, texs, glows, plan = _model(r, L, g, t, T, grow)
+    return (m if plan is None else _merged(r, L, plan)), mats, texs, glows
+
+
+def _model(r, L, g, t: float, T: float, grow: float) -> tuple:
+    """As model, with what places the model's copies (_plan) or None: then the mesh is one copy's, to merge
+    (_merged) or to hand to OpenGL with where they go (_placing)."""
     parts, keys = _parts(r, L, t, T)
     shape = L.raw.get("shape")
     meshes = [] if parts is None else [parts]
@@ -849,13 +856,14 @@ def model(r, L, g, t: float = 0.0, T: float = 0.0, grow: float = 1.0) -> tuple[m
         m = hit[1]
     if L.raw.get("cut"):
         m, keys = _cut(r, L, m, keys, t, T)
+    plan = None
     if L.copies is not None:
-        m, keys = _copies(r, L, m, keys, t, T)
+        keys, plan = _plan(r, L, m, keys, t, T)
     accent = r.s.theme.get("accent", "#ff633f")
     root = lambda k, d=None: g(k, accent if k == "fill" and d is None else d)  # noqa: E731
     mats = [_material(lambda k, d=None, o=o: o.get(k, root(k, d)), o.get("emit")) for o in keys]
     glows = [_texture(r, o.get("emitTexture")) if L.raw.get("texture") is not False else None for o in keys]
-    return m, mats, [_texture(r, o.get("texture", L.raw.get("texture")), L, t, T) for o in keys], glows
+    return m, mats, [_texture(r, o.get("texture", L.raw.get("texture")), L, t, T) for o in keys], glows, plan
 
 
 def _cut(r, L, m, keys: list, t: float, T: float) -> tuple[mesh.Mesh, list]:
@@ -888,13 +896,13 @@ def _caps(r, L, m) -> np.ndarray | None:
     return caps
 
 
-def _copies(r, L, m, keys: list, t: float, T: float) -> tuple[mesh.Mesh, list]:
-    """The model's copies ("repeat") at its time t (scene time T): mesh m placed once for each and merged, so they
-    sort as one model, and its materials keys with one for each copy fill in place of each without a fill of its
-    own, which that copy takes as it would the layer's fill. The mesh is kept while m and the copies' values hold;
-    its triangles while m's do, so moving copies keep them."""
+def _plan(r, L, m, keys: list, t: float, T: float) -> tuple[list, tuple]:
+    """The model's copies ("repeat") at its time t (scene time T): its materials keys with one for each copy fill in
+    place of each without a fill of its own, which that copy takes as it would the layer's fill, and what places
+    the copies: the mesh m copied, each placing key's values, each material's slots among the new ones (or None:
+    its own) and each copy's among a material's (or None)."""
     cols, fills = L.copied(t, T)
-    n, free = L.copies.n, [s for s, o in enumerate(keys) if "fill" not in o]
+    free = [s for s, o in enumerate(keys) if "fill" not in o]
     q = slot = None
     if fills is not None and free:
         most = max(1, (COPY_SLOTS - len(keys) + len(free)) // len(free))
@@ -907,15 +915,31 @@ def _copies(r, L, m, keys: list, t: float, T: float) -> tuple[mesh.Mesh, list]:
             slot[s] = len(out) + (np.arange(len(colours)) if s in free else 0)
             out += [dict(o, fill=c) for c in colours] if s in free else [o]
         keys = out
-    vals = list(cols.values()) + [q]
+    return keys, (m, cols, slot, q)
+
+
+def _placing(L, plan: tuple) -> tuple:
+    """Where plan (_plan) puts each of the model's copies: its turn (a matrix that takes a point of the mesh
+    round, n of them), its size and its offset; then the plan's slots."""
+    cols, n = plan[1], L.copies.n
+    A = {k: np.asarray(cols[k], float) if k in cols else np.full(n, PLACE_DEFAULT[k]) for k in PLACE}
+    return (_turns(A["rotateX"], A["rotateY"], A["rotate"]), A["scale"], np.stack([A["x"], A["y"], A["z"]], 1),
+            *plan[2:])
+
+
+def _merged(r, L, plan: tuple) -> mesh.Mesh:
+    """The model's copies as plan (_plan) places them: its mesh placed once for each and merged, so they sort as
+    one model. The mesh is kept while the one copied and the copies' values hold; its triangles while the one
+    copied keeps its own, so moving copies keep them."""
+    m, cols, slot, q = plan
+    n, vals = L.copies.n, list(cols.values()) + [q]
     hit = r._models.get(("copies", L.id))
     if hit is not None and hit[0] is m and len(hit[1]) == len(vals) and all(
             a is b or (a is not None and b is not None and np.array_equal(a, b)) for a, b in zip(hit[1], vals)):
-        return hit[2], keys
-    A = {k: np.asarray(cols[k], float) if k in cols else np.full(n, PLACE_DEFAULT[k]) for k in PLACE}
-    R = _turns(A["rotateX"], A["rotateY"], A["rotate"]).transpose(0, 2, 1)
-    s = A["scale"][:, None, None]
-    P = (m.P @ R) * s + np.stack([A["x"], A["y"], A["z"]], 1)[:, None, :]
+        return hit[2]
+    turn, size, off = _placing(L, plan)[:3]
+    R, s = turn.transpose(0, 2, 1), size[:, None, None]
+    P = (m.P @ R) * s + off[:, None, :]
     N = (m.N @ R) * np.where(s < 0, -1.0, 1.0)  # a mirrored copy's normals turn round with it
     if hit is not None and hit[0] is m:  # the same mesh copied: the same triangles
         Tn, U = hit[2].T, hit[2].U
@@ -925,7 +949,21 @@ def _copies(r, L, m, keys: list, t: float, T: float) -> tuple[mesh.Mesh, list]:
     M = np.tile(m.M, n) if q is None else slot[m.M[None, :], q[:, None]].ravel()
     merged = mesh.Mesh(P.reshape(-1, 3), N.reshape(-1, 3), Tn, M.astype(np.int32), U)
     r._models[("copies", L.id)] = (m, vals, merged)
-    return merged, keys
+    return merged
+
+
+def _placed_by_gl(r, L, mats, looks, amt: float) -> bool:
+    """Whether OpenGL places the model's copies (gl3d.draw's `copies`) instead of drawing them merged: copies that
+    move, all of them drawn, of a model whose merged points nothing else needs. Those are needed to sort
+    see-through triangles, to draw the model in part, for its ground shadow, for a stage's shadow map, for what
+    the camera's focus reaches, for where a point light stands, and by check and --boxes."""
+    specs = L.raw["lights"] if "lights" in L.raw else r.s.lights
+    return (L.copies.moves() and amt >= 1.0 and not r.track and r._focused is None
+            and (looks is not None or all(mt[8] >= 1 for mt in mats))
+            and L.raw.get("ground") in (None, False) and (r._stage is None or r._stage.casters is None)
+            and not any(isinstance(sp, dict) and sp.get("type") == "point"
+                        for sp in ([specs] if isinstance(specs, dict) else specs or []))
+            and gl3d.copying(looks is not None))
 
 
 def _turns(rx, ry, rz) -> np.ndarray:
@@ -1508,17 +1546,23 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
     in device pixels, or None."""
     amt = max(0.0, min(1.0, float(g("draw")) * reveal))
     grows = L.raw.get("shape") == "tube" and not L.src  # a tube is drawn along its length, not bottom to top
-    m, mats, texs, glows = model(r, L, g, t, scene_t, amt if grows else 1.0)
+    m, mats, texs, glows, plan = _model(r, L, g, t, scene_t, amt if grows else 1.0)
     amt = 1.0 if grows else amt
-    lt, more, env = _lighting(r, L, m, t, scene_t)
     fg = fog(r, scene_t) if r._stage is None else None  # a stage fogs each pixel it shows
     edging = _edging(r, L, t, scene_t)
     ex = float(g("explode", 0.0))
     on_gl = gl3d.available(r) and gl3d.fits(mats, texs, glows, ex, edging)
     looks = (texs, glows) if any(tx is not None for tx in texs + glows) else None  # what gl3d.draw shows
+    copies = None
+    if plan is not None:
+        if on_gl and _placed_by_gl(r, L, mats, looks, amt):
+            copies = _placing(L, plan)
+        else:
+            m = _merged(r, L, plan)
+    lt, more, env = _lighting(r, L, m, t, scene_t)
     if on_gl and not r.track:
         order = _fixed(r, L, m, "order", lambda: mesh.build_order(m)) if amt < 1.0 else None
-        return gl3d.draw(r, c, L, m, mats, (lt, more, env), fg, edging, amt, order, looks=looks)
+        return gl3d.draw(r, c, L, m, mats, (lt, more, env), fg, edging, amt, order, looks=looks, copies=copies)
     P, N, T, M = m.P, m.N, m.T, m.M
     U = None  # texture coordinates, when any material has a texture (a file without them: check says no-uvs)
     if any(tx is not None for tx in texs + glows):
