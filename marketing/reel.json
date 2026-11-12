@@ -1,0 +1,1531 @@
+{
+ "canvas": {
+  "w": 1920,
+  "h": 1080,
+  "fps": 30,
+  "duration": 32,
+  "bg": "#0a0c10",
+  "poster": 5.2
+ },
+ "grade": {
+  "vignette": 0.3,
+  "grain": 0.03
+ },
+ "camera": {
+  "rotateX": [
+   [
+    0,
+    0.0
+   ],
+   [
+    2.99,
+    0.0
+   ],
+   [
+    3,
+    14
+   ],
+   [
+    6.99,
+    10,
+    "inOutSine"
+   ],
+   [
+    6.99,
+    10
+   ],
+   [
+    7,
+    0
+   ],
+   [
+    9.99,
+    0,
+    "inOutSine"
+   ],
+   [
+    32,
+    0
+   ]
+  ],
+  "rotateY": [
+   [
+    0,
+    0.0
+   ],
+   [
+    2.99,
+    0.0
+   ],
+   [
+    3,
+    -26
+   ],
+   [
+    6.99,
+    18,
+    "inOutSine"
+   ],
+   [
+    6.99,
+    18
+   ],
+   [
+    7,
+    0
+   ],
+   [
+    9.99,
+    0,
+    "inOutSine"
+   ],
+   [
+    32,
+    0
+   ]
+  ],
+  "y": [
+   [
+    0,
+    0.0
+   ],
+   [
+    2.99,
+    0.0
+   ],
+   [
+    3,
+    -30
+   ],
+   [
+    6.99,
+    -10,
+    "inOutSine"
+   ],
+   [
+    6.99,
+    -10
+   ],
+   [
+    7,
+    0
+   ],
+   [
+    9.99,
+    0,
+    "inOutSine"
+   ],
+   [
+    32,
+    0
+   ]
+  ],
+  "z": [
+   [
+    0,
+    0.0
+   ],
+   [
+    2.99,
+    0.0
+   ],
+   [
+    3,
+    260
+   ],
+   [
+    6.99,
+    40,
+    "inOutSine"
+   ],
+   [
+    6.99,
+    40
+   ],
+   [
+    7,
+    160
+   ],
+   [
+    9.99,
+    0,
+    "inOutSine"
+   ],
+   [
+    32,
+    0
+   ]
+  ]
+ },
+ "light": {
+  "preset": "studio",
+  "follow": "world",
+  "azimuth": -40,
+  "elevation": 42
+ },
+ "env": "studio",
+ "audio": [
+  {
+   "id": "bed",
+   "role": "music",
+   "src": "sound/bed.m4a",
+   "until": "end",
+   "fadeIn": 0.5,
+   "fadeOut": 2.0
+  }
+ ],
+ "layers": [
+  {
+   "id": "bg",
+   "type": "shader",
+   "preset": "score",
+   "opacity": 0.8,
+   "fixed": true,
+   "uniforms": {
+    "base": "#0a0c10",
+    "line": "#242832",
+    "mark": "#9299a8"
+   }
+  },
+  {
+   "id": "open",
+   "type": "group",
+   "at": 0,
+   "dur": 3,
+   "fixed": true,
+   "children": [
+    {
+     "id": "lock-bar",
+     "type": "path",
+     "d": "M555.1 425.0 L555.1 575.0",
+     "stroke": "#f2f0e8",
+     "strokeWidth": 21.09375,
+     "at": 0.2,
+     "enter": {
+      "name": "draw",
+      "dur": 0.3,
+      "ease": "outQuart"
+     }
+    },
+    {
+     "id": "lock-arms",
+     "type": "path",
+     "d": "M670.0 425.0 C 631.3 425.0 631.3 500.0 592.6 500.0 C 631.3 500.0 631.3 575.0 670.0 575.0",
+     "stroke": "#f2f0e8",
+     "strokeWidth": 21.09375,
+     "at": 0.42000000000000004,
+     "enter": {
+      "name": "draw",
+      "dur": 0.5
+     }
+    },
+    {
+     "id": "lock-cue",
+     "type": "circle",
+     "x": 592.6171875,
+     "y": 500.0,
+     "r": 19.921875,
+     "fill": "#ff633f",
+     "at": 0.7,
+     "enter": {
+      "name": "pop",
+      "dur": 0.28,
+      "from": 0.2
+     }
+    },
+    {
+     "id": "lock-word",
+     "type": "text",
+     "text": "kinescript",
+     "x": 723.8671875,
+     "y": 516.40625,
+     "anchor": "left",
+     "align": "left",
+     "size": 150,
+     "weight": 700,
+     "letterSpacing": -3.515625,
+     "split": "chars",
+     "at": 0.8200000000000001,
+     "enter": {
+      "name": "snap",
+      "dur": 0.22,
+      "stagger": 0.028
+     }
+    },
+    {
+     "id": "tag",
+     "type": "text",
+     "text": "Video you can **diff.**",
+     "x": 960,
+     "y": 690,
+     "size": 52,
+     "weight": 500,
+     "emph": "#b9f45d",
+     "at": 1.25,
+     "enter": {
+      "name": "snap",
+      "dur": 0.3
+     },
+     "sound": {
+      "src": "sound/pop.wav",
+      "gain": -6
+     }
+    }
+   ]
+  },
+  {
+   "id": "stage",
+   "type": "group",
+   "at": 3,
+   "dur": 4,
+   "fixed": false,
+   "children": [
+    {
+     "id": "stage-set",
+     "type": "group",
+     "x": "50%",
+     "y": "54%",
+     "sort": "pixel",
+     "shadows": {
+      "opacity": 0.55,
+      "soft": 4
+     },
+     "children": [
+      {
+       "id": "floor",
+       "type": "rect",
+       "y": 261,
+       "z": -1400,
+       "w": 5200,
+       "h": 4000,
+       "rotateX": 90,
+       "fill": "#1d2129"
+      },
+      {
+       "id": "table",
+       "type": "model",
+       "shape": "cylinder",
+       "r": 300,
+       "h": 24,
+       "y": 249,
+       "fill": "#e8e2d4",
+       "shine": 0.25,
+       "rotateY": [
+        [
+         0,
+         0
+        ],
+        [
+         "end",
+         160
+        ]
+       ]
+      },
+      {
+       "id": "can",
+       "type": "model",
+       "src": "../examples/media/can.glb",
+       "h": 470,
+       "rotateY": [
+        [
+         0,
+         -40
+        ],
+        [
+         "end",
+         130
+        ]
+       ],
+       "enter": {
+        "name": "build",
+        "dur": 0.9
+       }
+      },
+      {
+       "id": "can-l",
+       "type": "model",
+       "src": "../examples/media/can.glb",
+       "h": 470,
+       "x": -620,
+       "y": 26,
+       "z": -1900,
+       "rotateY": 40
+      },
+      {
+       "id": "can-r",
+       "type": "model",
+       "src": "../examples/media/can.glb",
+       "h": 470,
+       "x": 900,
+       "y": 26,
+       "z": -2200,
+       "rotateY": -70
+      }
+     ]
+    }
+   ],
+   "sound": {
+    "src": "sound/whoosh.wav",
+    "at": "in-0.15",
+    "gain": -14,
+    "pan": 0.2
+   }
+  },
+  {
+   "id": "stage-cap",
+   "type": "group",
+   "at": 3,
+   "dur": 4,
+   "fixed": true,
+   "children": [
+    {
+     "id": "stage-head",
+     "type": "text",
+     "text": "Lit 3D, with shadows.",
+     "x": 160,
+     "y": 150,
+     "anchor": "left",
+     "align": "left",
+     "size": 60,
+     "weight": 700,
+     "at": 0.15,
+     "enter": {
+      "name": "left",
+      "dur": 0.32,
+      "dist": 28,
+      "ease": "outQuart"
+     },
+     "fixed": true
+    },
+    {
+     "id": "stage-key",
+     "type": "text",
+     "text": "{\"type\": \"model\", \"src\": \"**can.glb**\"}",
+     "x": 162,
+     "y": 214,
+     "anchor": "left",
+     "align": "left",
+     "font": "IBM Plex Mono",
+     "size": 30,
+     "weight": 500,
+     "fill": "#9299a8",
+     "emph": "#b9f45d",
+     "at": 0.35,
+     "enter": {
+      "name": "fade",
+      "dur": 0.25
+     },
+     "fixed": true
+    }
+   ]
+  },
+  {
+   "id": "cell",
+   "type": "group",
+   "at": 7,
+   "dur": 3,
+   "fixed": false,
+   "children": [
+    {
+     "id": "cellm",
+     "type": "model",
+     "x": "50%",
+     "y": "56%",
+     "rotateX": -24,
+     "rotateY": [
+      [
+       0,
+       -70
+      ],
+      [
+       "end",
+       -34,
+       "outCubic"
+      ]
+     ],
+     "bands": 3,
+     "edges": {
+      "width": [
+       [
+        0,
+        0
+       ],
+       [
+        0.6,
+        2.5
+       ]
+      ],
+      "color": "#20202a",
+      "angle": 50
+     },
+     "cut": {
+      "from": "front",
+      "at": [
+       [
+        0.4,
+        0
+       ],
+       [
+        1.6,
+        0.5,
+        "inOutCubic"
+       ]
+      ],
+      "cap": "#fbe3c8"
+     },
+     "enter": {
+      "name": "build",
+      "dur": 0.6
+     },
+     "sound": {
+      "src": "sound/whoosh.wav",
+      "at": "in+0.4",
+      "gain": -8
+     },
+     "parts": [
+      {
+       "shape": "sphere",
+       "r": 270,
+       "fill": "#e88a6a"
+      },
+      {
+       "shape": "sphere",
+       "r": 105,
+       "fill": "#7a5cc8",
+       "x": 50,
+       "y": -25
+      },
+      {
+       "shape": "torus",
+       "r": 78,
+       "tube": 24,
+       "fill": "#3aa37a",
+       "x": -115,
+       "y": 105,
+       "rotateX": 60
+      },
+      {
+       "shape": "capsule",
+       "r": 26,
+       "h": 120,
+       "fill": "#e9c46a",
+       "x": 120,
+       "y": 120,
+       "rotate": 40
+      }
+     ]
+    }
+   ],
+   "sound": {
+    "src": "sound/whoosh.wav",
+    "at": "in-0.15",
+    "gain": -14,
+    "pan": 0.2
+   }
+  },
+  {
+   "id": "cell-cap",
+   "type": "group",
+   "at": 7,
+   "dur": 3,
+   "fixed": true,
+   "children": [
+    {
+     "id": "cell-head",
+     "type": "text",
+     "text": "Cut it open.",
+     "x": 160,
+     "y": 150,
+     "anchor": "left",
+     "align": "left",
+     "size": 60,
+     "weight": 700,
+     "at": 0.15,
+     "enter": {
+      "name": "left",
+      "dur": 0.32,
+      "dist": 28,
+      "ease": "outQuart"
+     },
+     "fixed": true
+    },
+    {
+     "id": "cell-key",
+     "type": "text",
+     "text": "\"cut\": {\"from\": \"front\", \"at\": **0.5**}",
+     "x": 162,
+     "y": 214,
+     "anchor": "left",
+     "align": "left",
+     "font": "IBM Plex Mono",
+     "size": 30,
+     "weight": 500,
+     "fill": "#9299a8",
+     "emph": "#b9f45d",
+     "at": 0.35,
+     "enter": {
+      "name": "fade",
+      "dur": 0.25
+     },
+     "fixed": true
+    }
+   ]
+  },
+  {
+   "id": "type",
+   "type": "group",
+   "at": 10,
+   "dur": 3,
+   "fixed": true,
+   "children": [
+    {
+     "id": "word",
+     "type": "text",
+     "text": "Every letter on a cue.",
+     "x": 960,
+     "y": 560,
+     "size": 150,
+     "weight": 700,
+     "letterSpacing": -3,
+     "split": "chars",
+     "at": 0.2,
+     "enter": {
+      "name": "snap",
+      "dur": 0.22,
+      "stagger": 0.03
+     },
+     "unitY": "=sin(T*4 + i*0.55) * 10",
+     "unitFill": "=mix('#f2f0e8', '#b9f45d', sweep(i, n, clamp((t-1.4)/1.2, 0, 1), 3))"
+    },
+    {
+     "id": "word-rule",
+     "type": "line",
+     "points": [
+      [
+       -640,
+       0
+      ],
+      [
+       640,
+       0
+      ]
+     ],
+     "x": 960,
+     "y": 660,
+     "stroke": "#242832",
+     "strokeWidth": 6,
+     "at": 0.1,
+     "enter": {
+      "name": "draw",
+      "dur": 0.35,
+      "ease": "outQuart"
+     }
+    },
+    {
+     "id": "type-head",
+     "type": "text",
+     "text": "Type that moves.",
+     "x": 160,
+     "y": 150,
+     "anchor": "left",
+     "align": "left",
+     "size": 60,
+     "weight": 700,
+     "at": 0.15,
+     "enter": {
+      "name": "left",
+      "dur": 0.32,
+      "dist": 28,
+      "ease": "outQuart"
+     },
+     "fixed": true
+    },
+    {
+     "id": "type-key",
+     "type": "text",
+     "text": "\"split\": \"**chars**\"",
+     "x": 162,
+     "y": 214,
+     "anchor": "left",
+     "align": "left",
+     "font": "IBM Plex Mono",
+     "size": 30,
+     "weight": 500,
+     "fill": "#9299a8",
+     "emph": "#b9f45d",
+     "at": 0.35,
+     "enter": {
+      "name": "fade",
+      "dur": 0.25
+     },
+     "fixed": true
+    }
+   ],
+   "sound": {
+    "src": "sound/whoosh.wav",
+    "at": "in-0.15",
+    "gain": -14,
+    "pan": 0.2
+   }
+  },
+  {
+   "id": "charts",
+   "type": "group",
+   "at": 13,
+   "dur": 3,
+   "fixed": true,
+   "children": [
+    {
+     "use": "barChart",
+     "id": "bars",
+     "x": 640,
+     "y": 640,
+     "w": 760,
+     "h": 480,
+     "size": 28,
+     "valueSize": 34,
+     "data": [
+      [
+       "Q1",
+       42
+      ],
+      [
+       "Q2",
+       58
+      ],
+      [
+       "Q3",
+       91
+      ],
+      [
+       "Q4",
+       64
+      ]
+     ],
+     "highlight": "Q3",
+     "at": 0.3
+    },
+    {
+     "use": "lineChart",
+     "id": "line",
+     "x": 1380,
+     "y": 640,
+     "w": 640,
+     "h": 400,
+     "size": 28,
+     "color": "$key",
+     "data": [
+      [
+       "Mon",
+       12
+      ],
+      [
+       "Tue",
+       19
+      ],
+      [
+       "Wed",
+       15
+      ],
+      [
+       "Thu",
+       27
+      ],
+      [
+       "Fri",
+       34
+      ]
+     ],
+     "at": 0.6
+    },
+    {
+     "id": "charts-head",
+     "type": "text",
+     "text": "Charts from numbers.",
+     "x": 160,
+     "y": 150,
+     "anchor": "left",
+     "align": "left",
+     "size": 60,
+     "weight": 700,
+     "at": 0.15,
+     "enter": {
+      "name": "left",
+      "dur": 0.32,
+      "dist": 28,
+      "ease": "outQuart"
+     },
+     "fixed": true
+    },
+    {
+     "id": "charts-key",
+     "type": "text",
+     "text": "\"data\": [[\"Q1\", **42**], [\"Q2\", **58**], ...]",
+     "x": 162,
+     "y": 214,
+     "anchor": "left",
+     "align": "left",
+     "font": "IBM Plex Mono",
+     "size": 30,
+     "weight": 500,
+     "fill": "#9299a8",
+     "emph": "#b9f45d",
+     "at": 0.35,
+     "enter": {
+      "name": "fade",
+      "dur": 0.25
+     },
+     "fixed": true
+    }
+   ],
+   "sound": {
+    "src": "sound/whoosh.wav",
+    "at": "in-0.15",
+    "gain": -14,
+    "pan": 0.2
+   }
+  },
+  {
+   "id": "talk",
+   "type": "group",
+   "at": 16,
+   "dur": 5,
+   "fixed": true,
+   "children": [
+    {
+     "id": "host",
+     "use": "avatar",
+     "avatar": "kine:host",
+     "x": "30%",
+     "y": "60%",
+     "h": 860,
+     "at": 0.1,
+     "say": {
+      "text": "Write a [[line]]line, and I [[say]]say it.",
+      "speaker": "am_michael",
+      "at": "talk.in+0.6"
+     },
+     "expressions": [
+      {
+       "name": "smile",
+       "at": "host-say.in",
+       "dur": 1.2
+      },
+      {
+       "name": "happy",
+       "at": "host-say:say"
+      }
+     ],
+     "gaze": [
+      {
+       "at": 0,
+       "target": "camera"
+      }
+     ],
+     "gestures": [
+      {
+       "name": "wave",
+       "at": "host-say.in"
+      },
+      {
+       "name": "nod",
+       "at": "host-say:say"
+      }
+     ]
+    },
+    {
+     "id": "host-cc",
+     "type": "captions",
+     "voice": "host-say",
+     "mode": "karaoke",
+     "active": "#b9f45d",
+     "size": 44,
+     "x": "30%",
+     "y": "90%",
+     "maxWidth": 760,
+     "box": {
+      "fill": "#0a0c10d8",
+      "pad": [
+       12,
+       22
+      ],
+      "radius": 10
+     }
+    },
+    {
+     "id": "maya",
+     "type": "video",
+     "src": "../site/demos/avatar-maya.mp4",
+     "trim": [
+      4.9,
+      7.5
+     ],
+     "volume": 0,
+     "anchor": "center",
+     "x": 1400,
+     "y": 430,
+     "w": 640,
+     "h": 360,
+     "radius": 14,
+     "shadow": {
+      "y": 12,
+      "blur": 30,
+      "color": "#00000088"
+     },
+     "at": 2.5,
+     "enter": {
+      "name": "pop",
+      "dur": 0.35,
+      "from": 0.85
+     },
+     "sound": {
+      "src": "sound/pop.wav",
+      "gain": -10
+     }
+    },
+    {
+     "id": "rin",
+     "type": "video",
+     "src": "../site/demos/avatar-rin.mp4",
+     "trim": [
+      4.7,
+      7.300000000000001
+     ],
+     "volume": 0,
+     "anchor": "center",
+     "x": 1400,
+     "y": 810,
+     "w": 640,
+     "h": 360,
+     "radius": 14,
+     "shadow": {
+      "y": 12,
+      "blur": 30,
+      "color": "#00000088"
+     },
+     "at": 2.75,
+     "enter": {
+      "name": "pop",
+      "dur": 0.35,
+      "from": 0.85
+     },
+     "sound": {
+      "src": "sound/pop.wav",
+      "gain": -10
+     }
+    },
+    {
+     "id": "host-head",
+     "type": "text",
+     "text": "Characters that talk.",
+     "x": 160,
+     "y": 150,
+     "anchor": "left",
+     "align": "left",
+     "size": 60,
+     "weight": 700,
+     "at": 0.15,
+     "enter": {
+      "name": "left",
+      "dur": 0.32,
+      "dist": 28,
+      "ease": "outQuart"
+     },
+     "fixed": true
+    },
+    {
+     "id": "host-key",
+     "type": "text",
+     "text": "\"say\": {\"text\": \"**Write a line**\"}",
+     "x": 162,
+     "y": 214,
+     "anchor": "left",
+     "align": "left",
+     "font": "IBM Plex Mono",
+     "size": 30,
+     "weight": 500,
+     "fill": "#9299a8",
+     "emph": "#b9f45d",
+     "at": 0.35,
+     "enter": {
+      "name": "fade",
+      "dur": 0.25
+     },
+     "fixed": true
+    }
+   ],
+   "sound": {
+    "src": "sound/whoosh.wav",
+    "at": "in-0.15",
+    "gain": -14,
+    "pan": 0.2
+   }
+  },
+  {
+   "id": "brands",
+   "type": "group",
+   "at": 21,
+   "dur": 3,
+   "fixed": true,
+   "children": [
+    {
+     "id": "light",
+     "type": "video",
+     "src": "../site/demos/brand-tidewater.mp4",
+     "trim": [
+      1.5,
+      4.5
+     ],
+     "volume": 0,
+     "anchor": "center",
+     "x": 540,
+     "y": 600,
+     "w": 768,
+     "h": 432,
+     "radius": 14,
+     "shadow": {
+      "y": 12,
+      "blur": 30,
+      "color": "#00000088"
+     },
+     "at": 0.3,
+     "enter": {
+      "name": "pop",
+      "dur": 0.35,
+      "from": 0.85
+     },
+     "sound": {
+      "src": "sound/pop.wav",
+      "gain": -8
+     }
+    },
+    {
+     "id": "dark",
+     "type": "video",
+     "src": "../site/demos/brand-tidewater-dark.mp4",
+     "trim": [
+      1.75,
+      4.5
+     ],
+     "volume": 0,
+     "anchor": "center",
+     "x": 1380,
+     "y": 600,
+     "w": 768,
+     "h": 432,
+     "radius": 14,
+     "shadow": {
+      "y": 12,
+      "blur": 30,
+      "color": "#00000088"
+     },
+     "at": 0.55,
+     "enter": {
+      "name": "pop",
+      "dur": 0.35,
+      "from": 0.85
+     },
+     "sound": {
+      "src": "sound/pop.wav",
+      "gain": -8
+     }
+    },
+    {
+     "id": "brands-head",
+     "type": "text",
+     "text": "One scene, every palette.",
+     "x": 160,
+     "y": 150,
+     "anchor": "left",
+     "align": "left",
+     "size": 60,
+     "weight": 700,
+     "at": 0.15,
+     "enter": {
+      "name": "left",
+      "dur": 0.32,
+      "dist": 28,
+      "ease": "outQuart"
+     },
+     "fixed": true
+    },
+    {
+     "id": "brands-key",
+     "type": "text",
+     "text": "\"brand\": \"tidewater\", \"variant\": \"**dark**\"",
+     "x": 162,
+     "y": 214,
+     "anchor": "left",
+     "align": "left",
+     "font": "IBM Plex Mono",
+     "size": 30,
+     "weight": 500,
+     "fill": "#9299a8",
+     "emph": "#b9f45d",
+     "at": 0.35,
+     "enter": {
+      "name": "fade",
+      "dur": 0.25
+     },
+     "fixed": true
+    }
+   ],
+   "sound": {
+    "src": "sound/whoosh.wav",
+    "at": "in-0.15",
+    "gain": -14,
+    "pan": 0.2
+   }
+  },
+  {
+   "id": "edit",
+   "type": "group",
+   "at": 24,
+   "dur": 3,
+   "fixed": true,
+   "children": [
+    {
+     "id": "cut",
+     "type": "sequence",
+     "anchor": "center",
+     "x": 960,
+     "y": 640,
+     "w": 1120,
+     "h": 630,
+     "clips": [
+      {
+       "src": "../site/demos/import.mp4",
+       "trim": [
+        0.8,
+        2.45
+       ],
+       "volume": 0
+      },
+      {
+       "src": "../site/demos/materials.mp4",
+       "trim": [
+        2.2,
+        3.85
+       ],
+       "volume": 0
+      }
+     ],
+     "transition": {
+      "type": "zoom",
+      "dur": 0.4
+     },
+     "at": 0.15
+    },
+    {
+     "id": "edit-cc",
+     "type": "captions",
+     "mode": "karaoke",
+     "active": "#b9f45d",
+     "size": 40,
+     "y": "86%",
+     "box": {
+      "fill": "#0a0c10d8",
+      "pad": [
+       10,
+       20
+      ],
+      "radius": 10
+     },
+     "cues": [
+      [
+       0.4,
+       1.6,
+       "Trim, cut and caption"
+      ],
+      [
+       1.6,
+       2.9,
+       "in the same file"
+      ]
+     ]
+    },
+    {
+     "id": "edit-head",
+     "type": "text",
+     "text": "Cut footage, captioned.",
+     "x": 160,
+     "y": 150,
+     "anchor": "left",
+     "align": "left",
+     "size": 60,
+     "weight": 700,
+     "at": 0.15,
+     "enter": {
+      "name": "left",
+      "dur": 0.32,
+      "dist": 28,
+      "ease": "outQuart"
+     },
+     "fixed": true
+    },
+    {
+     "id": "edit-key",
+     "type": "text",
+     "text": "\"trim\": [**0.8**, **2.45**]",
+     "x": 162,
+     "y": 214,
+     "anchor": "left",
+     "align": "left",
+     "font": "IBM Plex Mono",
+     "size": 30,
+     "weight": 500,
+     "fill": "#9299a8",
+     "emph": "#b9f45d",
+     "at": 0.35,
+     "enter": {
+      "name": "fade",
+      "dur": 0.25
+     },
+     "fixed": true
+    }
+   ],
+   "sound": {
+    "src": "sound/whoosh.wav",
+    "at": "in-0.15",
+    "gain": -14,
+    "pan": 0.2
+   }
+  },
+  {
+   "id": "end",
+   "type": "group",
+   "at": 27,
+   "dur": 5,
+   "fixed": true,
+   "children": [
+    {
+     "id": "panel",
+     "type": "rect",
+     "x": 640,
+     "y": 556,
+     "w": 900,
+     "h": 520,
+     "radius": 18,
+     "fill": "#12151b",
+     "stroke": "#242832",
+     "strokeWidth": 2,
+     "enter": {
+      "name": "wipe-right",
+      "dur": 0.35,
+      "ease": "outQuart"
+     }
+    },
+    {
+     "id": "file",
+     "type": "text",
+     "text": "scene.json",
+     "x": 220,
+     "y": 336,
+     "anchor": "left",
+     "align": "left",
+     "font": "IBM Plex Mono",
+     "size": 26,
+     "weight": 500,
+     "fill": "#9299a8",
+     "at": 0.25,
+     "enter": "fade"
+    },
+    {
+     "id": "code-0",
+     "type": "text",
+     "text": "{",
+     "x": 220,
+     "y": 400,
+     "anchor": "left",
+     "align": "left",
+     "font": "IBM Plex Mono",
+     "size": 34,
+     "weight": 500,
+     "emph": "#b9f45d",
+     "at": 0.35,
+     "enter": {
+      "name": "type",
+      "dur": 0.2
+     },
+     "sound": {
+      "src": "sound/tick.wav",
+      "gain": -14
+     }
+    },
+    {
+     "id": "code-1",
+     "type": "text",
+     "text": "  \"canvas\": {\"w\": 1920, \"h\": 1080},",
+     "x": 220,
+     "y": 452,
+     "anchor": "left",
+     "align": "left",
+     "font": "IBM Plex Mono",
+     "size": 34,
+     "weight": 500,
+     "emph": "#b9f45d",
+     "at": 0.57,
+     "enter": {
+      "name": "type",
+      "dur": 0.2
+     },
+     "sound": {
+      "src": "sound/tick.wav",
+      "gain": -14
+     }
+    },
+    {
+     "id": "code-2",
+     "type": "text",
+     "text": "  \"layers\": [",
+     "x": 220,
+     "y": 504,
+     "anchor": "left",
+     "align": "left",
+     "font": "IBM Plex Mono",
+     "size": 34,
+     "weight": 500,
+     "emph": "#b9f45d",
+     "at": 0.79,
+     "enter": {
+      "name": "type",
+      "dur": 0.2
+     },
+     "sound": {
+      "src": "sound/tick.wav",
+      "gain": -14
+     }
+    },
+    {
+     "id": "code-3",
+     "type": "text",
+     "text": "    {\"type\": \"text\", \"text\": \"Hello\",",
+     "x": 220,
+     "y": 556,
+     "anchor": "left",
+     "align": "left",
+     "font": "IBM Plex Mono",
+     "size": 34,
+     "weight": 500,
+     "emph": "#b9f45d",
+     "at": 1.01,
+     "enter": {
+      "name": "type",
+      "dur": 0.2
+     },
+     "sound": {
+      "src": "sound/tick.wav",
+      "gain": -14
+     }
+    },
+    {
+     "id": "code-4",
+     "type": "text",
+     "text": "     \"enter\": \"**snap**\"}",
+     "x": 220,
+     "y": 608,
+     "anchor": "left",
+     "align": "left",
+     "font": "IBM Plex Mono",
+     "size": 34,
+     "weight": 500,
+     "emph": "#b9f45d",
+     "at": 1.23,
+     "enter": {
+      "name": "type",
+      "dur": 0.2
+     },
+     "sound": {
+      "src": "sound/tick.wav",
+      "gain": -14
+     }
+    },
+    {
+     "id": "code-5",
+     "type": "text",
+     "text": "  ]",
+     "x": 220,
+     "y": 660,
+     "anchor": "left",
+     "align": "left",
+     "font": "IBM Plex Mono",
+     "size": 34,
+     "weight": 500,
+     "emph": "#b9f45d",
+     "at": 1.4500000000000002,
+     "enter": {
+      "name": "type",
+      "dur": 0.2
+     },
+     "sound": {
+      "src": "sound/tick.wav",
+      "gain": -14
+     }
+    },
+    {
+     "id": "code-6",
+     "type": "text",
+     "text": "}",
+     "x": 220,
+     "y": 712,
+     "anchor": "left",
+     "align": "left",
+     "font": "IBM Plex Mono",
+     "size": 34,
+     "weight": 500,
+     "emph": "#b9f45d",
+     "at": 1.67,
+     "enter": {
+      "name": "type",
+      "dur": 0.2
+     },
+     "sound": {
+      "src": "sound/tick.wav",
+      "gain": -14
+     }
+    },
+    {
+     "id": "end-lock-bar",
+     "type": "path",
+     "d": "M1220.9 422.0 L1220.9 518.0",
+     "stroke": "#f2f0e8",
+     "strokeWidth": 13.5,
+     "at": 1.9,
+     "enter": {
+      "name": "draw",
+      "dur": 0.3,
+      "ease": "outQuart"
+     }
+    },
+    {
+     "id": "end-lock-arms",
+     "type": "path",
+     "d": "M1294.4 422.0 C 1269.6 422.0 1269.6 470.0 1244.9 470.0 C 1269.6 470.0 1269.6 518.0 1294.4 518.0",
+     "stroke": "#f2f0e8",
+     "strokeWidth": 13.5,
+     "at": 2.12,
+     "enter": {
+      "name": "draw",
+      "dur": 0.5
+     }
+    },
+    {
+     "id": "end-lock-cue",
+     "type": "circle",
+     "x": 1244.875,
+     "y": 470.0,
+     "r": 12.75,
+     "fill": "#ff633f",
+     "at": 2.4,
+     "enter": {
+      "name": "pop",
+      "dur": 0.28,
+      "from": 0.2
+     }
+    },
+    {
+     "id": "end-lock-word",
+     "type": "text",
+     "text": "kinescript",
+     "x": 1328.875,
+     "y": 480.5,
+     "anchor": "left",
+     "align": "left",
+     "size": 96,
+     "weight": 700,
+     "letterSpacing": -2.25,
+     "split": "chars",
+     "at": 2.52,
+     "enter": {
+      "name": "snap",
+      "dur": 0.22,
+      "stagger": 0.028
+     }
+    },
+    {
+     "id": "pip",
+     "type": "text",
+     "text": "pip install kinescript",
+     "x": 1480,
+     "y": 620,
+     "font": "IBM Plex Mono",
+     "size": 38,
+     "weight": 500,
+     "fill": "#b9f45d",
+     "at": 2.6,
+     "enter": {
+      "name": "type",
+      "dur": 0.6
+     },
+     "caret": true,
+     "sound": {
+      "src": "sound/hit.wav",
+      "gain": -4
+     }
+    },
+    {
+     "id": "confetti",
+     "type": "particles",
+     "preset": "confetti",
+     "x": 1480,
+     "y": 470,
+     "at": 2.6,
+     "dur": 2.3,
+     "burst": 70,
+     "rate": 0,
+     "fill": [
+      "#f2f0e8",
+      "#b9f45d",
+      "#9299a8",
+      "#ff633f"
+     ]
+    },
+    {
+     "id": "end-head",
+     "type": "text",
+     "text": "Write it. Check it. Render it.",
+     "x": 160,
+     "y": 150,
+     "anchor": "left",
+     "align": "left",
+     "size": 60,
+     "weight": 700,
+     "at": 0.15,
+     "enter": {
+      "name": "left",
+      "dur": 0.32,
+      "dist": 28,
+      "ease": "outQuart"
+     },
+     "fixed": true
+    },
+    {
+     "id": "end-key",
+     "type": "text",
+     "text": "kine render **scene.json**",
+     "x": 162,
+     "y": 214,
+     "anchor": "left",
+     "align": "left",
+     "font": "IBM Plex Mono",
+     "size": 30,
+     "weight": 500,
+     "fill": "#9299a8",
+     "emph": "#b9f45d",
+     "at": 0.35,
+     "enter": {
+      "name": "fade",
+      "dur": 0.25
+     },
+     "fixed": true
+    }
+   ],
+   "sound": {
+    "src": "sound/whoosh.wav",
+    "at": "in-0.15",
+    "gain": -14,
+    "pan": 0.2
+   }
+  }
+ ]
+}

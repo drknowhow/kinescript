@@ -329,7 +329,7 @@ def test_component_param_lists_cover_every_param_a_builder_reads():
 def test_examples_and_promo_have_no_unknown_keys():
     for path in ("examples/hello.json", "examples/edit.json", "examples/3d.json", "examples/model.json",
                  "examples/title3d.json", "examples/import.json", "examples/voiceover.json", "marketing/promo.json",
-                 "marketing/og.json"):
+                 "marketing/og.json", "marketing/reel.json"):
         sc = k.load(str(ROOT / path))  # loading runs every schema check; a full `check` renders and is slow on CPU
         bad = [i for i in sc.issues if i["level"] == "error" or i["code"] in ("renamed-key", "ignored-key")]
         sc.close()
