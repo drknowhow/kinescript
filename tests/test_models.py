@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 import kinescript as k
-from kinescript import mesh, models
+from kinescript import mesh, models, render3d
 from kinescript.render import Renderer
 from kinescript.verify import check
 
@@ -202,6 +202,103 @@ def test_ground_shadow_darkens_the_floor_under_the_model_and_fades_as_it_rises()
     assert _floor_darkness(touching, *rows) > 2000
     assert _floor_darkness(raised, *rows) < 0.6 * _floor_darkness(touching, *rows)
     assert np.array_equal(rest, touching)
+
+
+ORBIT = {"rotateX": [[0, 15], [2, 40]], "rotateY": [[0, -20], [2, 20]], "z": [[0, 0], [2, -200]]}
+
+
+def _on_a_floor(model=None, layers=(), **more):
+    """A scene of a cone standing on a floor, with its ground shadow: the cone as `model` changes it, the layers
+    listed before it and whatever else the scene has."""
+    cone = dict({"id": "b", "type": "model", "shape": "cone", "r": 40, "h": 60, "x": 160, "y": 90, "fill": "#ffffff",
+                 "ground": {"y": 130}}, **(model or {}))
+    return dict(scene([*layers, cone], bg="#ffffff", duration=2), **more)
+
+
+def _shadows(monkeypatch, spec, frames, backend="cpu", who="b"):
+    """Frames of spec drawn in order by one renderer: the picture of `who`'s ground shadow it held after each, how
+    many times it worked a footprint out, and the frames. Each frame is the one a renderer draws that has drawn
+    nothing else."""
+    def renderer():
+        try:
+            return Renderer(k.Scene(spec), backend=backend)
+        except RuntimeError:
+            pytest.skip("no GPU")
+    made, real = [], render3d._footprint
+    with monkeypatch.context() as mp:
+        mp.setattr(render3d, "_footprint", lambda *a: made.append(1) or real(*a))
+        r, pictures, shots = renderer(), [], []
+        for n in frames:
+            shots.append(r.frame(n).copy())
+            pictures.append(r._models[("ground", who)][4])
+    for n, shot in zip(frames, shots):
+        assert np.array_equal(shot, renderer().frame(n)), n
+    return pictures, len(made), shots
+
+
+@pytest.mark.parametrize("backend", ["cpu", "gpu"])
+def test_a_ground_shadow_is_drawn_once_while_its_model_stands_still(monkeypatch, backend):
+    """Under a camera that turns and pulls back the footprint is worked out once and one picture of it serves every
+    frame: so too with the light the shadow is cast along, while the camera is still."""
+    frames = list(range(0, 60, 6))
+    pictures, made, shots = _shadows(monkeypatch, _on_a_floor(camera=ORBIT), frames, backend)
+    assert made == 1 and len({id(p) for p in pictures}) == 1
+    assert len({shot.tobytes() for shot in shots}) == len(frames)  # the camera does move
+    assert _floor_darkness(shots[0][..., :3].astype(int), 140, 175) > 2000  # and the shadow is there
+    lit = _on_a_floor({"ground": {"y": 130, "from": "light"}}, light={"azimuth": 40, "elevation": 50})
+    pictures, made, _ = _shadows(monkeypatch, lit, frames, backend)
+    assert made == 1 and len({id(p) for p in pictures}) == 1
+
+
+@pytest.mark.parametrize("what, model, more", [
+    ("slides", {"x": [[0, 120], [2, 200]]}, {}),
+    ("rises", {"y": [[0, 90], [2, 60]]}, {}),
+    ("comes nearer", {"z": [[0, 0], [2, 80]]}, {}),
+    ("tips", {"rotateX": [[0, 0], [2, 60]]}, {}),
+    ("turns", {"rotate": 90, "rotateY": [[0, 0], [2, 170]]}, {}),
+    ("spins", {"rotateX": 90, "rotate": [[0, 0], [2, 80]]}, {}),
+    ("swells", {"scale": [[0, 1], [2, 1.5]]}, {}),
+    ("pops in", {"enter": {"name": "pop", "dur": 2}}, {}),
+    ("swings in", {"enter": {"name": "swing", "dur": 2}}, {}),
+    ("stretches in", {"enter": {"name": "stretch", "dur": 2, "ease": "linear"}}, {}),
+    ("grows", {"r": [[0, 30], [2, 50]]}, {}),
+    ("builds", {"draw": [[0, 0.3], [2, 0.9, "linear"]]}, {}),
+    ("is lit from a light that moves", {"ground": {"y": 130, "from": "light"}},
+     {"light": {"azimuth": [[0, -60], [2, 60]], "elevation": 50}}),
+    ("is lit under a camera that turns", {"ground": {"y": 130, "from": "light"}},
+     {"light": {"azimuth": 40, "elevation": 50}, "camera": ORBIT}),
+])
+def test_a_ground_shadow_is_drawn_again_when_what_it_is_made_from_changes(monkeypatch, what, model, more):
+    """A model that moves in its parent, turns, changes size or shape, or is drawn in part, and a light that moves
+    over it: the footprint is worked out, and drawn, each frame. Each frame is a fresh renderer's (_shadows)."""
+    frames = [3, 9, 18, 27, 36, 45, 54]
+    pictures, made, shots = _shadows(monkeypatch, _on_a_floor(model, **more), frames)
+    assert made == len(frames) and len({id(p) for p in pictures}) == len(frames), what
+    assert len({shot.tobytes() for shot in shots}) == len(frames), what
+
+
+def test_fog_draws_a_still_models_ground_shadow_again_only_as_it_thins_it(monkeypatch):
+    """The camera pulls back into fog: one footprint, and a picture of it for each darkness the fog leaves."""
+    spec = _on_a_floor(camera={"z": [[0, 0], [2, 900]], "rotateX": 25}, fog={"near": 300, "far": 1500})
+    frames = [3, 4, 5, 30, 31, 56]
+    pictures, made, shots = _shadows(monkeypatch, spec, frames)
+    assert made == 1 and 1 < len({id(p) for p in pictures}) < len(frames)
+    dark = [_floor_darkness(shot[..., :3].astype(int), 0, 180) for shot in shots]  # the cone's and its shadow's
+    assert dark[0] > dark[3] > dark[5] > 0
+
+
+def test_each_model_keeps_its_own_ground_shadow_through_a_texture_that_draws_layers(monkeypatch):
+    """Two models keep a shadow each. A model whose texture is a group draws the group's layers before its
+    shadow; they are placed in the group, and the shadow still goes by where the model is placed."""
+    screen = {"id": "ui", "type": "group", "w": 64, "h": 64, "children": [
+        {"id": "dot", "type": "ellipse", "x": 32, "y": 32, "w": 30, "h": 30, "fill": "#ff0000", "rotateY": 30}]}
+    spec = _on_a_floor({"shape": "cube", "w": 50, "x": [[0, 110], [2, 210]], "texture": "#ui"}, layers=[
+        screen, {"id": "a", "type": "model", "shape": "sphere", "r": 25, "x": 60, "y": 100, "ground": {"y": 130}}])
+    frames = [0, 15, 30, 45]
+    moving, made, _ = _shadows(monkeypatch, spec, frames)
+    still, _, _ = _shadows(monkeypatch, spec, frames, who="a")
+    assert made == len(frames) + 1  # the cube's each frame, the ball's once
+    assert len({id(p) for p in moving}) == len(frames) and len({id(p) for p in still}) == 1
 
 
 def test_imported_model_frames_are_pure_functions_of_their_index(tmp_path):
