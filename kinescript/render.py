@@ -716,6 +716,8 @@ class Renderer:
         self._recording = False  # drawing a group's children into its picture (_still)
         self._ink: skia.Rect | None = None  # track: device bounds of the strokes the layer being drawn made
         self._alpha = 1.0  # the opacity of the layer being drawn when its paint carries it (_one_draw), else 1
+        self._bare = False  # whether that layer draws straight on the canvas it is given: no layer, clip or paint
+        self._late: tuple | None = None  # the layer that washes a stage's model, not opened yet: (paint, paper, wash)
         self._cf: skia.ColorFilter | None = None  # likewise its fog
         self._copy: tuple | None = None  # while a layer's copies draw (_copies): (the layer, the copy's own colours)
         self._ops: list | None = None  # while a shape's copies are made ready: what _shape would draw
@@ -1365,7 +1367,8 @@ class Renderer:
         luma = mods.wipe == "luma" and mods.reveal < 1 and box is not None  # a matte drawn over it in its own layer
         effects = (blur > 0.05 or shadow or fx or (blend and blend != "normal") or L.looks or mods.smear > 0.05
                    or glitch or luma)
-        cf = None
+        cf = late = None
+        lone = not effects  # nothing but a tint asks for a layer
         washf = max(0.0, min(1.0, float(g("wash") or 0.0)))
         tints = [f for f in (render3d.fog_filter(fg, fogf) if fogf > 0.002 else None,
                              render3d.fog_filter((self._paper,), washf) if washf > 0.002 else None) if f is not None]
@@ -1432,7 +1435,14 @@ class Renderer:
                 if self._recording:  # a picture folds a layer whose paint is only alpha into the one draw inside
                     # it, which rounds differently; a layer paint's colour is not drawn, and with one it stays a layer
                     paint.setColor4f(skia.Color4f(1.0, 1.0, 1.0, alpha))
-                c.saveLayer(None, paint)
+                if (lone and len(tints) == 1 and washf > 0.002 and alpha >= 1.0 and L.type == "model"
+                        and self._stage is not None and self._stage.child is L and not self._recording
+                        and not (mods.wipe and mods.reveal < 1)):
+                    # A stage's model with a wash and nothing else: gl3d.draw washes it as it merges it into the run
+                    # of the stage's models, and the layer is opened (_open) only for a model that joins none.
+                    late, layered = (paint, self._paper, washf), False
+                else:
+                    c.saveLayer(None, paint)
         if box is not None:
             bx, by, bw, bh = box
             if mods.wipe and mods.reveal < 1:
@@ -1440,13 +1450,19 @@ class Renderer:
                     bx, by, bw, bh = self._copies_box(L, t, T, box)
                 self._wipe(c, mods, bx, by, bw, bh)
         reveal = mods.reveal if not mods.wipe else 1.0
-        self._ink, self._alpha, self._cf, self._t = None, paint_alpha, cf, t
+        self._ink, self._alpha, self._cf, self._t, self._late = None, paint_alpha, cf, t, late
+        self._bare = not (layered or paint_alpha < 1.0 or cf is not None or (mods.wipe and mods.reveal < 1)
+                          or self._recording or L is self._cutting or L is self._warping or L is self._looking)
         if L.copies is not None and L.type != "model":  # a model's copies are merged into its mesh (render3d)
             self._copies(c, L, t, T, g, box, reveal, mods, alpha, parent_alpha, facing)
         else:
             self._body(c, L, t, T, g, box, reveal, mods, alpha, parent_alpha, facing)
         if luma:
             self._luma(c, mods, bx, by, bw, bh)
+        if late is not None:
+            if self._late is None:  # opened: the model joined no run
+                c.restore()
+            self._late = None
         if layered == 2:
             c.restore()
         if layered:
@@ -1455,6 +1471,12 @@ class Renderer:
         self._m3d = outer
         if self.stop_after == L.id:
             self._stopped = True
+
+    def _open(self, c: skia.Canvas):
+        """Open the layer that washes the model being drawn, if _layer left it to now: it is not joining a run."""
+        if self._late is not None:
+            c.saveLayer(None, self._late[0])
+            self._late = None
 
     @staticmethod
     def _pivot(box, mods) -> tuple[float, float]:

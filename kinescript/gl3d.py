@@ -312,8 +312,71 @@ void main() {  // stage.py's _PACK
 }
 """
 
+# A stage merges its children one by one: the nearer shows at each texel, the later of two as near, and a child
+# behind what is there shows through it where that is not solid. Models that follow one another are merged the same
+# way here, as each is drawn, and the stage is handed what they come to as one child (stage.Stage._merge_run). The
+# second pass does it, with these lines added: it reads the run so far and writes the run with this model in it,
+# and _KEEP copies that back over the texels the model's pass covered. Each of a run's models is solid wherever it
+# drew, so the stage needs two colours of the run at a texel: the nearest model's, which goes over what is behind
+# the run, and the first's that drew there, which is what shows through something in front of them all.
+_JOIN = """
+uniform sampler2D t_near;   // the run so far: the nearest model's colour,
+uniform sampler2D t_first;  // the colour of the first that drew at the texel,
+uniform sampler2D t_deep;   // and the nearest's packed depth
+layout(location = 2) out vec4 o_first;
+float dep(vec4 v) {  // stage.py's _DEP
+    return floor(v.r * 255.0 + 0.5) * 65536.0 + floor(v.g * 255.0 + 0.5) * 256.0 + floor(v.b * 255.0 + 0.5);
+}
+"""
+_JOINED = """
+    vec4 first = texelFetch(t_first, p, 0);
+    o_first = first.a > 0.0 || o_col.a <= 0.0 ? first : o_col;
+    vec4 deep = texelFetch(t_deep, p, 0);
+    if (!(o_dep.a > 0.0 && dep(o_dep) >= dep(deep))) {  // stage.py's _NEAR
+        o_col = texelFetch(t_near, p, 0);
+        o_dep = deep;
+    }
+"""
+# A model its layer washes (render.py's `_late`) is washed as it joins: its second pass is the usual one, and this
+# one reads what that wrote, mixes it toward the paper as Skia's matrix colour filter does on the layer the model
+# would have been drawn in, and merges it into the run.
+_WASH = """
+#version 330
+uniform sampler2D t_col;  // the second pass's colour and packed depth
+uniform sampler2D t_dep;
+uniform mat4 u_m;  // the wash: the filter's matrix, and what it adds
+uniform vec4 u_v;
+layout(location = 0) out vec4 o_col;
+layout(location = 1) out vec4 o_dep;
+""" + _JOIN + """
+void main() {
+    ivec2 p = ivec2(gl_FragCoord.xy);
+    vec4 c = texelFetch(t_col, p, 0);
+    c = vec4(c.rgb / max(c.a, 0.0001), c.a);
+    c = clamp(u_m * c + u_v, 0.0, 1.0);
+    c.rgb *= c.a;
+    o_col = c;
+    o_dep = texelFetch(t_dep, p, 0);
+""" + _JOINED + """}
+"""
+_KEEP = """
+#version 330
+uniform sampler2D t_near;
+uniform sampler2D t_deep;
+uniform sampler2D t_first;
+layout(location = 0) out vec4 o_near;
+layout(location = 1) out vec4 o_deep;
+layout(location = 2) out vec4 o_first;
+void main() {
+    ivec2 p = ivec2(gl_FragCoord.xy);
+    o_near = texelFetch(t_near, p, 0);
+    o_deep = texelFetch(t_deep, p, 0);
+    o_first = texelFetch(t_first, p, 0);
+}
+"""
+
 _STATE: dict = {}  # the moderngl context and its programs, made once per process: None when it cannot be
-_TARGETS: dict = {}  # render targets by size, the last two kept
+_TARGETS: dict = {}  # render targets by size, the last two kept (and those a run is being merged in: "held")
 
 
 def setting() -> str:
@@ -422,6 +485,61 @@ def copying(textured: bool) -> bool:
     return _STATE[name + "_copies"] is not None
 
 
+def joining() -> bool:
+    """Whether a stage's models in a row can be merged here (draw's `join`): the driver took the programs that do
+    it, which are made the first time they are asked for."""
+    if "join" not in _STATE:
+        join = None
+        try:
+            ctx = _STATE["ctx"]
+            head, _, tail = _EDGE.rpartition("}")
+            join = ctx.program(vertex_shader=_QUAD, fragment_shader=head.replace(
+                "layout(location = 1) out vec4 o_dep;\n", "layout(location = 1) out vec4 o_dep;\n" + _JOIN) + _JOINED
+                + "}" + tail)
+            keep = ctx.program(vertex_shader=_QUAD, fragment_shader=_KEEP)
+            wash = ctx.program(vertex_shader=_QUAD, fragment_shader=_WASH)
+            for prog, names in ((join, ("t_col", "t_geo", "t_near", "t_first", "t_deep")),
+                                (keep, ("t_near", "t_deep", "t_first")),
+                                (wash, ("t_col", "t_dep", "t_near", "t_first", "t_deep"))):
+                for unit, name in enumerate(names):
+                    prog[name].value = unit
+            quad = ctx.buffer(np.array([-1, -1, 1, -1, -1, 1, 1, 1], "f4"))
+            _STATE.update(join_quad=ctx.vertex_array(join, [(quad, "2f", "in_xy")]), keep=keep, wash=wash,
+                          keep_quad=ctx.vertex_array(keep, [(quad, "2f", "in_xy")]),
+                          wash_quad=ctx.vertex_array(wash, [(quad, "2f", "in_xy")]))
+        except Exception:  # noqa: BLE001 - then each model is handed to its stage on its own, as it was
+            join = None
+        _STATE["join"] = join
+    return _STATE["join"] is not None
+
+
+def _run(tg: dict) -> dict:
+    """Targets tg with those a run of a stage's models is merged in, made the first time a size has a run: the
+    run's textures (run_near, run_first and run_deep: _JOIN's t_near, t_first and t_deep) and the one a model's
+    second pass writes the first colours to, with the framebuffers of that pass (joined) and of the copy back
+    (run); and what a washed model is merged into (washing: washed, washedd and the first colours)."""
+    if "run" not in tg:
+        ctx = _STATE["ctx"]
+        for name in ("run_near", "run_first", "run_deep", "wrote", "washed", "washedd"):
+            tg[name] = ctx.texture(tg["out"].size, 4)
+        tg["joined"] = ctx.framebuffer([tg["out"], tg["outd"], tg["wrote"]])
+        tg["washing"] = ctx.framebuffer([tg["washed"], tg["washedd"], tg["wrote"]])
+        tg["run"] = ctx.framebuffer([tg["run_near"], tg["run_deep"], tg["run_first"]])
+    return tg
+
+
+def run(r, w: int, h: int) -> tuple:
+    """The run of models merged here for a stage w by h, which ends with this, as Skia images: the nearest model's
+    colour at each texel, the first's that drew there, and the nearest's packed depth."""
+    tg = _TARGETS[_STATE.pop("held")]
+    return tuple(_image(r, tg[name], w, h) for name in ("run_near", "run_first", "run_deep"))
+
+
+def let_go():
+    """A run that was not handed to its stage (its drawing failed) holds its targets no more."""
+    _STATE.pop("held", None)
+
+
 def _mat(a: np.ndarray) -> bytes:
     """Matrix a as GLSL reads one: by columns."""
     return np.ascontiguousarray(np.asarray(a, "f4").T).tobytes()
@@ -441,8 +559,8 @@ def _targets(w: int, h: int):
                "first": ctx.framebuffer([col, geo], depth), "second": ctx.framebuffer([out, outd]),
                "tint": ctx.framebuffer([col], depth), "near": ctx.framebuffer([geo], depth)}
         hit["tint"].depth_mask = False  # see-through triangles hide nothing: they are drawn far to near
-        while len(_TARGETS) >= 2:
-            for v in _TARGETS.pop(next(iter(_TARGETS))).values():
+        while len(_TARGETS) >= 2 + (_STATE.get("held") in _TARGETS):  # a run's are kept until it is handed on
+            for v in _TARGETS.pop(next(k for k in _TARGETS if k != _STATE.get("held"))).values():
                 v.release()
     _TARGETS[(w, h)] = hit
     return hit
@@ -708,7 +826,10 @@ def _see_through(r, L, m, T: np.ndarray, ids, mats) -> np.ndarray:
     orders them: those turned to the camera, and those turned away (which show through the near ones) unless they
     are the back of a face drawn back to back, far to near."""
     from . import render3d
-    clear = np.array([mt[8] < 1 for mt in mats])[m.M[T[:, 0]]]
+    thin = [mt[8] < 1 for mt in mats]
+    if not any(thin):  # most models: nothing to look through, so no triangle to look up
+        return T[:0]
+    clear = np.array(thin)[m.M[T[:, 0]]]
     if not clear.any():
         return T[:0]
     hom = m.P @ r._m3d[[0, 1, 3], :3].T + r._m3d[[0, 1, 3], 3]  # x and y times w, and w
@@ -773,13 +894,18 @@ def draw(r, c: skia.Canvas, L, m, mats, lights, fg, edging, amt: float, order, t
     render3d.model gives them, for a model that has any. copies: m is one copy of the model, drawn whole once for
     each of these (render3d._placing): each one's turn (a matrix, n of them), size and offset, then each material's
     slots (or None: its own) and each copy's among them (or None). The bounds are then of a box round the copies'
-    boxes, which can be wider than the model."""
+    boxes, which can be wider than the model.
+
+    A stage's child is drawn into the stage's surfaces for the stage to merge, unless it can join the run of models
+    before it (_JOIN): one that is solid wherever it draws and is copied to the stage texel for texel, with nothing
+    of its layer's in between. The stage is told (its `apart`), as it is of a model that draws nothing."""
     from . import render3d
     T = m.T if amt >= 1.0 else m.T[order[:math.ceil(amt * len(m.T))]]
     P = m.P
     r.on_gl.add(L.id)
+    stage = r._stage if r._stage is not None and r._stage.child is L and not tracked else None
     if not len(T):
-        return None
+        return _unseen(stage, None)
     view = np.linalg.inv(r._lens) @ r._m3d
     lo3, hi3 = own = render3d._fixed(r, L, m, "box", lambda: (P.min(0), P.max(0)))
     if copies is not None:
@@ -809,7 +935,7 @@ def draw(r, c: skia.Canvas, L, m, mats, lights, fg, edging, amt: float, order, t
             if amt < 1.0:
                 wv = wv[np.unique(T)]
         if wv.max() < space.NEAR:
-            return None
+            return _unseen(stage, None)
         if wv.min() < space.NEAR and not tracked:
             r.culled.add(L.id)  # GL clips what crosses the camera plane; render3d leaves those triangles out
         if r._focused is not None and not tracked:
@@ -830,7 +956,7 @@ def draw(r, c: skia.Canvas, L, m, mats, lights, fg, edging, amt: float, order, t
         bounds = [0.0, 0.0, float(r.w), float(r.h)]
         x0, y0, x1, y1 = 0, 0, r.w, r.h
     if x1 <= x0 or y1 <= y0:
-        return bounds
+        return _unseen(stage, bounds)
     # A tracked render (check, --boxes) keeps its Skia models and stages at 1x with multisampling; these targets
     # have none, so they stay at 2x and are scaled down as they are drawn.
     ss = max(2, r._model_surface()[1])
@@ -892,7 +1018,11 @@ def draw(r, c: skia.Canvas, L, m, mats, lights, fg, edging, amt: float, order, t
             _set(sh, "u_pass", 1 if name == "tint" else 2)
             some.render(mgl.TRIANGLES, vertices=glass.size)
     ctx.enable_only(0)
-    edge = _STATE["edge"]
+    join = (stage is not None and not len(glass) and ss == r._dev and r._bare
+            and L.raw.get("ground") in (None, False) and joining())
+    wash = r._late if join else None  # the model's layer washes it: here, after the second pass
+    fused = join and wash is None  # the second pass merges the model into the run itself
+    edge = _STATE["join" if fused else "edge"]
     _set(edge, "u_box", (bx0, by0, bx1, by1))
     _set(edge, "u_r", float(rad) if edging is not None else 0.0)
     if edging is not None:
@@ -900,17 +1030,46 @@ def draw(r, c: skia.Canvas, L, m, mats, lights, fg, edging, amt: float, order, t
         _set(edge, "u_cos", float(edging[2]))
         _set(edge, "u_gap", STEP / (focus * space.NEAR))
         _set(edge, "u_ink", tuple(float(v) for v in edging[1]))
-    second = tg["second"]
+    if join and stage.run is None:  # the first of a run
+        _STATE["held"] = (W, H)
+        _run(tg)["run"].clear(0.0, 0.0, 0.0, 0.0, viewport=(0, 0, W, H))  # all of it, whatever the scissor is
+    second = tg["joined" if fused else "second"]
     second.scissor = None
     second.viewport = (x0 * ss, H - y1 * ss, (x1 - x0) * ss, (y1 - y0) * ss)
     second.use()
-    tg["col"].use(0)
-    tg["geo"].use(1)
-    _STATE["sampler"].use(0)
-    _STATE["sampler"].use(1)
-    _STATE["quad"].render(mgl.TRIANGLE_STRIP)
-    r.gr.resetContext()
+    reads = ("col", "geo", "run_near", "run_first", "run_deep") if fused else ("col", "geo")
+    for unit, name in enumerate(reads):
+        tg[name].use(unit)
+        _STATE["sampler"].use(unit)
+    _STATE["join_quad" if fused else "quad"].render(mgl.TRIANGLE_STRIP)
     region = skia.Rect(x0 * ss, y0 * ss, x1 * ss, y1 * ss)
+    if join:
+        merged = ("out", "outd", "wrote")
+        if wash is not None:
+            (pr, pg, pb), f = wash[1], wash[2]
+            k = 1.0 - f  # render3d.fog_filter's matrix
+            _set(_STATE["wash"], "u_m", _mat(np.diag([k, k, k, 1.0])))
+            _set(_STATE["wash"], "u_v", (pr * f, pg * f, pb * f, 0.0))
+            tg["washing"].viewport = second.viewport
+            tg["washing"].use()
+            for unit, name in enumerate(("out", "outd", "run_near", "run_first", "run_deep")):
+                tg[name].use(unit)
+                _STATE["sampler"].use(unit)
+            _STATE["wash_quad"].render(mgl.TRIANGLE_STRIP)
+            merged = ("washed", "washedd", "wrote")
+        tg["run"].viewport = second.viewport
+        tg["run"].use()
+        for unit, name in enumerate(merged):
+            tg[name].use(unit)
+        _STATE["keep_quad"].render(mgl.TRIANGLE_STRIP)
+        r.gr.resetContext()
+        stage.apart = False
+        stage.run = tuple(region) if stage.run is None else (
+            *(min(a, b) for a, b in zip(stage.run[:2], tuple(region)[:2])),
+            *(max(a, b) for a, b in zip(stage.run[2:], tuple(region)[2:])))
+        return bounds
+    r.gr.resetContext()
+    r._open(c)
     if L.raw.get("ground") not in (None, False):
         render3d._ground(r, c, L.raw["ground"], P, P if amt >= 1.0 else P[T.ravel()], fg, lights[0][0], L.id)
     if r._stage is not None and r._stage.child is L:
@@ -927,6 +1086,13 @@ def draw(r, c: skia.Canvas, L, m, mats, lights, fg, edging, amt: float, order, t
     c.restore()
     # The next model draws into the same textures: Skia's reads of them go to the GPU first.
     r.gr.flushAndSubmit(skia.GrSyncCpu.kNo)
+    return bounds
+
+
+def _unseen(stage, bounds):
+    """bounds, for a model that draws nothing: the stage it is a child of (None: of none) has nothing to merge."""
+    if stage is not None:
+        stage.apart = False
     return bounds
 
 

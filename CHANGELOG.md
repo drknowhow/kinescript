@@ -30,6 +30,17 @@
   same to the last pixel: all 180 of `fog.json`, `import.json`, `stage.json`, `lights.json`, `edges.json` and
   `reflections.json` on the GPU, and a sample of 30 to 45 of the first three on the CPU. A model that moves or
   turns draws its shadow each frame, as before.
+- A stage's models that follow one another are merged on OpenGL as each is drawn, and the stage is handed what they
+  come to as one child. Each model was handed to Skia and merged into the stage on its own. A model joins the run
+  before it when it is solid wherever it draws and nothing of its layer comes between it and the stage: it has no
+  `transparency`, `ground` shadow, opacity below 1, blur or other effect. A model that is only washed (`wash`, as
+  a tour washes what it is not showing) joins too: the wash is mixed in as the model is merged, where a layer the
+  size of the frame was opened for each. A frame of a 70 s tour of 24 models drew in 14.5 to 15.0 ms and draws in
+  7.9 to 8.4 (RTX 5060 Ti, three alternating runs of 60 consecutive frames); a membrane scene of ten models, 5.7 to
+  5.8 and now 3.3 to 3.5; `examples/shapes.json`, 5.2 and now 3.5 to 3.8; `product.json`, 6.1 to 6.3 and now 4.9
+  to 5.1; `textures.json`, 3.5 to 4.0 and now 2.8 to 3.0. A stage whose models each need a merge of their own
+  (`examples/stage.json`: a ground shadow) takes the time it took. The frames are the same to the last pixel on
+  the GPU: 40 of the tour, 20 of the membrane scene and 8 of each of 35 examples.
 
 ## 2.4.0 (2026-11-11)
 
