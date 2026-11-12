@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `kine check` reports a camera key that is not a number as a `bad-value` error on the camera, as it does for a
+  layer's keys. `"z": [[0, 0], [6, -400], "linear"]`, with the ease after the list instead of inside the last key,
+  made check stop with an internal TypeError.
+
 ## 2.5.0 (2026-11-12)
 
 - Text split into letters, words or lines draws the units that are only moved, faded or recoloured as runs of

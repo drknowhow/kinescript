@@ -752,6 +752,16 @@ def test_layer_behind_camera_is_skipped_and_check_warns():
     assert any(i["code"] == "behind-camera" and i["layer"] == "a" for i in check(spec)["issues"])
 
 
+def test_check_reports_a_bad_camera_key_instead_of_crashing():
+    # An ease after the last keyframe makes the list a constant: it crashed check with a TypeError.
+    spec = dict(scene([{"id": "r", "type": "rect", "x": 160, "y": 90, "w": 40, "h": 40}]),
+                camera={"z": [[0, 0], [1, -400], "linear"], "rotateY": [[0, 0], [1, 20, "linear"]]})
+    report = check(spec)
+    bad = [i for i in report["issues"] if i["code"] == "bad-value"]
+    assert [(i["layer"], i["message"].split(" ")[0]) for i in bad] == [("camera", "z")]
+    assert report["errors"] == 1
+
+
 def test_mirrored_text_warns():
     spec = scene([{"id": "t", "type": "text", "text": "Hi", "x": "50%", "y": "50%", "size": 40, "rotateY": 180}])
     assert any(i["code"] == "mirrored-text" and i["layer"] == "t" for i in check(spec)["issues"])
