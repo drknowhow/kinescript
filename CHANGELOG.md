@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- A model's ground shadow is kept between frames. Its outline on the floor is worked out again only when the model's
+  points, where the layer is placed or the light it is cast along change, and its blurred picture is drawn again
+  only then, or when fog leaves it less dark. Skia blurred the outline on the CPU for every model on every frame. A
+  frame of `examples/fog.json`, whose 14 pillars stand still while the camera moves, drew in 30.3 to 30.8 ms and
+  draws in 8.7 to 9.2 (RTX 5060 Ti, three alternating runs of 60 and 90 consecutive frames). The frames are the
+  same to the last pixel: all 180 of `fog.json`, `import.json`, `stage.json`, `lights.json`, `edges.json` and
+  `reflections.json` on the GPU, and a sample of 30 to 45 of the first three on the CPU. A model that moves or
+  turns draws its shadow each frame, as before.
+
 ## 2.4.0 (2026-11-11)
 
 - `kine check` and `kine look --boxes` draw models on OpenGL wherever a render does; they drew every model with

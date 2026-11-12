@@ -698,6 +698,7 @@ class Renderer:
         self._models: dict = {}  # merged parts of each model layer
         self._solids: dict = {}  # outlines and extruded meshes of text and path models
         self._outer = None  # the 3D matrix of the layer being drawn's parent (models put their floor in it)
+        self._put = None  # what places that layer in its parent, whatever the camera does (render3d._ground)
         self._msurf = None  # offscreen that models draw into, antialiased, before compositing
         self._mspare: dict = {}  # more offscreens like it, for the passes of textured models
         self._stages = None  # surfaces of groups with "sort": "pixel" (stage.Stage)
@@ -1299,8 +1300,10 @@ class Renderer:
                 tilt = space.tilt(z, rx, ry)
                 m = m @ tilt
             m = m @ space.rotate_z(rot) @ space.scale(sx, sy)
+            own = (x, y, z, rx, ry, rot, sx, sy)
             if mods.sx != 1 or mods.sy != 1 or mods.hinge:
                 px, py = self._pivot(box, mods)
+                own += (px, py, mods.hinge, mods.sx, mods.sy)
                 m = m @ space.translate(px, py) @ space.rotate_z(mods.hinge) @ space.scale(mods.sx, mods.sy) @ (
                     space.translate(-px, -py))
             if box is not None:
@@ -1333,7 +1336,7 @@ class Renderer:
                     (ax, ay), (bx, by), (cx, cy) = (o[:2] / o[3]).T
                     sc = math.sqrt(abs((bx - ax) * (cy - ay) - (by - ay) * (cx - ax)))
                     defocus = float(render3d.defocus(self._focused, o[3, 0])) / max(sc, 0.05)
-            self._m3d, self._outer = m, outer
+            self._m3d, self._outer, self._put = m, outer, own
             if self._stage is not None and self._stage.child is L:
                 self._stage.m = m
         c.save()
@@ -2722,7 +2725,8 @@ class Renderer:
         c.scale(size[0] / w, size[1] / h)
         ax, ay = ANCHORS.get(G.raw.get("anchor", "topleft"), (0, 0))
         cam = space.camera(w, h, x=-ax * w, y=-ay * h)  # looking at the middle of the box
-        kept = (self.boxes, self._m3d, self._cam, self._focused, self._stage, self._dev, self._lens, self._outer)
+        kept = (self.boxes, self._m3d, self._cam, self._focused, self._stage, self._dev, self._lens, self._outer,
+                self._put)
         self.boxes, self._focused, self._stage, self._dev, self._lens = {}, None, None, 1.0, space.lens(w, h)
         self._insets.add(gid)
         try:
@@ -2740,7 +2744,8 @@ class Renderer:
                 c.restore()
         finally:
             self._insets.discard(gid)
-            self.boxes, self._m3d, self._cam, self._focused, self._stage, self._dev, self._lens, self._outer = kept
+            (self.boxes, self._m3d, self._cam, self._focused, self._stage, self._dev, self._lens, self._outer,
+             self._put) = kept
         return surf.makeImageSnapshot()
 
     def _clip(self, L: Layer, spec: dict, t: float) -> skia.Image | None:

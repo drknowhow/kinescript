@@ -803,7 +803,7 @@ def draw(r, c: skia.Canvas, L, m, mats, lights, fg, edging, amt: float, order, t
     r.gr.resetContext()
     region = skia.Rect(x0 * ss, y0 * ss, x1 * ss, y1 * ss)
     if L.raw.get("ground") not in (None, False):
-        render3d._ground(r, c, L.raw["ground"], P, P if amt >= 1.0 else P[T.ravel()], fg, lights[0][0])
+        render3d._ground(r, c, L.raw["ground"], P, P if amt >= 1.0 else P[T.ravel()], fg, lights[0][0], L.id)
     if r._stage is not None and r._stage.child is L:
         dep = _image(r, tg["outd"], W, H)
         d = r._dev  # the stage's px per device px: ss in a render, where this copies each texel
