@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- kinescript-kokoro 0.2.0 runs on Python 3.13, with no PyTorch. Where the `kokoro` package is not installed
+  (it needs Python 3.12 or older), it runs the same model, Kokoro-82M v1.0, on onnxruntime: kokoro-onnx's export,
+  downloaded on first use, with misaki still turning text into phonemes, so `[word](/phonemes/)` links, stress and
+  number flags work as before. `KOKORO_ENGINE=torch` or `onnx` picks one. On the ten lines of a 2¼-minute
+  explainer, every word's start and end matched the torch engine's to the sample, and the install was about 840 MB
+  against 1.7 GB. The export's STFT differs from PyTorch's (the voice about 3 dB louder below 1 kHz and 2 dB
+  quieter above it); the plugin replaces three of its weight tensors at load time, after which the two engines
+  differ no more than two torch runs do. On 3.13, install with `pip install --ignore-requires-python
+  kinescript-kokoro`: misaki declares Python below 3.13 but runs on it.
 - The project site's hero is a 32-second reel set to music, `marketing/reel.json`, written by
   `marketing/build_reel.py`: a lit 3D can, a cutaway, kinetic type, charts, three talking presenters, one scene
   in two brand palettes, trimmed and captioned footage, and the scene file that made it, each named by a caption

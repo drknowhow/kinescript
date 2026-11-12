@@ -213,12 +213,12 @@ A narrated beat with a click on a marked word, over music that ducks under the v
 to its scene file. Install the plugin for the voice you want next to Kinescript:
 
 ```bash
-pip install kinescript-kokoro       # local and fast; Python 3.10 to 3.12
+pip install kinescript-kokoro       # local and fast; on Python 3.13 add --ignore-requires-python (no PyTorch)
 pip install kinescript-chatterbox   # local, copies a voice from a clip, tags hit or miss; installs PyTorch
 pip install kinescript-elevenlabs   # ElevenLabs' API, acts on tags; needs ELEVENLABS_API_KEY
 ```
 
-A plugin can also live in another Python, for Kokoro on Python 3.13 or newer or to keep PyTorch out of
+A plugin can also live in another Python, for Kokoro on Python 3.14 or newer or to keep PyTorch out of
 Kinescript's environment: point `KINE_VOICE_CMD`, or `KINE_VOICE_CMD_<NAME>` for one backend, at it. Each plugin's
 README has the details:
 [Kokoro](https://github.com/drknowhow/kinescript/tree/main/plugins/kinescript-kokoro),
@@ -571,7 +571,7 @@ Within one process, such as the MCP server, the workers stay warm for two minute
 - Audio is mixing and levelling (trim, gain over time, fades, speed, loop, pan, role levels, ducking, a loudness
   target), with no effects such as EQ, compression of single sounds or reverb.
 - Kinescript does not speak by itself: `kine voice` needs a plugin or a command. The Kokoro plugin times words
-  for English voices only and needs Python 3.10 to 3.12; the Chatterbox plugin speaks and times English only;
+  for English voices only, and on Python 3.13 runs the ONNX export of the model; the Chatterbox plugin speaks and times English only;
   the ElevenLabs plugin needs an API key and a network connection.
 - Video is decoded and resampled by ffmpeg to the scene frame rate. Jumping backwards or far ahead reopens the
   decoder, which is slower than sequential playback.

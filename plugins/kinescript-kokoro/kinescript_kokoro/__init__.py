@@ -2,12 +2,16 @@
 
 kine voice calls synth({"text", "speaker", "rate", "out"}) through the "kinescript.voice" entry point, or this
 package runs as `python -m kinescript_kokoro` for KINE_VOICE_CMD, when Kokoro lives in another Python.
+
+Two engines run the same model: "torch" (the kokoro package, Python 3.10 to 3.12) and "onnx" (onnxruntime, any
+Python misaki runs on, see onnx.py). KOKORO_ENGINE picks one; without it, torch when kokoro is installed.
 """
 from __future__ import annotations
 
 import os
 import re
 import wave
+from importlib.util import find_spec
 from importlib.metadata import PackageNotFoundError, version
 
 REPO = "hexgrad/Kokoro-82M"
@@ -66,10 +70,22 @@ def _device() -> str:
     return "cpu"
 
 
+def _engine() -> str:
+    """KOKORO_ENGINE (torch or onnx), else torch when the kokoro package is installed, else onnx."""
+    engine = os.environ.get("KOKORO_ENGINE") or ("torch" if find_spec("kokoro") else "onnx")
+    if engine not in ("torch", "onnx"):
+        raise ValueError(f"KOKORO_ENGINE is {engine!r}; it is torch or onnx")
+    return engine
+
+
 def _pipe(lang: str):
     if lang not in _pipes:
-        from kokoro import KPipeline
-        _pipes[lang] = KPipeline(lang_code=lang, repo_id=REPO, device=_device())
+        if _engine() == "onnx":
+            from .onnx import Pipeline
+            _pipes[lang] = Pipeline(lang)
+        else:
+            from kokoro import KPipeline
+            _pipes[lang] = KPipeline(lang_code=lang, repo_id=REPO, device=_device())
     return _pipes[lang]
 
 
@@ -79,6 +95,10 @@ def _version() -> str:
             return version(name)
         except PackageNotFoundError:
             return "?"
+    if _engine() == "onnx":
+        stft = "export stft" if os.environ.get("KOKORO_ONNX_STFT") == "export" else "torch stft"
+        return f"kokoro-82m v1.0 onnx ({stft}), misaki {v('misaki')}, onnxruntime {v('onnxruntime')}, " \
+               f"kinescript-kokoro {v('kinescript-kokoro')}"
     return f"kokoro {v('kokoro')}, kinescript-kokoro {v('kinescript-kokoro')}"
 
 

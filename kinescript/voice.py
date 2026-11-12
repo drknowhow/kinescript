@@ -237,8 +237,8 @@ def _speaker(name: str | None):
     elif found:
         raise ValueError(f"several voice backends are installed ({', '.join(found)}); pick one with --backend")
     else:
-        raise ValueError(f"no voice backend is installed: pip install {KOKORO} (Python 3.10 to 3.12), "
-                         "or set KINE_VOICE_CMD to a command that speaks")
+        raise ValueError(f"no voice backend is installed: pip install {KOKORO} (on Python 3.13, add "
+                         "--ignore-requires-python), or set KINE_VOICE_CMD to a command that speaks")
     # What a backend prints goes to stderr: kine voice answers in JSON on stdout, and kine mcp speaks JSON-RPC there.
     with contextlib.redirect_stdout(sys.stderr):
         fn = found[key].load()

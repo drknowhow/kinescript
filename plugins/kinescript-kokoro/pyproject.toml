@@ -4,14 +4,30 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kinescript-kokoro"
-version = "0.1.0"
+version = "0.2.0"
 description = "Kokoro voices for kine voice: speaks a scene's text and times each word"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Dr. Know How" }]
-requires-python = ">=3.10,<3.13"
-dependencies = ["kokoro>=0.9.4", "misaki[en]>=0.9.4"]
+requires-python = ">=3.10"
+# Python 3.10 to 3.12 get the PyTorch engine (kokoro). From 3.13, kokoro is not installable, so the onnx engine
+# runs the same model on onnxruntime; misaki still turns text into phonemes. misaki declares Python < 3.13 but runs
+# on 3.13, so installing there takes pip's --ignore-requires-python (see README). misaki[en] is not used there: its
+# spacy-curated-transformers extra pulls pip back to a spaCy that does not build on 3.13, and only trf=True needs it.
+dependencies = [
+    "kokoro>=0.9.4; python_version < '3.13'",
+    "misaki[en]>=0.9.4; python_version < '3.13'",
+    "misaki>=0.9.4; python_version >= '3.13'",
+    "spacy>=3.8; python_version >= '3.13'",
+    "num2words; python_version >= '3.13'",
+    "phonemizer-fork; python_version >= '3.13'",
+    "espeakng-loader; python_version >= '3.13'",
+    "addict; python_version >= '3.13'",
+    "regex; python_version >= '3.13'",
+    "onnxruntime>=1.20; python_version >= '3.13'",
+    "numpy",
+]
 keywords = ["kinescript", "kokoro", "text to speech", "tts", "voice-over", "word timestamps", "captions"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -23,9 +39,13 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Multimedia :: Sound/Audio :: Speech",
     "Topic :: Multimedia :: Video",
 ]
+
+[project.optional-dependencies]
+onnx = ["onnxruntime>=1.20"]  # the onnx engine on 3.10 to 3.12 too, with KOKORO_ENGINE=onnx
 
 # Same rule as the main package: trusted publishing from drknowhow/kinescript marks a link verified only under
 # https://github.com/drknowhow/kinescript or https://drknowhow.github.io/kinescript.
