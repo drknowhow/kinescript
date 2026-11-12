@@ -403,7 +403,8 @@ kine doctor        # ffmpeg path, GPU availability, default font
 
 On a GPU, `pip install "kinescript[gl]"` adds moderngl, and model layers draw on OpenGL. On an RTX 5060 Ti that drew a
 cel-shaded test scene of 76,000 triangles in 5 to 9 ms a frame instead of 155 to 193, and parts of one model that
-cross meet cleanly. Without it they draw with Skia.
+cross meet cleanly. Textured and see-through models and a stage's shadow map draw there too: a frame of
+`examples/product.json` drew in 100 to 110 ms in 2.3.0 and draws in about 6. Without it they draw with Skia.
 
 From a checkout: `pip install -e .`
 
