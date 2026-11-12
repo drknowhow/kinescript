@@ -228,6 +228,9 @@ class Stage:
         self.k = r.scale * self.ss  # canvas px to stage px
         self.gpu = r.backend == "gpu"
         self.child = None  # the child being drawn
+        self.apart = True  # whether it is merged on its own: not a model gl3d.draw adds to the run, or draws none of
+        self.run = None  # where the models gl3d.draw has merged since the last merge here drew: (l, t, r, b), px
+        self.extra = None  # the surface a run's depth is merged into (GPU), made with the first run
         self.casters = None  # (camera-space corners, triangles) of the models that cast shadows, when they are on
         self.sun = self.sund = None  # the shadow map, made on first use; on the CPU, its pixels
         self.spare: dict = {}  # GPU surfaces depth of field draws into, by what they hold and their size
@@ -270,7 +273,7 @@ class Stage:
             for child in kids:
                 if r._stopped:
                     break
-                self.child, self.m = child, None
+                self.child, self.m, self.apart = child, None, True
                 cv = self.kid.getCanvas()  # on the GPU, a merge trades the child's colour surface for another
                 cv.save()
                 cv.resetMatrix()
@@ -278,12 +281,20 @@ class Stage:
                 cv.concat(here)
                 r._layer(cv, child, T, alpha)
                 cv.restore()
+                if not self.apart:  # in the run, or nowhere: the surfaces a child draws into are as they were
+                    continue
                 box = None if self.gpu else self._extent()
                 if self.m is not None and (self.gpu or box is not None):
+                    if self.run is not None:  # the models before it come first
+                        self._merge_run(r)
                     self._merge(child, box)
                 self._clear(box)
+            if self.run is not None:
+                self._merge_run(r)
         finally:
-            r._stage, r._dev, self.child = None, 1.0, None
+            if self.run is not None:
+                gl3d.let_go()
+            r._stage, r._dev, self.child, self.run = None, 1.0, None, None
             span, r._span = r._span, outside
         dof = None
         if r._focused is not None and span[1] > 0:
@@ -517,11 +528,32 @@ class Stage:
         self._pass("depth", self.kid, B.kSrc, kidd=self.kidd, accd=self.accd)
         self.kid, self.accd = self.accd, self.kid
 
-    def _pass(self, name: str, dst: skia.Surface, mode: skia.BlendMode, **reads: skia.Surface):
+    def _merge_run(self, r):
+        """Merge the models gl3d.draw merged among themselves (its _JOIN), as the one child they come to. Each is
+        solid where it drew, so merged one by one they left the nearest of them over what was behind them all, and
+        the first of them that drew at a texel under what was in front of them all: those are the run's two
+        colours. The merged depth goes into a surface of its own, which trades places with the stage's depth: the
+        child's surfaces may hold the child that ends the run."""
+        B = skia.BlendMode
+        near, first, deep = gl3d.run(r, self.w, self.h)
+        box = skia.Rect(*self.run)
+        self._pass("over", self.acc, B.kSrcOver, box, kid=near, kidd=deep, accd=self.accd)
+        self._pass("under", self.acc, B.kDstOver, box, kid=first, kidd=deep, accd=self.accd)
+        if self.extra is None:
+            self.extra = skia.Surface.MakeRenderTarget(self.ctx, skia.Budgeted.kNo, self.acc.imageInfo(), 0)
+        self._pass("depth", self.extra, B.kSrc, kidd=deep, accd=self.accd)
+        self.extra, self.accd = self.accd, self.extra
+        r.gr.flushAndSubmit(skia.GrSyncCpu.kNo)  # the next run is merged in the same textures: these reads go first
+        self.run = None
+
+    def _pass(self, name: str, dst: skia.Surface, mode: skia.BlendMode, box: skia.Rect | None = None, **reads):
+        """reads: the surfaces the pass reads, or images. box: the part of dst it draws (None: all of it)."""
         b = skia.RuntimeShaderBuilder(_effect(name))
         for key, s in reads.items():
-            b.setChild(key, s.makeImageSnapshot().makeShader(skia.SamplingOptions()))
-        dst.getCanvas().drawRect(skia.Rect(0, 0, self.w, self.h), skia.Paint(Shader=b.makeShader(), BlendMode=mode))
+            img = s if isinstance(s, skia.Image) else s.makeImageSnapshot()
+            b.setChild(key, img.makeShader(skia.SamplingOptions()))
+        dst.getCanvas().drawRect(box or skia.Rect(0, 0, self.w, self.h),
+                                 skia.Paint(Shader=b.makeShader(), BlendMode=mode))
 
     def _merge_cpu(self, box):
         y0, y1, x0, x1 = box

@@ -1538,6 +1538,7 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
     if on_gl and not r.track:
         order = _fixed(r, L, m, "order", lambda: mesh.build_order(m)) if amt < 1.0 else None
         return gl3d.draw(r, c, L, m, mats, (lt, more, env), fg, edging, amt, order, looks=looks, copies=copies)
+    r._open(c)
     P, N, T, M = m.P, m.N, m.T, m.M
     U = None  # texture coordinates, when any material has a texture (a file without them: check says no-uvs)
     if any(tx is not None for tx in texs + glows):
