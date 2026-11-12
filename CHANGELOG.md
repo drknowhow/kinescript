@@ -12,6 +12,10 @@
   of the stress scene and 35 examples are the same to the last pixel; the other ten are frames of
   `examples/3d.json`, text under a camera, where 2 to 207 pixels differ by one level. On the CPU all 62 frames
   compared are the same.
+- A process that drew a frame on the GPU, ran `kine doctor` (`cli.main(["doctor"])`) and drew another crashed on
+  the second with an access violation. Doctor asks whether models can draw on OpenGL, which sets that up, and
+  Skia was not told that its bindings had been replaced. It is told now, wherever that is set up. The `kine`
+  command runs doctor in a process of its own, so this showed when `tests/test_cli.py` ran alone on a GPU.
 - A model's copies (`repeat`) that move are placed by OpenGL: one copy's mesh is drawn once for each, from a matrix,
   an offset and a colour of its own. They were merged into one mesh on the CPU and sent to the GPU again every frame.
   A frame of 400 rings that turn drew in 21.1 to 21.7 ms and draws in 1.1 (RTX 5060 Ti, three alternating runs of 60
