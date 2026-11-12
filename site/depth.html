@@ -43,7 +43,7 @@
       <div><dt>Cutaways</dt><dd><code>cut</code> takes one side off a model, as far as an animated <code>at</code>, and closes the opening with a flat <code>cap</code>; a part inside another shows its own colour on the cut. <code>repeat</code> with <code>spread</code> scatters seeded copies in a disc, ring, box, ball or shell, and a <code>tube</code> runs in depth through <code>points</code>, along a seeded <code>walk</code> or as <code>rays</code>.</dd></div>
       <div><dt>Guided tours</dt><dd><code>use: "tour"</code> turns a list of stops into an explainer: the camera flies to each stop's focus and swings round it while its voice line plays, with a caption card and a note pinned to the part. Each stop lasts as long as its line, and <code>dim</code> washes out the models it does not focus. <code>pin</code> keeps any layer on a point of a turning model. <code>kine docs explainers</code> has a complete scene.</dd></div>
     </dl>
-    <p class="note">With the <code>gl</code> extra on a GPU, each model draws through a depth buffer, so its crossing parts meet at a clean edge; a cel-shaded test scene of 76,000 triangles drew in 5 to 9 ms a frame instead of 155 to 193 (RTX 5060 Ti). Without it, and for textured, transparent and exploding models, triangles are sorted by depth in Skia, and crossing parts meet at a stepped seam. Either way, separate layers hide each other per pixel only inside a stage.</p>
+    <p class="note">With the <code>gl</code> extra on a GPU, each model draws through a depth buffer, so its crossing parts meet at a clean edge; a cel-shaded test scene of 76,000 triangles drew in 5 to 9 ms a frame instead of 155 to 193 (RTX 5060 Ti). Textured and see-through models draw there too, and so does a stage's shadow map: a frame of the product scene below drew in 100 to 110 ms in 2.3.0 and draws in about 6. Without the extra, and for exploding models, <code>"edges": "all"</code> and see-through models with edge lines, triangles are sorted by depth in Skia, and crossing parts meet at a stepped seam. Either way, separate layers hide each other per pixel only inside a stage.</p>
 
     <article class="demo" id="card-flip">
       <div class="demo-head">
@@ -157,7 +157,7 @@
   </main>
 
   <footer>
-    <span class="brand"><img src="assets/mark.svg" alt="" width="200" height="200">Kinescript 2.3.0, MIT licence</span>
+    <span class="brand"><img src="assets/mark.svg" alt="" width="200" height="200">Kinescript 2.4.0, MIT licence</span>
     <nav aria-label="Project links">
       <a href="https://github.com/drknowhow/kinescript">Source</a>
       <a href="https://pypi.org/project/kinescript/">PyPI</a>

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.4.0 (2026-11-11)
 
 - `kine check` and `kine look --boxes` draw models on OpenGL wherever a render does; they drew every model with
   Skia. The boxes, the triangle count and the warnings come from the same triangles as before and are unchanged,
