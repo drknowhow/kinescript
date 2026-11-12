@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.5.1 (2026-11-12)
 
 - `kine docs` leaves depth, the camera and model layers to a topic of their own, `kine docs 3d` (`kine_docs`
   topic `3d`), and keeps a short entry in their place that says what they are and where to read about them. An
