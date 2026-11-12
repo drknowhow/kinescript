@@ -1,12 +1,13 @@
 """Model layers on OpenGL (gl3d): which models draw there, that they match the Skia path, stages and their shadow
-maps, a partial draw, moving copies, textures, see-through materials, repeatability, what check and --boxes read,
-and KINE_3D. The drawing tests need the GPU backend and moderngl, and skip without them (CI runs on the CPU)."""
+maps, a partial draw, moving copies, textures, see-through materials, copies placed by OpenGL, repeatability, what
+check and --boxes read, and KINE_3D. The drawing tests need the GPU backend and moderngl, and skip without them (CI
+runs on the CPU)."""
 import numpy as np
 import pytest
 import skia
 
 import kinescript as k
-from kinescript import gl3d, stage
+from kinescript import gl3d, space, stage
 from kinescript.render import Renderer
 from test_models import write_gltf
 
@@ -115,7 +116,7 @@ def test_moving_copies_keep_their_buffers_and_draw_as_a_fresh_renderer_does(monk
     r.frame(0)
     buf = r._gl_meshes["dots"]
     later = r.frame(20)[..., :3]
-    assert r._gl_meshes["dots"] is buf  # the same buffers, the vertices written again
+    assert r._gl_meshes["dots"] is buf  # the same buffers: only where the copies go is written again
     assert np.array_equal(later, renderer(spec, monkeypatch).frame(20)[..., :3])
 
 
@@ -681,3 +682,155 @@ def test_check_reads_a_see_through_model_as_from_the_skia_path(monkeypatch):
     assert not a.on_gl and b.on_gl == {"glass", "case"}
     assert seen_a == seen_b
     assert np.array_equal(renderer(spec, monkeypatch).frame(0)[..., :3], px)
+
+
+# ---- copies placed by OpenGL ----
+
+def flock(**kw):
+    """Nine copies of a ring that bob: each turned its own way about all three axes, of its own size (one mirrored)
+    and colour, and at its own depth."""
+    return dict({"id": "flock", "type": "model", "shape": "torus", "r": 15, "tube": 6, "x": 160, "y": 120,
+                 "detail": "low", "shine": 0.6,
+                 "repeat": {"count": 9, "x": "=(i % 3 - 1) * 85", "y": "=(floor(i / 3) - 1) * 62 + sin(t * 3 + i) * 8",
+                            "z": "=i * 14 - 56", "rotateX": "=i * 35 + t * 40", "rotateY": "=i * 23",
+                            "rotate": "=i * 50", "scale": [1, 1.25, 0.8, 1.4, -1.1, 1, 0.9, 1.3, 1.1],
+                            "fill": "=mix('#ff633f', '#3b6cf0', i / 8)"}}, **kw)
+
+
+def placed(r, name="flock") -> bool:
+    """Whether OpenGL placed the model's copies in the renderer's frames so far, none of them merged."""
+    return r._gl_meshes[name].placed is not None and ("copies", name) not in r._models
+
+
+def merged(spec, monkeypatch, n=0, **kw):
+    """Frame n with the model's copies merged into one mesh and drawn on OpenGL, as they all were, and the
+    renderer."""
+    with monkeypatch.context() as mp:
+        mp.setattr(gl3d, "copying", lambda textured: False)
+        r = renderer(spec, mp, **kw)
+        px = r.frame(n)[..., :3].astype(int)
+    assert r.on_gl >= {"flock"} and not placed(r)
+    return px, r
+
+
+def alike(a, b, what=None, few=12):
+    """The frames differ at a few pixels at most: OpenGL places a copy's corners in 32 bits where numpy does in 64,
+    so a pixel whose centre a triangle's edge passes through can fall on the other side of it."""
+    d = np.abs(a - b).max(-1)
+    assert (d > 0).sum() <= few, (what, int((d > 0).sum()), int(d.max()))
+    assert (np.abs(b - b[0, 0]).max(-1) > 30).mean() > 0.02, what  # and the model is in the frame
+
+
+def test_copies_placed_by_opengl_draw_as_merged_copies_do(tmp_path, monkeypatch):
+    """Copies that move are drawn from one copy's buffers and where each goes. The frame is the one the merged
+    mesh gives, and the one the Skia path gives: alone, with a fill of its own on one part and the copies' on the
+    other, with no fills, in fog, in a stage through a card, and textured. Then with edge lines, which the Skia
+    path finds its own way."""
+    parts = [{"shape": "cube", "w": 24, "fill": "#20222a"}, {"shape": "sphere", "r": 11, "x": 16, "y": -8}]
+    plain = flock()
+    plain["repeat"] = {k_: v for k_, v in plain["repeat"].items() if k_ != "fill"}
+    board = {"id": "card", "type": "rect", "x": 160, "y": 120, "w": 150, "h": 60, "fill": "#33323a", "rotateY": 50}
+    tiles = dict(card(picture(tmp_path / "p.png"), w=50, h=38), id="flock", repeat=flock()["repeat"])
+    for spec, n in ((scene([flock()]), 10), (scene([flock()]), 40),
+                    (scene([flock(shape=None, parts=parts)]), 25), (scene([plain]), 25),
+                    (dict(scene([flock(z=-200)]), fog={"near": 100, "far": 1200}), 30),
+                    (scene([{"id": "st", "type": "group", "sort": "pixel", "children": [flock(), board]}]), 25),
+                    (scene([tiles]), 25)):
+        r = renderer(spec, monkeypatch)
+        b = r.frame(n)[..., :3].astype(int)
+        assert placed(r) and r.on_gl >= {"flock"}
+        alike(merged(spec, monkeypatch, n)[0], b, (spec["layers"][0], n))
+        close(renderer(spec, monkeypatch, "skia").frame(n)[..., :3].astype(int), b, mean=0.5, far=0.005)
+    spec = scene([flock(edges={"width": 2})])
+    r = renderer(spec, monkeypatch)
+    b = r.frame(10)[..., :3].astype(int)
+    assert placed(r)
+    alike(merged(spec, monkeypatch, 10)[0], b)
+    assert (np.abs(b - renderer(scene([flock()]), monkeypatch).frame(10)[..., :3]).max(-1) > 64).mean() > 0.01
+
+
+def test_copies_are_merged_when_their_points_are_needed(monkeypatch):
+    """Copies that hold still, are drawn in part, are see-through, cast a ground shadow or into a stage's shadow
+    map, stand under a point light or before a camera that focuses, and every model check draws: these need
+    each copy's points, so they are merged as before, and the frame is the merged one to the last pixel."""
+    still = flock()
+    still["repeat"] = dict(still["repeat"], y="=(floor(i / 3) - 1) * 62", rotateX="=i * 35")
+    lamp = dict(scene([flock()]), lights=[{"type": "point", "x": 60, "y": 40, "z": 200, "color": "#ffd0a0"}])
+    lens = dict(scene([flock()]), camera={"z": [[0, 0], [2, 40]], "aperture": 24, "focus": 0})
+    for what, spec in (("still", scene([still])), ("part", scene([flock(draw=[[0, 0.3], [2, 1, "linear"]])])),
+                       ("clear", scene([flock(transparency=0.5, edges=None)])),
+                       ("ground", scene([flock(ground=True)])), ("lamp", lamp), ("lens", lens),
+                       ("shadows", lit_scene([lit([flock(x=0, y=-60)])]))):
+        r = renderer(spec, monkeypatch)
+        b = r.frame(20)[..., :3].astype(int)
+        assert r.on_gl >= {"flock"} and not placed(r), what
+        assert np.array_equal(b, merged(spec, monkeypatch, 20)[0]), what
+    px, r, seen = tracked(scene([flock()]), monkeypatch, "auto", 20)
+    assert r.on_gl == {"flock"} and not placed(r)
+    assert seen == tracked(scene([flock()]), monkeypatch, "skia", 20)[2]
+
+
+def test_what_a_render_notes_of_copies_placed_by_opengl(monkeypatch):
+    """Whether the camera is inside the model, the camera plane cuts it or the fog hides it, as for merged copies.
+    Inside (and so cut by the camera plane): a ball round the camera only at its copy's size, a bar round it only
+    as its copy is turned, and not two balls round it at once (as for a merged mesh, whose surface a ray then
+    crosses twice). Cut: balls on both sides of the camera plane, a ball that reaches it only at its copy's size
+    (mirrored), and a bar that reaches it only as its copy is turned. Hidden: balls far off in fog, and not when
+    one is near."""
+    eye = -1.0 / space.lens(320, 240)[3, 2]  # how far the camera stands from z 0
+    balls = {"id": "flock", "type": "model", "shape": "sphere", "r": 30, "x": 160, "y": 120, "detail": "low"}
+    sway = "=sin(t) * 3"
+    sized = dict(balls, repeat={"count": 3, "y": sway, "z": [-200, eye - 45, -400], "scale": [1, 2, 1]})
+    pulse = "=1 + sin(t) * 0.02"
+    bar = dict(balls, shape="cube", w=120, h=20, depth=20, repeat={
+        "count": 2, "scale": pulse, "x": [30, 300], "y": [30, 0], "z": [eye, -200], "rotate": [45, 0]})
+    big = dict(balls, repeat={"count": 2, "y": sway, "x": [100, 0], "z": [eye - 60, -300], "scale": [-3, 1]})
+    long = dict(balls, shape="cube", w=160, h=20, depth=20, repeat={
+        "count": 2, "scale": pulse, "x": [100, 0], "z": [eye - 50, -300], "rotateX": [90, 0], "rotate": [90, 0]})
+    twice = dict(balls, repeat={"count": 3, "y": sway, "z": [eye, eye - 10, -400]})
+    across = dict(balls, repeat={"count": 4, "x": "=(i - 1.5) * 70 + t", "z": [0, eye - 5, eye + 60, -100]})
+    far = dict(balls, repeat={"count": 3, "x": "=(i - 1) * 90 + t", "z": [-3000, -3400, -5000]})
+    near = dict(balls, repeat={"count": 3, "x": "=(i - 1) * 90 + t", "z": [-3000, -3400, -200], "scale": [1, 1, -1]})
+    mist = {"near": 100, "far": 900}
+    for what, spec, notes in (("sized", scene([sized]), "inside culled"), ("bar", scene([bar]), "inside culled"),
+                              ("twice", scene([twice]), "culled"), ("across", scene([across]), "culled"),
+                              ("big", scene([big]), "culled"), ("long", scene([long]), "culled"),
+                              ("far", dict(scene([far]), fog=mist), "fogged"),
+                              ("near", dict(scene([near]), fog=mist), "")):
+        r = renderer(spec, monkeypatch)
+        b = r.frame(10)[..., :3].astype(int)
+        px, was = merged(spec, monkeypatch, 10)
+        assert placed(r), what
+        assert (r.inside, r.culled, r.fogged) == tuple({"flock"} if k_ in notes else set()
+                                                      for k_ in ("inside", "culled", "fogged")), what
+        assert (r.inside, r.culled, r.fogged) == (was.inside, was.culled, was.fogged), what
+        assert (np.abs(px - b).max(-1) > 0).sum() <= 12, what
+
+
+def test_a_frame_of_copies_placed_by_opengl_is_the_same_whatever_was_drawn_before_it(monkeypatch):
+    spec = scene([flock(), flock(id="more", x=200, r=9, tube=4)])
+    r = renderer(spec, monkeypatch)
+    first = r.frame(30).copy()
+    for n in (0, 59, 12):
+        r.frame(n)
+    assert placed(r) and placed(r, "more")
+    assert np.array_equal(first, r.frame(30))
+    assert np.array_equal(first, renderer(spec, monkeypatch).frame(30))
+
+
+def test_copies_are_merged_where_the_driver_will_not_place_them(monkeypatch):
+    """A driver that will not compile the program that places copies leaves them merged, on OpenGL still."""
+    def refuses(ctx, fills, mats):
+        raise RuntimeError("no")
+    spec = scene([flock()])
+    want = merged(spec, monkeypatch, 15)[0]
+    r = renderer(spec, monkeypatch)  # skips without OpenGL, before its state is touched
+    kept = {k_: gl3d._STATE.pop(k_) for k_ in ("shade_copies", "tex_copies") if k_ in gl3d._STATE}
+    try:
+        monkeypatch.setattr(gl3d, "_program", refuses)
+        assert np.array_equal(r.frame(15)[..., :3], want)
+        assert r.on_gl == {"flock"} and not placed(r) and gl3d._STATE["shade_copies"] is None
+    finally:
+        monkeypatch.undo()
+        gl3d._STATE.pop("shade_copies", None)
+        gl3d._STATE.update(kept)

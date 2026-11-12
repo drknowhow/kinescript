@@ -12,6 +12,16 @@
   of the stress scene and 35 examples are the same to the last pixel; the other ten are frames of
   `examples/3d.json`, text under a camera, where 2 to 207 pixels differ by one level. On the CPU all 62 frames
   compared are the same.
+- A model's copies (`repeat`) that move are placed by OpenGL: one copy's mesh is drawn once for each, from a matrix,
+  an offset and a colour of its own. They were merged into one mesh on the CPU and sent to the GPU again every frame.
+  A frame of 400 rings that turn drew in 21.1 to 21.7 ms and draws in 1.1 (RTX 5060 Ti, three alternating runs of 60
+  consecutive frames); `examples/cubes.json` after its build, 2.3 to 2.4 and now 1.3; a 70 s tour of 24 models, 28.2
+  to 28.4 and now 14.3 to 14.6. OpenGL places a point in 32 bits where the merge used 64, so a pixel on a copy's
+  outline can fall the other way: over eight frames of `cubes.json` two pixels of one frame differ, on the rings 34
+  to 58 pixels of a frame's 921,600 (at most four of them by more than 8 levels of 255), and over twelve frames of
+  the tour none to three. Copies are merged, and draw exactly as before, when they hold still, while the model is
+  drawn in part (`draw`, a `build`), with `transparency`, a `ground` shadow, a point light or a camera `aperture`,
+  in a stage that casts shadows, and for `kine check` and `--boxes`.
 
 ## 2.4.0 (2026-11-11)
 
