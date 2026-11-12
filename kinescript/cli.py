@@ -141,7 +141,8 @@ def main(argv=None) -> int:
     v.add_argument("--backend", help="which installed voice backend to use, when there are several")
 
     dc = sub.add_parser("docs", help="print the scene reference, or one topic of it")
-    dc.add_argument("topic", nargs="?", help="avatars, brands, or all")
+    from .docs import TOPICS
+    dc.add_argument("topic", nargs="?", help=", ".join(TOPICS) + ", or all")
     nw = sub.add_parser("new", help="write a starter scene")
     nw.add_argument("path", nargs="?", default="scene.json")
 

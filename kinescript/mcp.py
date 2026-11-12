@@ -14,13 +14,14 @@ import traceback
 from pathlib import Path
 
 from . import __version__
+from .docs import TOPICS
 
 _SCENE = {"description": "Path to a scene .json, or the scene object itself", "type": ["string", "object"]}
 TOOLS = [
     {"name": "kine_docs", "description": "Kinescript scene reference: layer types, properties, timing, motions, "
-     "components, eases. Read once before writing a scene. topic: avatars (talking characters) or brands, "
-     "for those references.", "inputSchema": {"type": "object", "properties": {
-         "topic": {"type": "string", "enum": ["avatars", "brands", "all"]}}}},
+     "components, eases. Read once before writing a scene. topic: 3d (depth, the camera and models), "
+     "avatars (talking characters), brands or explainers, for those references.",
+     "inputSchema": {"type": "object", "properties": {"topic": {"type": "string", "enum": [*TOPICS, "all"]}}}},
     {"name": "kine_check", "description": "Lint a scene: load errors, text off canvas or in the safe margin, overlapping "
      "text, low contrast, tiny text, too little reading time, and sound (a voice cut off or under the music, voices "
      "overlapping, an effect late on its cue, silence, loudness and peaks), and a brand's contrast and logo clear "
