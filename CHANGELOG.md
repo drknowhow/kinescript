@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- The project site's hero is a 32-second reel set to music, `marketing/reel.json`, written by
+  `marketing/build_reel.py`: a lit 3D can, a cutaway, kinetic type, charts, three talking presenters, one scene
+  in two brand palettes, trimmed and captioned footage, and the scene file that made it, each named by a caption
+  with the key that does it. The narrated tour, `marketing/hero.json`, moves to a "How it works" section below.
+
 ## 2.5.1 (2026-11-12)
 
 - `kine docs` leaves depth, the camera and model layers to a topic of their own, `kine docs 3d` (`kine_docs`

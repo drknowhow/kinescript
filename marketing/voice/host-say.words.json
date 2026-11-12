@@ -1,0 +1,84 @@
+{
+ "words": [
+  {
+   "word": "Write",
+   "start": 0.4,
+   "end": 0.5875
+  },
+  {
+   "word": "a",
+   "start": 0.5875,
+   "end": 0.675
+  },
+  {
+   "word": "line,",
+   "start": 0.675,
+   "end": 1.025,
+   "id": "line"
+  },
+  {
+   "word": "and",
+   "start": 1.0625,
+   "end": 1.1625
+  },
+  {
+   "word": "I",
+   "start": 1.1625,
+   "end": 1.325
+  },
+  {
+   "word": "say",
+   "start": 1.325,
+   "end": 1.6,
+   "id": "say"
+  },
+  {
+   "word": "it.",
+   "start": 1.6,
+   "end": 2.05
+  }
+ ],
+ "phones": [
+  {
+   "ipa": "ɹˈIt",
+   "start": 0.4,
+   "end": 0.5875
+  },
+  {
+   "ipa": "ɐ",
+   "start": 0.5875,
+   "end": 0.675
+  },
+  {
+   "ipa": "lˈIn",
+   "start": 0.675,
+   "end": 1.025
+  },
+  {
+   "ipa": "ænd",
+   "start": 1.0625,
+   "end": 1.1625
+  },
+  {
+   "ipa": "ˌI",
+   "start": 1.1625,
+   "end": 1.325
+  },
+  {
+   "ipa": "sˈA",
+   "start": 1.325,
+   "end": 1.6
+  },
+  {
+   "ipa": "ɪt",
+   "start": 1.6,
+   "end": 2.05
+  }
+ ],
+ "made": {
+  "hash": "5034b150337fbdef",
+  "backend": "kokoro",
+  "version": "kokoro 0.9.4, kinescript-kokoro 0.1.0",
+  "speaker": "am_michael"
+ }
+}
