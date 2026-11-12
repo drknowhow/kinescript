@@ -124,3 +124,10 @@ def test_checks_try_a_unit_expression_on_the_first_unit_and_the_last():
                "y": 100, "unitY": "=10 / (n - 5)"}
     assert codes(scene([counter]))[1] is not None  # 5, 25,002 and 50,000 at the times loading tries
     assert "bad-expression" in [i["code"] for i in check(scene([counter]))["issues"]]  # 1,000 to 9,999 on the way
+
+
+def test_a_unit_key_that_gives_no_finite_number_is_an_error():
+    for bad in ("=1e999", "=1e999 - 1e999", "=10 ** 400", "=1e308 * (i + 10)"):  # inf, nan, an int past a float
+        got, s = codes(scene([text(unitY=bad)]))
+        assert s is None and "bad-expression" in got, bad
+    assert codes(scene([text(unitY="=1e300 * i")]))[1] is not None  # large, and a number
