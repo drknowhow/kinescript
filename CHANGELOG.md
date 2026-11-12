@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.5.0 (2026-11-12)
 
 - Text split into letters, words or lines draws the units that are only moved, faded or recoloured as runs of
   placed glyphs: one call for each stretch of units that share a colour and an opacity. Every unit was drawn on
