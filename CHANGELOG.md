@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- `kine docs` leaves depth, the camera and model layers to a topic of their own, `kine docs 3d` (`kine_docs`
+  topic `3d`), and keeps a short entry in their place that says what they are and where to read about them. An
+  agent writing a 2D scene read 85,406 characters, about 21,000 tokens, of which 23,500 were 3D; the reference is
+  now 62,628. `kine docs all` prints everything, as before. The `kine_docs` MCP tool and `kine docs --help` list
+  every topic: both left out `explainers`. A line of the 3D text printed a line break where it meant to show
+  `"\n"`.
+
 ## 2.5.0 (2026-11-12)
 
 - Text split into letters, words or lines draws the units that are only moved, faded or recoloured as runs of

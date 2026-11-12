@@ -152,6 +152,8 @@ depth draw exactly as before.
   Each stop lasts as long as its line. `dim` washes out the models a stop does not focus or `keep`, and `wash`
   does the same for any layer by hand. `kine docs explainers` documents it, with a complete scene.
 
+`kine docs 3d` is the reference for depth, the camera and model layers.
+
 A 3D title that builds in and turns to face the camera:
 
 ```json
@@ -231,7 +233,7 @@ An agent cannot watch a video, so Kinescript gives it things it can read:
 
 | Command | What the agent gets |
 |---|---|
-| `kine docs [TOPIC]` | the scene reference, short enough to keep in context; `avatars`, `brands` and `explainers` are topics of their own |
+| `kine docs [TOPIC]` | the scene reference, short enough to keep in context; `3d`, `avatars`, `brands` and `explainers` are topics of their own |
 | `kine check scene.json` | every problem at once as JSON, each with its layer, time range and a fix |
 | `kine look scene.json --boxes` | one PNG of many labelled frames, with every layer outlined and the top-level ones named |
 | `kine look scene.json --wire --depth` | the same frames with every model's triangles drawn over them, and each stage's depth image, nearer brighter |

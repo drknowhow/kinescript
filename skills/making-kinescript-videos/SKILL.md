@@ -70,7 +70,8 @@ The CPU torch index avoids a multi-GB CUDA download. The first `kine voice` run 
 
 ## Procedure
 
-1. **Read `kine docs`** for layer types, cue syntax, motions and the sound rules.
+1. **Read `kine docs`** for layer types, cue syntax, motions and the sound rules,
+   and `kine docs 3d` as well when the scene uses depth, a camera or models.
    `kine new` writes a starter scene.
 2. **Storyboard in writing**: scenes, their order, and the one thing the
    viewer must take from each. For anything longer than a few layers,
