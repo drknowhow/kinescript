@@ -560,8 +560,9 @@ class Scene:
 
     def _check_values(self):
         """Evaluate every property at the start, middle and end of its layer, so a bad value is reported
-        now, with its layer and field, instead of as a Python error halfway through a render."""
-        for layer in self.all_layers():
+        now, with its layer and field, instead of as a Python error halfway through a render. The camera is
+        checked as a layer: its keys animate like one's."""
+        for layer in [*self.all_layers(), *([self.camera] if self.camera is not None else [])]:
             d = layer.dur
             for name, prop in layer.props.items():
                 if name.startswith("u_"):

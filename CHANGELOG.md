@@ -8,6 +8,9 @@
   now 62,628. `kine docs all` prints everything, as before. The `kine_docs` MCP tool and `kine docs --help` list
   every topic: both left out `explainers`. A line of the 3D text printed a line break where it meant to show
   `"\n"`.
+- `kine check` reports a camera key that is not a number as a `bad-value` error on the camera, as it does for a
+  layer's keys. `"z": [[0, 0], [6, -400], "linear"]`, with the ease after the list instead of inside the last key,
+  made check stop with an internal TypeError.
 
 ## 2.5.0 (2026-11-12)
 
