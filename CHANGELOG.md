@@ -25,7 +25,15 @@
   Turned in perspective, the image sits up to a pixel from where Skia put it, which shows along its sharp edges: over
   five frames of each example the mean difference is 0.03 levels on `product.json`, 0.3 on `textures.json` and 0.2 to
   0.3 on `screens.json`. `kine check` counts triangles and warns `texture-swim` as before, from the triangles Skia
-  would cut. A textured model of more than 32 materials or 16 images, and one with `transparency`, draws with Skia.
+  would cut. A textured model of more than 32 materials or 16 images draws with Skia.
+- Models with `transparency` draw on OpenGL when they have no edge lines. The see-through triangles are drawn after
+  the solid ones, far to near, over what is there; the solid ones go through the depth buffer as before. Frames match
+  Skia's to within one level of 255 on a see-through torus, a box with a ball in it, planes, model files, toon bands,
+  glow, an environment and fog. A frame of `glass.json`, one of whose two models has edge lines, drew in 7.2 to 7.9
+  ms and draws in 4.6 to 5.0 (RTX 5060 Ti, three alternating runs); a high-detail see-through torus and sphere,
+  30.0 to 30.8 and now 5.0 to 5.7. A see-through model with `edges` still draws with Skia: OpenGL finds lines on the
+  nearest surface, and the lines of what shows through would be lost. A textured model draws solid whatever its
+  `transparency`, as before, and now on OpenGL.
 
 ## 2.3.0 (2026-11-11)
 
