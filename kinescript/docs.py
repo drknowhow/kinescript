@@ -483,10 +483,10 @@ DEPTH AND CAMERA (3D)
             far edge); round a sphere, cylinder, cone, capsule or lathe with its middle facing you, and
             flat across a cylinder's or cone's ends; once round a torus and its tube; along a tube and
             round it; across the front and back of text and path shapes. The fill shows through clear pixels. A part takes the layer's texture unless it
-            sets its own; false draws its fill. Triangles are cut where perspective would slide the
-            image across them (check warns texture-swim where that is not enough, right in front of
-            the camera). repeat and offset do not animate. A textured model takes about twice as
-            long to draw.
+            sets its own; false draws its fill. repeat and offset do not animate. Skia cuts
+            triangles where perspective would slide the image across them (check warns texture-swim
+            where that is not enough, right in front of the camera) and takes about twice as long as
+            for a plain model; OpenGL (below) places the image at each pixel.
   parts     [{"shape": "sphere", "r": 30, "x": 0, "y": -120, "z": 0, "rotateX": 0, "rotateY": 0,
             "rotate": 0, "scale": 1, "fill": "#b9f45d", "shine": 0.9}, ...] placed from the
             model's centre. Part keys take keyframes and expressions like layer keys, with i the
@@ -583,12 +583,12 @@ DEPTH AND CAMERA (3D)
             matte model none. Unset (the default), nothing is reflected. The colours and amount animate.
   On the GPU with the gl extra (pip install "kinescript[gl]"; kine doctor says "models": "opengl"),
   a model draws on OpenGL through a depth buffer, and parts of one model that cut through each other
-  meet at a clean edge. Elsewhere (the CPU, and a model with a texture, transparency, explode or
-  "edges": "all") triangles are sorted far to near within one model, so that seam is stepped: let
-  parts touch rather than cross. Separate layers draw in list order, except in a stage (a group
-  with "sort": "pixel", see DEPTH AND CAMERA), where they meet at a clean edge wherever they cross:
-  put things that cross in a stage as separate layers. A ground shadow in a stage lies on a floor
-  layer in the same plane. check warns past 60,000 triangles in a frame.
+  meet at a clean edge. Elsewhere (the CPU; a model with transparency, explode or "edges": "all"; a
+  textured one of over 32 materials or 16 images) triangles are sorted far to near within one model,
+  so that seam is stepped: let parts touch rather than cross. Separate layers draw in list order,
+  except in a stage (a group with "sort": "pixel", see DEPTH AND CAMERA), where they meet at a clean
+  edge wherever they cross: put things that cross in a stage as separate layers. A ground shadow in
+  a stage lies on a floor layer in the same plane. check warns past 60,000 triangles in a frame.
   A ring around a ball that builds in, turns, and flies apart:
     {"id": "emblem", "type": "model", "x": "50%", "y": "45%", "detail": "high",
      "rotateX": [[0, 64], ["end", 18]], "rotateY": [[0, -30], ["end", 70]],

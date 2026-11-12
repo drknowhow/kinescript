@@ -1490,9 +1490,10 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
     edging = _edging(r, L, t, scene_t)
     ex = float(g("explode", 0.0))
     on_gl = gl3d.available(r) and gl3d.fits(mats, texs, glows, ex, edging)
+    looks = (texs, glows) if any(tx is not None for tx in texs + glows) else None  # what gl3d.draw shows
     if on_gl and not r.track:
         order = _fixed(r, L, m, "order", lambda: mesh.build_order(m)) if amt < 1.0 else None
-        return gl3d.draw(r, c, L, m, mats, (lt, more, env), fg, edging, amt, order)
+        return gl3d.draw(r, c, L, m, mats, (lt, more, env), fg, edging, amt, order, looks=looks)
     P, N, T, M = m.P, m.N, m.T, m.M
     U = None  # texture coordinates, when any material has a texture (a file without them: check says no-uvs)
     if any(tx is not None for tx in texs + glows):
@@ -1556,6 +1557,8 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
         # check and --boxes: OpenGL draws the pixels, while the box, the triangle count and fog-hides come from the
         # triangles and lines this path would draw, so they are the same with and without OpenGL.
         bounds, wv = _seen(r, X, Y, w, T, lines, 0.0 if edging is None else edging[0] / 2)
+        if U is not None:  # as many as Skia cuts these into, and its word on whether the image would swim there
+            T = _unswim(r, L, P, N, M, U, T, [tx if tx is not None else gl for tx, gl in zip(texs, glows)])[4]
         r.tris += len(T)
         if min(r.w, math.ceil(bounds[2]) + 2) <= max(0, math.floor(bounds[0]) - 2) or \
                 min(r.h, math.ceil(bounds[3]) + 2) <= max(0, math.floor(bounds[1]) - 2):
@@ -1563,7 +1566,7 @@ def draw(r, c: skia.Canvas, L, g, reveal: float, t: float = 0.0, scene_t: float 
         if fg is not None and fogged(fg, wv).min() >= 0.999:
             r.fogged.add(L.id)
         order = _fixed(r, L, m, "order", lambda: mesh.build_order(m)) if amt < 1.0 else None
-        gl3d.draw(r, c, L, m, mats, (lt, more, env), fg, edging, amt, order, tracked=True)
+        gl3d.draw(r, c, L, m, mats, (lt, more, env), fg, edging, amt, order, tracked=True, looks=looks)
         return bounds
     if U is not None:
         P, N, M, U, T = _unswim(r, L, P, N, M, U, T, [tx if tx is not None else gl for tx, gl in zip(texs, glows)])

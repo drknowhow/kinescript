@@ -1,6 +1,6 @@
 """Model layers on OpenGL (gl3d): which models draw there, that they match the Skia path, stages and their shadow
-maps, a partial draw, moving copies, repeatability, what check and --boxes read, and KINE_3D. The drawing tests need
-the GPU backend and moderngl, and skip without them (CI runs on the CPU)."""
+maps, a partial draw, moving copies, textures, repeatability, what check and --boxes read, and KINE_3D. The drawing
+tests need the GPU backend and moderngl, and skip without them (CI runs on the CPU)."""
 import numpy as np
 import pytest
 import skia
@@ -8,6 +8,7 @@ import skia
 import kinescript as k
 from kinescript import gl3d, stage
 from kinescript.render import Renderer
+from test_models import write_gltf
 
 
 def scene(layers, **canvas):
@@ -145,8 +146,6 @@ def test_what_fits_on_opengl():
     assert gl3d.fits([mat] * gl3d.MATS, [None] * gl3d.MATS, [None] * gl3d.MATS, 0.0, None)
     assert not gl3d.fits([mat] * (gl3d.MATS + 1), [None] * 65, [None] * 65, 0.0, None)
     assert not gl3d.fits([clear], [None], [None], 0.0, None)
-    assert not gl3d.fits([mat], [object()], [None], 0.0, None)
-    assert not gl3d.fits([mat], [None], [object()], 0.0, None)
     assert not gl3d.fits([mat], [None], [None], 0.3, None)
     assert not gl3d.fits([mat], [None], [None], 0.0, (2.0, [0, 0, 0], 2.0))  # edges: "all"
 
@@ -242,7 +241,7 @@ def nearness(image) -> np.ndarray:
 
 def cast(monkeypatch) -> list:
     """Count what gl3d.sun_map draws from here on: [casters from a model's buffers, casters sent loose, maps]."""
-    n, real_map, real_shadow = [0, 0, 0], gl3d.sun_map, gl3d._Buffers.shadow
+    n, real_map, real_array = [0, 0, 0], gl3d.sun_map, gl3d._Buffers.array
 
     def sun_map(r, casters, *a):
         before = n[0]
@@ -251,11 +250,11 @@ def cast(monkeypatch) -> list:
         n[2] += 1
         return out
 
-    def shadow(self, order):
-        n[0] += 1
-        return real_shadow(self, order)
+    def array(self, name, m, order=None):
+        n[0] += name == "sun"
+        return real_array(self, name, m, order)
     monkeypatch.setattr(gl3d, "sun_map", sun_map)
-    monkeypatch.setattr(gl3d._Buffers, "shadow", shadow)
+    monkeypatch.setattr(gl3d._Buffers, "array", array)
     return n
 
 
@@ -366,3 +365,214 @@ def test_skia_draws_the_shadow_map_when_opengl_is_off(monkeypatch):
     renderer(spec, monkeypatch, "skia").frame(0)
     Renderer(k.Scene(spec), backend="cpu").frame(0)
     assert count == [0, 0, 0]
+
+
+# ---- textures ----
+
+def picture(path, size=128, turned=False) -> str:
+    """An image whose quarters are red, green, blue and clear, with a dark line along every fourth row: which way up
+    it is read, where its edges fall, what shows through it and how sharply it is read when small all show.
+    turned: the same image upside down."""
+    h = size // 2
+    px = np.zeros((size, size, 4), np.uint8)
+    px[..., 3] = 255
+    px[:h, :h, :3], px[:h, h:, :3], px[h:, :h, :3] = (230, 40, 40), (40, 200, 60), (40, 70, 230)
+    px[::4, :, :3] //= 4
+    px[h:, h:] = 0
+    px = np.ascontiguousarray(px[::-1, ::-1]) if turned else px
+    skia.Image.fromarray(px, skia.kRGBA_8888_ColorType).save(str(path))
+    return str(path)
+
+
+def card(texture, **kw):
+    """A plane that faces the camera."""
+    return dict({"id": "card", "type": "model", "shape": "plane", "w": 200, "h": 150, "x": 160, "y": 120,
+                 "fill": "#c8a03c", "texture": texture}, **kw)
+
+
+def quad(tmp_path, name, uv, extra=None, halves=None, **material):
+    """A square model file that faces the camera, with picture() as its image 0 and the same upside down as its
+    image 1: of one material, or its left and right halves of the two materials `halves`."""
+    png = [open(picture(tmp_path / f"p{i}.png", turned=bool(i)), "rb").read() for i in range(2)]
+    xs = [(-1, 1)] if halves is None else [(-1, 0), (0, 1)]
+    prims = [([[a, 1, 0], [b, 1, 0], [b, -1, 0], [a, -1, 0]], [[0, 3, 2], [0, 2, 1]], [[0, 0, 1]] * 4, i,
+              *(() if uv is None else (uv,))) for i, (a, b) in enumerate(xs)]
+    src = write_gltf(tmp_path / name, prims, materials=halves or [material], binary=True, images=png, extra=extra)
+    return {"id": "m", "type": "model", "src": src, "w": 160, "x": 160, "y": 120}
+
+
+def same(a, b, what=None, levels=3):
+    """No pixel more than `levels` apart: Skia keeps a textured model's light in 8 bits before it multiplies."""
+    assert np.abs(a - b).max() <= levels, (what, int(np.abs(a - b).max()))
+    assert (np.abs(b - b[0, 0]).max(-1) > 30).mean() > 0.02, what  # and the model is in the frame
+
+
+def test_a_textured_model_that_faces_the_camera_is_the_skia_paths(tmp_path, monkeypatch):
+    """With perspective out of it nothing tells the paths apart: the image the right way up, repeated and offset,
+    its fill through its clear pixels, as sharp when it is drawn small, under more light than white takes and under
+    none of its own (glow), in toon bands."""
+    img = picture(tmp_path / "p.png")
+    for kw in ({}, {"w": 90, "h": 70}, {"texture": {"src": img, "repeat": [3, 2], "offset": [0.25, 0.1]}},
+               {"light": {"key": 1.6, "ambient": 1.4}, "fill": "#403020"}, {"glow": 1}, {"bands": 3, "shine": 0.9}):
+        a, b, gl = both(scene([card(**dict({"texture": img}, **kw))]), monkeypatch)
+        assert gl == {"card"}, kw
+        same(a, b, kw)
+
+
+def test_a_textured_model_turned_in_perspective_stays_within_a_pixel_of_the_skia_path(tmp_path, monkeypatch):
+    """Skia spreads the image evenly over triangles it cuts until that is within a pixel of right; OpenGL places it
+    at each pixel. They differ along the image's edges and nowhere else."""
+    img = picture(tmp_path / "p.png")
+    two = {"id": "card", "type": "model", "x": 160, "y": 120, "rotateX": 60, "parts": [
+        {"shape": "sphere", "r": 50, "texture": {"src": img, "repeat": [3, 2]}},
+        {"shape": "torus", "r": 80, "tube": 12, "fill": "#ffffff"}]}
+    for layer in (card(img, rotateY=50, rotateX=20), card(img, shape="sphere", r=80, rotateY=30),
+                  card(img, shape="cube", w=110, h=110, rotateY=35, rotateX=-25, edges=True), two):
+        a, b, gl = both(scene([layer]), monkeypatch)
+        assert gl == {"card"}
+        close(a, b, mean=0.8, far=0.004)
+        assert (np.abs(a - b).max(-1) > 16).mean() < 0.03
+
+
+def test_a_model_files_tint_tiling_and_emission_texture_draw_as_on_skia(tmp_path, monkeypatch):
+    """Coordinates that run a whole image past each edge show the tiling: repeated, mirrored, held at the edge,
+    and one image tiled two ways by two materials. Then the image tinted, an image as the light a material gives
+    off (the one it shows, then another over it, then one whose sampled mean is black, so that the material has no
+    emission colour), and a file without coordinates."""
+    wide, unit = [[-1, -1], [2, -1], [2, 2], [-1, 2]], [[0, 0], [1, 0], [1, 1], [0, 1]]
+    pbr = {"baseColorTexture": {"index": 0}, "metallicFactor": 0, "roughnessFactor": 1}
+    layers = []
+    for i, wrap in enumerate(((10497, 10497), (33648, 33071), (33071, 10497))):
+        extra = {"samplers": [{"wrapS": wrap[0], "wrapT": wrap[1]}], "textures": [{"source": 0, "sampler": 0}]}
+        layers.append(quad(tmp_path, f"wrap{i}.glb", wide, extra, pbrMetallicRoughness=pbr))
+    extra = {"samplers": [{"wrapS": 33071, "wrapT": 33071}, {"wrapS": 33648, "wrapT": 33648}],
+             "textures": [{"source": 0, "sampler": 0}, {"source": 0, "sampler": 1}]}
+    layers.append(quad(tmp_path, "ways.glb", wide, extra, halves=[
+        {"pbrMetallicRoughness": dict(pbr, baseColorTexture={"index": i})} for i in range(2)]))
+    layers.append(quad(tmp_path, "tint.glb", unit, pbrMetallicRoughness=dict(pbr, baseColorFactor=[1, 0.6, 0.3, 1])))
+    dark = {"baseColorFactor": [0.1, 0.1, 0.1, 1], "metallicFactor": 0, "roughnessFactor": 1}
+    layers.append(quad(tmp_path, "lit.glb", unit, pbrMetallicRoughness=dark, emissiveFactor=[1, 0.5, 1],
+                       emissiveTexture={"index": 0}))
+    layers.append(quad(tmp_path, "over.glb", unit, pbrMetallicRoughness=pbr, emissiveFactor=[0.5, 0.5, 0.5],
+                       emissiveTexture={"index": 1}))
+    px = np.zeros((128, 128, 4), np.uint8)
+    px[..., 3] = 255
+    px[1::2, 1::2, :3] = 255  # the importer's mean reads the even rows and columns
+    skia.Image.fromarray(px, skia.kRGBA_8888_ColorType).save(str(tmp_path / "dots.png"))
+    (tmp_path / "q.obj").write_text("mtllib q.mtl\nv -1 1 0\nv 1 1 0\nv 1 -1 0\nv -1 -1 0\n"
+                                    "vt 0 1\nvt 1 1\nvt 1 0\nvt 0 0\nusemtl q\nf 1/1 4/4 3/3 2/2\n")
+    (tmp_path / "q.mtl").write_text("newmtl q\nKd 0.2 0.1 0.4\nmap_Ke dots.png\n")
+    layers.append(dict(layers[0], src=str(tmp_path / "q.obj")))
+    layers.append(dict(quad(tmp_path, "bare.glb", None, pbrMetallicRoughness=dark),
+                       texture=picture(tmp_path / "p.png")))
+    seen = []
+    for layer in layers:
+        a, b, gl = both(scene([layer]), monkeypatch)
+        assert gl == {"m"}, layer["src"]
+        same(a, b, layer["src"])
+        seen.append(b)
+    assert all(np.abs(x - y).max() > 60 for i, x in enumerate(seen) for y in seen[:i])  # nine different pictures
+
+
+def moving_ui():
+    """A group to show on a model: a square that crosses it, under a band. The rest of it is clear."""
+    return {"id": "ui", "type": "group", "w": 100, "h": 100, "x": 0, "y": 0, "children": [
+        {"type": "rect", "x": 0, "y": 0, "w": 100, "h": 40, "anchor": "topleft", "fill": "#203040"},
+        {"type": "rect", "x": [[0, 0], [2, 70]], "y": 55, "w": 30, "h": 30, "anchor": "topleft", "fill": "#e62828"}]}
+
+
+def test_a_picture_that_changes_is_copied_again_and_one_that_is_shared_is_copied_once(tmp_path, monkeypatch):
+    """A group drawn on a model is a new image each frame: each frame shows its own, in the texture the last one
+    had, with nothing of the last left where it is clear. Two models that show one file share its copy."""
+    img = picture(tmp_path / "p.png")
+    spec = scene([moving_ui(), card("#ui", x=90, w=140, h=140), card(img, id="a", x=240, y=60, w=100, h=80),
+                  card(img, id="b", x=240, y=180, w=100, h=80)])
+    on_skia = renderer(spec, monkeypatch, "skia")
+    wanted = [on_skia.frame(n)[..., :3].astype(int) for n in (0, 25, 50)]
+    r = renderer(spec, monkeypatch)
+    frames, textures = [], []
+    for n, want in zip((0, 25, 50), wanted):
+        frames.append(r.frame(n)[..., :3].astype(int))
+        assert r.on_gl == {"card", "a", "b"}
+        same(want, frames[-1], n)
+        kept = r._gl_pictures
+        assert sorted(hit[2] for hit in kept.copies.values()) == [1, 2] and not kept.spare
+        textures.append({hit[2]: hit[1] for hit in kept.copies.values()})
+    assert all(t[1] is textures[0][1] and t[2] is textures[0][2] for t in textures)
+    assert np.abs(frames[0] - frames[2]).max() > 100  # the square moved on the model
+
+
+def test_a_textured_frame_is_the_same_whatever_was_drawn_before_it(tmp_path, monkeypatch):
+    img = picture(tmp_path / "p.png")
+    spec = scene([moving_ui(), card("#ui", x=90, w=140, h=140, rotateY=[[0, -40], [2, 40]]),
+                  card(img, id="ball", shape="sphere", r=50, x=240, rotateY=[[0, 0], [2, 200]])])
+    r = renderer(spec, monkeypatch)
+    first = r.frame(30).copy()
+    r.frame(0)
+    r.frame(45)
+    assert r.on_gl == {"card", "ball"}
+    assert np.array_equal(first, r.frame(30))
+    assert np.array_equal(first, renderer(spec, monkeypatch).frame(30))
+
+
+def test_textured_models_drawn_in_part_in_copies_and_in_a_lit_stage_match_the_skia_path(tmp_path, monkeypatch):
+    img = picture(tmp_path / "p.png")
+    part = card(img, shape="sphere", r=80, rotateY=30, draw=0.5)
+    a, b, gl = both(scene([part]), monkeypatch)
+    assert gl == {"card"}
+    close(a, b, mean=0.8, far=0.01)
+    whole = renderer(scene([dict(part, draw=1)]), monkeypatch).frame(0)[..., :3].astype(int)
+    assert (np.abs(b - b[0, 0]).max(-1) > 30).mean() < 0.8 * (np.abs(whole - whole[0, 0]).max(-1) > 30).mean()
+    dots = card(img, id="dots", shape="cube", w=40, h=40, rotateY=[[0, 0], [2, 180]], rotateX=20,
+                repeat={"count": 5, "x": "=i * 56 - 112", "z": "=sin(t * 3 + i) * 90"})
+    for n in (0, 30):
+        a, b, gl = both(scene([dots]), monkeypatch, n)
+        assert gl == {"dots"}
+        close(a, b, mean=0.8, far=0.004)
+    count = cast(monkeypatch)
+    kids = [ball(x=-20, y=-30, r=40, texture=img, edges=None, bands=0)]
+    a = shadowed(lit_scene([lit(kids)]), monkeypatch, skia_map=True)[0]
+    assert count == [0, 0, 0]
+    b, r = shadowed(lit_scene([lit(kids)]), monkeypatch)
+    assert r.on_gl == {"ball"} and count == [1, 0, 1]  # its shadow from the buffers its picture is drawn from
+    same_shadows(a, b, shadowed(lit_scene([lit(kids, shadows=None)]), monkeypatch)[0])
+
+
+def test_check_reads_a_textured_model_as_from_the_skia_path(tmp_path, monkeypatch):
+    """A floor that runs past the camera: Skia cuts its triangles until the image stays put, and check counts
+    those and warns where that was not enough, whichever path draws the pixels."""
+    img = picture(tmp_path / "p.png")
+    spec = scene([card(img, id="floor", w=3000, h=3000, rotateX=85, y=200, z=150),
+                  card(img, rotateY=40, w=120, h=90, y=60)])
+    _, a, seen_a = tracked(spec, monkeypatch, "skia", 0)
+    px, b, seen_b = tracked(spec, monkeypatch, "auto", 0)
+    assert not a.on_gl and b.on_gl == {"floor", "card"}
+    assert seen_a == seen_b and a.swim == b.swim == {"floor"}
+    assert a.tris > 1000  # cut: the two planes are 8 triangles
+    assert np.array_equal(renderer(spec, monkeypatch).frame(0)[..., :3], px)  # and the pixels are a render's
+
+
+def test_what_a_textured_models_program_does_not_take_draws_with_skia(tmp_path, monkeypatch):
+    img, other = picture(tmp_path / "p.png"), picture(tmp_path / "q.png", size=64)
+    mat = ((0.5, 0.5, 0.5), 0.0, 0.4, 20.0, 0.0, 0.5, 0.0, (0.0, 0.0, 0.0), 1.0)
+    two = {"id": "two", "type": "model", "x": 160, "y": 120, "parts": [
+        {"shape": "sphere", "r": 40, "x": -50, "texture": img},
+        {"shape": "sphere", "r": 40, "x": 50, "texture": other}]}
+    r = renderer(scene([two, ball(x=40, y=40, w=40)]), monkeypatch)
+    r.frame(0)
+    assert r.on_gl == {"two", "ball"}
+    tx = lambda i: (object(), (1.0, 1.0), (0.0, 0.0), None, ("repeat", "repeat"))  # noqa: E731
+    one = tx(0)
+    assert gl3d.fits([mat] * gl3d.TEX_MATS, [one] * gl3d.TEX_MATS, [one] * gl3d.TEX_MATS, 0.0, None)
+    assert not gl3d.fits([mat] * (gl3d.TEX_MATS + 1), [one] + [None] * gl3d.TEX_MATS, [None] * 33, 0.0, None)
+    assert gl3d.fits([mat] * 8, [tx(i) for i in range(8)], [tx(i) for i in range(8)], 0.0, None)
+    assert not gl3d.fits([mat] * 9, [tx(i) for i in range(9)], [tx(i) for i in range(8)] + [None], 0.0, None)
+    assert not gl3d.fits([mat], [one], [None], 0.3, None) and not gl3d.fits([mat[:8] + (0.6,)], [one], [None], 0.0, None)
+    monkeypatch.setattr(gl3d, "UNITS", 1)  # one picture a draw
+    r.frame(0)
+    assert r.on_gl == {"ball"}
+    monkeypatch.undo()
+    monkeypatch.setenv("KINE_3D", "auto")
+    monkeypatch.setitem(gl3d._STATE, "tex", None)  # a driver that would not take the program
+    r.frame(0)
+    assert r.on_gl == {"ball"}
