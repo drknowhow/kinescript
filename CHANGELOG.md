@@ -11,6 +11,10 @@
   quieter above it); the plugin replaces three of its weight tensors at load time, after which the two engines
   differ no more than two torch runs do. On 3.13, install with `pip install --ignore-requires-python
   kinescript-kokoro`: misaki declares Python below 3.13 but runs on it.
+- The project site's hero is a 32-second reel set to music, `marketing/reel.json`, written by
+  `marketing/build_reel.py`: a lit 3D can, a cutaway, kinetic type, charts, three talking presenters, one scene
+  in two brand palettes, trimmed and captioned footage, and the scene file that made it, each named by a caption
+  with the key that does it. The narrated tour, `marketing/hero.json`, moves to a "How it works" section below.
 
 ## 2.5.1 (2026-11-12)
 

@@ -2,19 +2,20 @@
 
     python examples/make_media.py        # once: footage, images and the models the examples read
     python marketing/build_site.py       # everything
-    python marketing/build_site.py dolly hero  # only these videos and posters ("look" is the contact sheets)
+    python marketing/build_site.py dolly reel  # only these videos and posters ("look" is the contact sheets)
     python marketing/build_site.py sound       # only make the voice demo's bed and click again
     python marketing/build_site.py --page      # only rewrite the page fragments, no rendering
 
-The voices of the voice demos (site/demos/voice/) and of the hero (marketing/voice/) are spoken by `kine voice` and
+The voices of the voice demos (site/demos/voice/), the reel and the tour (marketing/voice/) are spoken by `kine voice` and
 committed, so building the site does not need a speech engine unless a line changes; then install the plugin each
 sound names (voices.json uses all three) or set KINE_VOICE_CMD_<NAME>. bench/voices.py times them. The voice
-demo's music bed and click (site/demos/sound/) are synthesised here, the hero's sounds by marketing/build_hero.py,
-and both are committed too.
+demo's music bed and click (site/demos/sound/) are synthesised here, the sounds of the reel and the tour by
+marketing/build_hero.py, and both are committed too. marketing/build_reel.py writes the reel's scene, reel.json.
 
 Every video on the page is a scene rendered by `kine render -q high` at a fraction of its canvas size
-(the demos at half scale: 960x540, or 540x960 for the vertical one; the hero at 1280x720). The hero plays the
-demos' videos and posters, so it renders after them. ffmpeg then
+(the demos at half scale: 960x540, or 540x960 for the vertical one; the reel and the tour at 1280x720). The reel
+at the top of the home page and the narrated tour under "How it works" play the demos' videos and posters, so they
+render after them. ffmpeg then
 moves the index to the front of each file (`-movflags +faststart`, no re-encode) so browsers start playing
 before the whole file has arrived. Posters are `kine still` frames saved as JPEG.
 
@@ -103,7 +104,8 @@ SHEETS = {"avatar-sheet": "kinescript/avatars/host", "avatar-sheet-3d": "example
           "avatar-sheet-maya": "examples/avatars/maya", "avatar-sheet-rin": "examples/avatars/rin",
           "avatar-sheet-cue": "examples/avatars/cue", "avatar-sheet-slate": "examples/avatars/slate"}  # kine look FOLDER
 BRANDS = ("site/demos/brand-tidewater.json", "site/demos/brand-tidewater-dark.json")  # the same scene but its variant
-HERO = ("marketing/hero.json", 3.6, 2 / 3)
+HERO = ("marketing/hero.json", 3.6, 2 / 3)  # the narrated tour, in the home page's "How it works"
+REEL = ("marketing/reel.json", 5.2, 2 / 3)  # the reel at the top of the home page
 LOOK = "card-flip"          # the contact sheet shown in the agent section
 LISTEN = "voice"            # the contact sheet with the sound under it, in the sound section
 TRAILS = "explainer"        # the contact sheet with motion trails, in the agent section
@@ -310,6 +312,7 @@ def fragments() -> dict:
         summary = probe(str(ROOT / scene))
         out["score", name] = score_block(summary, f"Timeline of {path.name}")
     out["score", "hero"] = score_block(probe(str(ROOT / HERO[0])), f"Timeline of {HERO[0]}")
+    out["score", "reel"] = score_block(probe(str(ROOT / REEL[0])), f"Timeline of {REEL[0]}")
 
     before = (ROOT / CUES).read_text(encoding="utf-8")
     after = before.replace(*CUES_CHANGE, 1)
@@ -404,14 +407,14 @@ def main(argv: list[str]) -> None:
     if "--page" not in argv:
         if not (DEMOS / "sound" / "bed.m4a").exists() or "sound" in names:
             sound_assets()
-        for scene in (DEMO["voice"][0], DEMO["voices"][0], HERO[0], *(DEMO[a][0] for a in AVATARS)):  # speaks only the lines that changed since their files were made
+        for scene in (DEMO["voice"][0], DEMO["voices"][0], HERO[0], REEL[0], *(DEMO[a][0] for a in AVATARS)):  # speaks only the lines that changed since their files were made
             run(*KINE, "voice", scene)
-        for name in names or [*DEMO, "hero", "look"]:
+        for name in names or [*DEMO, "hero", "reel", "look"]:
             if name == "sound":
                 continue
-            if name == "hero":
-                scene, at, scale = HERO
-                render(scene, MEDIA / "hero.mp4", scale, at)
+            if name in ("hero", "reel"):
+                scene, at, scale = HERO if name == "hero" else REEL
+                render(scene, MEDIA / f"{name}.mp4", scale, at)
             elif name == "look":
                 look_sheet()
             else:
