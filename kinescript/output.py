@@ -527,12 +527,25 @@ def _noted(res: dict, notes: list[str]) -> dict:
 
 def render(src, out: str, quality: str = "standard", workers: int | None = None, scale: float = 1.0,
            start: float | None = None, end: float | None = None, transparent: bool = False,
-           poster: bool = True) -> dict:
+           poster: bool = True, receipt: bool = True) -> dict:
     """Render a scene to a file, with its brand's intro and outro when it asks for them ("intro": true): each is
     rendered as a segment of its own and joined to the scene's frames (see bookends.py). A frame range, a PNG
-    sequence or an audio file leaves them out, and the result's notes say so."""
-    from . import bookends
+    sequence or an audio file leaves them out, and the result's notes say so.
+    A video or sound file gets a receipt beside it (OUT.receipt.json, see receipt.py), named in the result's
+    "receipt"; receipt=False writes none."""
     scene = load(src)
+    res = _render(scene, out, quality, workers, scale, start, end, transparent, poster)
+    p = Path(res.get("out") or "")
+    if receipt and p.is_file() and p.suffix.lower() in (*VIDEO, *AUDIO_ONLY):
+        from . import receipt as R
+        res["receipt"] = R.write(scene, res, {"quality": quality, "scale": scale, "from": start, "to": end,
+                                              "transparent": transparent, "poster": poster})
+    return res
+
+
+def _render(scene: Scene, out: str, quality: str, workers, scale: float, start, end, transparent: bool,
+            poster: bool) -> dict:
+    from . import bookends
     try:
         parts = bookends.wanted(scene.spec)
         if not parts:

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Render receipts. `kine render` writes `OUT.receipt.json` beside each video or sound file: the Kinescript, ffmpeg
+  and skia-python that made it, the render's settings, and a SHA-256 of the output, the scene and every file the
+  scene reads (footage, images, sounds and their word times and mouth tracks, fonts, models with the `.mtl`, `.bin`
+  and textures they name, an avatar's folder, the brand's folder). It carries no time stamp, so an unchanged render
+  on the CPU writes the same receipt and one kept beside the scene diffs cleanly. `kine receipt OUT` reports whether
+  the file, the scene and each input still match, and names files the scene reads now that it did not then; it
+  exits 1 when anything differs. `--no-receipt` (and `"receipt": false` on `kine_render`, `receipt=False` on
+  `kinescript.render`) writes none. A PNG sequence gets none.
+- `"kinescript"` at the top of a scene names the versions it needs: `"2.6"` (that or newer), `">=2.6,<3"`,
+  `"~=2.6"`. A Kinescript outside them stops with `kinescript-version` as the first error, before the unknown keys a
+  newer scene gives an older version, with the `pip install` command as its fix. Versions compare as numbers, so
+  2.10 is after 2.9; a number instead of text (`2.10`, read as 2.1) is a `bad-kinescript` error.
 - kinescript-kokoro 0.2.0 runs on Python 3.13, with no PyTorch. Where the `kokoro` package is not installed
   (it needs Python 3.12 or older), it runs the same model, Kokoro-82M v1.0, on onnxruntime: kokoro-onnx's export,
   downloaded on first use, with misaki still turning text into phonemes, so `[word](/phonemes/)` links, stress and

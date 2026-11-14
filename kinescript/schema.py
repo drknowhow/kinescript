@@ -31,7 +31,7 @@ from .timing import KEYWORDS, LIMIT, finite as _finite_secs, parse_clock, show
 COMMENT = {"note", "notes", "comment", "comments", "description", "name"}
 
 TOP = {"canvas", "brand", "variant", "intro", "outro", "music", "theme", "markers", "grade", "motionBlur", "audio", "components", "layers", "meta",
-       "version", "$schema", "camera", "light", "lights", "env", "fog", "mix"}
+       "version", "$schema", "camera", "light", "lights", "env", "fog", "mix", "kinescript"}
 TOP_ALIAS = {"layer": "layers", "elements": "layers", "objects": "layers", "items": "layers", "scene": "layers",
              "children": "layers", "tracks": "layers", "motion_blur": "motionBlur", "colorGrade": "grade",
              "music": "audio", "sound": "audio", "marker": "markers"}
@@ -2581,6 +2581,62 @@ def _components(comps: dict, rep: Report):
                     "a component's layers can use other components, but not one that leads back to it")
 
 
+_CLAUSE = re.compile(r"\s*(>=|<=|==|!=|~=|>|<)?\s*(\d+(?:\.\d+)*)\s*")
+
+
+def requirement(text) -> list[tuple[str, tuple[int, ...]]]:
+    """A scene's "kinescript" value as [(operator, version)]: ">=2.6,<3" -> [(">=", (2, 6)), ("<", (3,))].
+    A bare version is a minimum ("2.6" is ">=2.6"), and "~=2.6" is ">=2.6,<3" as in pip. ValueError if unreadable."""
+    if isinstance(text, bool) or not isinstance(text, str):
+        raise ValueError(f"is {_show(text)}; write it as text, like \"2.6\" or \">=2.6,<3\"" + (
+            " (a number loses digits: 2.10 reads as 2.1)" if isinstance(text, (int, float)) else ""))
+    out = []
+    for part in text.split(","):
+        m = _CLAUSE.fullmatch(part)
+        if not m:
+            raise ValueError(f"{part.strip()!r} is not a version clause; use versions like 2.6 with >=, >, <=, <, "
+                             "==, != or ~=, joined by commas")
+        op, ver = m.group(1) or ">=", tuple(int(x) for x in m.group(2).split("."))
+        if op == "~=":
+            if len(ver) < 2:
+                raise ValueError(f"~={m.group(2)} needs two parts or more, like ~=2.6")
+            out += [(">=", ver), ("<", (*ver[:-2], ver[-2] + 1))]
+        else:
+            out.append((op, ver))
+    return out
+
+
+def satisfies(version: str, req: list[tuple[str, tuple[int, ...]]]) -> bool:
+    """Whether a version string such as "2.5.1" (or "2.6.0.dev1", read as 2.6.0) meets every clause."""
+    m = re.match(r"\d+(?:\.\d+)*", version)
+    have = tuple(int(x) for x in m.group(0).split(".")) if m else (0,)
+    for op, want in req:
+        n = max(len(have), len(want))
+        a, b = have + (0,) * (n - len(have)), want + (0,) * (n - len(want))
+        if not {">=": a >= b, "<=": a <= b, ">": a > b, "<": a < b, "==": a == b, "!=": a != b}[op]:
+            return False
+    return True
+
+
+def _needs(text, rep: Report):
+    """The scene's "kinescript" requirement against this Kinescript. An older version without this check reports the
+    key as unknown, which also stops the render."""
+    if text is None:
+        return
+    from . import __version__
+    try:
+        req = requirement(text)
+    except ValueError as e:
+        rep.add("error", "bad-kinescript", None, f"kinescript {e}", "write the versions this scene works with, "
+                "like \"kinescript\": \">=2.6\"")
+        return
+    if not satisfies(__version__, req):
+        pin = ",".join(f"{op}{'.'.join(map(str, v))}" for op, v in req)
+        rep.add("error", "kinescript-version", None, f"this scene needs Kinescript {text.strip()}; this is "
+                f"{__version__}. Errors below may be features this version does not have",
+                f"pip install \"kinescript{pin}\"")
+
+
 def normalize(spec) -> tuple[dict, Report]:
     """Return a cleaned copy of `spec` and a Report of notes and errors (nothing is raised here)."""
     rep = Report()
@@ -2588,6 +2644,7 @@ def normalize(spec) -> tuple[dict, Report]:
         rep.add("error", "bad-scene", None, f"a scene is a JSON object with 'canvas' and 'layers', got {type(spec).__name__}")
         return {}, rep
     spec = copy.deepcopy(spec)
+    _needs(spec.get("kinescript"), rep)  # first, so a newer scene's other errors read as what they are
     cv = spec.get("canvas")
     if cv is None:
         cv = spec["canvas"] = {}

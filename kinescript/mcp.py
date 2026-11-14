@@ -98,11 +98,13 @@ TOOLS = [
     {"name": "kine_render", "description": "Render to a file (.mp4, .mov ProRes 4444 alpha, .webm VP9 alpha, .gif, or a "
      ".png sequence; .wav/.m4a/.mp3/.flac for the sound alone). quality draft|standard|high; scale <1 for previews; "
      "from/to (s) for a range: every frame on screen from `from` until `to`. The result's notes say when `to` was "
-     "past the end.",
+     "past the end. A video or sound file gets OUT.receipt.json beside it (the result's \"receipt\"): hashes of the "
+     "output, the scene and every file it reads; receipt=false writes none.",
      "inputSchema": {"type": "object", "properties": {"scene": _SCENE, "base": {"type": "string"}, "out": {"type": "string"},
                                                       "quality": {"type": "string", "enum": ["draft", "standard", "high"]},
                                                       "scale": {"type": "number"}, "from": {"type": "number"},
-                                                      "to": {"type": "number"}}, "required": ["scene", "out"]}},
+                                                      "to": {"type": "number"}, "receipt": {"type": "boolean"}},
+                     "required": ["scene", "out"]}},
     {"name": "kine_feedback", "description": "Review notes a person left on a scene's video (kine edit), kept in \"<scene>.feedback.json\". "
      "list gives the open notes in time order (status=resolved or all for others): time, layer id, point, text, and "
      "stale=true when the scene changed after the note was made. get shows one note. resolve closes it, with an "
@@ -203,7 +205,7 @@ def call(name: str, args: dict) -> list[dict]:
             raise ValueError("out must be a file path")
         out = os.path.join(os.getcwd(), out)  # the result says where a relative out landed: the server's folder
         res = render(sc, out, args.get("quality", "standard"), None, float(args.get("scale", 1.0)),
-                     args.get("from"), args.get("to"))
+                     args.get("from"), args.get("to"), receipt=args.get("receipt", True) is not False)
         return [_text(res)]
     if name == "kine_feedback":
         from . import feedback as fb
