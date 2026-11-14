@@ -95,6 +95,11 @@ SCENE (top level)
   audio       the list of sounds: voice-over, music, effects (see SOUND).
   mix         loudness, role levels and ducking of the sound (see SOUND).
   components  your own reusable layer groups (see COMPONENTS).
+  kinescript  the Kinescript versions the scene needs: "2.6" (that or newer), ">=2.6,<3", "~=2.6"
+              (the same), "==2.6.0", "!=2.6.1"; numbers compare as numbers (2.10 is after 2.9). An
+              older or newer one stops with error "kinescript-version" first, before the unknown
+              keys a newer scene gives it, and its fix is the pip command; a version from before
+              this key says "unknown key 'kinescript'". Write it as text: 2.10 as a number is 2.1.
 
 TIME: "at" (start), "dur" (length), "until" (end)
   1.5               seconds
@@ -682,6 +687,19 @@ COMMANDS
                                   bytes every time.
                                   Its JSON lists warnings for footage cut short, with no picture or
                                   with alpha this ffmpeg cannot read, as check gives them.
+                                  A video or sound file gets a receipt beside it, out.mp4.receipt.json
+                                  (the JSON's "receipt"): the Kinescript, ffmpeg and settings that
+                                  made it, and a SHA-256 of the file, the scene and every file the
+                                  scene reads (footage, images, sounds and their word times, fonts,
+                                  models and their .mtl, .bin and textures, an avatar's folder, the
+                                  brand's folder). It has no time stamp, so an unchanged render on
+                                  the CPU writes the same receipt. --no-receipt writes none.
+  kine receipt out.mp4            whether out.mp4, its scene and every file the scene reads are as
+                                  out.mp4.receipt.json records them: "out" and "scene" are same,
+                                  changed or missing; "inputs" lists files changed, missing, and
+                                  added (read by the scene now but not then). Exit 1 when anything
+                                  differs; another Kinescript version is a note. Give the
+                                  .receipt.json instead to check a scene whose video is elsewhere.
   kine voice scene.json           speaks each sound's text into its file and times its words; a sound
                                   is spoken again only when its text, speaker, rate, backend or
                                   options changed (--force: all of them, --only vo1: one). Needs a
