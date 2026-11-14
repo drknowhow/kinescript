@@ -246,7 +246,7 @@ An agent cannot watch a video, so Kinescript gives it things it can read:
 | `kine avatar new avatars/mine` | a copy of the built-in starter avatar (`"avatar": "kine:host"` in a scene) as svg parts to redraw |
 | `kine probe scene.json --mouth vo1` | the voice's mouth track: which of nine mouth shapes shows when, and whether it came from the backend's phonemes, the spelling of each word, or loudness |
 | `kine still` / `kine render` | a frame, a range (`--from/--to`), a draft (`-q draft --scale 0.5`) or the final file |
-| `kine receipt out.mp4` | whether a rendered file, its scene and every file the scene reads still match the receipt `kine render` wrote beside it |
+| `kine receipt out.mp4` | JSON saying whether `out.mp4`, its scene and every file the scene reads (footage, sounds, fonts, models, the brand) still have the SHA-256 recorded in `out.mp4.receipt.json`, which `kine render` writes beside each video unless given `--no-receipt`; it lists the files changed, missing or newly read and exits 1 when any differ (command line only) |
 | `kine watch scene.json` | the contact sheet, made again every time the file is saved |
 | `kine edit scene.json` | a browser page to edit layers, comment on frames, captions and voice, and draw on the frame, for an agent to read (`--port`, `--no-open`) |
 | `kine voice scene.json` | each sound with text spoken into its file, with its word times, skipping what has not changed |
