@@ -833,7 +833,7 @@ class Scene:
             used = next((f for f in FONT_FALLBACK if (x := skia.Typeface(f, skia.FontStyle())) is not None
                          and x.getFamilyName().lower() == f.lower()), "the system default")
             self.note("warning", "font-missing", owner, f"font '{fam}' is not installed here, so the text is drawn "
-                      f"in {used}", "use Space Grotesk or IBM Plex Mono (bundled), an installed family, or a .ttf "
+                      f"in {used}", "use Kinescript Sans, Space Grotesk or IBM Plex Mono (bundled), an installed family, or a .ttf "
                       "file next to the scene")
 
     def check_expressions(self, budget: int = 200_000):

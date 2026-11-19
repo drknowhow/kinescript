@@ -30,7 +30,7 @@ DEFAULT = {
         "light": {"bg": "#f2f0e8", "surface": "#e2dfd4", "text": "#0a0c10", "muted": "#5b6272", "accent": "#c8411f",
                   "accent2": "#3d6b12"},
     },
-    "fonts": {"display": {"family": "Space Grotesk"}, "body": {"family": "Space Grotesk"},
+    "fonts": {"display": {"family": "Kinescript Sans"}, "body": {"family": "Kinescript Sans"},
               "mono": {"family": "IBM Plex Mono"}},
     "charts": {"series": ["accent", "accent2", "text", "muted"], "highlight": "accent"},
     "logos": {"clearSpace": 0.25, "minHeight": 32},

@@ -101,7 +101,8 @@ def test_text_images_and_groups_replay_one_recording_as_each_copy_draws_alone(ba
     ])
     replayed, r = _pixels(spec, backend=backend)
     alone, _ = _pixels(spec, backend=backend, track=True)  # tracked frames draw each copy on its own
-    assert np.abs(replayed - alone).max() <= (0 if backend == "cpu" else 1)
+    # On the GPU a rotated Kinescript Sans "K" lands up to 4 levels apart on its edge pixels (Space Grotesk: 0).
+    assert np.abs(replayed.astype(int) - alone).max() <= (0 if backend == "cpu" else 4)
     assert np.abs(replayed[155, 40 + 210] - (102, 80, 0)).max() <= 2  # the last chip, #ffc800 at 0.4
     assert replayed[40, 40 + 210].max() > 30  # the last badge
     assert replayed[140, 300].argmax() == 1 and replayed[140, 300, 1] > 240

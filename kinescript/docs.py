@@ -219,8 +219,8 @@ LAYER TYPES (defaults in brackets)
             It wobbles the outline as if drawn by hand: points length px apart stray up to amount px,
             the same way for the same seed. boil draws it anew that many times a second (8 gives a
             hand-drawn flicker). Fill, stroke and draw follow the wobbled line.
-  text      text (centred on x, y: the anchor is center), size [64], weight [600] (100..900), font ["Space Grotesk"; also "IBM Plex Mono",
-            "Kinescript Sans" (400, 700), any installed family, or a .ttf path], italic, fill [#f2f0e8], emph (colour of
+  text      text (centred on x, y: the anchor is center), size [64], weight [600] (100..900), font ["Kinescript Sans" (400, 700: other weights take the nearer); also "Space Grotesk",
+            "IBM Plex Mono", any installed family, or a .ttf path], italic, fill [#f2f0e8], emph (colour of
             text written **like this**, also inside a word: g**P**u colours the P),
             align [center] (left|center|right), maxWidth (wraps lines), lineHeight [1.18],
             letterSpacing [0], stroke, strokeWidth,

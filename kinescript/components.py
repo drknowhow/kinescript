@@ -19,7 +19,7 @@ THEME = {
     "void": "#0a0c10", "sheet": "#f2f0e8", "track": "#242832", "cue": "#ff633f", "key": "#b9f45d",
     "annotation": "#9299a8",
     "ink": "#0a0c10", "paper": "#f2f0e8", "accent": "#ff633f", "accent2": "#b9f45d", "muted": "#9299a8",
-    "font": "Space Grotesk", "fontDisplay": "Space Grotesk", "mono": "IBM Plex Mono",
+    "font": "Kinescript Sans", "fontDisplay": "Kinescript Sans", "mono": "IBM Plex Mono",
 }
 
 # Text styles a layer names with "textStyle"; a brand's "text" part changes them or adds more.

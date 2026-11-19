@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Kinescript Sans is the default font. Text with no `font` and no theme font, the `"sans"` alias, the components'
+  body and display faces and the built-in brand now draw in Kinescript Sans instead of Space Grotesk. It has
+  Regular (400) and Bold (700): weight 600, the text default, and 800 draw Bold; 500 draws Regular. A character it
+  lacks (Latin Extended-A such as `ş` or `ł`, `©`, `°`, Greek) is drawn in a system font that has it, as before for
+  any face. Space Grotesk is still bundled: `"theme": {"font": "Space Grotesk", "fontDisplay": "Space Grotesk"}` or
+  `"font": "Space Grotesk"` on a layer gives the old look. Videos already rendered do not change; a scene with no
+  font that is rendered again does.
+- A layer turned exactly edge on (`rotateY` or `rotateX` at 90 degrees) counts as facing the camera. Its area there
+  is zero, and the sign of what rounding left decided before, so `kine check` could warn `mirrored-text` on text
+  of one width and not another.
 - Render receipts. `kine render` writes `OUT.receipt.json` beside each video or sound file: the Kinescript, ffmpeg
   and skia-python that made it, the render's settings, and a SHA-256 of the output, the scene and every file the
   scene reads (footage, images, sounds and their word times and mouth tracks, fonts, models with the `.mtl`, `.bin`

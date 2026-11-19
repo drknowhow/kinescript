@@ -877,7 +877,7 @@ def _text(obj: dict, rep: Report, lid, where: str = ""):
                     "write the character itself, or both halves of its JSON escape, like \\ud83d\\ude00")
     f = obj.get("font")
     if f is not None and not isinstance(f, str):
-        rep.add("error", "bad-value", lid, f"{where}font is {_show(f)}; it is a font family such as \"Space Grotesk\", "
+        rep.add("error", "bad-value", lid, f"{where}font is {_show(f)}; it is a font family such as \"Kinescript Sans\", "
                 "or a .ttf or .otf file")
 
 
@@ -2726,7 +2726,7 @@ def normalize(spec) -> tuple[dict, Report]:
             _colour(theme[k], f"theme.{k}", rep, "theme")
     if theme.get("font") is not None and not isinstance(theme["font"], str):
         rep.add("error", "bad-value", "theme", f"theme.font is {_show(theme['font'])}; it is a font family such as "
-                "\"Space Grotesk\"")
+                "\"Kinescript Sans\"")
     mb = spec.get("motionBlur")
     if isinstance(mb, (int, float)) and not isinstance(mb, bool):
         spec["motionBlur"] = {"samples": int(mb)}
