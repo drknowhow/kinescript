@@ -59,8 +59,9 @@ These are the defaults in `kinescript/components.py` (`THEME`, under both the na
 
 ## Type
 
-- **Space Grotesk** for headlines and text (bundled, SIL OFL). Headlines Bold (700), body Regular (400) or
-  Medium (500). The wordmark is Space Grotesk Bold with -3 px tracking at 128 px.
+- **Kinescript Sans** for headlines and text (bundled, SIL OFL; made for Kinescript with YepType). Headlines Bold
+  (700), body Regular (400). It is the renderer's default face.
+- **Space Grotesk** (bundled, SIL OFL) stays for the wordmark: Space Grotesk Bold with -3 px tracking at 128 px.
 - **IBM Plex Mono** (bundled, SIL OFL) for code, commands, timecodes and data.
 - Headlines in sentence case, ending with a full stop when they are statements: "Write it as data."
 

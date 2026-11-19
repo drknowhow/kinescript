@@ -160,7 +160,8 @@ def test_fill_gradient_and_stroke_go_on_the_letters_where_they_stand():
     assert first[0] > first[2] * 3 and last[2] > last[0] * 3  # red at the text's start, blue at its end
     (img,) = frames(scene([text("M 300 20 L 300 340", fill={"stops": ["#ff0000", "#0000ff"], "angle": 0})]))
     ys, xs = np.nonzero(img.max(axis=2) > 96)
-    middle = (ys > 80) & (ys < 140)  # the letters run from 20 to 200: halfway between red and blue
+    mid = (ys.min() + ys.max()) / 2  # halfway down the letters: halfway between red and blue
+    middle = (ys > mid - 30) & (ys < mid + 30)
     r, _, b = img[ys[middle], xs[middle]].mean(axis=0)
     assert abs(r - b) < 40 and r > 80
     (img,) = frames(scene([text(LINE, fill="#000000", stroke="#ffffff", strokeWidth=2)]))

@@ -31,14 +31,14 @@ ANCHORS = {"center": (0.5, 0.5), "topleft": (0, 0), "top": (0.5, 0), "topright":
            "right": (1, 0.5), "bottomleft": (0, 1), "bottom": (0.5, 1), "bottomright": (1, 1)}
 FONT_FALLBACK = ["Segoe UI", "Helvetica Neue", "Arial", "DejaVu Sans"]
 FONT_DIR = Path(__file__).parent / "fonts"
-# Space Grotesk and IBM Plex Mono ship with the package (SIL OFL) so default text matches on every machine.
+# The bundled faces (SIL OFL) make default text match on every machine. Kinescript Sans is the default and "sans".
 _GROTESK = {400: "SpaceGrotesk-Regular.ttf", 500: "SpaceGrotesk-Medium.ttf", 600: "SpaceGrotesk-SemiBold.ttf",
             700: "SpaceGrotesk-Bold.ttf"}
 _PLEX = {400: "IBMPlexMono-Regular.ttf", 500: "IBMPlexMono-Medium.ttf", 600: "IBMPlexMono-SemiBold.ttf",
          700: "IBMPlexMono-Bold.ttf"}
 # Kinescript Sans 0.1.0, made for Kinescript with YepType (SIL OFL): Regular and Bold.
 _KINE = {400: "KinescriptSans-Regular.ttf", 700: "KinescriptSans-Bold.ttf"}
-BUNDLED = {"space grotesk": _GROTESK, "sans": _GROTESK, "ibm plex mono": _PLEX, "mono": _PLEX,
+BUNDLED = {"space grotesk": _GROTESK, "sans": _KINE, "ibm plex mono": _PLEX, "mono": _PLEX,
            "kinescript sans": _KINE}
 COMBINE = {"union": skia.PathOp.kUnion_PathOp, "subtract": skia.PathOp.kDifference_PathOp,
            "intersect": skia.PathOp.kIntersect_PathOp, "xor": skia.PathOp.kXOR_PathOp}

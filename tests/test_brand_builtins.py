@@ -21,7 +21,7 @@ def _raw(s, lid):
 def test_text_style_fills_a_layer_without_a_brand(tmp_path):
     s = _load(tmp_path, [{"id": "h", "type": "text", "text": "Hi", "textStyle": "heading"},
                          {"id": "b", "type": "text", "text": "Hi", "textStyle": "heading", "size": 50}])
-    assert (_raw(s, "h")["size"], _raw(s, "h")["weight"], _raw(s, "h")["font"]) == (72, 700, "Space Grotesk")
+    assert (_raw(s, "h")["size"], _raw(s, "h")["weight"], _raw(s, "h")["font"]) == (72, 700, "Kinescript Sans")
     assert _raw(s, "b")["size"] == 50
 
 

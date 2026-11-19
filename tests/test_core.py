@@ -720,6 +720,15 @@ def test_rotate_y_turns_the_right_edge_away_and_backface_hides_it():
     assert "a" not in r.boxes and r.boxes["b"]["mirrored"]
 
 
+
+def test_a_layer_turned_exactly_edge_on_counts_as_facing_whatever_its_width():
+    # At 90 degrees a box has no area; what rounding leaves was +/-1e-11, so text of one width read mirrored.
+    for w in range(20, 600, 7):
+        r = _boxes(scene([{"id": "a", "type": "rect", "x": 160, "y": 90, "w": w, "h": 60, "rotateY": 90}]))
+        assert not r.boxes.get("a", {}).get("mirrored"), w
+    r = _boxes(scene([{"id": "a", "type": "rect", "x": 160, "y": 90, "w": 100, "h": 60, "rotateY": 91}]))
+    assert r.boxes["a"]["mirrored"]
+
 def test_group_sort_depth_draws_far_to_near():
     kids = [{"id": "near", "type": "rect", "x": 0, "y": 0, "w": 80, "h": 80, "z": 50, "fill": "#0000ff"},
             {"id": "far", "type": "rect", "x": 0, "y": 0, "w": 80, "h": 80, "z": -50, "fill": "#ff0000"}]
@@ -2437,7 +2446,7 @@ def test_doctor_reports_version_and_font(capsys):
     from kinescript.cli import main
     assert main(["doctor"]) == 0
     info = json.loads(capsys.readouterr().out)
-    assert info["version"] == k.__version__ and info["font"] == "Space Grotesk", info
+    assert info["version"] == k.__version__ and info["font"] == "Kinescript Sans", info
 
 
 def _packets(path) -> int:

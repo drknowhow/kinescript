@@ -90,6 +90,8 @@ def project(m: np.ndarray, box) -> tuple[np.ndarray, np.ndarray]:
 
 
 def facing(xy: np.ndarray) -> bool:
-    """True while the rect whose projected corners are `xy` shows its front."""
+    """True while the rect whose projected corners are `xy` shows its front. Edge on (turned exactly 90 degrees) it
+    has no area, and the sign of what rounding leaves (about 1e-11) is no side: that counts as the front."""
     (x0, y0), (x1, y1), _, (x3, y3) = xy
-    return (x1 - x0) * (y3 - y0) - (y1 - y0) * (x3 - x0) >= 0
+    span = max(float(np.ptp(xy[:, 0]) + np.ptp(xy[:, 1])), 1.0)
+    return (x1 - x0) * (y3 - y0) - (y1 - y0) * (x3 - x0) >= -1e-9 * span * span
