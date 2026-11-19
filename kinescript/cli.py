@@ -90,6 +90,13 @@ def main(argv=None) -> int:
     r.add_argument("--transparent", action="store_true", help="drop the background (use .mov or .webm)")
     r.add_argument("--no-poster", dest="poster", action="store_false",
                    help="keep frame 0 in place when the scene sets canvas.poster")
+    r.add_argument("--no-receipt", dest="receipt", action="store_false",
+                   help="write no OUT.receipt.json (what the file was made from) beside a video or sound file")
+
+    rc = sub.add_parser("receipt", help="check a rendered file against its receipt: is it, its scene and every file "
+                                        "the scene reads as they were when it was rendered")
+    rc.add_argument("file", help="the video or sound file, or its .receipt.json")
+    rc.add_argument("--receipt", help="the receipt, when it is not beside the file")
 
     s = sub.add_parser("still", help="render one frame to PNG/JPG")
     s.add_argument("scene")
@@ -321,8 +328,13 @@ def _run(a) -> int:
         output.WARM = 0  # one render, then the process exits: shut the workers down inside it, as timed
         out = a.out or _default_out(a.scene, ".mp4")
         _emit(dict(ok=True, **render(a.scene, out, a.quality, a.workers, a.scale, a.start, a.end, a.transparent,
-                                     a.poster)))
+                                     a.poster, a.receipt)))
         return 0
+    if a.cmd == "receipt":
+        from .receipt import check as check_receipt
+        res = check_receipt(a.file, a.receipt)
+        _emit(res)
+        return OK if res["ok"] else ISSUES
     if a.cmd == "still":
         from .output import still
         at = str(a.at).strip()  # --at -1 is 1 s before the end: its own name, not the same file as --at 1

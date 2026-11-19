@@ -213,6 +213,8 @@ class Sound:
 
 class Scene:
     def __init__(self, spec: dict, base_dir: str | Path = ".", notes: list[dict] | None = None):
+        self.source = spec  # as written, before any defaults: a render receipt hashes it when there is no file
+        self.file: Path | None = None  # the scene's .json, when it was loaded from one (load sets it)
         spec, report = schema.normalize(spec)
         self.issues: list[dict] = list(notes or []) + report.issues
         self._raise_errors()
@@ -1387,6 +1389,7 @@ def load(src) -> Scene:
     if isinstance(src, dict):
         return Scene(src)
     s = str(src)
+    file = None
     if s.lstrip().startswith("{"):
         text, base, name = s, Path("."), "scene"
     else:
@@ -1396,7 +1399,7 @@ def load(src) -> Scene:
         if p.is_dir():
             raise SceneError(f"{p} is a folder; give the scene's .json file")
         try:
-            text, base, name = p.read_text(encoding="utf-8-sig"), p.parent, p.name
+            text, base, name, file = p.read_text(encoding="utf-8-sig"), p.parent, p.name, p
         except UnicodeDecodeError as e:
             raise SceneError(f"{p.name} is not UTF-8 text (byte {e.object[e.start]:#04x} at {e.start}); a scene is "
                              "a .json file saved as UTF-8") from e
@@ -1408,4 +1411,6 @@ def load(src) -> Scene:
         raise SceneError(f"{name}: invalid JSON at line {e.lineno} col {e.colno}: {e.msg}. The line is: {line}") from e
     notes = [{"level": "info", "code": "json", "layer": None, "message": f"the JSON had {', '.join(fixed)}; read anyway",
               "fix": "write strict JSON"}] if fixed else []
-    return Scene(spec, base, notes)
+    scene = Scene(spec, base, notes)
+    scene.file = file
+    return scene
