@@ -36,7 +36,10 @@ _GROTESK = {400: "SpaceGrotesk-Regular.ttf", 500: "SpaceGrotesk-Medium.ttf", 600
             700: "SpaceGrotesk-Bold.ttf"}
 _PLEX = {400: "IBMPlexMono-Regular.ttf", 500: "IBMPlexMono-Medium.ttf", 600: "IBMPlexMono-SemiBold.ttf",
          700: "IBMPlexMono-Bold.ttf"}
-BUNDLED = {"space grotesk": _GROTESK, "sans": _GROTESK, "ibm plex mono": _PLEX, "mono": _PLEX}
+# Kinescript Sans 0.1.0, made for Kinescript with YepType (SIL OFL): Regular and Bold.
+_KINE = {400: "KinescriptSans-Regular.ttf", 700: "KinescriptSans-Bold.ttf"}
+BUNDLED = {"space grotesk": _GROTESK, "sans": _GROTESK, "ibm plex mono": _PLEX, "mono": _PLEX,
+           "kinescript sans": _KINE}
 COMBINE = {"union": skia.PathOp.kUnion_PathOp, "subtract": skia.PathOp.kDifference_PathOp,
            "intersect": skia.PathOp.kIntersect_PathOp, "xor": skia.PathOp.kXOR_PathOp}
 BLENDS = {"normal": skia.BlendMode.kSrcOver, "multiply": skia.BlendMode.kMultiply, "screen": skia.BlendMode.kScreen,

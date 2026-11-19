@@ -412,8 +412,8 @@ of a tour of 24 models drew in 14.5 to 15.0 ms and draws in 7.9 to 8.4. Without 
 
 From a checkout: `pip install -e .`
 
-Dependencies are `skia-python`, `numpy` and `glfw`. Space Grotesk and IBM Plex Mono (both SIL Open Font License)
-ship with the package, so default text looks the same on every machine.
+Dependencies are `skia-python`, `numpy` and `glfw`. Space Grotesk, IBM Plex Mono and Kinescript Sans
+(Regular and Bold, made for Kinescript with YepType; all SIL Open Font License) ship with the package, so default text looks the same on every machine.
 
 ## Quick start
 
